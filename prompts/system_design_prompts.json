@@ -1,0 +1,354 @@
+{
+  "system_design_prompts": [
+    {
+      "id": "social_001",
+      "domain": "social_media",
+      "difficulty": "intermediate",
+      "prompt": "Design a Twitter-like social media platform that supports posting tweets (280 chars), following users, and a home timeline feed. Expected scale: 50M DAU, 500M tweets/day.",
+      "key_topics": ["fan-out", "timeline generation", "caching", "partitioning"]
+    },
+    {
+      "id": "social_002",
+      "domain": "social_media",
+      "difficulty": "advanced",
+      "prompt": "Design Instagram's photo sharing and news feed system. Users upload photos, follow others, and see a ranked feed. Scale: 100M DAU, 50M photo uploads/day, each photo ~2MB.",
+      "key_topics": ["object storage", "CDN", "ranking", "fan-out-on-read vs write"]
+    },
+    {
+      "id": "social_003",
+      "domain": "social_media",
+      "difficulty": "beginner",
+      "prompt": "Design a simple Reddit-like forum with subreddits, posts, comments, and upvotes. Expected: 5M DAU.",
+      "key_topics": ["nested comments", "ranking algorithms", "read-heavy"]
+    },
+    {
+      "id": "ecom_001",
+      "domain": "e_commerce",
+      "difficulty": "advanced",
+      "prompt": "Design a flash sale system like Amazon's Lightning Deals. Must handle 100K concurrent users hitting the same product page, with strict inventory consistency (never oversell). Sale events last 15 minutes.",
+      "key_topics": ["inventory consistency", "hot keys", "rate limiting", "queue-based ordering"]
+    },
+    {
+      "id": "ecom_002",
+      "domain": "e_commerce",
+      "difficulty": "intermediate",
+      "prompt": "Design a product search and recommendation engine for an e-commerce platform with 10M products. Must support full-text search, filters (price, category, rating), and personalized recommendations.",
+      "key_topics": ["search engine", "inverted index", "collaborative filtering", "caching"]
+    },
+    {
+      "id": "ecom_003",
+      "domain": "e_commerce",
+      "difficulty": "intermediate",
+      "prompt": "Design a shopping cart and checkout system. Must handle adding/removing items, applying coupons, calculating shipping, processing payments, and managing inventory reservations.",
+      "key_topics": ["transactions", "payment idempotency", "inventory reservation", "saga pattern"]
+    },
+    {
+      "id": "msg_001",
+      "domain": "messaging",
+      "difficulty": "intermediate",
+      "prompt": "Design a WhatsApp-like 1-on-1 and group messaging system. Must support real-time message delivery, read receipts, media sharing, and offline message queuing. Scale: 20M DAU.",
+      "key_topics": ["websockets", "message ordering", "presence", "fan-out for groups"]
+    },
+    {
+      "id": "msg_002",
+      "domain": "messaging",
+      "difficulty": "advanced",
+      "prompt": "Design a Slack-like workplace messaging platform with channels, threads, search across message history, file sharing, and integrations. Multi-tenant with 10K organizations, largest org has 50K users.",
+      "key_topics": ["multi-tenancy", "search", "real-time", "message threading"]
+    },
+    {
+      "id": "msg_003",
+      "domain": "messaging",
+      "difficulty": "beginner",
+      "prompt": "Design a simple notification system that can send push notifications, emails, and SMS to users based on events in the system. Must handle 1M notifications/day with retry logic.",
+      "key_topics": ["message queue", "retry with backoff", "template engine", "provider abstraction"]
+    },
+    {
+      "id": "video_001",
+      "domain": "video",
+      "difficulty": "advanced",
+      "prompt": "Design a YouTube-like video sharing platform. Users upload videos, the system transcodes them into multiple resolutions, serves them via CDN, and shows a personalized recommendation feed. Scale: 10M DAU, 100K uploads/day.",
+      "key_topics": ["transcoding pipeline", "CDN", "adaptive bitrate", "recommendation"]
+    },
+    {
+      "id": "video_002",
+      "domain": "video",
+      "difficulty": "intermediate",
+      "prompt": "Design a live video streaming platform like Twitch. Streamers broadcast to thousands of concurrent viewers. Must support chat, stream recording, and low latency (<5 sec).",
+      "key_topics": ["live streaming protocols", "chat fan-out", "edge servers", "recording"]
+    },
+    {
+      "id": "fintech_001",
+      "domain": "fintech",
+      "difficulty": "advanced",
+      "prompt": "Design a payment processing system like Stripe. Must handle credit card charges, refunds, and payouts with exactly-once processing semantics. Must be PCI-DSS compliant. Scale: 10K transactions/second.",
+      "key_topics": ["exactly-once", "idempotency", "PCI compliance", "ledger", "reconciliation"]
+    },
+    {
+      "id": "fintech_002",
+      "domain": "fintech",
+      "difficulty": "advanced",
+      "prompt": "Design a stock trading platform that shows real-time prices, accepts buy/sell orders, and maintains user portfolios. Must handle market data from multiple exchanges, order matching, and position tracking.",
+      "key_topics": ["real-time data", "order matching", "consistency", "audit trail"]
+    },
+    {
+      "id": "fintech_003",
+      "domain": "fintech",
+      "difficulty": "intermediate",
+      "prompt": "Design a peer-to-peer money transfer system like Venmo. Users can send money to friends, request money, and maintain a balance. Must handle fraud detection and comply with financial regulations.",
+      "key_topics": ["double-entry ledger", "fraud detection", "KYC/AML", "transaction consistency"]
+    },
+    {
+      "id": "ride_001",
+      "domain": "ride_sharing",
+      "difficulty": "advanced",
+      "prompt": "Design an Uber-like ride sharing system. Must match riders with nearby drivers in real-time, calculate ETAs, handle surge pricing, and track rides in progress. Scale: 1M rides/day across 100 cities.",
+      "key_topics": ["geospatial indexing", "real-time matching", "location tracking", "surge pricing"]
+    },
+    {
+      "id": "ride_002",
+      "domain": "ride_sharing",
+      "difficulty": "intermediate",
+      "prompt": "Design a food delivery system like DoorDash. Must handle restaurant menus, order placement, driver assignment, real-time delivery tracking, and ETA estimation.",
+      "key_topics": ["geospatial", "order state machine", "driver dispatch", "ETA prediction"]
+    },
+    {
+      "id": "infra_001",
+      "domain": "infrastructure",
+      "difficulty": "intermediate",
+      "prompt": "Design a URL shortening service like bit.ly. Must generate short URLs, redirect to original URLs with minimal latency, track click analytics, and handle 100M URLs with 10K new URLs/day.",
+      "key_topics": ["key generation", "read-heavy caching", "analytics pipeline", "redirect latency"]
+    },
+    {
+      "id": "infra_002",
+      "domain": "infrastructure",
+      "difficulty": "intermediate",
+      "prompt": "Design a distributed rate limiter that works across multiple application servers. Must support different rate limit policies per API endpoint and per user tier. Must handle 100K requests/second.",
+      "key_topics": ["token bucket", "sliding window", "distributed counters", "Redis"]
+    },
+    {
+      "id": "infra_003",
+      "domain": "infrastructure",
+      "difficulty": "advanced",
+      "prompt": "Design a distributed task scheduler like Airflow. Must support DAG-based task dependencies, cron scheduling, retry logic, task priority, and horizontal scaling. Must handle 100K task executions/day.",
+      "key_topics": ["DAG execution", "distributed locking", "task queues", "failure handling"]
+    },
+    {
+      "id": "infra_004",
+      "domain": "infrastructure",
+      "difficulty": "beginner",
+      "prompt": "Design a paste bin service (like Pastebin) where users can create, read, and share text snippets with optional expiration. Scale: 5M pastes/day, average paste size 10KB.",
+      "key_topics": ["key generation", "object storage", "TTL", "read-heavy"]
+    },
+    {
+      "id": "search_001",
+      "domain": "search",
+      "difficulty": "advanced",
+      "prompt": "Design a web search engine that crawls pages, indexes them, and returns ranked results for user queries. Must handle 10M pages in the index and 1000 queries/second.",
+      "key_topics": ["web crawling", "inverted index", "PageRank", "query parsing", "relevance scoring"]
+    },
+    {
+      "id": "search_002",
+      "domain": "search",
+      "difficulty": "intermediate",
+      "prompt": "Design a typeahead/autocomplete system for a search box. Must return suggestions within 50ms as the user types. Must support 100K unique queries and handle 10K concurrent users.",
+      "key_topics": ["trie", "prefix matching", "caching", "ranking by popularity"]
+    },
+    {
+      "id": "iot_001",
+      "domain": "iot",
+      "difficulty": "intermediate",
+      "prompt": "Design a smart home IoT platform that collects sensor data (temperature, humidity, motion) from 1M devices sending data every 30 seconds. Must support real-time dashboards and alerting.",
+      "key_topics": ["time-series database", "high write throughput", "MQTT", "stream processing"]
+    },
+    {
+      "id": "iot_002",
+      "domain": "iot",
+      "difficulty": "advanced",
+      "prompt": "Design a fleet management system that tracks 100K vehicles in real-time, stores GPS history, detects anomalies (speeding, route deviation), and provides route optimization.",
+      "key_topics": ["geospatial time-series", "stream processing", "anomaly detection", "route optimization"]
+    },
+    {
+      "id": "collab_001",
+      "domain": "collaboration",
+      "difficulty": "advanced",
+      "prompt": "Design a Google Docs-like collaborative document editor. Multiple users edit the same document simultaneously with real-time cursor tracking and conflict resolution.",
+      "key_topics": ["CRDT or OT", "real-time sync", "websockets", "version history"]
+    },
+    {
+      "id": "collab_002",
+      "domain": "collaboration",
+      "difficulty": "intermediate",
+      "prompt": "Design a Dropbox-like file sync system. Users store files that sync across their devices. Must handle 100M files, detect changes, resolve conflicts, and minimize bandwidth.",
+      "key_topics": ["file chunking", "deduplication", "sync protocol", "conflict resolution"]
+    },
+    {
+      "id": "gaming_001",
+      "domain": "gaming",
+      "difficulty": "advanced",
+      "prompt": "Design the backend for a multiplayer online battle royale game with 100 players per match. Must handle real-time position updates, hit detection, and match state at 60 ticks/second.",
+      "key_topics": ["UDP networking", "state synchronization", "lag compensation", "matchmaking"]
+    },
+    {
+      "id": "gaming_002",
+      "domain": "gaming",
+      "difficulty": "intermediate",
+      "prompt": "Design a global leaderboard system for a mobile game with 50M players. Must support real-time rank updates, top-N queries, and friend leaderboards.",
+      "key_topics": ["sorted sets", "partitioned leaderboards", "approximate ranking", "caching"]
+    },
+    {
+      "id": "ml_001",
+      "domain": "ml_platform",
+      "difficulty": "advanced",
+      "prompt": "Design a real-time ML feature store that serves features for model inference with <10ms latency. Must handle 1M feature lookups/second across 500 feature definitions, with daily batch feature computation and real-time streaming features.",
+      "key_topics": ["feature serving", "batch vs streaming", "point-in-time correctness", "caching"]
+    },
+    {
+      "id": "ml_002",
+      "domain": "ml_platform",
+      "difficulty": "intermediate",
+      "prompt": "Design an A/B testing platform that can run experiments across web and mobile, track metrics, compute statistical significance, and prevent interaction effects between concurrent experiments.",
+      "key_topics": ["experiment assignment", "metric computation", "statistical testing", "event pipeline"]
+    },
+    {
+      "id": "saas_001",
+      "domain": "saas",
+      "difficulty": "intermediate",
+      "prompt": "Design a multi-tenant SaaS analytics dashboard. Each tenant has their own data, custom dashboards, and user management. Must handle 1000 tenants with the largest having 10M events/day.",
+      "key_topics": ["multi-tenancy", "data isolation", "aggregation", "dashboard rendering"]
+    },
+    {
+      "id": "saas_002",
+      "domain": "saas",
+      "difficulty": "intermediate",
+      "prompt": "Design a webhook delivery system for a SaaS platform. When events occur, deliver HTTP callbacks to customer endpoints with retry logic, delivery guarantees, and a management UI.",
+      "key_topics": ["reliable delivery", "retry with backoff", "dead letter queue", "signature verification"]
+    },
+    {
+      "id": "storage_001",
+      "domain": "storage",
+      "difficulty": "advanced",
+      "prompt": "Design a distributed key-value store like DynamoDB. Must support consistent hashing, configurable replication (N, R, W quorums), conflict resolution with vector clocks, and automatic rebalancing.",
+      "key_topics": ["consistent hashing", "quorums", "vector clocks", "gossip protocol", "hinted handoff"]
+    },
+    {
+      "id": "storage_002",
+      "domain": "storage",
+      "difficulty": "advanced",
+      "prompt": "Design a distributed object storage system like S3. Must support uploads up to 5TB, versioning, lifecycle policies, and 11 nines of durability. Expected: 1PB total storage, 10K requests/second.",
+      "key_topics": ["erasure coding", "metadata service", "multipart upload", "consistency model"]
+    },
+    {
+      "id": "storage_003",
+      "domain": "storage",
+      "difficulty": "intermediate",
+      "prompt": "Design a distributed cache system like Memcached. Must support get/set/delete, consistent hashing for distribution, LRU eviction, and handle 1M ops/second across 10 nodes.",
+      "key_topics": ["consistent hashing", "LRU eviction", "memory management", "slab allocation"]
+    },
+    {
+      "id": "monitoring_001",
+      "domain": "monitoring",
+      "difficulty": "intermediate",
+      "prompt": "Design a metrics collection and alerting system like Datadog. Must ingest metrics from 10K servers, store time-series data, support custom dashboards, and trigger alerts based on threshold rules.",
+      "key_topics": ["time-series ingestion", "downsampling", "alerting rules", "query engine"]
+    },
+    {
+      "id": "monitoring_002",
+      "domain": "monitoring",
+      "difficulty": "intermediate",
+      "prompt": "Design a distributed logging system like the ELK stack. Must collect logs from 5K servers, provide full-text search, support structured queries, and retain 30 days of logs.",
+      "key_topics": ["log ingestion", "indexing", "retention", "search", "storage optimization"]
+    },
+    {
+      "id": "auth_001",
+      "domain": "identity",
+      "difficulty": "intermediate",
+      "prompt": "Design a single sign-on (SSO) and identity management system. Must support OAuth2, SAML, MFA, user provisioning/deprovisioning, and role-based access control for 1M users across 50 applications.",
+      "key_topics": ["OAuth2 flows", "token management", "session handling", "RBAC"]
+    },
+    {
+      "id": "content_001",
+      "domain": "content",
+      "difficulty": "intermediate",
+      "prompt": "Design a content moderation system that automatically flags inappropriate content (text, images, video) across a social platform with 10M posts/day. Must support human review workflows.",
+      "key_topics": ["ML classification", "human-in-the-loop", "queue management", "appeal process"]
+    },
+    {
+      "id": "content_002",
+      "domain": "content",
+      "difficulty": "beginner",
+      "prompt": "Design a blog platform where users can write posts with rich text, add images, tag posts, and readers can comment. Must support 100K bloggers and 10M readers.",
+      "key_topics": ["content storage", "CDN", "commenting", "tagging and search"]
+    },
+    {
+      "id": "maps_001",
+      "domain": "maps",
+      "difficulty": "advanced",
+      "prompt": "Design a Google Maps-like navigation system. Must support map tile rendering, route calculation (driving, walking, transit), real-time traffic, and place search. Serve 10M route requests/day.",
+      "key_topics": ["graph algorithms", "map tiles", "real-time traffic", "geospatial indexing"]
+    },
+    {
+      "id": "booking_001",
+      "domain": "booking",
+      "difficulty": "intermediate",
+      "prompt": "Design a hotel booking system like Booking.com. Must handle search with date/location/price filters, room availability with no double-booking, and payment processing. Scale: 1M bookings/day.",
+      "key_topics": ["availability management", "double-booking prevention", "search", "payment"]
+    },
+    {
+      "id": "booking_002",
+      "domain": "booking",
+      "difficulty": "intermediate",
+      "prompt": "Design a ticket booking system for concerts and events. Must handle seat selection, temporary seat holds during checkout, and high-concurrency releases (100K users for 5K seats).",
+      "key_topics": ["seat locking", "reservation timeout", "consistency", "queue-based access"]
+    },
+    {
+      "id": "email_001",
+      "domain": "email",
+      "difficulty": "advanced",
+      "prompt": "Design an email service like Gmail. Must handle sending/receiving emails via SMTP, spam filtering, search across mailbox, labels/folders, and attachment storage. Scale: 10M users.",
+      "key_topics": ["SMTP", "spam filtering", "full-text search", "attachment storage", "IMAP"]
+    },
+    {
+      "id": "social_004",
+      "domain": "social_media",
+      "difficulty": "intermediate",
+      "prompt": "Design a TikTok-like short video feed. Users upload 15-60 second videos, the system serves a personalized infinite scroll feed. Must optimize for engagement. Scale: 30M DAU.",
+      "key_topics": ["recommendation engine", "video processing", "CDN", "engagement metrics"]
+    },
+    {
+      "id": "data_001",
+      "domain": "data_pipeline",
+      "difficulty": "intermediate",
+      "prompt": "Design a real-time analytics pipeline that ingests clickstream events from a website, processes them, and updates dashboards in near-real-time. Scale: 100K events/second, dashboards refresh every 10 seconds.",
+      "key_topics": ["Kafka", "stream processing", "materialized views", "dashboard serving"]
+    },
+    {
+      "id": "data_002",
+      "domain": "data_pipeline",
+      "difficulty": "intermediate",
+      "prompt": "Design a change data capture (CDC) pipeline that syncs data from a primary PostgreSQL database to Elasticsearch for search, Redis for caching, and a data warehouse for analytics.",
+      "key_topics": ["CDC", "Debezium", "eventual consistency", "schema evolution"]
+    },
+    {
+      "id": "dns_001",
+      "domain": "infrastructure",
+      "difficulty": "advanced",
+      "prompt": "Design a DNS-like distributed name resolution system. Must handle 100K queries/second, support caching with TTL, handle zone transfers, and provide high availability across multiple regions.",
+      "key_topics": ["hierarchical resolution", "caching", "zone replication", "anycast"]
+    },
+    {
+      "id": "ci_001",
+      "domain": "devtools",
+      "difficulty": "intermediate",
+      "prompt": "Design a CI/CD pipeline system like GitHub Actions. Must support defining workflows in YAML, parallel job execution, artifact storage, caching between builds, and secure secret management.",
+      "key_topics": ["job scheduling", "container execution", "artifact storage", "DAG execution"]
+    },
+    {
+      "id": "crm_001",
+      "domain": "saas",
+      "difficulty": "intermediate",
+      "prompt": "Design a CRM system like a simplified Salesforce. Must manage contacts, companies, deals with pipeline stages, activity logging, email integration, and reporting. Multi-tenant with 5K organizations.",
+      "key_topics": ["multi-tenancy", "relationship modeling", "pipeline management", "reporting"]
+    }
+  ]
+}
