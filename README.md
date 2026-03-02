@@ -1,78 +1,93 @@
-# Systems Design Multimodal Model — Budget Fine-Tuning Pipeline
+# RepoDesign: Codebase-Aware Multimodal System Design Planning
 
-## Overview
-This is the complete, minimal pipeline to fine-tune Qwen2-VL-7B-Instruct into a systems design assistant. Total cost: ~$150-250.
+A multimodal agent pipeline that accepts a product specification, an existing code repository, and (optionally) architecture diagrams, and produces a **codebase-aware implementation plan** with real file paths, scale-appropriate technology choices, and executable ticket descriptions.
 
-## Directory Structure
+## Core Contributions
+
+1. **Repo IR** — A structured Intermediate Representation capturing repository architecture through deterministic code analysis + LLM summarization
+2. **Multimodal Diagram Fusion** — Grounding visual architecture diagrams against the Repo IR
+3. **Scale-Aware Reasoning** — Conditioning recommendations on project constraints (team size, user count, budget) via GRPO
+
+## Project Structure
+
 ```
-sysdesign-finetune/
-├── README.md                  ← You are here
-├── 01_generate_diagrams.py    ← Generates synthetic architecture diagrams
-├── 02_generate_conversations.py ← Generates training conversations using Claude/GPT-4 API
-├── 03_prepare_dataset.py      ← Converts raw data into training format
-├── 04_train.py                ← QLoRA fine-tuning with Unsloth
-├── 05_merge_and_export.py     ← Merges LoRA adapter and exports to GGUF
-├── 06_evaluate.py             ← Runs evaluation on test prompts
-├── 07_inference.py            ← Interactive inference script
-├── prompts/
-│   ├── system_design_prompts.json    ← 50 seed prompts for data generation
-│   └── eval_prompts.json             ← 30 held-out test prompts
-├── data/
-│   ├── raw/                   ← Raw generated conversations
-│   ├── diagrams/              ← Generated architecture diagrams
-│   └── train.jsonl            ← Final training dataset
-└── output/
-    ├── checkpoints/           ← Training checkpoints
-    ├── merged/                ← Merged full model
-    └── gguf/                  ← Quantized GGUF for deployment
+Multimodal/
+├── src/repodesign/             # Core Python package
+│   ├── schemas/                # Pydantic models (Spec, RepoIR, Plan)
+│   ├── extractors/             # Repo IR extraction pipeline
+│   │   ├── directory_analysis.py
+│   │   ├── dependency_graph.py
+│   │   ├── api_routes.py       # Flask/FastAPI/Django/Express
+│   │   ├── orm_models.py       # Django/SQLAlchemy/Prisma
+│   │   ├── infra_config.py     # Docker/K8s/Terraform/CI
+│   │   ├── llm_summarizer.py
+│   │   └── pipeline.py         # Orchestrator
+│   ├── curation/               # GitHub repo scraping + scale classification
+│   ├── spec_normalizer/        # PRD → canonical Spec JSON
+│   ├── diagrams/               # Diagram mining from repos
+│   ├── evaluation/             # Repo Grounding Score (RGS)
+│   └── training/               # Tinker/LoRA config for Qwen3-VL-235B
+├── scripts/                    # CLI entry points
+├── tests/                      # Test suite
+└── data/                       # Data directory (gitignored)
 ```
 
-## Prerequisites
+## Setup
 
-### Local machine (for data generation)
 ```bash
-pip install anthropic openai diagrams Pillow matplotlib
+# Install in editable mode
+pip install -e ".[dev]"
 ```
 
-### Training machine (rent a GPU — Vast.ai or RunPod)
+## Quick Start
+
+### Extract Repo IR from any repository
 ```bash
-# On a fresh Ubuntu + CUDA machine with A100 40/80GB:
-pip install "unsloth[colab-new] @ git+https://github.com/unslothai/unsloth.git"
-pip install --no-deps trl peft accelerate bitsandbytes
-pip install qwen-vl-utils
+python scripts/extract_repo_ir.py /path/to/repo --skip-llm
+python scripts/extract_repo_ir.py /path/to/repo --url https://github.com/user/repo --stars 500
 ```
 
-### Deployment machine (your laptop or a cheap VPS)
+### Scrape GitHub repos for training data
 ```bash
-# Install Ollama
-curl -fsSL https://ollama.com/install.sh | sh
+export GITHUB_TOKEN=ghp_your_token
+python scripts/scrape_repos.py --per-language 50
 ```
 
-## Pipeline Steps
-
-### Step 1: Generate training data (your laptop, ~20-40 hours of work)
+### Run batch extraction
 ```bash
-python 01_generate_diagrams.py          # ~30 min, generates 500 diagrams
-python 02_generate_conversations.py     # ~2-4 hours, costs ~$50-100 in API fees
-python 03_prepare_dataset.py            # ~5 min, formats everything
+python scripts/run_extraction_batch.py data/repo_list.json --skip-llm --limit 10
 ```
 
-### Step 2: Train (rented GPU, ~4-8 hours)
+### Mine architecture diagrams
 ```bash
-# Upload data/ folder to GPU machine
-python 04_train.py                      # ~4-8 hours on A100
-python 05_merge_and_export.py           # ~20 min
+python scripts/mine_diagrams.py /path/to/repo1 /path/to/repo2
 ```
 
-### Step 3: Deploy (your laptop or VPS)
+### Normalize a PRD
 ```bash
-# Download the GGUF file from GPU machine
-ollama create sysdesign -f Modelfile
-ollama run sysdesign
+export ANTHROPIC_API_KEY=sk-ant-...
+python scripts/normalize_spec.py prd.txt -o data/specs/spec-001.json
 ```
 
-### Step 4: Evaluate and iterate
+## Run Tests
 ```bash
-python 06_evaluate.py                   # Test against held-out prompts
-# Review results, improve training data, retrain
+python -m pytest tests/ -v
 ```
+
+## Training Pipeline
+
+**Model:** Qwen3-VL-235B-A22B-Instruct via full LoRA (Tinker)
+- **Stage 1 (SFT):** Repo→IR extraction + Spec+IR→Plan generation
+- **Stage 2 (GRPO):** Scale-contrastive preference pairs
+
+See `src/repodesign/training/tinker_config.py` for configuration.
+
+## Evaluation
+
+**Primary metric:** Repo Grounding Score (RGS) — % of file paths in the generated plan that actually exist in the target repository. Fully deterministic, no LLM-as-judge.
+
+## Team
+
+- **Andrea Jimenez Fernandez** — Repo IR & Data Pipeline
+- **Cerine Hamida** — Multimodal & Training
+- **Kevin Power** — Scale Reasoning & Evaluation
