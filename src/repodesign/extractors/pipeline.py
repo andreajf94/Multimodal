@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -18,6 +19,7 @@ from ..schemas.repo_ir import (
     RepoMetadata,
 )
 from ..schemas.spec import ScaleTier
+from ..diagrams.mine_diagrams import mine_diagrams_from_repo
 from .api_routes import extract_api_routes
 from .dependency_graph import extract_dependency_info
 from .directory_analysis import extract_directory_info
@@ -28,13 +30,62 @@ from .orm_models import extract_data_models
 logger = logging.getLogger(__name__)
 
 
+def _collect_file_manifest(repo_path: str) -> list[str]:
+    """Collect all file paths relative to repo root.
+
+    Used for RGS evaluation without needing the clone at training time.
+    """
+    skip_dirs = {".git", "node_modules", "__pycache__", ".venv", "venv", "env",
+                 "dist", "build", "vendor", ".tox", ".mypy_cache", ".pytest_cache"}
+    manifest = []
+    repo = Path(repo_path)
+    for root, dirs, files in os.walk(repo_path):
+        dirs[:] = [d for d in dirs if d not in skip_dirs]
+        for fname in files:
+            rel = str(Path(root, fname).relative_to(repo))
+            manifest.append(rel.replace("\\", "/"))
+    return sorted(manifest)
+
+
+def _copy_diagrams(repo_path: str, output_dir: str) -> list[str]:
+    """Mine diagrams from repo and copy image files to output_dir/diagrams/.
+
+    Returns list of copied diagram paths relative to output_dir.
+    """
+    import shutil
+
+    entries = mine_diagrams_from_repo(repo_path)
+    if not entries:
+        return []
+
+    diagrams_dir = Path(output_dir) / "diagrams"
+    diagrams_dir.mkdir(parents=True, exist_ok=True)
+    copied = []
+
+    for entry in entries:
+        src = Path(repo_path) / entry.file_path
+        if not src.exists():
+            continue
+        dest_name = entry.file_path.replace("/", "_").replace("\\", "_")
+        dest = diagrams_dir / dest_name
+        try:
+            shutil.copy2(src, dest)
+            copied.append(f"diagrams/{dest_name}")
+            logger.info(f"  Copied diagram: {entry.file_path} -> {dest}")
+        except Exception as e:
+            logger.warning(f"  Failed to copy diagram {entry.file_path}: {e}")
+
+    return copied
+
+
 def extract_repo_ir(
     repo_path: str,
     repo_url: str = "",
     star_count: int = 0,
     num_contributors: int = 0,
     skip_llm: bool = False,
-    llm_provider: str = "anthropic",
+    llm_provider: str = "deepseek",
+    output_dir: str | None = None,
 ) -> RepoIR:
     """Extract a complete Repo IR from a local repository.
 
@@ -44,7 +95,8 @@ def extract_repo_ir(
         star_count: Number of GitHub stars.
         num_contributors: Number of contributors.
         skip_llm: If True, skip LLM-based summarization.
-        llm_provider: "anthropic" or "openai".
+        llm_provider: "deepseek", "anthropic", or "openai".
+        output_dir: If provided, copy diagrams here and include paths in RepoIR.
 
     Returns:
         A fully populated RepoIR instance.
@@ -94,6 +146,25 @@ def extract_repo_ir(
     except Exception as e:
         warnings.append(f"Infrastructure extraction failed: {e}")
         infra = {}
+
+    # 5b. File manifest (for RGS without clone)
+    logger.info("  [5b] Collecting file manifest...")
+    try:
+        file_manifest = _collect_file_manifest(repo_path)
+        logger.info(f"  Collected {len(file_manifest)} file paths")
+    except Exception as e:
+        warnings.append(f"File manifest collection failed: {e}")
+        file_manifest = []
+
+    # 5c. Diagrams
+    diagram_paths: list[str] = []
+    if output_dir:
+        logger.info("  [5c] Mining and copying diagrams...")
+        try:
+            diagram_paths = _copy_diagrams(repo_path, output_dir)
+            logger.info(f"  Copied {len(diagram_paths)} diagrams")
+        except Exception as e:
+            warnings.append(f"Diagram mining failed: {e}")
 
     # 6. LLM summary
     if skip_llm:
@@ -151,6 +222,8 @@ def extract_repo_ir(
         directory_tree=dir_info.get("directory_tree", ""),
         key_directories=dir_info.get("key_directories", {}),
         architectural_summary=summary,
+        file_manifest=file_manifest,
+        diagram_paths=diagram_paths,
         extraction_timestamp=datetime.now(timezone.utc).isoformat(),
         extraction_warnings=warnings,
     )

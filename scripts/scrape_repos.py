@@ -8,6 +8,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
+from dotenv import load_dotenv
+load_dotenv()
+
 from repodesign.curation.classify_scale import classify_all
 from repodesign.curation.scrape_repos import GitHubScraper, save_repo_list
 

@@ -54,25 +54,52 @@ def _build_summary_prompt(extracted_data: dict) -> str:
     return "\n\n".join(sections)
 
 
-def generate_architectural_summary(extracted_data: dict, provider: str = "anthropic") -> str:
+def generate_architectural_summary(extracted_data: dict, provider: str = "deepseek") -> str:
     """Generate an LLM-based architectural summary.
 
     Args:
         extracted_data: Combined output from all deterministic extractors.
-        provider: "anthropic" or "openai".
+        provider: "deepseek", "anthropic", or "openai".
 
     Returns:
         Natural language architectural summary string.
     """
     user_prompt = _build_summary_prompt(extracted_data)
 
-    if provider == "anthropic":
+    if provider == "deepseek":
+        return _call_deepseek(user_prompt)
+    elif provider == "anthropic":
         return _call_anthropic(user_prompt)
     elif provider == "openai":
         return _call_openai(user_prompt)
     else:
         logger.warning(f"Unknown provider {provider}, returning empty summary")
         return ""
+
+
+def _call_deepseek(user_prompt: str) -> str:
+    """Call DeepSeek API for summary (uses OpenAI-compatible endpoint)."""
+    api_key = os.environ.get("DEEPSEEK_API_KEY")
+    if not api_key:
+        logger.warning("DEEPSEEK_API_KEY not set, skipping LLM summary")
+        return "(LLM summary unavailable - DEEPSEEK_API_KEY not set)"
+
+    try:
+        import openai
+
+        client = openai.OpenAI(api_key=api_key, base_url="https://api.deepseek.com")
+        response = client.chat.completions.create(
+            model="deepseek-reasoner",
+            max_tokens=2048,
+            messages=[
+                {"role": "system", "content": SUMMARY_SYSTEM_PROMPT},
+                {"role": "user", "content": user_prompt},
+            ],
+        )
+        return response.choices[0].message.content or ""
+    except Exception as e:
+        logger.error(f"DeepSeek API call failed: {e}")
+        return f"(LLM summary failed: {e})"
 
 
 def _call_anthropic(user_prompt: str) -> str:

@@ -1,0 +1,252 @@
+\documentclass{article}
+
+\usepackage[preprint]{neurips_2025}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{hyperref}
+\usepackage{url}
+\usepackage{booktabs}
+\usepackage{amsfonts}
+\usepackage{nicefrac}
+\usepackage{microtype}
+\usepackage{xcolor}
+\usepackage{enumitem}
+
+\title{RepoDesign: Codebase-Aware Multimodal System Design Planning}
+
+\author{%
+  Andrea Jimenez Fernandez \\
+  MIT \\
+  \texttt{andrejim@mit.edu} \\
+  \And
+  Cerine Hamida \\
+  MIT \\
+  \texttt{chamida@mit.edu} \\
+  \And
+  Kevin Power \\
+  MIT \\
+  \texttt{kevpower@mit.edu} \\
+}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+Large language models can discuss system design fluently, yet their advice is fundamentally ungrounded: they suggest adding a Redis caching layer without checking whether the codebase already has one, or recommend Kubernetes for a 200-user internal tool. We introduce \textbf{RepoDesign}, a multimodal agent pipeline that accepts a product specification, an existing code repository, and (optionally) architecture diagrams, and produces a codebase-aware implementation plan with real file paths, scale-appropriate technology choices, and executable ticket descriptions. Our core contributions are: (1)~a structured \textbf{Repo Intermediate Representation (Repo~IR)} capturing repository architecture through deterministic code analysis augmented by LLM summarization; (2)~a \textbf{multimodal fusion mechanism} grounding visual architecture diagrams against the Repo~IR; and (3)~a \textbf{scale-aware design reasoning framework} conditioning recommendations on project constraints (team size, user count, budget) rather than defaulting to enterprise-grade patterns. We fine-tune Qwen3-VL-235B-A22B-Instruct via full LoRA (via Tinker) with SFT and GRPO, evaluated using a novel \textbf{Repo Grounding Score} measuring whether generated plans reference files and modules that actually exist in the target repository.
+\end{abstract}
+
+\section{Introduction}
+
+System design is one of the most consequential activities in software engineering; a poor architectural decision in week one can cost months of rework. Yet today's AI tools leave a critical gap. Code-generation tools (GitHub Copilot, Cursor) excel at implementing functions but offer no guidance on \emph{what to build or where to put it} within an existing codebase. Conversational assistants (ChatGPT, Claude) discuss system design eloquently but their recommendations are generic, decoupled from any repository, blind to existing infrastructure, and biased toward over-engineered solutions. As Kleppmann~\cite{kleppmann} emphasizes, the value of a design checklist is \emph{consciously deciding which items matter for your specific system}. Current AI tools fail at this: they cannot see you already use Django with PostgreSQL, miss that \texttt{docker-compose.yml} reveals a single-server deployment, and recommend sharding regardless of row count.
+
+\textbf{Broad Impact.} A repo-grounded, scale-appropriate design tool would democratize architectural expertise, giving junior engineers guidance calibrated to their actual context rather than Silicon Valley-scale assumptions, reducing architectural debt~\cite{besker}.
+
+\textbf{Intellectual Merit.} Faithfully representing repository architecture requires fusing heterogeneous signals (dependency graphs, ORM models, API decorators, infrastructure configs, visual diagrams). Generating grounded plans avoiding hallucinated paths requires structured reasoning current LLMs struggle with. Scale-aware reasoning demands learning \emph{when not to recommend complexity}, counter to training data biases, and the multimodal aspect requires non-trivial cross-modal alignment.
+
+\section{Related Work}
+
+\subsection{Code-Aware Language Models}
+CodeBERT~\cite{feng} and CodeT5~\cite{codet5} introduced code pre-training; StarCoder~\cite{starcoder} and Code~Llama~\cite{codellama} scaled to long-context generation. RepoCoder~\cite{repocoder}, SWE-Agent~\cite{sweagent}, and SWE-bench~\cite{swebench} pushed toward repo-level reasoning. OpenHands~\cite{openhands} and Devin~\cite{devin} extend to autonomous multi-step engineering, while Qwen2.5-Coder~\cite{qwencoder} and DeepSeek-Coder-V2~\cite{deepseek} show open-weight models approach frontier performance. \emph{Why build a Repo~IR when models can ingest long contexts?} LongBench~v2 shows persistent failures in far-context utilization: attention diffusion, structural underuse, and high inference cost. \textbf{Repo~IR is a structural scaffold}: it deterministically surfaces high-signal structure (routes, ORM topology, infra configs) into a stable representation planners reliably attend to. Despite this progress, existing systems focus on code generation and bug fixing rather than \emph{architectural reasoning}.
+
+\subsection{Automated Software Architecture and Agentic Workflows}
+Early work used formal ADLs~\cite{medvidovic}; more recently, Chen et al.~\cite{chen} explored LLM-based UML generation, while ChatDev~\cite{chatdev} and MetaGPT~\cite{metagpt} simulate multi-agent teams producing designs and code. However, these generate architectures \emph{de novo} without codebase awareness and target only greenfield projects. Flow-engineering approaches optimize for patch correctness (compilation, tests) rather than \emph{design correctness} (grounded in existing architecture, appropriate for constraints). RepoDesign's ``verifier'' is the repository itself (via Repo Grounding Score) and a constraint rubric (via Scale Appropriateness).
+
+\subsection{Multimodal Diagram Understanding and Grounding}
+Qwen2-VL~\cite{qwenvl} and LLaVA~\cite{llava} interpret diagrams and screenshots; prior work explores UML understanding~\cite{kimura} and whiteboard-to-structure translation. No prior work \emph{grounds} visual architecture diagrams against an actual codebase, e.g., mapping ``User Service'' in a diagram to \texttt{src/services/user/}. Related GUI grounding work maps UI elements to DOM/accessibility trees. RepoDesign's diagram grounding is the architectural analogue: \textbf{visual-to-structured alignment enabling downstream action}.
+
+\subsection{Constraint-Aware Planning and Preference Alignment}
+RAG~\cite{rag} and tool-augmented LLMs~\cite{toolformer} address factual grounding; SayCan~\cite{saycan} and Plan-and-Solve~\cite{plansolve} explore LLM planning. For system design, correctness requires \emph{appropriateness under constraints}. Recent preference optimization enforces constraint satisfaction beyond outcome correctness. RepoDesign applies this via GRPO over contrastive ``scale-tier'' pairs, penalizing both over- and under-engineering. \textbf{Gaps:} prior work (a)~generates code without architectural reasoning, (b)~reasons about architecture without codebase awareness, (c)~understands diagrams without code grounding, or (d)~ignores scale. RepoDesign unifies all four.
+
+\section{Research Ideas}
+
+\subsection{Repo~IR Extraction and Grounding \textnormal{(Andrea Jimenez Fernandez)}}
+\textbf{Idea:} Build a structured Repo~IR combining deterministic static analysis (dependency graphs via pipreqs/madge, API route extraction via AST parsing, ORM and infrastructure config parsing) with LLM summarization. Core question: does a fine-tuned model produce faithful Repo~IRs that significantly reduce hallucinated file paths in downstream plans?
+\textbf{Novelty:} No prior work defines a canonical structured repository-architecture representation for downstream design tasks. The Repo~IR schema is itself a reusable benchmark artifact.
+
+\subsection{Multimodal Architecture Diagram Fusion \textnormal{(Cerine Hamida)}}
+\textbf{Idea:} Accept architecture diagrams (PlantUML, Mermaid, whiteboard photos, cloud screenshots) and align diagram components with Repo~IR entities, e.g., mapping ``Auth Service'' to \texttt{src/auth/} or an ``API Gateway $\to$ Database'' edge to the actual call chain.
+\textbf{Novelty:} We propose \emph{diagram grounding}: cross-modal alignment between visual architecture and code structure, distinct from diagram generation or isolated understanding.
+
+\subsection{Scale-Aware Design Reasoning \textnormal{(Kevin Power)}}
+\textbf{Idea:} Condition recommendations on scale constraints (user count, team size, budget) via GRPO over contrastive pairs where ``preferred'' plans match the tier and ``rejected'' plans over- or under-engineer. We use a 20-dimension framework from Kleppmann~\cite{kleppmann} (performance, consistency, caching, replication, partitioning, security, failure resilience) across four tiers: \emph{hobby} ($<$1k users, 1~dev), \emph{startup} (1k--50k, 2--5~devs), \emph{growth} (50k--1M, 10--30~devs), \emph{enterprise} (1M+, 30+~devs). For example, at hobby tier caching is ``none, your DB is fast enough''; at growth, ``Redis with cache-aside''; at enterprise, multi-layer caching with CDN and stampede prevention. This framework serves as both training signal and evaluation rubric.
+\textbf{Novelty:} No prior work trains or evaluates LLMs on scale-appropriate system design.
+
+\section{Planned Execution}
+
+\subsection{Datasets}
+\textbf{Repo~IR:} 5,000--20,000 open-source GitHub repos across scales ($\sim$~2,500 small, $\sim$~1,500 medium, $\sim$~750 growth, $\sim$~250 large/enterprise); silver-label Repo~IR JSON via Deepseek Reasoner; 50--100 manually corrected gold examples.
+\textbf{Implementation Plans:} 2--3 synthetic PRDs per repo plus negative examples (hallucinated paths, scale-mismatched plans) for GRPO pairs.
+\textbf{Diagrams:} $\sim$100--150 diagram-repo pairs from \texttt{.puml}/\texttt{.mmd} files, supplemented with synthetically degraded renders.
+\textbf{Scale Pairs:} 50+ contrastive scenario pairs using the 20-dimension framework as ground truth.
+
+\subsection{Evaluation Metrics}
+\textbf{Repo Grounding Score (RGS):} \% of file paths in the plan that exist in the repo; fully deterministic, no LLM-as-judge.
+\textbf{Plan Completeness:} Scale-conditioned checklist across 20 design dimensions (a 500-user plan is not penalized for omitting sharding; a 5M-user plan is).
+\textbf{Scale Appropriateness:} Whether recommended technologies match the stated tier.
+\textbf{Constraint Satisfaction:} \% of hard spec constraints respected.
+\textbf{Format Compliance:} Valid JSON conforming to defined schemas.
+\textbf{Human Evaluation:} 10--20 engineers compare our model vs.\ GPT-4: (a)~``execute Monday morning,'' (b)~scale match, (c)~code accuracy.
+
+\subsection{Experimental Setup}
+\textbf{RQ1 (Grounding):} Repo~IR vs.\ naive RAG. \emph{H:} $\geq$30\% higher RGS.
+\textbf{RQ2 (Multimodal):} Diagrams vs.\ text-only. \emph{H:} Higher completeness, fewer hallucinations.
+\textbf{RQ3 (Scale):} GRPO vs.\ SFT-only. \emph{H:} $\geq$2$\times$ more scale-appropriate recommendations.
+\textbf{RQ4 (End-to-End):} RepoDesign vs.\ GPT-4. \emph{H:} Preferred $\geq$60\% on ``execute Monday morning.''
+
+\textbf{Baselines:} (1)~GPT-4 with system design prompt; (2)~GPT-4 with naive RAG; (3)~SFT-only (no GRPO).
+\textbf{Training:} Qwen3-VL-235B-A22B-Instruct, full LoRA via Tinker. Stage~1: SFT on Repo$\to$IR and Spec+IR$\to$Plan. Stage~2: GRPO on scale-contrastive preference pairs.
+
+\textbf{Risks:} (1)~Noisy IR for poorly structured repos (mitigated by stratified evaluation). (2)~Insufficient data (mitigated by augmentation and RAG fallback). (3)~Scarce diagram data (mitigated by synthetic renders; evaluated as delta over text-only). (4)~Small human study (mitigated by paired comparisons with confidence intervals).
+
+\section{Task Division and Timeline}
+
+\textbf{Andrea (Repo~IR \& Data):} Deterministic analysis tools, IR schema, scraping pipeline, RGS metric.
+\textbf{Cerine (Multimodal \& Training):} Diagram extraction, multimodal formatting, SFT/GRPO runs, model evaluation.
+\textbf{Kevin (Scale \& Evaluation):} Scale rubric, contrastive pairs, human evaluation, Spec Normalizer, demo UI.
+All members co-write the final report with cross-functional code reviews. GitHub: \url{https://github.com/andreajf94/Multimodal}.
+
+\medskip\noindent
+\begin{tabular}{@{}lp{9.5cm}@{}}
+\toprule
+\textbf{Weeks} & \textbf{Milestone} \\
+\midrule
+1--2 & Define JSON schemas (Spec, IR, Plan). Build IR extraction v1. Curate repo list. Build Spec Normalizer. Set up Tinker/LoRA. \\
+3--4 & Run IR extraction. Generate silver-label IRs. Validate 50+. Generate PRDs, gold plans, contrastive pairs. Collect diagrams. \\
+5--6 & SFT runs (Repo$\to$IR; Spec+IR$\to$Plan). Implement automated metrics. Evaluate and iterate. \\
+7--8 & Build GRPO dataset. Run GRPO. Compare SFT vs.\ GRPO. Build demo UI. Begin human eval recruitment. \\
+9--10 & Full evaluation across baselines. Human eval (10--20 participants). Draft final report. \\
+11--12 & Final report. Live demo. Submit code, data, model to GitHub. \\
+\bottomrule
+\end{tabular}
+
+\newpage
+
+\bibliographystyle{plain}
+
+\begin{thebibliography}{24}
+
+\bibitem{saycan}
+M.~Ahn et al.
+\newblock Do As I Can, Not As I Say: Grounding Language in Robotic Affordances.
+\newblock \emph{arXiv:2204.01691}, 2022.
+
+\bibitem{besker}
+T.~Besker, A.~Martini, and J.~Bosch.
+\newblock Managing architectural technical debt: A unified model and systematic literature review.
+\newblock \emph{Journal of Systems and Software}, 135:1--16, 2018.
+
+\bibitem{chen}
+M.~Chen et al.
+\newblock Towards automated UML generation from natural language requirements using LLMs.
+\newblock \emph{ASE Workshop}, 2023.
+
+\bibitem{devin}
+Cognition Labs.
+\newblock Devin: The First AI Software Engineer.
+\newblock Blog post, 2024.
+
+\bibitem{feng}
+Z.~Feng et al.
+\newblock CodeBERT: A Pre-Trained Model for Programming and Natural Languages.
+\newblock \emph{EMNLP}, 2020.
+
+\bibitem{metagpt}
+S.~Hong et al.
+\newblock MetaGPT: Meta Programming for A Multi-Agent Collaborative Framework.
+\newblock \emph{ICLR}, 2024.
+
+\bibitem{qwencoder}
+B.~Hui et al.
+\newblock Qwen2.5-Coder Technical Report.
+\newblock \emph{arXiv:2409.12186}, 2024.
+
+\bibitem{swebench}
+C.~E.~Jimenez et al.
+\newblock SWE-bench: Can Language Models Resolve Real-World GitHub Issues?
+\newblock \emph{ICLR}, 2024.
+
+\bibitem{kimura}
+T.~Kimura et al.
+\newblock Understanding UML diagrams with vision-language models.
+\newblock \emph{ICSE Companion}, 2023.
+
+\bibitem{kleppmann}
+M.~Kleppmann.
+\newblock \emph{Designing Data-Intensive Applications}.
+\newblock O'Reilly, 2017.
+
+\bibitem{rag}
+P.~Lewis et al.
+\newblock Retrieval-Augmented Generation for Knowledge-Intensive NLP Tasks.
+\newblock \emph{NeurIPS}, 2020.
+
+\bibitem{starcoder}
+R.~Li et al.
+\newblock StarCoder: May the Source Be With You.
+\newblock \emph{arXiv:2305.06161}, 2023.
+
+\bibitem{llava}
+H.~Liu et al.
+\newblock Visual Instruction Tuning.
+\newblock \emph{NeurIPS}, 2023.
+
+\bibitem{medvidovic}
+N.~Medvidovic and R.~N.~Taylor.
+\newblock A classification and comparison framework for software architecture description languages.
+\newblock \emph{IEEE TSE}, 26(1):70--93, 2000.
+
+\bibitem{chatdev}
+C.~Qian et al.
+\newblock ChatDev: Communicative Agents for Software Development.
+\newblock \emph{ACL}, 2024.
+
+\bibitem{codellama}
+B.~Rozi\`{e}re et al.
+\newblock Code Llama: Open Foundation Models for Code.
+\newblock \emph{arXiv:2308.12950}, 2023.
+
+\bibitem{toolformer}
+T.~Schick et al.
+\newblock Toolformer: Language Models Can Teach Themselves to Use Tools.
+\newblock \emph{NeurIPS}, 2024.
+
+\bibitem{openhands}
+X.~Wang et al.
+\newblock OpenHands: An Open Platform for AI Software Developers as Generalist Agents.
+\newblock \emph{arXiv:2407.16741}, 2024.
+
+\bibitem{codet5}
+Y.~Wang et al.
+\newblock CodeT5: Identifier-aware Unified Pre-trained Encoder-Decoder Models for Code Understanding and Generation.
+\newblock \emph{EMNLP}, 2021.
+
+\bibitem{qwenvl}
+P.~Wang et al.
+\newblock Qwen2-VL: Enhancing Vision-Language Model's Perception of the World at Any Resolution.
+\newblock \emph{arXiv:2409.12191}, 2024.
+
+\bibitem{plansolve}
+L.~Wang et al.
+\newblock Plan-and-Solve Prompting: Improving Zero-Shot Chain-of-Thought Reasoning by Large Language Models.
+\newblock \emph{ACL}, 2023.
+
+\bibitem{sweagent}
+J.~Yang et al.
+\newblock SWE-agent: Agent-Computer Interfaces Enable Automated Software Engineering.
+\newblock \emph{arXiv:2405.15793}, 2024.
+
+\bibitem{repocoder}
+F.~Zhang et al.
+\newblock RepoCoder: Repository-Level Code Completion Through Iterative Retrieval and Generation.
+\newblock \emph{EMNLP}, 2023.
+
+\bibitem{deepseek}
+Q.~Zhu et al.
+\newblock DeepSeek-Coder-V2: Breaking the Barrier of Closed-Source Models in Code Intelligence.
+\newblock \emph{arXiv:2406.11931}, 2024.
+
+\end{thebibliography}
+
+\end{document}

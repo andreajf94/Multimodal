@@ -96,5 +96,7 @@ class RepoIR(BaseModel):
     directory_tree: str = ""
     key_directories: dict[str, str] = Field(default_factory=dict)
     architectural_summary: str = ""
+    file_manifest: list[str] = Field(default_factory=list, description="Complete list of file paths relative to repo root, for RGS evaluation without cloning")
+    diagram_paths: list[str] = Field(default_factory=list, description="Paths to extracted diagram image files (relative to output dir)")
     extraction_timestamp: str = ""
     extraction_warnings: list[str] = Field(default_factory=list)
