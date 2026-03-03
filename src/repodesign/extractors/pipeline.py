@@ -248,13 +248,13 @@ def save_repo_ir(repo_ir: RepoIR, output_path: str) -> None:
     """Save RepoIR to JSON file."""
     path = Path(output_path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "w") as f:
+    with open(path, "w", encoding="utf-8") as f:
         f.write(repo_ir.model_dump_json(indent=2))
     logger.info(f"Saved Repo IR to {output_path}")
 
 
 def load_repo_ir(input_path: str) -> RepoIR:
     """Load RepoIR from JSON file."""
-    with open(input_path) as f:
+    with open(input_path, encoding="utf-8") as f:
         data = json.load(f)
     return RepoIR(**data)
