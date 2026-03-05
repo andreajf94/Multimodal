@@ -65,13 +65,14 @@ Return a JSON object with these fields:
 {
   "architecture_decisions": [{"dimension": "...", "recommendation": "...", "rationale": "...", "alternatives_considered": [...], "files_affected": [...]}],
   "tickets": [{"id": "T-001", "title": "...", "description": "...", "files_to_modify": [...], "files_to_create": [...], "estimated_effort": "small|medium|large", "dependencies": [...]}],
-  "technology_choices": [{"category": "...", "choice": "...", "rationale": "..."}]
+  "implementation_summary": "2-3 paragraph explanation of the overall approach"
 }
 
 IMPORTANT:
 - files_to_modify must reference REAL file paths from the codebase
 - files_to_create should follow the project's existing conventions
-- Generate 3-8 architecture decisions and 4-10 actionable tickets"""
+- Generate 3-8 architecture decisions and 4-10 actionable tickets
+- implementation_summary should explain WHY each decision was made, not just WHAT"""
 
 
 def build_prompt(
@@ -92,8 +93,7 @@ Description: {spec.get('description', '')}
 Requirements:
 {chr(10).join(f'- {r}' for r in spec.get('functional_requirements', []))}
 
-Scale: {spec.get('scale_tier', 'startup')}
-
+{f"Scale: {spec['scale_tier']}" + chr(10) if spec.get('scale_tier') else ''}
 Generate a detailed implementation plan as JSON."""
 
     messages = [
@@ -126,11 +126,11 @@ def load_training_examples(repo_irs_dir: str, use_diagrams: bool = True) -> list
             continue
 
         try:
-            with open(repo_ir_path) as f:
+            with open(repo_ir_path, encoding="utf-8") as f:
                 repo_ir = json.load(f)
-            with open(spec_path) as f:
+            with open(spec_path, encoding="utf-8") as f:
                 spec = json.load(f)
-            with open(plan_path) as f:
+            with open(plan_path, encoding="utf-8") as f:
                 teacher_plan = json.load(f)
         except Exception as e:
             logger.warning(f"Failed to load {repo_dir.name}: {e}")

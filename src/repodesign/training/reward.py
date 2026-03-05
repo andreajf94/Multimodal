@@ -20,7 +20,10 @@ import re
 logger = logging.getLogger(__name__)
 
 # Required top-level keys in a valid plan
-REQUIRED_PLAN_KEYS = {"architecture_decisions", "tickets", "technology_choices"}
+# Core keys are always required; one of the optional sets must be present
+_CORE_PLAN_KEYS = {"architecture_decisions", "tickets"}
+_OPTIONAL_PLAN_KEYS_A = {"technology_choices"}       # synthetic pipeline
+_OPTIONAL_PLAN_KEYS_B = {"implementation_summary"}   # commit-pair pipeline
 REQUIRED_TICKET_KEYS = {"id", "title", "description"}
 REQUIRED_DECISION_KEYS = {"dimension", "recommendation", "rationale"}
 
@@ -39,7 +42,12 @@ def format_compliance(completions: list[str]) -> list[float]:
                 scores.append(0.0)
                 continue
             # Check required keys
-            if not REQUIRED_PLAN_KEYS.issubset(plan.keys()):
+            plan_keys = set(plan.keys())
+            if not _CORE_PLAN_KEYS.issubset(plan_keys):
+                scores.append(0.0)
+                continue
+            # Accept either technology_choices or implementation_summary
+            if not (_OPTIONAL_PLAN_KEYS_A & plan_keys or _OPTIONAL_PLAN_KEYS_B & plan_keys):
                 scores.append(0.0)
                 continue
             # Check that lists are non-empty
@@ -81,7 +89,8 @@ def format_partial(completions: list[str]) -> list[float]:
         # Credit for key field names (fine-grained per key)
         key_weights = {
             "architecture_decisions": 0.02, "tickets": 0.02,
-            "technology_choices": 0.02, "files_to_modify": 0.015,
+            "technology_choices": 0.02, "implementation_summary": 0.02,
+            "files_to_modify": 0.015,
             "files_to_create": 0.015, "recommendation": 0.01,
             "rationale": 0.01, "dimension": 0.01, "description": 0.01,
             "estimated_effort": 0.01, "dependencies": 0.01,
