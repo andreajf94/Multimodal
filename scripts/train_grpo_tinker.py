@@ -324,6 +324,9 @@ def train(config: Config, repo_irs_dir: str):
                 for tokens, logprobs, advantage in zip(
                     sampled_tokens_G, logprobs_G, advantages_G
                 ):
+                    if len(tokens) < 2:
+                        logger.debug("Skipping completion with < 2 tokens")
+                        continue
                     ob_len = prompt.length - 1
                     model_input = prompt.append(types.EncodedTextChunk(tokens=tokens[:-1]))
                     target_tokens = [0] * ob_len + tokens
