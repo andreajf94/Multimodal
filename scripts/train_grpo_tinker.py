@@ -60,10 +60,6 @@ class Config:
 
 SYSTEM_PROMPT = """You are a senior software architect. Given a codebase analysis and a feature specification, generate a detailed implementation plan as JSON.
 
-<think>
-Analyze the codebase structure, identify the right files to modify, and plan the implementation.
-</think>
-
 Return a JSON object with these fields:
 {
   "architecture_decisions": [{"dimension": "...", "recommendation": "...", "rationale": "...", "alternatives_considered": [...], "files_affected": [...]}],
@@ -223,10 +219,11 @@ def train(config: Config, repo_irs_dir: str):
     tokenizer = training_client.get_tokenizer()
 
     # Get appropriate renderer for Qwen3-VL
-    from tinker_cookbook import renderers, model_info
-    renderer_name = model_info.get_recommended_renderer_name(config.model_name)
-    renderer = renderers.get_renderer(renderer_name, tokenizer)
-    logger.info(f"Using renderer: {renderer_name}")
+    # NOTE: tinker-cookbook model_info doesn't have VL models registered,
+    # so we use Qwen3Renderer directly (same chat template as text Qwen3).
+    from tinker_cookbook.renderers import Qwen3Renderer
+    renderer = Qwen3Renderer(tokenizer)
+    logger.info(f"Using renderer: Qwen3Renderer")
 
     sampling_params = types.SamplingParams(
         max_tokens=config.max_tokens,
@@ -316,7 +313,7 @@ def train(config: Config, repo_irs_dir: str):
                     sampled_tokens_G.append(seq.tokens)
                     logprobs_G.append(seq.logprobs)
                     parsed_msg, _ = renderer.parse_response(seq.tokens)
-                    content = renderers.get_text_content(parsed_msg)
+                    content = parsed_msg.get("content", "")
                     completions.append(content)
 
                 # Compute rewards for all completions
@@ -387,17 +384,29 @@ def train(config: Config, repo_irs_dir: str):
 
             # Save checkpoint
             if config.save_every > 0 and global_step % config.save_every == 0 and global_step > 0:
-                ckpt_path = os.path.join(config.log_path, f"checkpoint_{global_step:06d}")
-                training_client.save_weights(ckpt_path)
-                logger.info(f"  Saved checkpoint to {ckpt_path}")
+                from tinker_cookbook import checkpoint_utils
+                checkpoint_utils.save_checkpoint(
+                    training_client=training_client,
+                    name=f"{global_step:06d}",
+                    log_path=config.log_path,
+                    kind="state",
+                    loop_state={"batch": global_step},
+                )
+                logger.info(f"  Saved checkpoint at step {global_step}")
 
             global_step += 1
 
     # Save final checkpoint
-    final_path = os.path.join(config.log_path, "checkpoint_final")
-    training_client.save_weights(final_path)
+    from tinker_cookbook import checkpoint_utils
+    checkpoint_utils.save_checkpoint(
+        training_client=training_client,
+        name="final",
+        log_path=config.log_path,
+        kind="both",
+        loop_state={"batch": global_step},
+    )
     ml_logger.close()
-    print(f"\nTraining complete! Final checkpoint: {final_path}")
+    print(f"\nTraining complete! Final checkpoint saved to {config.log_path}")
 
 
 # ---------------------------------------------------------------------------
