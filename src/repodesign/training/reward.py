@@ -62,18 +62,42 @@ def format_compliance(completions: list[str]) -> list[float]:
 # ---------------------------------------------------------------------------
 
 def format_partial(completions: list[str]) -> list[float]:
-    """Partial credit for near-valid JSON structure."""
+    """Partial credit for near-valid JSON structure.
+
+    More granular scoring to produce variance between completions:
+      - Structural tokens: braces, brackets, colons
+      - Key field mentions (weighted)
+      - Depth of structure (nested objects)
+      - Count of quoted strings (proxy for specificity)
+    """
     scores = []
     for text in completions:
         score = 0.0
         # Credit for having JSON-like structure
         if "{" in text and "}" in text:
-            score += 0.05
-        # Credit for key field names being present
-        for key in ["architecture_decisions", "tickets", "technology_choices",
-                     "files_to_modify", "files_to_create", "recommendation"]:
-            if key in text:
-                score += 0.025
+            score += 0.02
+        if "[" in text and "]" in text:
+            score += 0.01
+        # Credit for key field names (fine-grained per key)
+        key_weights = {
+            "architecture_decisions": 0.02, "tickets": 0.02,
+            "technology_choices": 0.02, "files_to_modify": 0.015,
+            "files_to_create": 0.015, "recommendation": 0.01,
+            "rationale": 0.01, "dimension": 0.01, "description": 0.01,
+            "estimated_effort": 0.01, "dependencies": 0.01,
+            "alternatives_considered": 0.01,
+        }
+        for key, w in key_weights.items():
+            # Count occurrences (more mentions = more structured)
+            count = text.count(f'"{key}"')
+            if count > 0:
+                score += w * min(count, 5)  # cap at 5 mentions per key
+        # Credit for nested object depth (more braces = deeper structure)
+        brace_depth = min(text.count("{"), 20)
+        score += brace_depth * 0.002
+        # Credit for quoted strings (proxy for specificity)
+        n_quoted = len(re.findall(r'"[^"]{3,}"', text))
+        score += min(n_quoted, 30) * 0.001
         # Cap at 0.25
         scores.append(min(score, 0.25))
     return scores
@@ -87,22 +111,29 @@ def rgs_score(completions: list[str], file_manifests: list[list[str]]) -> list[f
     """Score based on fraction of referenced file paths that exist in manifest.
 
     Max score: 3.0 (scaled from 0-1 RGS ratio).
+    Falls back to regex path extraction if JSON parsing fails.
     """
     scores = []
     for text, manifest in zip(completions, file_manifests):
-        plan = _parse_plan_json(text)
-        if plan is None:
-            scores.append(0.0)
-            continue
-
         manifest_set = set(manifest)
-        referenced = _extract_file_paths(plan)
+        manifest_norm = {_normalize_path(p) for p in manifest}
+
+        # Try structured extraction first
+        plan = _parse_plan_json(text)
+        if plan is not None:
+            referenced = _extract_file_paths(plan)
+        else:
+            # Fallback: extract path-like strings from raw text
+            referenced = _extract_paths_regex(text)
 
         if not referenced:
             scores.append(0.0)
             continue
 
-        valid = sum(1 for p in referenced if _normalize_path(p) in manifest_set)
+        valid = sum(
+            1 for p in referenced
+            if _normalize_path(p) in manifest_set or _normalize_path(p) in manifest_norm
+        )
         ratio = valid / len(referenced)
         scores.append(ratio * 3.0)
     return scores
@@ -246,6 +277,22 @@ def _parse_plan_json(text: str) -> dict | None:
         except json.JSONDecodeError:
             pass
     return None
+
+
+def _extract_paths_regex(text: str) -> list[str]:
+    """Extract file-path-like strings from raw text when JSON parsing fails.
+
+    Matches patterns like: src/foo/bar.py, ./config/settings.yml, etc.
+    """
+    # Match quoted strings that look like file paths (contain / or \ and an extension)
+    pattern = r'["\']([a-zA-Z0-9_./-]+\.[a-zA-Z]{1,10})["\']'
+    matches = re.findall(pattern, text)
+    # Filter to things that look like real file paths (have at least one directory separator)
+    paths = [m for m in matches if "/" in m or "\\" in m]
+    # Also match unquoted paths with directory structure
+    unquoted = re.findall(r'(?<!\w)([a-zA-Z0-9_]+(?:/[a-zA-Z0-9_.]+){1,}\.(?:py|js|ts|yml|yaml|json|toml|md|txt|cfg|ini|sh|go|rs|java|rb|jsx|tsx))\b', text)
+    paths.extend(unquoted)
+    return list(set(paths))
 
 
 def _extract_file_paths(plan: dict) -> list[str]:

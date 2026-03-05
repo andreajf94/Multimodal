@@ -32,6 +32,7 @@ import torch
 
 from repodesign.training.reward import compute_rewards
 from repodesign.training.data_gen import summarize_repo_ir_for_prompt
+from repodesign.training.vl_renderer import Qwen3VLRenderer, load_diagram_images
 
 logger = logging.getLogger(__name__)
 
@@ -76,12 +77,10 @@ IMPORTANT:
 def build_prompt(
     repo_ir_summary: str,
     spec: dict,
-    tokenizer,
-    renderer,
+    renderer: Qwen3VLRenderer,
     diagram_images: list[bytes] | None = None,
 ) -> types.ModelInput:
     """Build a Tinker ModelInput prompt from RepoIR + Spec + optional diagrams."""
-    # Build the user message content
     user_text = f"""## Codebase Analysis
 {repo_ir_summary}
 
@@ -97,20 +96,13 @@ Scale: {spec.get('scale_tier', 'startup')}
 
 Generate a detailed implementation plan as JSON."""
 
-    # Build conversation
-    messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+    messages = [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user", "content": user_text},
+    ]
 
-    if diagram_images:
-        # Multimodal: include diagram images in the user message
-        content_parts = []
-        for img_data in diagram_images:
-            content_parts.append({"type": "image", "image": img_data})
-        content_parts.append({"type": "text", "text": user_text})
-        messages.append({"role": "user", "content": content_parts})
-    else:
-        messages.append({"role": "user", "content": user_text})
-
-    return renderer.build_generation_prompt(messages)
+    # Qwen3VLRenderer handles interleaving images with text in ModelInput chunks
+    return renderer.build_generation_prompt(messages, diagram_images=diagram_images)
 
 
 # ---------------------------------------------------------------------------
@@ -144,16 +136,10 @@ def load_training_examples(repo_irs_dir: str, use_diagrams: bool = True) -> list
             logger.warning(f"Failed to load {repo_dir.name}: {e}")
             continue
 
-        # Load diagram images if available
+        # Load diagram images if available (max 5 per repo, max 2MB each)
         diagram_images = []
         if use_diagrams:
-            for dp in repo_ir.get("diagram_paths", []):
-                img_path = repo_dir / dp
-                if img_path.exists() and img_path.stat().st_size < 5_000_000:  # skip >5MB
-                    try:
-                        diagram_images.append(img_path.read_bytes())
-                    except Exception:
-                        pass
+            diagram_images = load_diagram_images(repo_ir, str(repo_dir))
 
         examples.append({
             "repo_name": repo_dir.name,
@@ -218,12 +204,9 @@ def train(config: Config, repo_irs_dir: str):
 
     tokenizer = training_client.get_tokenizer()
 
-    # Get appropriate renderer for Qwen3-VL
-    # NOTE: tinker-cookbook model_info doesn't have VL models registered,
-    # so we use Qwen3Renderer directly (same chat template as text Qwen3).
-    from tinker_cookbook.renderers import Qwen3Renderer
-    renderer = Qwen3Renderer(tokenizer)
-    logger.info(f"Using renderer: Qwen3Renderer")
+    # Use our custom Qwen3VL renderer that handles ImageChunk for diagrams
+    renderer = Qwen3VLRenderer(tokenizer)
+    logger.info(f"Using renderer: Qwen3VLRenderer (multimodal={config.use_diagrams})")
 
     sampling_params = types.SamplingParams(
         max_tokens=config.max_tokens,
@@ -292,7 +275,6 @@ def train(config: Config, repo_irs_dir: str):
                 prompt = build_prompt(
                     repo_ir_summary=ex["repo_ir_summary"],
                     spec=ex["spec"],
-                    tokenizer=tokenizer,
                     renderer=renderer,
                     diagram_images=ex["diagram_images"] if config.use_diagrams else None,
                 )
