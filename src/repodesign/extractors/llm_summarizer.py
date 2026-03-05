@@ -89,7 +89,7 @@ def _call_deepseek(user_prompt: str) -> str:
 
         client = openai.OpenAI(api_key=api_key, base_url="https://api.deepseek.com")
         response = client.chat.completions.create(
-            model="deepseek-reasoner",
+            model="deepseek-chat",
             max_tokens=2048,
             messages=[
                 {"role": "system", "content": SUMMARY_SYSTEM_PROMPT},

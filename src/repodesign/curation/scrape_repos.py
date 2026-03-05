@@ -125,32 +125,52 @@ class GitHubScraper:
 
     def enrich_repo(self, entry: RepoEntry) -> RepoEntry:
         """Enrich a repo entry with contributor count and CI/Docker detection."""
-        # Get contributor count
+        # Get contributor count via Link header pagination trick
         try:
-            contributors = self._get(
+            resp = self.session.get(
                 f"{GITHUB_API}/repos/{entry.full_name}/contributors",
                 params={"per_page": 1, "anon": "true"},
             )
-            # GitHub returns a list; header has total count
-            entry.num_contributors = len(contributors) if isinstance(contributors, list) else 0
-        except Exception:
-            pass
+            resp.raise_for_status()
+            link = resp.headers.get("Link", "")
+            # Parse last page from Link header: <...?page=N>; rel="last"
+            if 'rel="last"' in link:
+                import re
+                match = re.search(r'[&?]page=(\d+)>; rel="last"', link)
+                if match:
+                    entry.num_contributors = int(match.group(1))
+            else:
+                # No pagination = all contributors fit on one page
+                data = resp.json()
+                entry.num_contributors = len(data) if isinstance(data, list) else 0
+            logger.debug(f"  {entry.name}: {entry.num_contributors} contributors")
+        except Exception as e:
+            logger.warning(f"  Failed to get contributors for {entry.full_name}: {e}")
 
         # Check for CI and Docker files
         try:
             contents = self._get(f"{GITHUB_API}/repos/{entry.full_name}/contents")
             if isinstance(contents, list):
                 names = {c["name"] for c in contents}
-                entry.has_docker = "Dockerfile" in names or "docker-compose.yml" in names
-                entry.has_ci = ".github" in names or ".gitlab-ci.yml" in names or ".travis.yml" in names
-        except Exception:
-            pass
+                entry.has_docker = any(n in names for n in (
+                    "Dockerfile", "docker-compose.yml", "docker-compose.yaml",
+                    "compose.yml", "compose.yaml",
+                ))
+                entry.has_ci = any(n in names for n in (
+                    ".github", ".gitlab-ci.yml", ".travis.yml",
+                    ".circleci", "Jenkinsfile",
+                ))
+        except Exception as e:
+            logger.warning(f"  Failed to get contents for {entry.full_name}: {e}")
 
         # Get languages breakdown
         try:
-            entry.languages = self._get(f"{GITHUB_API}/repos/{entry.full_name}/languages")
-        except Exception:
-            pass
+            langs = self._get(f"{GITHUB_API}/repos/{entry.full_name}/languages")
+            if isinstance(langs, dict):
+                entry.languages = langs
+                logger.debug(f"  {entry.name} languages: {list(langs.keys())}")
+        except Exception as e:
+            logger.warning(f"  Failed to get languages for {entry.full_name}: {e}")
 
         time.sleep(0.5)
         return entry
@@ -181,6 +201,48 @@ class GitHubScraper:
 
         logger.info(f"Total repos scraped: {len(all_entries)}")
         return all_entries
+
+
+    def fetch_repos_by_name(
+        self,
+        full_names: list[str],
+        enrich: bool = True,
+    ) -> list[RepoEntry]:
+        """Fetch specific repos by their full names (e.g. 'owner/repo').
+
+        Useful for hand-picked test sets or adding specific repos.
+        """
+        entries: list[RepoEntry] = []
+        for full_name in full_names:
+            logger.info(f"Fetching {full_name}...")
+            try:
+                item = self._get(f"{GITHUB_API}/repos/{full_name}")
+                entry = RepoEntry(
+                    name=item["name"],
+                    full_name=item["full_name"],
+                    url=item["html_url"],
+                    clone_url=item["clone_url"],
+                    description=item.get("description") or "",
+                    primary_language=item.get("language") or "unknown",
+                    star_count=item.get("stargazers_count", 0),
+                    fork_count=item.get("forks_count", 0),
+                    size_kb=item.get("size", 0),
+                    topics=item.get("topics", []),
+                    has_wiki=item.get("has_wiki", False),
+                    open_issues=item.get("open_issues_count", 0),
+                    license=(
+                        item.get("license", {}).get("spdx_id")
+                        if item.get("license")
+                        else None
+                    ),
+                )
+                if enrich:
+                    self.enrich_repo(entry)
+                entries.append(entry)
+                logger.info(f"  ✓ {full_name}: {entry.star_count:,} stars, {entry.primary_language}")
+            except Exception as e:
+                logger.error(f"  ✗ Failed to fetch {full_name}: {e}")
+        return entries
 
 
 def save_repo_list(entries: list[RepoEntry], output_path: str) -> None:
