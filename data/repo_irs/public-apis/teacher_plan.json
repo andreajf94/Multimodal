@@ -1,0 +1,202 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "monitoring_data_storage",
+      "recommendation": "Store health check results as timestamped JSON log files in a new `monitor/logs/` directory structure organized by date (YYYY-MM-DD). Each API entry will have its status, latency, SSL expiry, and HTTP response code recorded.",
+      "rationale": "JSON provides structured, human-readable logs that can be easily processed by reporting scripts. Timestamped files enable historical analysis and trend monitoring while avoiding single-point failures. This approach aligns with the project's existing validation patterns.",
+      "alternatives_considered": [
+        "Database storage (SQLite/PostgreSQL)",
+        "In-memory cache only",
+        "Single consolidated JSON file"
+      ],
+      "files_affected": [
+        "scripts/monitor/health.py",
+        "scripts/monitor/report.py",
+        ".github/workflows/health_checks.yml"
+      ]
+    },
+    {
+      "dimension": "scheduling_mechanism",
+      "recommendation": "Use GitHub Actions scheduled workflows (cron syntax) to run health checks daily at off-peak hours (e.g., 2 AM UTC). Create a new workflow file `.github/workflows/health_checks.yml` that runs the monitoring script and stores artifacts.",
+      "rationale": "GitHub Actions is already integrated into the project for validation workflows. Scheduled workflows provide free, reliable execution without requiring external infrastructure. This maintains consistency with existing CI patterns.",
+      "alternatives_considered": [
+        "External cron service (e.g., AWS CloudWatch)",
+        "Self-hosted scheduler",
+        "Manual execution only"
+      ],
+      "files_affected": [
+        ".github/workflows/health_checks.yml",
+        "scripts/github_pull_request.sh"
+      ]
+    },
+    {
+      "dimension": "rate_limiting_implementation",
+      "recommendation": "Extend the existing rate limiting pattern from `scripts/validate/format.py` to include exponential backoff with jitter and request caching. Use a decorator-based approach to wrap API calls with configurable delays between requests to the same domain.",
+      "rationale": "Prevents overwhelming API providers with concurrent requests and respects rate limits. Exponential backoff with jitter handles transient failures gracefully. Reusing existing patterns ensures consistency and reduces maintenance overhead.",
+      "alternatives_considered": [
+        "Fixed delay between all requests",
+        "Token bucket algorithm",
+        "No rate limiting"
+      ],
+      "files_affected": [
+        "scripts/validate/format.py",
+        "scripts/validate/links.py",
+        "scripts/monitor/health.py"
+      ]
+    },
+    {
+      "dimension": "status_visualization",
+      "recommendation": "Add a status column to the main README table with shields.io badges indicating operational status (green=operational, yellow=degraded, red=down). Generate this dynamically by processing the latest health check results and updating the README via a script.",
+      "rationale": "Shields.io badges are widely recognized and provide immediate visual feedback. Dynamic README updates ensure users see current status without manual intervention. This enhances the directory's reliability and user trust.",
+      "alternatives_considered": [
+        "Static status text",
+        "Separate status page (HTML)",
+        "No visual indicators"
+      ],
+      "files_affected": [
+        "README.md",
+        "scripts/monitor/report.py"
+      ]
+    },
+    {
+      "dimension": "alerting_mechanism",
+      "recommendation": "Use GitHub Issues API to create automated issues for APIs that fail consecutive health checks (e.g., 3 failures in a row). Include relevant metadata (API name, failure reason, last successful check) in the issue body and label with 'monitoring-alert'.",
+      "rationale": "GitHub Issues are already used for project management, providing a centralized location for maintainer attention. Automated issue creation with consistent formatting reduces manual triaging effort and ensures timely responses to API degradation.",
+      "alternatives_considered": [
+        "Email notifications",
+        "Slack/webhook integrations",
+        "No automated alerts"
+      ],
+      "files_affected": [
+        "scripts/monitor/report.py",
+        ".github/ISSUE_TEMPLATE.md"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Extend link validation with health check capabilities",
+      "description": "Modify `scripts/validate/links.py` to perform HTTP/S health checks including response codes, latency measurement, and SSL certificate expiry validation. Integrate the rate limiting decorator from `scripts/validate/format.py` and add configuration for timeout and retry logic.",
+      "files_to_modify": [
+        "scripts/validate/links.py",
+        "scripts/validate/format.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium",
+      "dependencies": []
+    },
+    {
+      "id": "T-002",
+      "title": "Create health monitoring module and logging structure",
+      "description": "Create `scripts/monitor/health.py` that imports the enhanced validation functions and runs scheduled checks on all APIs. Implement JSON logging to `monitor/logs/YYYY-MM-DD.json` with structured results. Create the necessary directory structure.",
+      "files_to_modify": [],
+      "files_to_create": [
+        "scripts/monitor/__init__.py",
+        "scripts/monitor/health.py",
+        "monitor/logs/.gitkeep"
+      ],
+      "estimated_effort": "medium",
+      "dependencies": [
+        "T-001"
+      ]
+    },
+    {
+      "id": "T-003",
+      "title": "Implement GitHub Actions workflow for scheduled monitoring",
+      "description": "Create `.github/workflows/health_checks.yml` with a daily cron schedule to run the health monitoring script. Configure artifact upload for log files and set up proper Python environment using existing requirements.",
+      "files_to_modify": [],
+      "files_to_create": [
+        ".github/workflows/health_checks.yml"
+      ],
+      "estimated_effort": "small",
+      "dependencies": [
+        "T-002"
+      ]
+    },
+    {
+      "id": "T-004",
+      "title": "Build reporting and alerting module",
+      "description": "Create `scripts/monitor/report.py` that analyzes recent log files, identifies APIs with consecutive failures, and opens GitHub Issues using the API. Implement deduplication logic to avoid duplicate issues for the same API failure.",
+      "files_to_modify": [
+        ".github/ISSUE_TEMPLATE.md"
+      ],
+      "files_to_create": [
+        "scripts/monitor/report.py"
+      ],
+      "estimated_effort": "medium",
+      "dependencies": [
+        "T-002"
+      ]
+    },
+    {
+      "id": "T-005",
+      "title": "Update README generation with status badges",
+      "description": "Modify the reporting script to generate status badges (using shields.io format) based on latest health check results. Update the main README.md table to include a 'Status' column with appropriate badges for each API entry.",
+      "files_to_modify": [
+        "README.md",
+        "scripts/monitor/report.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium",
+      "dependencies": [
+        "T-004"
+      ]
+    },
+    {
+      "id": "T-006",
+      "title": "Add monitoring test coverage",
+      "description": "Create comprehensive tests for the new monitoring modules in `scripts/tests/test_monitor_health.py` and `scripts/tests/test_monitor_report.py`. Include unit tests for rate limiting, health check logic, and report generation.",
+      "files_to_modify": [
+        "scripts/tests/test_validate_format.py",
+        "scripts/tests/test_validate_links.py"
+      ],
+      "files_to_create": [
+        "scripts/tests/test_monitor_health.py",
+        "scripts/tests/test_monitor_report.py"
+      ],
+      "estimated_effort": "large",
+      "dependencies": [
+        "T-002",
+        "T-004"
+      ]
+    },
+    {
+      "id": "T-007",
+      "title": "Document monitoring system in contributing guide",
+      "description": "Update `CONTRIBUTING.md` and `scripts/README.md` to document the new monitoring system, including how to interpret status badges, how health checks work, and how to troubleshoot false positives.",
+      "files_to_modify": [
+        "CONTRIBUTING.md",
+        "scripts/README.md"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small",
+      "dependencies": [
+        "T-003",
+        "T-005"
+      ]
+    }
+  ],
+  "technology_choices": [
+    {
+      "category": "http_client",
+      "choice": "Python requests library (already in use)",
+      "rationale": "Already present in the project's requirements and used by existing validation scripts. Provides robust HTTP/S handling with timeout support, SSL verification, and session management."
+    },
+    {
+      "category": "ssl_validation",
+      "choice": "Python ssl and cryptography libraries",
+      "rationale": "Standard library components that provide SSL certificate parsing and expiry validation without additional dependencies. Allows checking certificate validity dates programmatically."
+    },
+    {
+      "category": "github_api",
+      "choice": "PyGithub library",
+      "rationale": "Well-maintained Python wrapper for GitHub API v3 that simplifies authentication and issue creation. Reduces boilerplate code compared to direct REST API calls."
+    },
+    {
+      "category": "scheduling",
+      "choice": "GitHub Actions scheduled workflows",
+      "rationale": "Already integrated into the project's CI/CD pipeline. Provides free, reliable scheduling with minimal configuration and good observability through the GitHub interface."
+    }
+  ]
+}

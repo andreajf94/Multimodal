@@ -1,0 +1,236 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "script_architecture",
+      "recommendation": "Create a modular Python script with clear separation of concerns: URL extraction, link validation, reporting, and GitHub integration. Use async/await for efficient concurrent link checking.",
+      "rationale": "The repository contains thousands of links across many files; async HTTP requests will significantly reduce total execution time. Modular design allows for easier testing and maintenance.",
+      "alternatives_considered": [
+        "Synchronous sequential requests",
+        "External link checking services",
+        "Pre-commit hook approach"
+      ],
+      "files_affected": [
+        "scripts/check_links.py",
+        "config.yaml",
+        ".github/workflows/check-links.yml"
+      ]
+    },
+    {
+      "dimension": "data_modeling",
+      "recommendation": "Store link checking results in structured format (JSON) alongside Markdown reports for programmatic access. Include metadata like timestamp, HTTP status, redirect chain, and validation duration.",
+      "rationale": "Structured data enables historical analysis, trend tracking, and potential future dashboard visualization. JSON format is easily consumable by other tools.",
+      "alternatives_considered": [
+        "CSV format",
+        "Database storage",
+        "Plain text only"
+      ],
+      "files_affected": [
+        "scripts/check_links.py",
+        "reports/link-health-YYYY-MM-DD.json"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Implement robust error handling with retry logic, exponential backoff, and circuit breaker pattern for external HTTP requests. Log errors at appropriate levels for monitoring.",
+      "rationale": "Link checking involves unreliable external networks; robust error handling prevents false positives and ensures the script completes even with intermittent failures.",
+      "alternatives_considered": [
+        "Simple try-catch",
+        "Single retry attempt",
+        "Skip on error"
+      ],
+      "files_affected": [
+        "scripts/check_links.py",
+        "config.yaml"
+      ]
+    },
+    {
+      "dimension": "ci_cd_integration",
+      "recommendation": "Integrate link checking into existing GitHub Actions workflow structure with scheduled weekly runs and manual triggers. Use issue creation API to report new broken links.",
+      "rationale": "Leverages existing CI infrastructure and follows repository patterns. Scheduled runs ensure regular maintenance without manual intervention.",
+      "alternatives_considered": [
+        "Cron job on external server",
+        "GitHub App",
+        "Third-party monitoring service"
+      ],
+      "files_affected": [
+        ".github/workflows/check-links.yml",
+        ".github/workflows/comment-pr.yml"
+      ]
+    },
+    {
+      "dimension": "configuration_management",
+      "recommendation": "Use YAML configuration file with sensible defaults for timeouts, retries, concurrent connections, and exclusion patterns. Allow environment variable overrides.",
+      "rationale": "Centralized configuration simplifies maintenance and allows non-developers to adjust parameters. Environment variables support CI/CD integration.",
+      "alternatives_considered": [
+        "Command-line arguments only",
+        "INI format",
+        "JSON configuration"
+      ],
+      "files_affected": [
+        "config.yaml",
+        "scripts/check_links.py"
+      ]
+    },
+    {
+      "dimension": "reporting",
+      "recommendation": "Generate human-readable Markdown reports with clear organization by language/category and severity. Include summary statistics and comparison with previous runs.",
+      "rationale": "Markdown format is familiar to contributors and renders well on GitHub. Clear organization helps prioritize fixing efforts.",
+      "alternatives_considered": [
+        "HTML reports",
+        "PDF generation",
+        "Email notifications"
+      ],
+      "files_affected": [
+        "scripts/check_links.py",
+        "reports/link-health-YYYY-MM-DD.md"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Create link checking script foundation",
+      "description": "Implement core Python script structure with configuration loading, Markdown parsing, and URL extraction from books/, casts/, and courses/ directories. Create initial config.yaml with default settings.",
+      "files_to_modify": [],
+      "files_to_create": [
+        "scripts/check_links.py",
+        "config.yaml",
+        "tests/test_check_links.py"
+      ],
+      "estimated_effort": "medium",
+      "dependencies": []
+    },
+    {
+      "id": "T-002",
+      "title": "Implement async HTTP link validation",
+      "description": "Add asynchronous HTTP client with retry logic, timeout handling, and redirect following. Implement concurrent link checking with configurable limits.",
+      "files_to_modify": [
+        "scripts/check_links.py",
+        "config.yaml"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium",
+      "dependencies": [
+        "T-001"
+      ]
+    },
+    {
+      "id": "T-003",
+      "title": "Add reporting functionality",
+      "description": "Implement report generation in both Markdown and JSON formats. Create reports/ directory structure and include summary statistics, broken links by file, and comparison data.",
+      "files_to_modify": [
+        "scripts/check_links.py"
+      ],
+      "files_to_create": [
+        "reports/link-health-YYYY-MM-DD.md",
+        "reports/link-health-YYYY-MM-DD.json"
+      ],
+      "estimated_effort": "small",
+      "dependencies": [
+        "T-002"
+      ]
+    },
+    {
+      "id": "T-004",
+      "title": "Create GitHub Actions workflow",
+      "description": "Add scheduled workflow to run link checker weekly. Configure workflow to generate reports and upload them as artifacts. Integrate with existing CI patterns.",
+      "files_to_modify": [
+        ".github/workflows/check-urls.yml"
+      ],
+      "files_to_create": [
+        ".github/workflows/check-links.yml"
+      ],
+      "estimated_effort": "medium",
+      "dependencies": [
+        "T-003"
+      ]
+    },
+    {
+      "id": "T-005",
+      "title": "Implement automated issue creation",
+      "description": "Add functionality to automatically create GitHub issues for files with new broken links. Include issue templates with broken link details and fix instructions.",
+      "files_to_modify": [
+        "scripts/check_links.py",
+        ".github/workflows/check-links.yml"
+      ],
+      "files_to_create": [
+        ".github/ISSUE_TEMPLATE/broken-link.md"
+      ],
+      "estimated_effort": "medium",
+      "dependencies": [
+        "T-004"
+      ]
+    },
+    {
+      "id": "T-006",
+      "title": "Update documentation",
+      "description": "Update CONTRIBUTING.md to document the link checking process, how to interpret reports, and guidelines for fixing broken links. Add section on automated monitoring.",
+      "files_to_modify": [
+        "docs/CONTRIBUTING.md",
+        "README.md"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small",
+      "dependencies": [
+        "T-005"
+      ]
+    },
+    {
+      "id": "T-007",
+      "title": "Add comprehensive testing",
+      "description": "Create unit tests for URL extraction, HTTP validation, and report generation. Add integration tests with mock HTTP responses. Ensure test coverage for edge cases.",
+      "files_to_modify": [
+        "tests/test_check_links.py"
+      ],
+      "files_to_create": [
+        "tests/conftest.py",
+        "tests/data/sample_links.md"
+      ],
+      "estimated_effort": "medium",
+      "dependencies": [
+        "T-003"
+      ]
+    },
+    {
+      "id": "T-008",
+      "title": "Optimize performance and add monitoring",
+      "description": "Implement performance optimizations including connection pooling, cache headers respect, and parallel processing improvements. Add logging and metrics collection.",
+      "files_to_modify": [
+        "scripts/check_links.py",
+        "config.yaml"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small",
+      "dependencies": [
+        "T-007"
+      ]
+    }
+  ],
+  "technology_choices": [
+    {
+      "category": "http_client",
+      "choice": "aiohttp with asyncio",
+      "rationale": "Provides high-performance asynchronous HTTP client suitable for checking thousands of links concurrently. Well-maintained with good timeout and retry support."
+    },
+    {
+      "category": "markdown_parsing",
+      "choice": "Python's built-in regex with custom parsing",
+      "rationale": "Lightweight approach that avoids external dependencies. The markdown structure in this repository is consistent (links in list items), making regex parsing reliable."
+    },
+    {
+      "category": "configuration",
+      "choice": "PyYAML for YAML configuration",
+      "rationale": "Standard YAML library for Python. Provides human-readable configuration format that's already used in the repository (see scripts/rtl_ltr_linter_config.yml)."
+    },
+    {
+      "category": "testing",
+      "choice": "pytest with pytest-asyncio",
+      "rationale": "Standard testing framework with excellent async support. Consistent with Python community standards and provides rich fixture system."
+    },
+    {
+      "category": "ci_cd",
+      "choice": "GitHub Actions",
+      "rationale": "Already used in the repository for multiple workflows. Provides seamless integration with GitHub issues and artifact storage."
+    }
+  ]
+}

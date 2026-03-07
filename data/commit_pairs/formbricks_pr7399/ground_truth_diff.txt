@@ -1,0 +1,933 @@
+diff --git a/apps/web/app/(app)/environments/[environmentId]/settings/(organization)/general/actions.ts b/apps/web/app/(app)/environments/[environmentId]/settings/(organization)/general/actions.ts
+index 91246bca6c7a..da0a61fe0938 100644
+--- a/apps/web/app/(app)/environments/[environmentId]/settings/(organization)/general/actions.ts
++++ b/apps/web/app/(app)/environments/[environmentId]/settings/(organization)/general/actions.ts
+@@ -3,6 +3,7 @@
+ import { z } from "zod";
+ import { ZId } from "@formbricks/types/common";
+ import { OperationNotAllowedError } from "@formbricks/types/errors";
++import type { TOrganizationRole } from "@formbricks/types/memberships";
+ import { ZOrganizationUpdateInput } from "@formbricks/types/organizations";
+ import { deleteOrganization, getOrganization, updateOrganization } from "@/lib/organization/service";
+ import { authenticatedActionClient } from "@/lib/utils/action-client";
+@@ -11,6 +12,32 @@ import { AuthenticatedActionClientCtx } from "@/lib/utils/action-client/types/co
+ import { withAuditLogging } from "@/modules/ee/audit-logs/lib/handler";
+ import { getIsMultiOrgEnabled } from "@/modules/ee/license-check/lib/utils";
+ 
++async function updateOrganizationAction<T extends z.ZodRawShape>({
++  ctx,
++  organizationId,
++  schema,
++  data,
++  roles,
++}: {
++  ctx: AuthenticatedActionClientCtx;
++  organizationId: string;
++  schema: z.ZodObject<T>;
++  data: z.infer<z.ZodObject<T>>;
++  roles: TOrganizationRole[];
++}) {
++  await checkAuthorizationUpdated({
++    userId: ctx.user.id,
++    organizationId,
++    access: [{ type: "organization", schema, data, roles }],
++  });
++  ctx.auditLoggingCtx.organizationId = organizationId;
++  const oldObject = await getOrganization(organizationId);
++  const result = await updateOrganization(organizationId, data);
++  ctx.auditLoggingCtx.oldObject = oldObject;
++  ctx.auditLoggingCtx.newObject = result;
++  return result;
++}
++
+ const ZUpdateOrganizationNameAction = z.object({
+   organizationId: ZId,
+   data: ZOrganizationUpdateInput.pick({ name: true }),
+@@ -27,27 +54,46 @@ export const updateOrganizationNameAction = authenticatedActionClient
+         parsedInput,
+       }: {
+         ctx: AuthenticatedActionClientCtx;
+-        parsedInput: Record<string, any>;
+-      }) => {
+-        await checkAuthorizationUpdated({
+-          userId: ctx.user.id,
++        parsedInput: z.infer<typeof ZUpdateOrganizationNameAction>;
++      }) =>
++        updateOrganizationAction({
++          ctx,
++          organizationId: parsedInput.organizationId,
++          schema: ZOrganizationUpdateInput.pick({ name: true }),
++          data: parsedInput.data,
++          roles: ["owner"],
++        })
++    )
++  );
++
++const ZUpdateOrganizationAISettingsAction = z.object({
++  organizationId: ZId,
++  data: ZOrganizationUpdateInput.pick({ isAISmartToolsEnabled: true, isAIDataAnalysisEnabled: true }),
++});
++
++export const updateOrganizationAISettingsAction = authenticatedActionClient
++  .schema(ZUpdateOrganizationAISettingsAction)
++  .action(
++    withAuditLogging(
++      "updated",
++      "organization",
++      async ({
++        ctx,
++        parsedInput,
++      }: {
++        ctx: AuthenticatedActionClientCtx;
++        parsedInput: z.infer<typeof ZUpdateOrganizationAISettingsAction>;
++      }) =>
++        updateOrganizationAction({
++          ctx,
+           organizationId: parsedInput.organizationId,
+-          access: [
+-            {
+-              type: "organization",
+-              schema: ZOrganizationUpdateInput.pick({ name: true }),
+-              data: parsedInput.data,
+-              roles: ["owner"],
+-            },
+-          ],
+-        });
+-        ctx.auditLoggingCtx.organizationId = parsedInput.organizationId;
+-        const oldObject = await getOrganization(parsedInput.organizationId);
+-        const result = await updateOrganization(parsedInput.organizationId, parsedInput.data);
+-        ctx.auditLoggingCtx.oldObject = oldObject;
+-        ctx.auditLoggingCtx.newObject = result;
+-        return result;
+-      }
++          schema: ZOrganizationUpdateInput.pick({
++            isAISmartToolsEnabled: true,
++            isAIDataAnalysisEnabled: true,
++          }),
++          data: parsedInput.data,
++          roles: ["owner", "manager"],
++        })
+     )
+   );
+ 
+diff --git a/apps/web/app/(app)/environments/[environmentId]/settings/(organization)/general/components/AISettingsToggle.tsx b/apps/web/app/(app)/environments/[environmentId]/settings/(organization)/general/components/AISettingsToggle.tsx
+new file mode 100644
+index 000000000000..c8f04f36105d
+--- /dev/null
++++ b/apps/web/app/(app)/environments/[environmentId]/settings/(organization)/general/components/AISettingsToggle.tsx
+@@ -0,0 +1,84 @@
++"use client";
++
++import { useRouter } from "next/navigation";
++import { useState } from "react";
++import toast from "react-hot-toast";
++import { useTranslation } from "react-i18next";
++import { TOrganizationRole } from "@formbricks/types/memberships";
++import { TOrganization } from "@formbricks/types/organizations";
++import { updateOrganizationAISettingsAction } from "@/app/(app)/environments/[environmentId]/settings/(organization)/general/actions";
++import { getAccessFlags } from "@/lib/membership/utils";
++import { getFormattedErrorMessage } from "@/lib/utils/helper";
++import { AdvancedOptionToggle } from "@/modules/ui/components/advanced-option-toggle";
++import { Alert, AlertDescription } from "@/modules/ui/components/alert";
++
++interface AISettingsToggleProps {
++  organization: TOrganization;
++  membershipRole?: TOrganizationRole;
++}
++
++export const AISettingsToggle = ({ organization, membershipRole }: Readonly<AISettingsToggleProps>) => {
++  const [isLoading, setIsLoading] = useState(false);
++  const { t } = useTranslation();
++  const router = useRouter();
++
++  const { isOwner, isManager } = getAccessFlags(membershipRole);
++  const canEdit = isOwner || isManager;
++
++  const handleToggle = async (
++    field: "isAISmartToolsEnabled" | "isAIDataAnalysisEnabled",
++    checked: boolean
++  ) => {
++    setIsLoading(true);
++    try {
++      const response = await updateOrganizationAISettingsAction({
++        organizationId: organization.id,
++        data: { [field]: checked },
++      });
++
++      if (response?.data) {
++        toast.success(t("environments.settings.general.ai_settings_updated_successfully"));
++        router.refresh();
++      } else {
++        const errorMessage = getFormattedErrorMessage(response);
++        toast.error(errorMessage);
++      }
++    } catch {
++      toast.error(t("common.something_went_wrong"));
++    } finally {
++      setIsLoading(false);
++    }
++  };
++
++  return (
++    <div>
++      <AdvancedOptionToggle
++        isChecked={organization.isAISmartToolsEnabled}
++        onToggle={(checked) => handleToggle("isAISmartToolsEnabled", checked)}
++        htmlId="ai-smart-tools-toggle"
++        title={t("environments.settings.general.ai_smart_tools_enabled")}
++        description={t("environments.settings.general.ai_smart_tools_enabled_description")}
++        disabled={isLoading || !canEdit}
++        customContainerClass="px-0"
++      />
++
++      <AdvancedOptionToggle
++        isChecked={organization.isAIDataAnalysisEnabled}
++        onToggle={(checked) => handleToggle("isAIDataAnalysisEnabled", checked)}
++        htmlId="ai-data-analysis-toggle"
++        title={t("environments.settings.general.ai_data_analysis_enabled")}
++        description={t("environments.settings.general.ai_data_analysis_enabled_description")}
++        disabled={isLoading || !canEdit}
++        customContainerClass="px-0"
++      />
++
++      {!canEdit && (
++        <Alert variant="warning">
++          <AlertDescription>
++            {t("common.only_owners_managers_and_manage_access_members_can_perform_this_action")}
++          </AlertDescription>
++        </Alert>
++      )}
++    </div>
++  );
++};
+diff --git a/apps/web/app/(app)/environments/[environmentId]/settings/(organization)/general/page.tsx b/apps/web/app/(app)/environments/[environmentId]/settings/(organization)/general/page.tsx
+index c148687630c1..462133ae0be6 100644
+--- a/apps/web/app/(app)/environments/[environmentId]/settings/(organization)/general/page.tsx
++++ b/apps/web/app/(app)/environments/[environmentId]/settings/(organization)/general/page.tsx
+@@ -11,6 +11,7 @@ import { PageContentWrapper } from "@/modules/ui/components/page-content-wrapper
+ import { PageHeader } from "@/modules/ui/components/page-header";
+ import packageJson from "@/package.json";
+ import { SettingsCard } from "../../components/SettingsCard";
++import { AISettingsToggle } from "./components/AISettingsToggle";
+ import { DeleteOrganization } from "./components/DeleteOrganization";
+ import { EditOrganizationNameForm } from "./components/EditOrganizationNameForm";
+ import { SecurityListTip } from "./components/SecurityListTip";
+@@ -60,6 +61,11 @@ const Page = async (props: { params: Promise<{ environmentId: string }> }) => {
+           membershipRole={currentUserMembership?.role}
+         />
+       </SettingsCard>
++      <SettingsCard
++        title={t("environments.settings.general.ai_enabled")}
++        description={t("environments.settings.general.ai_enabled_description")}>
++        <AISettingsToggle organization={organization} membershipRole={currentUserMembership?.role} />
++      </SettingsCard>
+       <EmailCustomizationSettings
+         organization={organization}
+         hasWhiteLabelPermission={hasWhiteLabelPermission}
+diff --git a/apps/web/app/api/v1/client/[environmentId]/environment/lib/environmentState.test.ts b/apps/web/app/api/v1/client/[environmentId]/environment/lib/environmentState.test.ts
+index 0426ec069dcb..885ad1a788e9 100644
+--- a/apps/web/app/api/v1/client/[environmentId]/environment/lib/environmentState.test.ts
++++ b/apps/web/app/api/v1/client/[environmentId]/environment/lib/environmentState.test.ts
+@@ -82,7 +82,8 @@ const mockOrganization: TOrganization = {
+     },
+     periodStart: new Date(),
+   },
+-  isAIEnabled: false,
++  isAISmartToolsEnabled: false,
++  isAIDataAnalysisEnabled: false,
+ };
+ 
+ const mockSurveys: TSurvey[] = [
+diff --git a/apps/web/app/api/v1/management/surveys/lib/utils.test.ts b/apps/web/app/api/v1/management/surveys/lib/utils.test.ts
+index 94053d141c9a..1b04f0b7e498 100644
+--- a/apps/web/app/api/v1/management/surveys/lib/utils.test.ts
++++ b/apps/web/app/api/v1/management/surveys/lib/utils.test.ts
+@@ -43,7 +43,8 @@ const mockOrganization: TOrganization = {
+     },
+     periodStart: new Date(),
+   },
+-  isAIEnabled: false,
++  isAISmartToolsEnabled: false,
++  isAIDataAnalysisEnabled: false,
+ };
+ 
+ const mockFollowUp: TSurveyCreateInputWithEnvironmentId["followUps"][number] = {
+diff --git a/apps/web/i18n.lock b/apps/web/i18n.lock
+index c300b0a5bfec..1e04f399f573 100644
+--- a/apps/web/i18n.lock
++++ b/apps/web/i18n.lock
+@@ -1176,6 +1176,13 @@ checksums:
+     environments/settings/enterprise/sso: 95e98e279bb89233d63549b202bd9112
+     environments/settings/enterprise/teams: 21ab78abcba0f16c3029741563f789ea
+     environments/settings/enterprise/unlock_the_full_power_of_formbricks_free_for_30_days: 104d07b63a42911c9673ceb08a4dbd43
++    environments/settings/general/ai_data_analysis_enabled: 45fabb594da6851f73fef50ca40fe525
++    environments/settings/general/ai_data_analysis_enabled_description: 46d4f0bdf4ebf89e78f79cc961a2de83
++    environments/settings/general/ai_enabled: 3cb1fce89c525e754448d5bd143eb6b5
++    environments/settings/general/ai_enabled_description: e8c3e9f362588898a6cea85e18c013a1
++    environments/settings/general/ai_settings_updated_successfully: 2a6f534dc3a246ced46becd8a4a9543d
++    environments/settings/general/ai_smart_tools_enabled: 1dda984f5262c5f9120ee9a409236758
++    environments/settings/general/ai_smart_tools_enabled_description: 1ceca6707746d3ab4a530712a06d91da
+     environments/settings/general/bulk_invite_warning_description: e8737a2fbd5ff353db5580d17b4b5a37
+     environments/settings/general/cannot_delete_only_organization: 833cc6848b28f2694a4552b4de91a6ba
+     environments/settings/general/cannot_leave_only_organization: dd8463262e4299fef7ad73512225c55b
+diff --git a/apps/web/lib/organization/auth.test.ts b/apps/web/lib/organization/auth.test.ts
+index 868a4436c9a9..bd06ea5e47b2 100644
+--- a/apps/web/lib/organization/auth.test.ts
++++ b/apps/web/lib/organization/auth.test.ts
+@@ -40,7 +40,8 @@ describe("auth", () => {
+             },
+             periodStart: new Date(),
+           },
+-          isAIEnabled: false,
++          isAISmartToolsEnabled: false,
++          isAIDataAnalysisEnabled: false,
+         },
+       ];
+       vi.mocked(getOrganizationsByUserId).mockResolvedValue(mockOrganizations);
+diff --git a/apps/web/lib/organization/service.test.ts b/apps/web/lib/organization/service.test.ts
+index f38436f69f88..ba026a462911 100644
+--- a/apps/web/lib/organization/service.test.ts
++++ b/apps/web/lib/organization/service.test.ts
+@@ -55,7 +55,8 @@ describe("Organization Service", () => {
+           periodStart: new Date(),
+           period: "monthly" as const,
+         },
+-        isAIEnabled: false,
++        isAISmartToolsEnabled: false,
++        isAIDataAnalysisEnabled: false,
+         whitelabel: false,
+       };
+ 
+@@ -110,7 +111,8 @@ describe("Organization Service", () => {
+             periodStart: new Date(),
+             period: "monthly" as const,
+           },
+-          isAIEnabled: false,
++          isAISmartToolsEnabled: false,
++          isAIDataAnalysisEnabled: false,
+           whitelabel: false,
+         },
+       ];
+@@ -163,7 +165,8 @@ describe("Organization Service", () => {
+           periodStart: new Date(),
+           period: "monthly" as const,
+         },
+-        isAIEnabled: false,
++        isAISmartToolsEnabled: false,
++        isAIDataAnalysisEnabled: false,
+         whitelabel: false,
+       };
+ 
+@@ -224,7 +227,8 @@ describe("Organization Service", () => {
+           periodStart: new Date(),
+           period: "monthly" as const,
+         },
+-        isAIEnabled: false,
++        isAISmartToolsEnabled: false,
++        isAIDataAnalysisEnabled: false,
+         whitelabel: false,
+         memberships: [{ userId: "user1" }, { userId: "user2" }],
+         projects: [
+@@ -256,7 +260,8 @@ describe("Organization Service", () => {
+           periodStart: expect.any(Date),
+           period: "monthly",
+         },
+-        isAIEnabled: false,
++        isAISmartToolsEnabled: false,
++        isAIDataAnalysisEnabled: false,
+         whitelabel: false,
+       });
+       expect(prisma.organization.update).toHaveBeenCalledWith({
+diff --git a/apps/web/lib/organization/service.ts b/apps/web/lib/organization/service.ts
+index 83a2c8edf118..29523d1b4058 100644
+--- a/apps/web/lib/organization/service.ts
++++ b/apps/web/lib/organization/service.ts
+@@ -25,7 +25,8 @@ export const select: Prisma.OrganizationSelect = {
+   updatedAt: true,
+   name: true,
+   billing: true,
+-  isAIEnabled: true,
++  isAISmartToolsEnabled: true,
++  isAIDataAnalysisEnabled: true,
+   whitelabel: true,
+ };
+ 
+diff --git a/apps/web/lib/survey/__mock__/survey.mock.ts b/apps/web/lib/survey/__mock__/survey.mock.ts
+index 33c0e0066995..6df9130a758c 100644
+--- a/apps/web/lib/survey/__mock__/survey.mock.ts
++++ b/apps/web/lib/survey/__mock__/survey.mock.ts
+@@ -232,7 +232,8 @@ export const mockOrganizationOutput: TOrganization = {
+   name: "mock Organization",
+   createdAt: currentDate,
+   updatedAt: currentDate,
+-  isAIEnabled: false,
++  isAISmartToolsEnabled: false,
++  isAIDataAnalysisEnabled: false,
+   billing: {
+     stripeCustomerId: null,
+     plan: "free",
+diff --git a/apps/web/lib/user/service.test.ts b/apps/web/lib/user/service.test.ts
+index 790eb14b61d4..08daed6e781d 100644
+--- a/apps/web/lib/user/service.test.ts
++++ b/apps/web/lib/user/service.test.ts
+@@ -73,7 +73,8 @@ describe("User Service", () => {
+         },
+         periodStart: new Date(),
+       },
+-      isAIEnabled: false,
++      isAISmartToolsEnabled: false,
++      isAIDataAnalysisEnabled: false,
+     },
+     {
+       id: "org2",
+@@ -93,7 +94,8 @@ describe("User Service", () => {
+         },
+         periodStart: new Date(),
+       },
+-      isAIEnabled: false,
++      isAISmartToolsEnabled: false,
++      isAIDataAnalysisEnabled: false,
+     },
+   ];
+ 
+diff --git a/apps/web/locales/de-DE.json b/apps/web/locales/de-DE.json
+index cfd1f2af020c..898336236e2d 100644
+--- a/apps/web/locales/de-DE.json
++++ b/apps/web/locales/de-DE.json
+@@ -1243,6 +1243,13 @@
+         "unlock_the_full_power_of_formbricks_free_for_30_days": "Schalte die volle Power von Formbricks frei. 30 Tage kostenlos."
+       },
+       "general": {
++        "ai_data_analysis_enabled": "Datenanreicherung & Analyse (KI)",
++        "ai_data_analysis_enabled_description": "KI, um mehr aus deinen Daten herauszuholen, Dashboards, Diagramme, Berichte und mehr einzurichten. Greift auf deine Erfahrungsdaten zu.",
++        "ai_enabled": "Formbricks AI",
++        "ai_enabled_description": "Verwalte KI-gestützte Funktionen für diese Organisation.",
++        "ai_settings_updated_successfully": "KI-Einstellungen erfolgreich aktualisiert",
++        "ai_smart_tools_enabled": "Intelligente Funktionen (KI)",
++        "ai_smart_tools_enabled_description": "KI, um dir zu helfen, in kürzerer Zeit mehr zu erreichen. Greift niemals auf mit Formbricks gesammelte Daten zu. Wird nur verwendet, um z. B. Umfragen in andere Sprachen zu übersetzen.",
+         "bulk_invite_warning_description": "Bitte beachte, dass im Free-Plan alle Organisationsmitglieder automatisch die Rolle \"Owner\" zugewiesen bekommen, unabhängig von der im CSV-File angegebenen Rolle.",
+         "cannot_delete_only_organization": "Das ist deine einzige Organisation, sie kann nicht gelöscht werden. Erstelle zuerst eine neue Organisation.",
+         "cannot_leave_only_organization": "Du kannst diese Organisation nicht verlassen, da es deine einzige Organisation ist. Erstelle zuerst eine neue Organisation.",
+diff --git a/apps/web/locales/en-US.json b/apps/web/locales/en-US.json
+index eb4fa404a73c..5abaab6714b8 100644
+--- a/apps/web/locales/en-US.json
++++ b/apps/web/locales/en-US.json
+@@ -1243,6 +1243,13 @@
+         "unlock_the_full_power_of_formbricks_free_for_30_days": "Unlock the full power of Formbricks. Free for 30 days."
+       },
+       "general": {
++        "ai_data_analysis_enabled": "Data enrichment & analysis (AI)",
++        "ai_data_analysis_enabled_description": "AI to get more out of your data, setup dashboards, charts, reports and more. Touches your experience data.",
++        "ai_enabled": "Formbricks AI",
++        "ai_enabled_description": "Manage AI-powered features for this organization.",
++        "ai_settings_updated_successfully": "AI settings updated successfully",
++        "ai_smart_tools_enabled": "Smart functionality (AI)",
++        "ai_smart_tools_enabled_description": "AI to help you achieve more in less time. Never touches data collected with Formbricks. Only used to e.g. translate surveys to other languages.",
+         "bulk_invite_warning_description": "On the free plan, all organization members are always assigned the “Owner” role.",
+         "cannot_delete_only_organization": "This is your only organization, it cannot be deleted. Create a new organization first.",
+         "cannot_leave_only_organization": "You cannot leave this organization as it is your only organization. Create a new organization first.",
+diff --git a/apps/web/locales/es-ES.json b/apps/web/locales/es-ES.json
+index d013f6076eb0..81aa87b3347c 100644
+--- a/apps/web/locales/es-ES.json
++++ b/apps/web/locales/es-ES.json
+@@ -1243,6 +1243,13 @@
+         "unlock_the_full_power_of_formbricks_free_for_30_days": "Desbloquea todo el potencial de Formbricks. Gratis durante 30 días."
+       },
+       "general": {
++        "ai_data_analysis_enabled": "Enriquecimiento y análisis de datos (IA)",
++        "ai_data_analysis_enabled_description": "IA para sacar más partido a tus datos, configurar paneles, gráficos, informes y más. Accede a los datos de experiencia.",
++        "ai_enabled": "IA de Formbricks",
++        "ai_enabled_description": "Gestiona las funciones impulsadas por IA para esta organización.",
++        "ai_settings_updated_successfully": "Configuración de IA actualizada correctamente",
++        "ai_smart_tools_enabled": "Funcionalidad inteligente (IA)",
++        "ai_smart_tools_enabled_description": "IA para ayudarte a conseguir más en menos tiempo. Nunca accede a los datos recopilados con Formbricks. Solo se usa para, por ejemplo, traducir encuestas a otros idiomas.",
+         "bulk_invite_warning_description": "En el plan gratuito, a todos los miembros de la organización se les asigna siempre el rol de \"Propietario\".",
+         "cannot_delete_only_organization": "Esta es tu única organización, no se puede eliminar. Crea una nueva organización primero.",
+         "cannot_leave_only_organization": "No puedes abandonar esta organización ya que es tu única organización. Crea una nueva organización primero.",
+diff --git a/apps/web/locales/fr-FR.json b/apps/web/locales/fr-FR.json
+index 8864af295b1b..2b2298bcc541 100644
+--- a/apps/web/locales/fr-FR.json
++++ b/apps/web/locales/fr-FR.json
+@@ -1243,6 +1243,13 @@
+         "unlock_the_full_power_of_formbricks_free_for_30_days": "Débloquez tout le potentiel de Formbricks. Gratuit pendant 30 jours."
+       },
+       "general": {
++        "ai_data_analysis_enabled": "Enrichissement et analyse des données (IA)",
++        "ai_data_analysis_enabled_description": "L'IA pour tirer le meilleur parti de vos données, configurer des tableaux de bord, des graphiques, des rapports et plus encore. Accède à vos données d'expérience.",
++        "ai_enabled": "IA Formbricks",
++        "ai_enabled_description": "Gérer les fonctionnalités alimentées par l'IA pour cette organisation.",
++        "ai_settings_updated_successfully": "Paramètres IA mis à jour avec succès",
++        "ai_smart_tools_enabled": "Fonctionnalités intelligentes (IA)",
++        "ai_smart_tools_enabled_description": "L'IA pour vous aider à accomplir plus en moins de temps. N'accède jamais aux données collectées avec Formbricks. Utilisée uniquement pour, par exemple, traduire les sondages dans d'autres langues.",
+         "bulk_invite_warning_description": "Dans le plan gratuit, tous les membres de l'organisation se voient toujours attribuer le rôle \"Owner\".",
+         "cannot_delete_only_organization": "C'est votre seule organisation, elle ne peut pas être supprimée. Créez d'abord une nouvelle organisation.",
+         "cannot_leave_only_organization": "Vous ne pouvez pas quitter cette organisation car c'est votre seule organisation. Créez d'abord une nouvelle organisation.",
+diff --git a/apps/web/locales/hu-HU.json b/apps/web/locales/hu-HU.json
+index 793158efe4ef..ae2a04af0992 100644
+--- a/apps/web/locales/hu-HU.json
++++ b/apps/web/locales/hu-HU.json
+@@ -1243,6 +1243,13 @@
+         "unlock_the_full_power_of_formbricks_free_for_30_days": "A Formbricks teljes erejének feloldása. 30 napig ingyen."
+       },
+       "general": {
++        "ai_data_analysis_enabled": "Adatgazdagítás és elemzés (AI)",
++        "ai_data_analysis_enabled_description": "AI segítségével többet hozhat ki az adataiból, irányítópultokat, diagramokat, jelentéseket és egyebeket állíthat be. Hozzáfér az élményekhez kapcsolódó adatokhoz.",
++        "ai_enabled": "Formbricks AI",
++        "ai_enabled_description": "AI-alapú funkciók kezelése ehhez a szervezethez.",
++        "ai_settings_updated_successfully": "AI beállítások sikeresen frissítve",
++        "ai_smart_tools_enabled": "Intelligens funkciók (AI)",
++        "ai_smart_tools_enabled_description": "AI segítségével kevesebb idő alatt többet érhet el. Soha nem fér hozzá a Formbricks által gyűjtött adatokhoz. Csak például felmérések más nyelvekre történő fordításához használatos.",
+         "bulk_invite_warning_description": "Az ingyenes csomagban az összes szervezeti tag mindig a „Tulajdonos” szerephez van hozzárendelve.",
+         "cannot_delete_only_organization": "Ez az egyetlen szervezete, nem lehet törölni. Először hozzon létre egy új szervezetet.",
+         "cannot_leave_only_organization": "Nem hagyhatja el ezt a szervezetet, mivel ez az egyetlen szervezete. Először hozzon létre egy új szervezetet.",
+diff --git a/apps/web/locales/ja-JP.json b/apps/web/locales/ja-JP.json
+index bd569b98bf55..92d3eaac7733 100644
+--- a/apps/web/locales/ja-JP.json
++++ b/apps/web/locales/ja-JP.json
+@@ -1243,6 +1243,13 @@
+         "unlock_the_full_power_of_formbricks_free_for_30_days": "Formbricksの全機能をアンロック。30日間無料。"
+       },
+       "general": {
++        "ai_data_analysis_enabled": "データエンリッチメントと分析（AI）",
++        "ai_data_analysis_enabled_description": "AIを活用してデータから最大限の価値を引き出し、ダッシュボード、チャート、レポートなどを設定できます。エクスペリエンスデータに触れます。",
++        "ai_enabled": "Formbricks AI",
++        "ai_enabled_description": "この組織のAI機能を管理します。",
++        "ai_settings_updated_successfully": "AI設定が正常に更新されました",
++        "ai_smart_tools_enabled": "スマート機能（AI）",
++        "ai_smart_tools_enabled_description": "AIを活用して、より短時間でより多くのことを達成できます。Formbricksで収集されたデータには一切触れません。アンケートを他の言語に翻訳するなどの用途にのみ使用されます。",
+         "bulk_invite_warning_description": "無料プランでは、すべての組織メンバーに常に「オーナー」ロールが割り当てられます。",
+         "cannot_delete_only_organization": "これはあなたの唯一の組織です。削除できません。まず新しい組織を作成してください。",
+         "cannot_leave_only_organization": "これはあなたの唯一の組織であるため、離れることはできません。まず新しい組織を作成してください。",
+diff --git a/apps/web/locales/nl-NL.json b/apps/web/locales/nl-NL.json
+index 6e976813e5dc..53525129ace1 100644
+--- a/apps/web/locales/nl-NL.json
++++ b/apps/web/locales/nl-NL.json
+@@ -1243,6 +1243,13 @@
+         "unlock_the_full_power_of_formbricks_free_for_30_days": "Ontgrendel de volledige kracht van Formbricks. 30 dagen gratis."
+       },
+       "general": {
++        "ai_data_analysis_enabled": "Dataverrijking & analyse (AI)",
++        "ai_data_analysis_enabled_description": "AI om meer uit je data te halen, dashboards op te zetten, grafieken, rapporten en meer. Raakt je ervaringsdata aan.",
++        "ai_enabled": "Formbricks AI",
++        "ai_enabled_description": "Beheer AI-functies voor deze organisatie.",
++        "ai_settings_updated_successfully": "AI-instellingen succesvol bijgewerkt",
++        "ai_smart_tools_enabled": "Slimme functionaliteit (AI)",
++        "ai_smart_tools_enabled_description": "AI om je te helpen meer te bereiken in minder tijd. Raakt nooit data aan die met Formbricks is verzameld. Wordt alleen gebruikt om bijvoorbeeld enquêtes naar andere talen te vertalen.",
+         "bulk_invite_warning_description": "Bij het gratis abonnement krijgen alle organisatieleden altijd de rol 'Eigenaar' toegewezen.",
+         "cannot_delete_only_organization": "Dit is uw enige organisatie. Deze kan niet worden verwijderd. Maak eerst een nieuwe organisatie aan.",
+         "cannot_leave_only_organization": "U kunt deze organisatie niet verlaten, aangezien dit uw enige organisatie is. Maak eerst een nieuwe organisatie aan.",
+diff --git a/apps/web/locales/pt-BR.json b/apps/web/locales/pt-BR.json
+index b1df6718cbdf..22e8c16aca87 100644
+--- a/apps/web/locales/pt-BR.json
++++ b/apps/web/locales/pt-BR.json
+@@ -1243,6 +1243,13 @@
+         "unlock_the_full_power_of_formbricks_free_for_30_days": "Desbloqueie todo o poder do Formbricks. Grátis por 30 dias."
+       },
+       "general": {
++        "ai_data_analysis_enabled": "Enriquecimento e análise de dados (IA)",
++        "ai_data_analysis_enabled_description": "IA para extrair mais dos seus dados, configurar dashboards, gráficos, relatórios e muito mais. Acessa os dados da sua experiência.",
++        "ai_enabled": "Formbricks AI",
++        "ai_enabled_description": "Gerencie recursos com IA para esta organização.",
++        "ai_settings_updated_successfully": "Configurações de IA atualizadas com sucesso",
++        "ai_smart_tools_enabled": "Funcionalidades inteligentes (IA)",
++        "ai_smart_tools_enabled_description": "IA para ajudar você a conquistar mais em menos tempo. Nunca acessa dados coletados com o Formbricks. Usado apenas para, por exemplo, traduzir pesquisas para outros idiomas.",
+         "bulk_invite_warning_description": "Por favor, note que no Plano Gratuito, todos os membros da organização são automaticamente atribuídos ao papel de 'Owner', independentemente do papel especificado no arquivo CSV.",
+         "cannot_delete_only_organization": "Essa é sua única organização, não pode ser deletada. Crie uma nova organização primeiro.",
+         "cannot_leave_only_organization": "Você não pode sair dessa organização porque é a sua única. Crie uma nova organização primeiro.",
+diff --git a/apps/web/locales/pt-PT.json b/apps/web/locales/pt-PT.json
+index 4068cedb59b4..0f34ab796420 100644
+--- a/apps/web/locales/pt-PT.json
++++ b/apps/web/locales/pt-PT.json
+@@ -1243,6 +1243,13 @@
+         "unlock_the_full_power_of_formbricks_free_for_30_days": "Desbloqueie todo o poder do Formbricks. Grátis por 30 dias."
+       },
+       "general": {
++        "ai_data_analysis_enabled": "Enriquecimento e análise de dados (IA)",
++        "ai_data_analysis_enabled_description": "IA para tirar mais partido dos teus dados, configurar dashboards, gráficos, relatórios e muito mais. Acede aos dados da tua experiência.",
++        "ai_enabled": "IA da Formbricks",
++        "ai_enabled_description": "Gerir funcionalidades com IA para esta organização.",
++        "ai_settings_updated_successfully": "Definições de IA atualizadas com sucesso",
++        "ai_smart_tools_enabled": "Funcionalidade inteligente (IA)",
++        "ai_smart_tools_enabled_description": "IA para te ajudar a alcançar mais em menos tempo. Nunca acede aos dados recolhidos com o Formbricks. Apenas usado para, por exemplo, traduzir inquéritos para outros idiomas.",
+         "bulk_invite_warning_description": "No plano gratuito, todos os membros da organização são sempre atribuídos ao papel de \"Proprietário\".",
+         "cannot_delete_only_organization": "Esta é a sua única organização, não pode ser eliminada. Crie uma nova organização primeiro.",
+         "cannot_leave_only_organization": "Não pode sair desta organização, pois é a sua única organização. Crie uma nova organização primeiro.",
+diff --git a/apps/web/locales/ro-RO.json b/apps/web/locales/ro-RO.json
+index 7393124d7965..b863969a60e6 100644
+--- a/apps/web/locales/ro-RO.json
++++ b/apps/web/locales/ro-RO.json
+@@ -1243,6 +1243,13 @@
+         "unlock_the_full_power_of_formbricks_free_for_30_days": "Deblocați puterea completă a Formbricks. Gratuit timp de 30 de zile."
+       },
+       "general": {
++        "ai_data_analysis_enabled": "Îmbogățire și analiză de date (AI)",
++        "ai_data_analysis_enabled_description": "AI pentru a obține mai mult din datele tale, configurare dashboard-uri, grafice, rapoarte și multe altele. Accesează datele tale de experiență.",
++        "ai_enabled": "Formbricks AI",
++        "ai_enabled_description": "Gestionează funcționalitățile bazate pe AI pentru această organizație.",
++        "ai_settings_updated_successfully": "Setările AI au fost actualizate cu succes",
++        "ai_smart_tools_enabled": "Funcționalitate inteligentă (AI)",
++        "ai_smart_tools_enabled_description": "AI care te ajută să faci mai mult în mai puțin timp. Nu accesează niciodată datele colectate cu Formbricks. Folosit doar, de exemplu, pentru a traduce chestionare în alte limbi.",
+         "bulk_invite_warning_description": "În planul gratuit, toți membrii organizației sunt întotdeauna alocați rolului „Proprietar”.",
+         "cannot_delete_only_organization": "Aceasta este singura ta organizație, nu poate fi ștearsă. Creează mai întâi o nouă organizație.",
+         "cannot_leave_only_organization": "Nu poți părăsi această organizație deoarece este singura ta organizație. Creează mai întâi o nouă organizație.",
+diff --git a/apps/web/locales/ru-RU.json b/apps/web/locales/ru-RU.json
+index 82cd609e8be9..bafb7566933f 100644
+--- a/apps/web/locales/ru-RU.json
++++ b/apps/web/locales/ru-RU.json
+@@ -1243,6 +1243,13 @@
+         "unlock_the_full_power_of_formbricks_free_for_30_days": "Откройте все возможности Formbricks. Бесплатно на 30 дней."
+       },
+       "general": {
++        "ai_data_analysis_enabled": "Обогащение и анализ данных (ИИ)",
++        "ai_data_analysis_enabled_description": "ИИ для получения большего от твоих данных: настройка дашбордов, графиков, отчетов и не только. Работает с твоими данными об опыте.",
++        "ai_enabled": "Formbricks AI",
++        "ai_enabled_description": "Управляй функциями на базе ИИ для этой организации.",
++        "ai_settings_updated_successfully": "Настройки AI успешно обновлены",
++        "ai_smart_tools_enabled": "Умные функции (ИИ)",
++        "ai_smart_tools_enabled_description": "ИИ помогает тебе делать больше за меньшее время. Никогда не использует данные, собранные с помощью Formbricks. Применяется, например, для перевода опросов на другие языки.",
+         "bulk_invite_warning_description": "В бесплатном тарифе всем участникам организации всегда назначается роль \"Владелец\".",
+         "cannot_delete_only_organization": "Это ваша единственная организация, её нельзя удалить. Сначала создайте новую организацию.",
+         "cannot_leave_only_organization": "Вы не можете покинуть эту организацию, так как она у вас единственная. Сначала создайте новую организацию.",
+diff --git a/apps/web/locales/sv-SE.json b/apps/web/locales/sv-SE.json
+index c572da230106..10d133dc121e 100644
+--- a/apps/web/locales/sv-SE.json
++++ b/apps/web/locales/sv-SE.json
+@@ -1243,6 +1243,13 @@
+         "unlock_the_full_power_of_formbricks_free_for_30_days": "Lås upp Formbricks fulla kraft. Gratis i 30 dagar."
+       },
+       "general": {
++        "ai_data_analysis_enabled": "Dataförbättring & analys (AI)",
++        "ai_data_analysis_enabled_description": "AI för att få ut mer av din data, skapa dashboards, diagram, rapporter och mer. Använder din upplevelsedata.",
++        "ai_enabled": "Formbricks AI",
++        "ai_enabled_description": "Hantera AI-drivna funktioner för den här organisationen.",
++        "ai_settings_updated_successfully": "AI-inställningarna har uppdaterats",
++        "ai_smart_tools_enabled": "Smarta funktioner (AI)",
++        "ai_smart_tools_enabled_description": "AI som hjälper dig att göra mer på kortare tid. Rör aldrig data som samlats in med Formbricks. Används bara till t.ex. att översätta enkäter till andra språk.",
+         "bulk_invite_warning_description": "På gratisplanen tilldelas alla organisationsmedlemmar alltid rollen \"Ägare\".",
+         "cannot_delete_only_organization": "Detta är din enda organisation, den kan inte tas bort. Skapa en ny organisation först.",
+         "cannot_leave_only_organization": "Du kan inte lämna denna organisation eftersom det är din enda organisation. Skapa en ny organisation först.",
+diff --git a/apps/web/locales/zh-Hans-CN.json b/apps/web/locales/zh-Hans-CN.json
+index b38c46510f12..c1eef51a6089 100644
+--- a/apps/web/locales/zh-Hans-CN.json
++++ b/apps/web/locales/zh-Hans-CN.json
+@@ -1243,6 +1243,13 @@
+         "unlock_the_full_power_of_formbricks_free_for_30_days": "解锁 Formbricks 的全部功能。免费使用 30 天。"
+       },
+       "general": {
++        "ai_data_analysis_enabled": "数据增强与分析（AI）",
++        "ai_data_analysis_enabled_description": "使用 AI 深度挖掘你的数据，设置仪表盘、图表、报告等。会处理你的体验数据。",
++        "ai_enabled": "Formbricks AI",
++        "ai_enabled_description": "管理该组织的 AI 驱动功能。",
++        "ai_settings_updated_successfully": "AI 设置已成功更新",
++        "ai_smart_tools_enabled": "智能功能（AI）",
++        "ai_smart_tools_enabled_description": "AI 帮你更高效地完成更多任务。绝不会接触 Formbricks 收集的数据，仅用于如问卷翻译等功能。",
+         "bulk_invite_warning_description": "在免费计划中，所有组织成员都会被分配为 \"Owner \"角色。",
+         "cannot_delete_only_organization": "这是 您 唯一的 组织，不可 删除。请 先 创建一个新的 组织。",
+         "cannot_leave_only_organization": "您 不能 离开 此 组织，因为 这是 您 唯一的 组织。请 先 创建一个新的 组织。",
+diff --git a/apps/web/locales/zh-Hant-TW.json b/apps/web/locales/zh-Hant-TW.json
+index be705824f32a..ccfb8ebb7057 100644
+--- a/apps/web/locales/zh-Hant-TW.json
++++ b/apps/web/locales/zh-Hant-TW.json
+@@ -1243,6 +1243,13 @@
+         "unlock_the_full_power_of_formbricks_free_for_30_days": "免費解鎖 Formbricks 的全部功能，為期 30 天。"
+       },
+       "general": {
++        "ai_data_analysis_enabled": "資料增強與分析（AI）",
++        "ai_data_analysis_enabled_description": "利用 AI 深入分析你的資料，建立儀表板、圖表、報告等。會處理你的體驗資料。",
++        "ai_enabled": "Formbricks AI",
++        "ai_enabled_description": "管理此組織的 AI 功能。",
++        "ai_settings_updated_successfully": "AI 設定已成功更新",
++        "ai_smart_tools_enabled": "智慧功能（AI）",
++        "ai_smart_tools_enabled_description": "AI 幫你更快完成更多事。絕不會接觸 Formbricks 收集的資料，只用於像是將問卷翻譯成其他語言等用途。",
+         "bulk_invite_warning_description": "在免費方案中，所有組織成員始終會被指派「擁有者」角色。",
+         "cannot_delete_only_organization": "這是您唯一的組織，無法刪除。請先建立新組織。",
+         "cannot_leave_only_organization": "您無法離開此組織，因為它是您唯一的組織。請先建立新組織。",
+diff --git a/apps/web/modules/ee/sso/lib/organization.test.ts b/apps/web/modules/ee/sso/lib/organization.test.ts
+index 3ad31acf92bf..d77f49e222a5 100644
+--- a/apps/web/modules/ee/sso/lib/organization.test.ts
++++ b/apps/web/modules/ee/sso/lib/organization.test.ts
+@@ -40,7 +40,8 @@ describe("getFirstOrganization", () => {
+           projects: 3,
+         },
+       },
+-      isAIEnabled: false,
++      isAISmartToolsEnabled: false,
++      isAIDataAnalysisEnabled: false,
+     };
+     vi.mocked(prisma.organization.findFirst).mockResolvedValue(org);
+     const result = await getFirstOrganization();
+diff --git a/apps/web/modules/ee/sso/lib/tests/__mock__/sso-handlers.mock.ts b/apps/web/modules/ee/sso/lib/tests/__mock__/sso-handlers.mock.ts
+index 7a33210c4af7..d09db5230b65 100644
+--- a/apps/web/modules/ee/sso/lib/tests/__mock__/sso-handlers.mock.ts
++++ b/apps/web/modules/ee/sso/lib/tests/__mock__/sso-handlers.mock.ts
+@@ -45,7 +45,8 @@ export const mockSamlAccount: Account = {
+ export const mockOrganization: Organization = {
+   id: "org-123",
+   name: "Test Organization",
+-  isAIEnabled: false,
++  isAISmartToolsEnabled: false,
++  isAIDataAnalysisEnabled: false,
+   whitelabel: {
+     enabled: false,
+   },
+diff --git a/apps/web/modules/environments/lib/utils.test.ts b/apps/web/modules/environments/lib/utils.test.ts
+index 6dd64f7eca3c..ca3d80843fd2 100644
+--- a/apps/web/modules/environments/lib/utils.test.ts
++++ b/apps/web/modules/environments/lib/utils.test.ts
+@@ -268,7 +268,8 @@ describe("utils.ts", () => {
+           updatedAt: new Date("2024-01-02"),
+           name: "Test Organization",
+           billing: { plan: "free" },
+-          isAIEnabled: false,
++          isAISmartToolsEnabled: false,
++          isAIDataAnalysisEnabled: false,
+           whitelabel: false,
+           memberships: [
+             {
+@@ -408,7 +409,8 @@ describe("utils.ts", () => {
+             updatedAt: new Date("2024-01-02"),
+             name: "Test Organization",
+             billing: { plan: "free", limits: {} },
+-            isAIEnabled: false,
++            isAISmartToolsEnabled: false,
++            isAIDataAnalysisEnabled: false,
+             whitelabel: false,
+             memberships: [
+               {
+@@ -512,7 +514,8 @@ describe("utils.ts", () => {
+             createdAt: new Date(),
+             updatedAt: new Date(),
+             billing: { plan: "free", limits: {} },
+-            isAIEnabled: false,
++            isAISmartToolsEnabled: false,
++            isAIDataAnalysisEnabled: false,
+             whitelabel: false,
+             memberships: [], // No membership
+           },
+@@ -596,7 +599,8 @@ describe("utils.ts", () => {
+             createdAt: new Date(),
+             updatedAt: new Date(),
+             billing: { plan: "free", limits: {} },
+-            isAIEnabled: false,
++            isAISmartToolsEnabled: false,
++            isAIDataAnalysisEnabled: false,
+             whitelabel: false,
+             memberships: [{ userId: "user123", organizationId: "org123", role: "owner", accepted: true }],
+           },
+@@ -635,7 +639,8 @@ describe("utils.ts", () => {
+             createdAt: new Date(),
+             updatedAt: new Date(),
+             billing: { plan: "pro", limits: {} },
+-            isAIEnabled: true,
++            isAISmartToolsEnabled: true,
++            isAIDataAnalysisEnabled: true,
+             whitelabel: true,
+             memberships: [{ userId: "user123", organizationId: "org456", role: "member", accepted: true }],
+           },
+diff --git a/apps/web/modules/environments/lib/utils.ts b/apps/web/modules/environments/lib/utils.ts
+index d60705dcdba2..d2e4d87c3f86 100644
+--- a/apps/web/modules/environments/lib/utils.ts
++++ b/apps/web/modules/environments/lib/utils.ts
+@@ -173,7 +173,8 @@ export const getEnvironmentWithRelations = reactCache(async (environmentId: stri
+                 updatedAt: true,
+                 name: true,
+                 billing: true,
+-                isAIEnabled: true,
++                isAISmartToolsEnabled: true,
++                isAIDataAnalysisEnabled: true,
+                 whitelabel: true,
+                 // Current user's membership only (filtered at DB level)
+                 memberships: {
+@@ -232,7 +233,8 @@ export const getEnvironmentWithRelations = reactCache(async (environmentId: stri
+         updatedAt: data.project.organization.updatedAt,
+         name: data.project.organization.name,
+         billing: data.project.organization.billing,
+-        isAIEnabled: data.project.organization.isAIEnabled,
++        isAISmartToolsEnabled: data.project.organization.isAISmartToolsEnabled,
++        isAIDataAnalysisEnabled: data.project.organization.isAIDataAnalysisEnabled,
+         whitelabel: data.project.organization.whitelabel,
+       },
+       environments: data.project.environments,
+diff --git a/apps/web/modules/survey/editor/lib/survey.test.ts b/apps/web/modules/survey/editor/lib/survey.test.ts
+index 681ceb0312bc..129cf690dcc9 100644
+--- a/apps/web/modules/survey/editor/lib/survey.test.ts
++++ b/apps/web/modules/survey/editor/lib/survey.test.ts
+@@ -151,7 +151,8 @@ describe("Survey Editor Library Tests", () => {
+         period: "monthly" as const,
+         periodStart: new Date(),
+       },
+-      isAIEnabled: false,
++      isAISmartToolsEnabled: false,
++      isAIDataAnalysisEnabled: false,
+     };
+ 
+     beforeEach(() => {
+diff --git a/apps/web/modules/survey/lib/organization.test.ts b/apps/web/modules/survey/lib/organization.test.ts
+index c828e47f8303..0b51702f2091 100644
+--- a/apps/web/modules/survey/lib/organization.test.ts
++++ b/apps/web/modules/survey/lib/organization.test.ts
+@@ -82,8 +82,12 @@ describe("getOrganizationAIKeys", () => {
+   });
+ 
+   const mockOrgId = "org_test789";
+-  const mockOrganizationData: Pick<Organization, "isAIEnabled" | "billing"> = {
+-    isAIEnabled: true,
++  const mockOrganizationData: Pick<
++    Organization,
++    "isAISmartToolsEnabled" | "isAIDataAnalysisEnabled" | "billing"
++  > = {
++    isAISmartToolsEnabled: true,
++    isAIDataAnalysisEnabled: true,
+     billing: {
+       plan: "free",
+       stripeCustomerId: null,
+@@ -109,7 +113,8 @@ describe("getOrganizationAIKeys", () => {
+         id: mockOrgId,
+       },
+       select: {
+-        isAIEnabled: true,
++        isAISmartToolsEnabled: true,
++        isAIDataAnalysisEnabled: true,
+         billing: true,
+       },
+     });
+diff --git a/apps/web/modules/survey/lib/organization.ts b/apps/web/modules/survey/lib/organization.ts
+index 0722ca9e22d7..816b931eeac6 100644
+--- a/apps/web/modules/survey/lib/organization.ts
++++ b/apps/web/modules/survey/lib/organization.ts
+@@ -29,14 +29,17 @@ export const getOrganizationIdFromEnvironmentId = reactCache(
+ );
+ 
+ export const getOrganizationAIKeys = reactCache(
+-  async (organizationId: string): Promise<Pick<Organization, "isAIEnabled" | "billing"> | null> => {
++  async (
++    organizationId: string
++  ): Promise<Pick<Organization, "isAISmartToolsEnabled" | "isAIDataAnalysisEnabled" | "billing"> | null> => {
+     try {
+       const organization = await prisma.organization.findUnique({
+         where: {
+           id: organizationId,
+         },
+         select: {
+-          isAIEnabled: true,
++          isAISmartToolsEnabled: true,
++          isAIDataAnalysisEnabled: true,
+           billing: true,
+         },
+       });
+diff --git a/apps/web/modules/survey/link/lib/data.test.ts b/apps/web/modules/survey/link/lib/data.test.ts
+index 872ff0065a36..ddd0c5e2a7a3 100644
+--- a/apps/web/modules/survey/link/lib/data.test.ts
++++ b/apps/web/modules/survey/link/lib/data.test.ts
+@@ -454,7 +454,8 @@ describe("data", () => {
+       name: "Test Organization",
+       billing: mockBilling,
+       whitelabel: null,
+-      isAIEnabled: true,
++      isAISmartToolsEnabled: true,
++      isAIDataAnalysisEnabled: true,
+     };
+ 
+     test("should fetch organization billing successfully", async () => {
+diff --git a/packages/database/migration/20260302000000_replace_is_ai_enabled_with_dual_toggles/migration.sql b/packages/database/migration/20260302000000_replace_is_ai_enabled_with_dual_toggles/migration.sql
+new file mode 100644
+index 000000000000..5fbb64d58ff7
+--- /dev/null
++++ b/packages/database/migration/20260302000000_replace_is_ai_enabled_with_dual_toggles/migration.sql
+@@ -0,0 +1,4 @@
++-- AlterTable
++ALTER TABLE "Organization" ADD COLUMN "isAISmartToolsEnabled" BOOLEAN NOT NULL DEFAULT false;
++ALTER TABLE "Organization" ADD COLUMN "isAIDataAnalysisEnabled" BOOLEAN NOT NULL DEFAULT false;
++ALTER TABLE "Organization" DROP COLUMN "isAIEnabled";
+diff --git a/packages/database/schema.prisma b/packages/database/schema.prisma
+index 3ebb856e2d9d..efa55b036a04 100644
+--- a/packages/database/schema.prisma
++++ b/packages/database/schema.prisma
+@@ -663,22 +663,24 @@ model Project {
+ /// @property projects - Collection of projects owned by the organization
+ /// @property billing - JSON field containing billing information
+ /// @property whitelabel - Whitelabel configuration for the organization
+-/// @property isAIEnabled - Controls access to AI-powered features
++/// @property isAISmartToolsEnabled - Controls access to AI smart tools (e.g. translations) that never touch collected data
++/// @property isAIDataAnalysisEnabled - Controls access to AI data analysis features that touch experience data
+ model Organization {
+-  id          String       @id @default(cuid())
+-  createdAt   DateTime     @default(now()) @map(name: "created_at")
+-  updatedAt   DateTime     @updatedAt @map(name: "updated_at")
+-  name        String
+-  memberships Membership[]
+-  projects    Project[]
++  id                      String       @id @default(cuid())
++  createdAt               DateTime     @default(now()) @map(name: "created_at")
++  updatedAt               DateTime     @updatedAt @map(name: "updated_at")
++  name                    String
++  memberships             Membership[]
++  projects                Project[]
+   /// [OrganizationBilling]
+-  billing     Json
++  billing                 Json
+   /// [OrganizationWhitelabel]
+-  whitelabel  Json         @default("{}")
+-  invites     Invite[]
+-  isAIEnabled Boolean      @default(false)
+-  teams       Team[]
+-  apiKeys     ApiKey[]
++  whitelabel              Json         @default("{}")
++  invites                 Invite[]
++  isAISmartToolsEnabled   Boolean      @default(false)
++  isAIDataAnalysisEnabled Boolean      @default(false)
++  teams                   Team[]
++  apiKeys                 ApiKey[]
+ }
+ 
+ enum OrganizationRole {
+diff --git a/packages/database/zod/organizations.ts b/packages/database/zod/organizations.ts
+index a194d9a63fc0..cb9b85a3112c 100644
+--- a/packages/database/zod/organizations.ts
++++ b/packages/database/zod/organizations.ts
+@@ -37,5 +37,6 @@ export const ZOrganization = z.object({
+   name: z.string(),
+   whitelabel: ZOrganizationWhiteLabel,
+   billing: ZOrganizationBilling as z.ZodType<Organization["billing"]>,
+-  isAIEnabled: z.boolean().default(false) as z.ZodType<Organization["isAIEnabled"]>,
++  isAISmartToolsEnabled: z.boolean().default(false) as z.ZodType<Organization["isAISmartToolsEnabled"]>,
++  isAIDataAnalysisEnabled: z.boolean().default(false) as z.ZodType<Organization["isAIDataAnalysisEnabled"]>,
+ }) satisfies z.ZodType<Organization>;
+diff --git a/packages/email/src/lib/example-data.ts b/packages/email/src/lib/example-data.ts
+index e011b9353e06..316fbd5dc923 100644
+--- a/packages/email/src/lib/example-data.ts
++++ b/packages/email/src/lib/example-data.ts
+@@ -134,7 +134,8 @@ export const exampleData = {
+           },
+         },
+       },
+-      isAIEnabled: false,
++      isAISmartToolsEnabled: false,
++      isAIDataAnalysisEnabled: false,
+     } as unknown as TOrganization,
+   },
+ 
+diff --git a/packages/types/organizations.ts b/packages/types/organizations.ts
+index a0c486aead87..64ce93a35ad5 100644
+--- a/packages/types/organizations.ts
++++ b/packages/types/organizations.ts
+@@ -50,7 +50,8 @@ export const ZOrganization = z.object({
+   }),
+   whitelabel: ZOrganizationWhitelabel.optional(),
+   billing: ZOrganizationBilling,
+-  isAIEnabled: z.boolean().default(false),
++  isAISmartToolsEnabled: z.boolean().default(false),
++  isAIDataAnalysisEnabled: z.boolean().default(false),
+ });
+ 
+ export const ZOrganizationCreateInput = z.object({
+@@ -64,7 +65,8 @@ export const ZOrganizationUpdateInput = z.object({
+   name: z.string(),
+   whitelabel: ZOrganizationWhitelabel.optional(),
+   billing: ZOrganizationBilling.optional(),
+-  isAIEnabled: z.boolean().optional(),
++  isAISmartToolsEnabled: z.boolean().optional(),
++  isAIDataAnalysisEnabled: z.boolean().optional(),
+ });
+ 
+ export type TOrganizationUpdateInput = z.infer<typeof ZOrganizationUpdateInput>;

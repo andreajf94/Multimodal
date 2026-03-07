@@ -1,0 +1,13 @@
+{
+  "project_name": "public-apis",
+  "feature_name": "Automated API Status Monitoring and Health Checks",
+  "description": "Integrate automated, scheduled health checks for listed APIs to detect downtime, SSL certificate validity, and response latency. This will enhance the reliability of the API directory by adding a real-time status indicator for each entry and alerting maintainers to broken links or services.",
+  "functional_requirements": [
+    "Extend `scripts/validate/links.py` to perform periodic HTTP/S requests to API endpoints and record response codes, latency, and SSL expiry dates.",
+    "Add a new `scripts/monitor/health.py` module that runs via GitHub Actions scheduled workflows, storing results in a timestamped JSON log file within a `monitor/` directory.",
+    "Update the main project README generation to include a status badge (e.g., 'Operational', 'Degraded', 'Down') for each API based on the latest health check results.",
+    "Implement a reporting script `scripts/monitor/report.py` that analyzes logs and opens GitHub Issues for APIs that fail consecutive health checks.",
+    "Ensure the monitoring respects API rate limits by implementing exponential backoff and caching, referencing existing validation patterns in `scripts/validate/format.py`."
+  ],
+  "scale_tier": "enterprise"
+}

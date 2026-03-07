@@ -1,0 +1,87 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "testing",
+      "recommendation": "Created a CwdGuard RAII (Resource Acquisition Is Initialization) struct to automatically restore the original working directory after tests that modify it",
+      "rationale": "Tests that change the current working directory were causing cascading failures in other tests because they didn't clean up after themselves. Using RAII ensures cleanup happens even if tests panic, providing robust isolation between tests.",
+      "alternatives_considered": [
+        "Manually restoring directory in each test (error-prone, doesn't handle panics)",
+        "Using test fixtures with explicit setup/teardown (more boilerplate)",
+        "Avoiding directory changes entirely (not always possible for the functionality being tested)"
+      ],
+      "files_affected": [
+        "src/cargo_config.rs"
+      ]
+    },
+    {
+      "dimension": "testing",
+      "recommendation": "Extracted common fixture path logic into a reusable function to avoid hardcoded relative paths",
+      "rationale": "Tests were using relative paths like `PathBuf::from(\"tests\")...` which fail when the working directory changes. Using `CARGO_MANIFEST_DIR` environment variable provides an absolute path that works regardless of current directory.",
+      "alternatives_considered": [
+        "Using absolute paths directly (not portable across machines)",
+        "Passing fixture paths as parameters (adds complexity to test setup)",
+        "Embedding test data in the binary (increases binary size, less flexible)"
+      ],
+      "files_affected": [
+        "src/tests_cfg/queue.rs"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Used `Drop` trait implementation for CwdGuard to ensure directory restoration happens automatically",
+      "rationale": "The Drop trait guarantees cleanup when the guard goes out of scope, even during unwinding from panics. This provides exception-safe resource management in Rust's ownership model.",
+      "alternatives_considered": [
+        "Try-finally pattern (not idiomatic in Rust)",
+        "Explicit teardown calls (easy to forget, doesn't handle panics)",
+        "Using scoped threads or async contexts (overkill for this simple case)"
+      ],
+      "files_affected": [
+        "src/cargo_config.rs"
+      ]
+    },
+    {
+      "dimension": "code_organization",
+      "recommendation": "Created a shared helper function for fixture path resolution that works for both PostgreSQL and SQLite test setups",
+      "rationale": "Both database test setups needed the same fixture file. DRY (Don't Repeat Yourself) principle reduces maintenance burden and ensures consistency between different database backends.",
+      "alternatives_considered": [
+        "Keeping duplicate code (violates DRY, harder to maintain)",
+        "Creating a separate module for test utilities (more file changes, but could be considered for larger test utilities)",
+        "Using a macro to generate the path code (overly complex for this simple case)"
+      ],
+      "files_affected": [
+        "src/tests_cfg/queue.rs"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Fix working directory isolation in cargo_config tests",
+      "description": "Implement RAII guard to automatically restore original working directory after tests that need to change it, preventing test interference",
+      "files_to_modify": [
+        "src/cargo_config.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-002",
+      "title": "Make test fixture paths independent of working directory",
+      "description": "Extract common fixture path logic to use CARGO_MANIFEST_DIR for absolute paths, fixing PostgreSQL and SQLite test initialization",
+      "files_to_modify": [
+        "src/tests_cfg/queue.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The changes address test stability issues caused by working directory modifications during test execution. In the cargo_config tests, we introduced a CwdGuard RAII struct that automatically restores the original working directory when it goes out of scope. This uses Rust's Drop trait to ensure cleanup happens even if tests panic, providing robust isolation between tests that run in parallel.\n\nFor the queue tests, we extracted the fixture path resolution into a shared function that uses the CARGO_MANIFEST_DIR environment variable to construct absolute paths. This eliminates dependency on the current working directory, fixing initialization code for both PostgreSQL and SQLite database backends.\n\nThe approach follows Rust's ownership model and RAII patterns for resource management, ensuring tests don't interfere with each other. By using absolute paths derived from the project root, we make the tests more robust and portable. These changes enable parallel test execution and prevent cascading failures that occurred when tests didn't properly clean up their working directory state.",
+  "source_pr": "https://github.com/loco-rs/loco/pull/1745",
+  "before_sha": "f539147c6a7cf7ea8f721c2f21cd75a5f4d470e4",
+  "after_sha": "e9598a6822c581a06416bb668ad80e1920e54d09",
+  "diff_stats": {
+    "additions": 32,
+    "deletions": 16,
+    "files_changed": 2
+  }
+}

@@ -1,0 +1,246 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "translation_automation",
+      "recommendation": "Create a modular Python translation script with pluggable translation service adapters (Google Translate, DeepL) and configurable language targets. Preserve code blocks, image references, and links during translation.",
+      "rationale": "The repository contains technical content with code snippets that must not be translated. A modular design allows maintainers to switch translation services based on cost/accuracy and supports incremental language expansion without rewriting core logic.",
+      "alternatives_considered": [
+        "Manual translation only",
+        "Single hardcoded translation service",
+        "Markdown parsing with regex instead of AST"
+      ],
+      "files_affected": [
+        "translate_markdown.py (new)",
+        "solutions/system_design/mint/README.md",
+        "solutions/system_design/pastebin/README.md",
+        "CONTRIBUTING.md"
+      ]
+    },
+    {
+      "dimension": "content_structure",
+      "recommendation": "Follow existing translation patterns: create language-suffixed files (README-es.md) in root and mirror this pattern in solution directories. Do not create separate language directories.",
+      "rationale": "Consistency with existing Chinese (zh-Hans) and Japanese (ja) translations reduces cognitive load for contributors. Flat structure with suffix pattern is already used and works with existing tooling like generate-epub.sh.",
+      "alternatives_considered": [
+        "Language-specific subdirectories",
+        "Separate repository forks per language",
+        "Database-driven content management"
+      ],
+      "files_affected": [
+        "README-es.md (new)",
+        "solutions/system_design/mint/README-es.md (new)",
+        "solutions/system_design/pastebin/README-es.md (new)",
+        "TRANSLATIONS.md"
+      ]
+    },
+    {
+      "dimension": "validation_and_testing",
+      "recommendation": "Implement structure-preserving validation tests that compare original and translated files for identical code blocks, image paths, and link anchors. Use pytest for test framework.",
+      "rationale": "Technical accuracy is critical - code snippets must remain unchanged across translations. Automated validation prevents introduction of broken links or corrupted code during translation process.",
+      "alternatives_considered": [
+        "Manual review only",
+        "End-to-end translation accuracy testing",
+        "Spell-check only validation"
+      ],
+      "files_affected": [
+        "tests/test_translation_validation.py (new)",
+        "tests/__init__.py (new)",
+        ".github/workflows/ci.yml (new)"
+      ]
+    },
+    {
+      "dimension": "ci_cd_integration",
+      "recommendation": "Implement GitHub Actions workflow that runs translation validation tests on PRs, checks for broken image references, and validates markdown structure.",
+      "rationale": "Automated quality gates ensure translated content maintains repository standards without manual review overhead. GitHub Actions is native to the platform and aligns with existing contribution workflows.",
+      "alternatives_considered": [
+        "Travis CI",
+        "Jenkins",
+        "CircleCI",
+        "Manual validation only"
+      ],
+      "files_affected": [
+        ".github/workflows/translation-validation.yml (new)",
+        "CONTRIBUTING.md",
+        "tests/test_translation_validation.py (new)"
+      ]
+    },
+    {
+      "dimension": "epub_generation",
+      "recommendation": "Extend generate-epub.sh to accept language parameter and update epub-metadata.yaml with multilingual metadata. Process language-suffixed markdown files for EPUB generation.",
+      "rationale": "The existing EPUB generation script is simple and effective. Parameterizing it for languages avoids duplication while supporting the feature requirement for multilingual EPUBs.",
+      "alternatives_considered": [
+        "Separate EPUB generation scripts per language",
+        "Complete rewrite in Python",
+        "Drop EPUB support for translations"
+      ],
+      "files_affected": [
+        "generate-epub.sh",
+        "epub-metadata.yaml",
+        "README.md"
+      ]
+    },
+    {
+      "dimension": "configuration_management",
+      "recommendation": "Use environment variables and a config file (translate_config.yaml) for API keys, target languages, and exclusion patterns. Never commit API keys.",
+      "rationale": "Translation services require API keys that must remain secret. Environment-based configuration supports CI/CD integration and allows contributors to use their own keys.",
+      "alternatives_considered": [
+        "Hardcoded configuration",
+        "Command-line arguments only",
+        "Database-backed configuration"
+      ],
+      "files_affected": [
+        "translate_config.yaml (new)",
+        "translate_markdown.py (new)",
+        ".gitignore",
+        "CONTRIBUTING.md"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Create translation automation script with Google Translate adapter",
+      "description": "Develop translate_markdown.py script that can translate markdown files while preserving code blocks (```), image references, and links. Implement Google Translate API adapter with configurable exclusion patterns.",
+      "files_to_modify": [],
+      "files_to_create": [
+        "translate_markdown.py",
+        "translate_config.yaml",
+        "translation_adapters/google_translate_adapter.py",
+        "translation_adapters/__init__.py"
+      ],
+      "estimated_effort": "medium",
+      "dependencies": []
+    },
+    {
+      "id": "T-002",
+      "title": "Add Spanish translation scaffolding and example content",
+      "description": "Create README-es.md in root directory and corresponding README-es.md files in key solution directories (mint, pastebin, web_crawler) following the same structure as README-zh-Hans.md. Include placeholders for automated translation.",
+      "files_to_modify": [
+        "TRANSLATIONS.md"
+      ],
+      "files_to_create": [
+        "README-es.md",
+        "solutions/system_design/mint/README-es.md",
+        "solutions/system_design/pastebin/README-es.md",
+        "solutions/system_design/web_crawler/README-es.md"
+      ],
+      "estimated_effort": "small",
+      "dependencies": []
+    },
+    {
+      "id": "T-003",
+      "title": "Update contribution guidelines with translation workflow",
+      "description": "Add translation contribution section to CONTRIBUTING.md explaining how to use the translation script, maintain code snippet integrity, and follow the language suffix pattern.",
+      "files_to_modify": [
+        "CONTRIBUTING.md"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small",
+      "dependencies": [
+        "T-001"
+      ]
+    },
+    {
+      "id": "T-004",
+      "title": "Implement translation validation test suite",
+      "description": "Create pytest tests that validate translated files maintain identical code blocks, image references (images/*.png), and internal links as their English counterparts.",
+      "files_to_modify": [],
+      "files_to_create": [
+        "tests/__init__.py",
+        "tests/test_translation_validation.py",
+        "tests/test_data/sample_english.md",
+        "tests/test_data/sample_translated.md"
+      ],
+      "estimated_effort": "medium",
+      "dependencies": [
+        "T-002"
+      ]
+    },
+    {
+      "id": "T-005",
+      "title": "Set up GitHub Actions CI/CD for translation validation",
+      "description": "Create GitHub Actions workflow that runs translation tests on PRs, validates markdown structure, and checks for broken image links in translated content.",
+      "files_to_modify": [],
+      "files_to_create": [
+        ".github/workflows/translation-validation.yml",
+        ".github/workflows/ci.yml"
+      ],
+      "estimated_effort": "medium",
+      "dependencies": [
+        "T-004"
+      ]
+    },
+    {
+      "id": "T-006",
+      "title": "Extend EPUB generation for multiple languages",
+      "description": "Modify generate-epub.sh to accept language parameter (e.g., --lang es) and update epub-metadata.yaml to include multilingual metadata. Ensure script processes correct language-suffixed markdown files.",
+      "files_to_modify": [
+        "generate-epub.sh",
+        "epub-metadata.yaml",
+        "README.md"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small",
+      "dependencies": [
+        "T-002"
+      ]
+    },
+    {
+      "id": "T-007",
+      "title": "Add DeepL translation adapter and configuration",
+      "description": "Implement alternative DeepL translation adapter to provide translation service options. Update translate_config.yaml to support multiple service configuration.",
+      "files_to_modify": [
+        "translate_config.yaml",
+        "translate_markdown.py"
+      ],
+      "files_to_create": [
+        "translation_adapters/deepl_adapter.py"
+      ],
+      "estimated_effort": "small",
+      "dependencies": [
+        "T-001"
+      ]
+    },
+    {
+      "id": "T-008",
+      "title": "Implement batch translation and progress tracking",
+      "description": "Add batch processing capability to translate_markdown.py for translating multiple files/directories. Include progress bars and skip-already-translated logic.",
+      "files_to_modify": [
+        "translate_markdown.py",
+        "translate_config.yaml"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium",
+      "dependencies": [
+        "T-001",
+        "T-007"
+      ]
+    }
+  ],
+  "technology_choices": [
+    {
+      "category": "translation_api",
+      "choice": "Google Translate API (with DeepL as alternative)",
+      "rationale": "Google Translate offers broad language support and reliable quality. Making it configurable with DeepL alternative provides flexibility for maintainers who may prefer DeepL's technical translation accuracy."
+    },
+    {
+      "category": "testing_framework",
+      "choice": "pytest",
+      "rationale": "pytest is the standard Python testing framework with rich plugin ecosystem. It's lightweight and integrates well with CI/CD pipelines."
+    },
+    {
+      "category": "ci_cd",
+      "choice": "GitHub Actions",
+      "rationale": "The repository is already on GitHub, and GitHub Actions provides native CI/CD with free tier for open source. Existing .github directory suggests this is the preferred platform."
+    },
+    {
+      "category": "configuration",
+      "choice": "YAML configuration files",
+      "rationale": "YAML is human-readable and widely used in the Python ecosystem. The existing epub-metadata.yaml shows YAML is already used in the codebase."
+    },
+    {
+      "category": "markdown_parsing",
+      "choice": "Python's markdown library with custom extensions",
+      "rationale": "The standard markdown library can parse code blocks and structure reliably. Custom extensions can handle the specific preservation requirements for technical content."
+    }
+  ]
+}

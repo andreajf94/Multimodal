@@ -1,0 +1,91 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "dependency_management",
+      "recommendation": "Added explicit import of golang.org/x/image/webp package to enable WebP decoding capabilities",
+      "rationale": "The existing imaging library (github.com/disintegration/imaging) doesn't support WebP format. The official Go WebP decoder from golang.org/x/image/webp provides native WebP decoding support. This approach leverages Go's standard library extensions rather than adding third-party dependencies.",
+      "alternatives_considered": [
+        "Using a third-party WebP library",
+        "Extending the imaging library with WebP support",
+        "Converting WebP to another format before processing"
+      ],
+      "files_affected": [
+        "go.mod",
+        "tools/filesystem/filesystem.go"
+      ]
+    },
+    {
+      "dimension": "api_design",
+      "recommendation": "Updated imageContentTypes list to include 'image/webp' MIME type for automatic WebP detection",
+      "rationale": "The system needs to recognize WebP files as valid images for thumbnail generation. By adding 'image/webp' to the imageContentTypes slice, the file API will automatically treat WebP files as images and attempt to generate thumbnails for them, maintaining consistency with existing image handling.",
+      "alternatives_considered": [
+        "Creating a separate WebP-specific handler",
+        "Using file extension detection instead of MIME types",
+        "Making WebP support configurable"
+      ],
+      "files_affected": [
+        "apis/file.go"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Relied on Go's image.Decode fallback mechanism for WebP decoding failures",
+      "rationale": "The implementation uses Go's standard image.Decode function which will automatically use the registered WebP decoder. If decoding fails, the existing error handling in the thumbnail generation code will fall back to using the original file. This maintains backward compatibility and graceful degradation.",
+      "alternatives_considered": [
+        "Explicit try-catch for WebP decoding",
+        "Separate WebP-specific error handling logic",
+        "Pre-validation of WebP files before processing"
+      ],
+      "files_affected": [
+        "tools/filesystem/filesystem.go"
+      ]
+    },
+    {
+      "dimension": "backward_compatibility",
+      "recommendation": "Minimal changes to existing code with no breaking API modifications",
+      "rationale": "Only three files were modified with minimal changes: adding a MIME type, importing a package, and updating dependencies. The thumbnail generation pipeline remains unchanged, ensuring existing functionality continues to work while adding WebP support transparently.",
+      "alternatives_considered": [
+        "Creating a new WebP-specific thumbnail endpoint",
+        "Modifying the imaging library directly",
+        "Creating a separate WebP processing module"
+      ],
+      "files_affected": [
+        "apis/file.go",
+        "go.mod",
+        "tools/filesystem/filesystem.go"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Add WebP MIME type recognition",
+      "description": "Update the image content type detection to include WebP files so they're processed through the thumbnail generation pipeline",
+      "files_to_modify": [
+        "apis/file.go"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-002",
+      "title": "Integrate Go WebP decoder",
+      "description": "Add the official Go WebP decoder package as a dependency and import it to enable WebP image decoding capabilities",
+      "files_to_modify": [
+        "go.mod",
+        "tools/filesystem/filesystem.go"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The WebP thumbnail generation feature was implemented with minimal changes to the existing codebase by leveraging Go's standard library extensions. The approach focused on three key areas: dependency management, MIME type recognition, and transparent integration with the existing thumbnail generation pipeline.\n\nFirst, the official Go WebP decoder (golang.org/x/image/webp) was added as a dependency and imported with a blank identifier to register its decoder with Go's image.Decode function. This allows the system to decode WebP files using native Go libraries rather than relying on the imaging library which lacks WebP support. The dependency was moved from indirect to direct in go.mod to ensure it's properly included.\n\nSecond, the imageContentTypes slice in apis/file.go was updated to include 'image/webp', enabling the file API to automatically recognize WebP files as valid images. This ensures WebP files are processed through the same thumbnail generation pipeline as other image formats, maintaining consistency in the API behavior.\n\nThird, the implementation relies on Go's existing image decoding fallback mechanism. When a WebP file is processed, Go's image.Decode will automatically use the registered WebP decoder. If decoding fails for any reason, the existing error handling in the thumbnail generation code will fall back to using the original file, ensuring graceful degradation. This approach requires no changes to the actual thumbnail generation logic, as the system transparently gains WebP support through the registered decoder.\n\nThe changes are minimal and non-breaking, maintaining full backward compatibility while adding WebP support. The thumbnail generation continues to produce PNG format thumbnails as before, ensuring consistency across all image formats. This implementation follows the existing architectural patterns of the codebase, avoiding the need for WebP-specific code paths or complex conditional logic.",
+  "source_pr": "https://github.com/pocketbase/pocketbase/pull/6744",
+  "before_sha": "a2b89d73444fe7775812bcb35b5cad3b741e1b29",
+  "after_sha": "5d46fb054ecd811b9f803df5a9d963c13d89726e",
+  "diff_stats": {
+    "additions": 5,
+    "deletions": 2,
+    "files_changed": 3
+  }
+}

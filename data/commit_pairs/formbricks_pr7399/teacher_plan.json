@@ -1,0 +1,186 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "data_modeling",
+      "recommendation": "Split the single `isAIEnabled` boolean into two separate flags: `isAISmartToolsEnabled` and `isAIDataAnalysisEnabled` to provide granular control over different AI feature categories",
+      "rationale": "This allows organizations to enable AI for productivity tools (like survey translation) while potentially disabling AI that processes user data for analysis, addressing privacy concerns and providing more flexible feature management",
+      "alternatives_considered": [
+        "Keep single boolean flag with all-or-nothing approach",
+        "Create a more complex permission system with multiple AI feature categories"
+      ],
+      "files_affected": [
+        "packages/database/schema.prisma",
+        "packages/database/migration/20260302000000_replace_is_ai_enabled_with_dual_toggles/migration.sql",
+        "packages/types/organizations.ts",
+        "packages/database/zod/organizations.ts"
+      ]
+    },
+    {
+      "dimension": "api_design",
+      "recommendation": "Created a reusable `updateOrganizationAction` helper function to consolidate organization update logic and replace single-purpose actions with a unified approach",
+      "rationale": "This DRY (Don't Repeat Yourself) pattern reduces code duplication, ensures consistent authorization and audit logging across all organization updates, and makes it easier to add new organization settings in the future",
+      "alternatives_considered": [
+        "Create separate action functions for each organization setting",
+        "Use a generic update endpoint with dynamic field validation"
+      ],
+      "files_affected": [
+        "apps/web/app/(app)/environments/[environmentId]/settings/(organization)/general/actions.ts"
+      ]
+    },
+    {
+      "dimension": "authorization",
+      "recommendation": "Implemented role-based access control where AI settings can be modified by both owners and managers, while organization name changes remain owner-only",
+      "rationale": "This aligns with the principle of least privilege while providing practical flexibility for team management. Managers need to control AI features for their teams but shouldn't be able to rename the organization",
+      "alternatives_considered": [
+        "Make all organization settings owner-only",
+        "Create custom permission system independent of roles"
+      ],
+      "files_affected": [
+        "apps/web/app/(app)/environments/[environmentId]/settings/(organization)/general/actions.ts",
+        "apps/web/app/(app)/environments/[environmentId]/settings/(organization)/general/components/AISettingsToggle.tsx"
+      ]
+    },
+    {
+      "dimension": "ui_ux",
+      "recommendation": "Created a dedicated `AISettingsToggle` component with proper loading states, success/error feedback, and conditional rendering based on user permissions",
+      "rationale": "Provides clear visual feedback for users, prevents unauthorized users from seeing interactive controls they can't use, and maintains consistency with existing settings UI patterns",
+      "alternatives_considered": [
+        "Inline the toggle logic directly in the page component",
+        "Use server components for the entire settings card"
+      ],
+      "files_affected": [
+        "apps/web/app/(app)/environments/[environmentId]/settings/(organization)/general/components/AISettingsToggle.tsx",
+        "apps/web/app/(app)/environments/[environmentId]/settings/(organization)/general/page.tsx"
+      ]
+    },
+    {
+      "dimension": "internationalization",
+      "recommendation": "Added comprehensive i18n support with translations for all UI text across 14 supported languages, including clear descriptions of what each AI toggle controls",
+      "rationale": "Maintains consistency with the existing internationalization strategy and ensures the feature is accessible to all users regardless of language preference",
+      "alternatives_considered": [
+        "Use English-only text initially and add translations later",
+        "Create separate translation files for AI-specific terms"
+      ],
+      "files_affected": [
+        "apps/web/locales/de-DE.json",
+        "apps/web/locales/en-US.json",
+        "apps/web/locales/es-ES.json",
+        "apps/web/locales/fr-FR.json",
+        "apps/web/locales/hu-HU.json",
+        "apps/web/locales/ja-JP.json",
+        "apps/web/locales/nl-NL.json",
+        "apps/web/locales/pt-BR.json",
+        "apps/web/locales/pt-PT.json",
+        "apps/web/locales/ro-RO.json",
+        "apps/web/locales/ru-RU.json",
+        "apps/web/locales/sv-SE.json",
+        "apps/web/locales/zh-Hans-CN.json",
+        "apps/web/locales/zh-Hant-TW.json",
+        "apps/web/i18n.lock"
+      ]
+    },
+    {
+      "dimension": "testing",
+      "recommendation": "Updated all existing test mocks and test files to reflect the new dual AI flag structure while maintaining test coverage",
+      "rationale": "Ensures tests continue to pass after the data model change and prevents regression. The comprehensive test updates show good test hygiene in the codebase",
+      "alternatives_considered": [
+        "Only update tests that directly test AI functionality",
+        "Create new tests specifically for the AI toggle feature"
+      ],
+      "files_affected": [
+        "apps/web/app/api/v1/client/[environmentId]/environment/lib/environmentState.test.ts",
+        "apps/web/app/api/v1/management/surveys/lib/utils.test.ts",
+        "apps/web/lib/organization/auth.test.ts",
+        "apps/web/lib/organization/service.test.ts",
+        "apps/web/lib/survey/__mock__/survey.mock.ts",
+        "apps/web/lib/user/service.test.ts",
+        "apps/web/modules/ee/sso/lib/organization.test.ts",
+        "apps/web/modules/ee/sso/lib/tests/__mock__/sso-handlers.mock.ts",
+        "apps/web/modules/environments/lib/utils.test.ts",
+        "apps/web/modules/survey/editor/lib/survey.test.ts",
+        "apps/web/modules/survey/lib/organization.test.ts"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Database schema migration for granular AI controls",
+      "description": "Replace single isAIEnabled boolean with two separate flags for smart tools and data analysis, update Prisma schema and create migration",
+      "files_to_modify": [
+        "packages/database/schema.prisma",
+        "packages/database/migration/20260302000000_replace_is_ai_enabled_with_dual_toggles/migration.sql",
+        "packages/types/organizations.ts",
+        "packages/database/zod/organizations.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-002",
+      "title": "Unified organization update action with authorization",
+      "description": "Create reusable updateOrganizationAction helper and implement AI settings update action with proper role-based access control",
+      "files_to_modify": [
+        "apps/web/app/(app)/environments/[environmentId]/settings/(organization)/general/actions.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-003",
+      "title": "AI settings UI component with internationalization",
+      "description": "Create AISettingsToggle React component with toggles for both AI features, loading states, permission checks, and add to organization settings page",
+      "files_to_modify": [
+        "apps/web/app/(app)/environments/[environmentId]/settings/(organization)/general/page.tsx"
+      ],
+      "files_to_create": [
+        "apps/web/app/(app)/environments/[environmentId]/settings/(organization)/general/components/AISettingsToggle.tsx"
+      ],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-004",
+      "title": "Comprehensive test updates and i18n support",
+      "description": "Update all test mocks and test files to use new dual AI flags, add translations for 14 languages, and update i18n lock file",
+      "files_to_modify": [
+        "apps/web/app/api/v1/client/[environmentId]/environment/lib/environmentState.test.ts",
+        "apps/web/app/api/v1/management/surveys/lib/utils.test.ts",
+        "apps/web/lib/organization/auth.test.ts",
+        "apps/web/lib/organization/service.test.ts",
+        "apps/web/lib/survey/__mock__/survey.mock.ts",
+        "apps/web/lib/user/service.test.ts",
+        "apps/web/modules/ee/sso/lib/organization.test.ts",
+        "apps/web/modules/ee/sso/lib/tests/__mock__/sso-handlers.mock.ts",
+        "apps/web/modules/environments/lib/utils.test.ts",
+        "apps/web/modules/survey/editor/lib/survey.test.ts",
+        "apps/web/modules/survey/lib/organization.test.ts",
+        "apps/web/locales/de-DE.json",
+        "apps/web/locales/en-US.json",
+        "apps/web/locales/es-ES.json",
+        "apps/web/locales/fr-FR.json",
+        "apps/web/locales/hu-HU.json",
+        "apps/web/locales/ja-JP.json",
+        "apps/web/locales/nl-NL.json",
+        "apps/web/locales/pt-BR.json",
+        "apps/web/locales/pt-PT.json",
+        "apps/web/locales/ro-RO.json",
+        "apps/web/locales/ru-RU.json",
+        "apps/web/locales/sv-SE.json",
+        "apps/web/locales/zh-Hans-CN.json",
+        "apps/web/locales/zh-Hant-TW.json",
+        "apps/web/i18n.lock"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "large"
+    }
+  ],
+  "implementation_summary": "The implementation introduces granular AI feature controls at the organization level by splitting the existing single `isAIEnabled` flag into two separate toggles: `isAISmartToolsEnabled` for productivity features (like survey translation) and `isAIDataAnalysisEnabled` for data processing features. This architectural decision provides organizations with more control over privacy-sensitive AI functionality while maintaining access to helpful tools.\n\nThe solution follows established patterns in the codebase by creating a reusable `updateOrganizationAction` helper that consolidates authorization, audit logging, and update logic. This DRY approach replaces what would have been separate action functions for each setting. The UI implementation uses the existing `AdvancedOptionToggle` component and integrates seamlessly with the organization settings page, showing appropriate permission-based controls and feedback.\n\nA key design choice was allowing both owners and managers to modify AI settings while keeping organization name changes owner-only. This balances security with practical team management needs. The implementation maintains full internationalization support with translations across 14 languages and comprehensively updates all test files to reflect the new data model, demonstrating good test hygiene and preventing regression.",
+  "source_pr": "https://github.com/formbricks/formbricks/pull/7399",
+  "before_sha": "345b282733a6a72159990e0074bda6ee7624b67e",
+  "after_sha": "bc334c24cf367400ae0bb7edc66bafb573e0832b",
+  "diff_stats": {
+    "additions": 347,
+    "deletions": 65,
+    "files_changed": 38
+  }
+}
