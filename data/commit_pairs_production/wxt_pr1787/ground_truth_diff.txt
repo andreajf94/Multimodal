@@ -1,0 +1,436 @@
+diff --git a/packages/wxt/src/core/builders/vite/plugins/devHtmlPrerender.ts b/packages/wxt/src/core/builders/vite/plugins/devHtmlPrerender.ts
+index 6c7f2dd9d..2317a6a92 100644
+--- a/packages/wxt/src/core/builders/vite/plugins/devHtmlPrerender.ts
++++ b/packages/wxt/src/core/builders/vite/plugins/devHtmlPrerender.ts
+@@ -41,32 +41,32 @@ export function devHtmlPrerender(
+       },
+       // Convert scripts like src="./main.tsx" -> src="http://localhost:3000/entrypoints/popup/main.tsx"
+       // before the paths are replaced with their bundled path
+-      transform(code, id) {
+-        if (
+-          config.command !== 'serve' ||
+-          server == null ||
+-          !id.endsWith('.html')
+-        )
+-          return;
+-
+-        const { document } = parseHTML(code);
+-
+-        const _pointToDevServer = (querySelector: string, attr: string) =>
+-          pointToDevServer(config, server, id, document, querySelector, attr);
+-        _pointToDevServer('script[type=module]', 'src');
+-        _pointToDevServer('link[rel=stylesheet]', 'href');
+-
+-        // Add a script to add page reloading
+-        const reloader = document.createElement('script');
+-        reloader.src = htmlReloadId;
+-        reloader.type = 'module';
+-        document.head.appendChild(reloader);
+-
+-        const newHtml = document.toString();
+-        config.logger.debug('transform ' + id);
+-        config.logger.debug('Old HTML:\n' + code);
+-        config.logger.debug('New HTML:\n' + newHtml);
+-        return newHtml;
++      transform: {
++        filter: {
++          id: /\.html$/,
++        },
++        handler(code, id) {
++          if (config.command !== 'serve' || server == null) return;
++
++          const { document } = parseHTML(code);
++
++          const _pointToDevServer = (querySelector: string, attr: string) =>
++            pointToDevServer(config, server, id, document, querySelector, attr);
++          _pointToDevServer('script[type=module]', 'src');
++          _pointToDevServer('link[rel=stylesheet]', 'href');
++
++          // Add a script to add page reloading
++          const reloader = document.createElement('script');
++          reloader.src = htmlReloadId;
++          reloader.type = 'module';
++          document.head.appendChild(reloader);
++
++          const newHtml = document.toString();
++          config.logger.debug('transform ' + id);
++          config.logger.debug('Old HTML:\n' + code);
++          config.logger.debug('New HTML:\n' + newHtml);
++          return newHtml;
++        },
+       },
+ 
+       // Pass the HTML through the dev server to add dev-mode specific code
+@@ -114,29 +114,37 @@ export function devHtmlPrerender(
+     {
+       name: 'wxt:virtualize-inline-scripts',
+       apply: 'serve',
+-      resolveId(id) {
+-        // Resolve inline scripts
+-        if (id.startsWith(virtualInlineScript)) {
+-          return '\0' + id;
+-        }
+-
+-        // Ignore chunks during HTML file pre-rendering
+-        if (id.startsWith('/chunks/')) {
+-          return '\0noop';
+-        }
++      resolveId: {
++        filter: {
++          id: [new RegExp(`^${virtualInlineScript}`), new RegExp('^/chunks/')],
++        },
++        handler(id) {
++          // Ignore chunks during HTML file pre-rendering
++          if (id.startsWith('/chunks/')) {
++            return '\0noop';
++          }
++
++          return `\0${id}`;
++        },
+       },
+-      load(id) {
+-        // Resolve virtualized inline scripts
+-        if (id.startsWith(resolvedVirtualInlineScript)) {
++      load: {
++        filter: {
++          id: [
++            new RegExp(`^${resolvedVirtualInlineScript}`),
++            //eslint-disable-next-line no-control-regex
++            new RegExp('^\x00noop'),
++          ],
++        },
++        handler(id) {
++          // Ignore chunks during HTML file pre-rendering
++          if (id === '\0noop') {
++            return '';
++          }
++
+           // id="virtual:wxt-inline-script?<key>"
+           const key = id.substring(id.indexOf('?') + 1);
+           return inlineScriptContents[key];
+-        }
+-
+-        // Ignore chunks during HTML file pre-rendering
+-        if (id === '\0noop') {
+-          return '';
+-        }
++        },
+       },
+     },
+   ];
+diff --git a/packages/wxt/src/core/builders/vite/plugins/download.ts b/packages/wxt/src/core/builders/vite/plugins/download.ts
+index d3e87a251..4bdf67353 100644
+--- a/packages/wxt/src/core/builders/vite/plugins/download.ts
++++ b/packages/wxt/src/core/builders/vite/plugins/download.ts
+@@ -13,15 +13,23 @@ import { fetchCached } from '../../../utils/network';
+ export function download(config: ResolvedConfig): Plugin {
+   return {
+     name: 'wxt:download',
+-    resolveId(id) {
+-      if (id.startsWith('url:')) return '\0' + id;
++    resolveId: {
++      filter: {
++        id: /^url:/,
++      },
++      handler(id) {
++        return `\0${id}`;
++      },
+     },
+-    load(id) {
+-      if (!id.startsWith('\0url:')) return;
+-
+-      // Load file from network or cache
+-      const url = id.replace('\0url:', '');
+-      return fetchCached(url, config);
++    load: {
++      filter: {
++        //eslint-disable-next-line no-control-regex
++        id: /^\x00url:/,
++      },
++      handler(id) {
++        const url = id.replace('\0url:', '');
++        return fetchCached(url, config);
++      },
+     },
+   };
+ }
+diff --git a/packages/wxt/src/core/builders/vite/plugins/extensionApiMock.ts b/packages/wxt/src/core/builders/vite/plugins/extensionApiMock.ts
+index 830bd5981..f466ff84d 100644
+--- a/packages/wxt/src/core/builders/vite/plugins/extensionApiMock.ts
++++ b/packages/wxt/src/core/builders/vite/plugins/extensionApiMock.ts
+@@ -33,11 +33,21 @@ export function extensionApiMock(config: ResolvedConfig): vite.PluginOption {
+         },
+       };
+     },
+-    resolveId(id) {
+-      if (id.endsWith(virtualSetupModule)) return resolvedVirtualSetupModule;
++    resolveId: {
++      filter: {
++        id: new RegExp(`${virtualSetupModule}$`),
++      },
++      handler() {
++        return resolvedVirtualSetupModule;
++      },
+     },
+-    load(id) {
+-      if (id === resolvedVirtualSetupModule) return setupTemplate;
++    load: {
++      filter: {
++        id: new RegExp(`^${resolvedVirtualSetupModule}$`),
++      },
++      handler() {
++        return setupTemplate;
++      },
+     },
+   };
+ }
+diff --git a/packages/wxt/src/core/builders/vite/plugins/noopBackground.ts b/packages/wxt/src/core/builders/vite/plugins/noopBackground.ts
+index 46be89d9e..6dffab1cd 100644
+--- a/packages/wxt/src/core/builders/vite/plugins/noopBackground.ts
++++ b/packages/wxt/src/core/builders/vite/plugins/noopBackground.ts
+@@ -11,13 +11,21 @@ export function noopBackground(): Plugin {
+   const resolvedVirtualModuleId = '\0' + virtualModuleId;
+   return {
+     name: 'wxt:noop-background',
+-    resolveId(id) {
+-      if (id === virtualModuleId) return resolvedVirtualModuleId;
++    resolveId: {
++      filter: {
++        id: new RegExp(`^${virtualModuleId}$`),
++      },
++      handler() {
++        return resolvedVirtualModuleId;
++      },
+     },
+-    load(id) {
+-      if (id === resolvedVirtualModuleId) {
++    load: {
++      filter: {
++        id: new RegExp(`^${resolvedVirtualModuleId}$`),
++      },
++      handler() {
+         return `import { defineBackground } from 'wxt/utils/define-background';\nexport default defineBackground(() => void 0)`;
+-      }
++      },
+     },
+   };
+ }
+diff --git a/packages/wxt/src/core/builders/vite/plugins/removeEntrypointMainFunction.ts b/packages/wxt/src/core/builders/vite/plugins/removeEntrypointMainFunction.ts
+index 4d691a39c..1aad7af39 100644
+--- a/packages/wxt/src/core/builders/vite/plugins/removeEntrypointMainFunction.ts
++++ b/packages/wxt/src/core/builders/vite/plugins/removeEntrypointMainFunction.ts
+@@ -17,14 +17,15 @@ export function removeEntrypointMainFunction(
+     name: 'wxt:remove-entrypoint-main-function',
+     transform: {
+       order: 'pre',
+-      handler(code, id) {
+-        if (id === absPath) {
+-          const newCode = removeMainFunctionCode(code);
+-          config.logger.debug('vite-node transformed entrypoint', path);
+-          config.logger.debug(`Original:\n---\n${code}\n---`);
+-          config.logger.debug(`Transformed:\n---\n${newCode.code}\n---`);
+-          return newCode;
+-        }
++      filter: {
++        id: new RegExp(`^${absPath}$`),
++      },
++      handler(code) {
++        const newCode = removeMainFunctionCode(code);
++        config.logger.debug('vite-node transformed entrypoint', path);
++        config.logger.debug(`Original:\n---\n${code}\n---`);
++        config.logger.debug(`Transformed:\n---\n${newCode.code}\n---`);
++        return newCode;
+       },
+     },
+   };
+diff --git a/packages/wxt/src/core/builders/vite/plugins/resolveAppConfig.ts b/packages/wxt/src/core/builders/vite/plugins/resolveAppConfig.ts
+index e3bcc2535..abef26b30 100644
+--- a/packages/wxt/src/core/builders/vite/plugins/resolveAppConfig.ts
++++ b/packages/wxt/src/core/builders/vite/plugins/resolveAppConfig.ts
+@@ -23,15 +23,23 @@ export function resolveAppConfig(config: ResolvedConfig): vite.Plugin {
+         },
+       };
+     },
+-    async resolveId(id) {
+-      if (id !== virtualModuleId) return;
+-
+-      return (await pathExists(appConfigFile))
+-        ? appConfigFile
+-        : resolvedVirtualModuleId;
++    resolveId: {
++      filter: {
++        id: new RegExp(`^${virtualModuleId}$`),
++      },
++      async handler() {
++        return (await pathExists(appConfigFile))
++          ? appConfigFile
++          : resolvedVirtualModuleId;
++      },
+     },
+-    load(id) {
+-      if (id === resolvedVirtualModuleId) return `export default {}`;
++    load: {
++      filter: {
++        id: new RegExp(`^${resolvedVirtualModuleId}$`),
++      },
++      handler() {
++        return `export default {}`;
++      },
+     },
+   };
+ }
+diff --git a/packages/wxt/src/core/builders/vite/plugins/resolveVirtualModules.ts b/packages/wxt/src/core/builders/vite/plugins/resolveVirtualModules.ts
+index fd9e71827..fa0d0692b 100644
+--- a/packages/wxt/src/core/builders/vite/plugins/resolveVirtualModules.ts
++++ b/packages/wxt/src/core/builders/vite/plugins/resolveVirtualModules.ts
+@@ -5,8 +5,8 @@ import {
+   VirtualModuleId,
+   virtualModuleNames,
+ } from '../../../utils/virtual-modules';
+-import fs from 'fs-extra';
+ import { resolve } from 'path';
++import fs from 'fs-extra';
+ 
+ /**
+  * Resolve all the virtual modules to the `node_modules/wxt/dist/virtual`
+@@ -16,26 +16,32 @@ export function resolveVirtualModules(config: ResolvedConfig): Plugin[] {
+   return virtualModuleNames.map((name) => {
+     const virtualId: `${VirtualModuleId}?` = `virtual:wxt-${name}?`;
+     const resolvedVirtualId = '\0' + virtualId;
++
+     return {
+       name: `wxt:resolve-virtual-${name}`,
+-      resolveId(id) {
+-        // Id doesn't start with prefix, it looks like this:
+-        // /path/to/project/virtual:wxt-background?/path/to/project/entrypoints/background.ts
+-        const index = id.indexOf(virtualId);
+-        if (index === -1) return;
+-
+-        const inputPath = normalizePath(id.substring(index + virtualId.length));
+-        return resolvedVirtualId + inputPath;
++      resolveId: {
++        filter: {
++          id: new RegExp(virtualId),
++        },
++        handler(id) {
++          const inputPath = normalizePath(
++            id.substring(id.indexOf(virtualId) + virtualId.length),
++          );
++          return resolvedVirtualId + inputPath;
++        },
+       },
+-      async load(id) {
+-        if (!id.startsWith(resolvedVirtualId)) return;
+-
+-        const inputPath = id.replace(resolvedVirtualId, '');
+-        const template = await fs.readFile(
+-          resolve(config.wxtModuleDir, `dist/virtual/${name}.mjs`),
+-          'utf-8',
+-        );
+-        return template.replace(`virtual:user-${name}`, inputPath);
++      load: {
++        filter: {
++          id: new RegExp(`^${resolvedVirtualId}`),
++        },
++        async handler(id) {
++          const inputPath = id.replace(resolvedVirtualId, '');
++          const template = await fs.readFile(
++            resolve(config.wxtModuleDir, `dist/virtual/${name}.mjs`),
++            'utf-8',
++          );
++          return template.replace(`virtual:user-${name}`, inputPath);
++        },
+       },
+     };
+   });
+diff --git a/packages/wxt/src/core/builders/vite/plugins/wxtPluginLoader.ts b/packages/wxt/src/core/builders/vite/plugins/wxtPluginLoader.ts
+index 19cb2c19c..73238ec5b 100644
+--- a/packages/wxt/src/core/builders/vite/plugins/wxtPluginLoader.ts
++++ b/packages/wxt/src/core/builders/vite/plugins/wxtPluginLoader.ts
+@@ -16,33 +16,50 @@ export function wxtPluginLoader(config: ResolvedConfig): vite.Plugin {
+ 
+   return {
+     name: 'wxt:plugin-loader',
+-    resolveId(id) {
+-      if (id === virtualModuleId) return resolvedVirtualModuleId;
+-      if (id === virtualHtmlModuleId) return resolvedVirtualHtmlModuleId;
+-    },
+-    load(id) {
+-      if (id === resolvedVirtualModuleId) {
+-        // Import and init all plugins
+-        const imports = config.plugins
+-          .map(
+-            (plugin, i) =>
+-              `import initPlugin${i} from '${normalizePath(plugin)}';`,
+-          )
+-          .join('\n');
+-        const initCalls = config.plugins
+-          .map((_, i) => `  initPlugin${i}();`)
+-          .join('\n');
+-        return `${imports}\n\nexport function initPlugins() {\n${initCalls}\n}`;
+-      }
+-      if (id === resolvedVirtualHtmlModuleId) {
+-        return `import { initPlugins } from '${virtualModuleId}';
++    resolveId: {
++      filter: {
++        id: [
++          new RegExp(`^${virtualModuleId}$`),
++          new RegExp(`^${virtualHtmlModuleId}$`),
++        ],
++      },
++      handler(id) {
++        if (id === virtualModuleId) {
++          return resolvedVirtualModuleId;
++        }
+ 
+-try {
+-  initPlugins();
+-} catch (err) {
+-  console.error("[wxt] Failed to initialize plugins", err);
+-}`;
+-      }
++        return resolvedVirtualHtmlModuleId;
++      },
++    },
++    load: {
++      filter: {
++        id: [
++          new RegExp(`^${resolvedVirtualModuleId}$`),
++          new RegExp(`^${resolvedVirtualHtmlModuleId}$`),
++        ],
++      },
++      handler(id) {
++        if (id === resolvedVirtualModuleId) {
++          // Import and init all plugins
++          const imports = config.plugins
++            .map(
++              (plugin, i) =>
++                `import initPlugin${i} from '${normalizePath(plugin)}';`,
++            )
++            .join('\n');
++          const initCalls = config.plugins
++            .map((_, i) => `  initPlugin${i}();`)
++            .join('\n');
++          return `${imports}\n\nexport function initPlugins() {\n${initCalls}\n}`;
++        } else {
++          return `import { initPlugins } from '${virtualModuleId}';
++            try {
++              initPlugins();
++            } catch (err) {
++              console.error("[wxt] Failed to initialize plugins", err);
++            }`;
++        }
++      },
+     },
+     transformIndexHtml: {
+       // Use "pre" so the new script is added before vite bundles all the scripts
+@@ -65,7 +82,8 @@ try {
+           const newHead = document.createElement('head');
+           document.documentElement.prepend(newHead);
+         }
+-        document.head.prepend(script);
++
++        document.head?.prepend(script);
+         return document.toString();
+       },
+     },

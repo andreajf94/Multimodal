@@ -1,0 +1,153 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "caching_strategy",
+      "recommendation": "Implemented a three-layer caching hierarchy: LRU cache \u2192 Vercel edge cache \u2192 Redis \u2192 MySQL fallback",
+      "rationale": "This provides graceful degradation during traffic spikes. LRU cache offers fastest in-memory access for hot data. Vercel edge cache (5s TTL) provides short-lived shared cache across serverless instances during scaling events. Redis serves as persistent cache (24h TTL) for consistent data. MySQL is the ultimate source of truth.",
+      "alternatives_considered": [
+        "Single Redis instance for all operations",
+        "Longer Vercel cache TTLs",
+        "Using only LRU cache with longer TTL"
+      ],
+      "files_affected": [
+        "apps/web/lib/api/links/cache.ts"
+      ]
+    },
+    {
+      "dimension": "regional_caching",
+      "recommendation": "Separated Redis instances for different workloads: main Redis for general operations, us-east-1 Redis for high-volume click tracking",
+      "rationale": "Isolates high-volume click tracking operations to prevent them from impacting other Redis-dependent endpoints. If the us-east-1 Redis instance fails, only click tracking is affected, not the entire application. This follows the bulkhead pattern for fault isolation.",
+      "alternatives_considered": [
+        "Single Redis instance with separate databases",
+        "Using Redis clusters",
+        "Implementing circuit breakers on single Redis instance"
+      ],
+      "files_affected": [
+        "apps/web/lib/upstash/redis.ts",
+        "apps/web/lib/api/links/record-click-cache.ts"
+      ]
+    },
+    {
+      "dimension": "api_design",
+      "recommendation": "Updated track endpoints to use Promise.all for parallel cache lookups and separated Redis instance usage",
+      "rationale": "Parallelizing cache lookups reduces latency by fetching click IDs and link data concurrently. Separating click ID cache (us-east-1 Redis) from link cache (main Redis) prevents resource contention and allows independent scaling of high-volume operations.",
+      "alternatives_considered": [
+        "Sequential cache lookups",
+        "Combining all cache operations in single mget",
+        "Using Redis pipelines instead of Promise.all"
+      ],
+      "files_affected": [
+        "apps/web/app/(ee)/api/track/click/route.ts",
+        "apps/web/app/(ee)/api/track/open/route.ts",
+        "apps/web/app/(ee)/api/track/visit/route.ts"
+      ]
+    },
+    {
+      "dimension": "observability",
+      "recommendation": "Enhanced logging throughout the cache hierarchy to track hits/misses at each layer",
+      "rationale": "Provides visibility into cache performance and helps identify bottlenecks. Each cache layer logs its status, making it easier to debug cache behavior during traffic spikes and optimize TTLs based on real usage patterns.",
+      "alternatives_considered": [
+        "Structured logging with metrics",
+        "Using OpenTelemetry for distributed tracing",
+        "Minimal logging to reduce overhead"
+      ],
+      "files_affected": [
+        "apps/web/lib/api/links/cache.ts"
+      ]
+    },
+    {
+      "dimension": "runtime_configuration",
+      "recommendation": "Updated middleware to use Node.js runtime instead of edge runtime and upgraded @vercel/functions dependency",
+      "rationale": "Node.js runtime provides more stable execution environment for middleware operations. Upgrading to @vercel/functions 3.4.3 enables access to getCache() API for edge caching and ensures compatibility with newer Vercel features.",
+      "alternatives_considered": [
+        "Keeping edge runtime with different caching strategy",
+        "Using edge middleware with limitations",
+        "Implementing custom cache layer without Vercel functions"
+      ],
+      "files_affected": [
+        "apps/web/middleware.ts",
+        "apps/web/package.json",
+        "pnpm-lock.yaml"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Added try-catch around Vercel cache operations to gracefully handle failures",
+      "rationale": "Ensures that Vercel cache failures don't break the entire caching flow. If Vercel cache is unavailable, the system falls back to Redis and MySQL, maintaining core functionality during infrastructure issues.",
+      "alternatives_considered": [
+        "Failing fast on cache errors",
+        "Implementing retry logic",
+        "Using circuit breakers for cache layers"
+      ],
+      "files_affected": [
+        "apps/web/lib/api/links/cache.ts"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Implement three-layer caching hierarchy for link lookups",
+      "description": "Add Vercel edge cache as intermediate layer between LRU cache and Redis to handle traffic spikes when new serverless instances spin up",
+      "files_to_modify": [
+        "apps/web/lib/api/links/cache.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-002",
+      "title": "Separate Redis instances for workload isolation",
+      "description": "Create dedicated us-east-1 Redis instance for high-volume click tracking operations to prevent impact on other Redis-dependent endpoints",
+      "files_to_modify": [
+        "apps/web/lib/upstash/redis.ts",
+        "apps/web/lib/api/links/record-click-cache.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-003",
+      "title": "Update track endpoints for parallel cache operations",
+      "description": "Modify click, open, and visit tracking endpoints to use Promise.all for parallel cache lookups and route click ID caching to us-east-1 Redis",
+      "files_to_modify": [
+        "apps/web/app/(ee)/api/track/click/route.ts",
+        "apps/web/app/(ee)/api/track/open/route.ts",
+        "apps/web/app/(ee)/api/track/visit/route.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-004",
+      "title": "Update runtime configuration and dependencies",
+      "description": "Change middleware runtime from edge to Node.js and upgrade @vercel/functions dependency to access getCache() API",
+      "files_to_modify": [
+        "apps/web/middleware.ts",
+        "apps/web/package.json",
+        "pnpm-lock.yaml"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-005",
+      "title": "Update test expectations for redirect behavior",
+      "description": "Adjust test to handle potential query parameter variations in redirect URLs",
+      "files_to_modify": [
+        "apps/web/tests/redirects/index.test.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation introduces a sophisticated multi-layer caching system designed to protect the Dub application from traffic spikes while maintaining high performance for link lookups and click tracking. The core innovation is a three-tier caching hierarchy: in-memory LRU cache (3s TTL) for fastest access, Vercel edge cache (5s TTL) as a shared fallback during serverless instance scaling, and Redis (24h TTL) as persistent storage. This design ensures that during traffic surges when new Vercel Fluid instances spin up, they can quickly access cached data from the shared Vercel cache rather than hitting Redis or MySQL immediately.\n\nA key architectural decision was separating Redis workloads: click tracking operations (high volume, time-sensitive) were moved to a dedicated us-east-1 Redis instance, while general link data remains in the main Redis instance. This isolation prevents high-volume click operations from impacting other Redis-dependent endpoints, implementing a bulkhead pattern for fault tolerance. The track endpoints were optimized to use Promise.all for parallel cache lookups, reducing latency by fetching click IDs and link data concurrently.\n\nThe system integrates gracefully with the existing codebase by extending the existing cache abstraction in lib/api/links/cache.ts and updating the track endpoints to use the new Redis instance separation. Enhanced logging provides observability into cache performance at each layer, helping operators understand cache behavior during traffic spikes. The middleware runtime was changed from edge to Node.js for stability, and the @vercel/functions dependency was upgraded to access the getCache() API needed for the edge caching layer.\n\nThis approach balances performance, reliability, and maintainability. During normal operations, most requests hit the LRU cache. During traffic spikes, the Vercel edge cache prevents thundering herd problems on Redis. If any cache layer fails, the system gracefully degrades to the next layer, ensuring core functionality remains available. The separation of Redis instances provides operational resilience, allowing high-volume click tracking to be scaled independently from other Redis operations.",
+  "source_pr": "https://github.com/dubinc/dub/pull/3541",
+  "before_sha": "583ba120e6fbedb0e9caeeb6998566ef1255cafa",
+  "after_sha": "f53db546730e81827dbfb837daea3d354418324a",
+  "diff_stats": {
+    "additions": 93,
+    "deletions": 34,
+    "files_changed": 10
+  }
+}

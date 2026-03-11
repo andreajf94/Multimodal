@@ -1,0 +1,51 @@
+diff --git a/tools/filesystem/filesystem.go b/tools/filesystem/filesystem.go
+index f2aa36aa1..1ee69cd2b 100644
+--- a/tools/filesystem/filesystem.go
++++ b/tools/filesystem/filesystem.go
+@@ -285,6 +285,16 @@ var manualExtensionContentTypes = map[string]string{
+ 	".css": "text/css",      // (see https://github.com/gabriel-vasile/mimetype/pull/113)
+ }
+ 
++// / GetFile returns a file content reader for given file key
++// / NB! Make sure to call `Close()` after you are done working with it.
++func (s *System) GetFile(fileKey string) (io.ReadCloser, error) {
++	br, readErr := s.bucket.NewReader(s.ctx, fileKey, nil)
++	if readErr != nil {
++		return nil, readErr
++	}
++	return br, nil
++}
++
+ // Serve serves the file at fileKey location to an HTTP response.
+ func (s *System) Serve(res http.ResponseWriter, req *http.Request, fileKey string, name string) error {
+ 	br, readErr := s.bucket.NewReader(s.ctx, fileKey, nil)
+diff --git a/tools/filesystem/filesystem_test.go b/tools/filesystem/filesystem_test.go
+index f03f22a3f..25300dfe1 100644
+--- a/tools/filesystem/filesystem_test.go
++++ b/tools/filesystem/filesystem_test.go
+@@ -348,7 +348,25 @@ func TestFileSystemServe(t *testing.T) {
+ 		}
+ 	}
+ }
++func TestFileSystemGetFile(t *testing.T) {
++	dir := createTestDir(t)
++	defer os.RemoveAll(dir)
+ 
++	fs, err := filesystem.NewLocal(dir)
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer fs.Close()
++
++	f, fErr := fs.GetFile("image.png")
++	if fErr != nil {
++		t.Fatal(fErr)
++	}
++	defer f.Close()
++	if f == nil {
++		t.Fatal("File is supposed to be found")
++	}
++}
+ func TestFileSystemServeSingleRange(t *testing.T) {
+ 	dir := createTestDir(t)
+ 	defer os.RemoveAll(dir)

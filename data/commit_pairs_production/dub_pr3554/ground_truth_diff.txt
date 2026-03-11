@@ -1,0 +1,81 @@
+diff --git a/apps/web/ui/support/chat-bubble.tsx b/apps/web/ui/support/chat-bubble.tsx
+index 272691af082..b40024b8c06 100644
+--- a/apps/web/ui/support/chat-bubble.tsx
++++ b/apps/web/ui/support/chat-bubble.tsx
+@@ -40,7 +40,7 @@ export function SupportChatBubble() {
+             animate={{ opacity: 1, y: 0, scale: 1 }}
+             exit={{ opacity: 0, y: 16, scale: 0.97 }}
+             transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
+-            className="pointer-events-auto mb-4 flex h-[660px] max-h-[calc(100vh-6rem)] w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-2xl bg-white shadow-2xl shadow-neutral-900/15 sm:w-[560px]"
++            className="pointer-events-auto mb-4 flex h-[660px] max-h-[calc(100vh-6rem)] w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-2xl shadow-[inset_0_0_0_1px_rgba(0,0,0,0.08)] sm:w-[560px]"
+           >
+             <div className="flex shrink-0 items-center justify-between bg-neutral-900 px-4 py-3">
+               <div className="flex items-center gap-2.5">
+@@ -74,11 +74,13 @@ export function SupportChatBubble() {
+               </div>
+             </div>
+ 
+-            <ChatInterface
+-              key={resetKey}
+-              onReset={handleReset}
+-              className="flex-1 overflow-hidden"
+-            />
++            <div className="flex-1 overflow-hidden bg-white">
++              <ChatInterface
++                key={resetKey}
++                onReset={handleReset}
++                className="h-full overflow-hidden"
++              />
++            </div>
+           </motion.div>
+         )}
+       </AnimatePresence>
+diff --git a/apps/web/ui/support/embedded-chat.tsx b/apps/web/ui/support/embedded-chat.tsx
+index 32ffb72b2bd..1b476e7502a 100644
+--- a/apps/web/ui/support/embedded-chat.tsx
++++ b/apps/web/ui/support/embedded-chat.tsx
+@@ -18,7 +18,7 @@ export function EmbeddedSupportChat() {
+   };
+ 
+   return (
+-    <div className="flex min-h-[500px] flex-col overflow-hidden rounded-xl border border-neutral-200 bg-white shadow-sm">
++    <div className="flex min-h-[500px] flex-col overflow-hidden rounded-xl border border-neutral-200 bg-white">
+       <div className="flex shrink-0 items-center justify-between border-b border-neutral-100 bg-neutral-50 px-5 py-4">
+         <div className="flex items-center gap-3">
+           <img
+diff --git a/apps/web/ui/support/ticket-upload.tsx b/apps/web/ui/support/ticket-upload.tsx
+index b4964628d6c..8064eebf91b 100644
+--- a/apps/web/ui/support/ticket-upload.tsx
++++ b/apps/web/ui/support/ticket-upload.tsx
+@@ -102,24 +102,20 @@ export function TicketUpload({
+       status: "uploading",
+     }));
+ 
+-    let allowedEntries: FileEntry[] = [];
+-    setFiles((prev) => {
+-      const combined = [...prev, ...entries].slice(0, MAX_FILES);
+-      allowedEntries = combined.slice(prev.length);
+-      return combined;
+-    });
++    setFiles((prev) => [...prev, ...entries].slice(0, MAX_FILES));
+ 
+-    allowedEntries.forEach((entry) => {
++    entries.forEach((entry) => {
+       uploadToPlain(entry.file).then((result) => {
+-        setFiles((prev) =>
+-          prev.map((f) =>
++        setFiles((prev) => {
++          if (!prev.some((f) => f.id === entry.id)) return prev;
++          return prev.map((f) =>
+             f.id === entry.id
+               ? "error" in result
+                 ? { ...f, status: "error", errorMessage: result.error }
+                 : { ...f, status: "done", attachmentId: result.attachmentId }
+               : f,
+-          ),
+-        );
++          );
++        });
+       });
+     });
+   }, []);

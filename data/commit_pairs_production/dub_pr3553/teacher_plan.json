@@ -1,0 +1,158 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "cron_job_design",
+      "recommendation": "Created a new cron job endpoint at `/api/cron/payouts/force-withdrawals` that processes payouts aged 90+ days in batches using cursor-based pagination and recursive scheduling via QStash.",
+      "rationale": "Batch processing prevents overwhelming the system with too many payouts at once. Cursor-based pagination ensures reliable pagination through large datasets. Recursive scheduling via QStash allows processing to continue across multiple invocations without manual intervention. The 90-day threshold aligns with compliance requirements for automatic withdrawals.",
+      "alternatives_considered": [
+        "Single large batch processing",
+        "Using database triggers",
+        "External job queue like BullMQ"
+      ],
+      "files_affected": [
+        "apps/web/app/(ee)/api/cron/payouts/force-withdrawals/route.ts"
+      ]
+    },
+    {
+      "dimension": "fee_handling_logic",
+      "recommendation": "Implemented dual fee structure: 0.5% stablecoin transaction fee + $0.50 withdrawal fee for payouts below $10 minimum. Updated fee calculation logic in multiple places to handle both scenarios.",
+      "rationale": "Separate fees for different scenarios: stablecoin transactions have network costs, while below-minimum withdrawals incur administrative overhead. The $0.50 fee for small withdrawals discourages frequent small transactions while covering processing costs. Constants are centralized for maintainability.",
+      "alternatives_considered": [
+        "Flat fee for all withdrawals",
+        "Percentage-based fee only",
+        "No fee for small withdrawals"
+      ],
+      "files_affected": [
+        "apps/web/lib/partners/create-stablecoin-payout.ts",
+        "apps/web/lib/partners/create-stripe-transfer.ts",
+        "apps/web/app/(ee)/partners.dub.co/(dashboard)/payouts/partner-payout-details-sheet.tsx",
+        "packages/email/src/types.ts"
+      ]
+    },
+    {
+      "dimension": "idempotency_and_concurrency",
+      "recommendation": "Added Redis-based locking mechanism in forceWithdrawal function to prevent duplicate withdrawals for the same partner. Extracted shared logic from action to reusable function.",
+      "rationale": "Prevents race conditions where multiple cron jobs or manual triggers could attempt to withdraw the same payout simultaneously. 60-second lock expiration provides safety while allowing retries. Extracting the logic makes it reusable for both manual actions and automated cron jobs.",
+      "alternatives_considered": [
+        "Database transactions with row locking",
+        "Optimistic concurrency control",
+        "Queue-based serial processing"
+      ],
+      "files_affected": [
+        "apps/web/lib/actions/partners/force-withdrawal.ts"
+      ]
+    },
+    {
+      "dimension": "email_notification_system",
+      "recommendation": "Created three new email templates: broadcast notification about auto-withdrawals, force withdrawal confirmation, and updated payout processed template with fee explanations.",
+      "rationale": "Different email types serve different purposes: broadcast educates users about the new system, force withdrawal confirms automated action, updated payout template explains fee structure. Templates include clear fee breakdowns and links to documentation for transparency.",
+      "alternatives_considered": [
+        "Single generic email template",
+        "In-app notifications only",
+        "Separate email service"
+      ],
+      "files_affected": [
+        "packages/email/src/templates/broadcasts/payout-auto-withdrawals.tsx",
+        "packages/email/src/templates/partner-payout-force-withdrawal.tsx",
+        "packages/email/src/templates/partner-payout-processed.tsx",
+        "apps/web/lib/email/email-templates-map.ts"
+      ]
+    },
+    {
+      "dimension": "minimum_withdrawal_enforcement",
+      "recommendation": "Added logic to skip automatic transfers for payouts below $10 minimum, but allow force withdrawals with fee. Updated existing cron job to only fund financial accounts for stablecoin payouts meeting minimum.",
+      "rationale": "Minimum amount reduces administrative overhead for small transactions. Force withdrawal option gives users control while applying fee to cover costs. The system gracefully handles edge cases where payouts accumulate below threshold.",
+      "alternatives_considered": [
+        "Always transfer regardless of amount",
+        "Accumulate until minimum reached",
+        "Donate small amounts to charity"
+      ],
+      "files_affected": [
+        "apps/web/app/(ee)/api/cron/payouts/charge-succeeded/route.ts",
+        "apps/web/lib/partners/create-stablecoin-payout.ts",
+        "apps/web/scripts/processed-payouts.ts"
+      ]
+    },
+    {
+      "dimension": "financial_account_funding",
+      "recommendation": "Added 1-second delay after funding financial account to ensure funds are available before proceeding with transfers.",
+      "rationale": "Stripe's financial accounts may have eventual consistency. The delay prevents race conditions where subsequent operations might fail due to insufficient funds. This is a pragmatic solution to handle asynchronous fund availability.",
+      "alternatives_considered": [
+        "Polling for fund availability",
+        "Webhook-based confirmation",
+        "Retry logic with exponential backoff"
+      ],
+      "files_affected": [
+        "apps/web/lib/stripe/fund-financial-account.ts"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Automated Force Withdrawal Cron Job",
+      "description": "Implement daily cron job that automatically withdraws processed payouts after 90 days, with batch processing and recursive scheduling.",
+      "files_to_modify": [
+        "apps/web/app/(ee)/api/cron/payouts/force-withdrawals/route.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-002",
+      "title": "Fee Calculation and Enforcement Logic",
+      "description": "Update payout creation logic to handle minimum withdrawal amounts, apply appropriate fees, and skip transfers for small payouts.",
+      "files_to_modify": [
+        "apps/web/lib/partners/create-stablecoin-payout.ts",
+        "apps/web/lib/partners/create-stripe-transfer.ts",
+        "apps/web/app/(ee)/api/cron/payouts/charge-succeeded/route.ts",
+        "apps/web/scripts/processed-payouts.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-003",
+      "title": "Email Notification System",
+      "description": "Create and integrate email templates for automated withdrawal notifications, force withdrawals, and updated payout explanations.",
+      "files_to_modify": [
+        "apps/web/lib/email/email-templates-map.ts",
+        "packages/email/src/templates/partner-payout-processed.tsx"
+      ],
+      "files_to_create": [
+        "packages/email/src/templates/broadcasts/payout-auto-withdrawals.tsx",
+        "packages/email/src/templates/partner-payout-force-withdrawal.tsx"
+      ],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-004",
+      "title": "UI Updates and Fee Display",
+      "description": "Update payout details sheet to show appropriate fees based on payout method and amount, with tooltip explanations.",
+      "files_to_modify": [
+        "apps/web/app/(ee)/partners.dub.co/(dashboard)/payouts/partner-payout-details-sheet.tsx"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-005",
+      "title": "Shared Force Withdrawal Logic",
+      "description": "Refactor force withdrawal logic into reusable function for both manual actions and automated cron jobs, with Redis locking.",
+      "files_to_modify": [
+        "apps/web/lib/actions/partners/force-withdrawal.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The automated payout withdrawal system was implemented as a comprehensive solution that handles compliance requirements, fee structures, and user notifications. The core architecture centers around a new cron job endpoint that processes payouts aged 90+ days in batches, using cursor-based pagination for reliability and recursive scheduling via QStash for continuous processing.\n\nKey patterns include the separation of fee logic (0.5% for stablecoin transactions, $0.50 for below-minimum withdrawals), Redis-based locking to prevent duplicate withdrawals, and a modular email notification system with three distinct templates. The implementation reuses existing payout creation logic but adds conditional fee application and minimum amount enforcement.\n\nThe changes integrate well with the existing codebase by extending the partner payout system rather than rewriting it. Constants are centralized, existing API endpoints are modified with minimal changes, and the force withdrawal logic is extracted to be reusable across both manual and automated contexts. The system maintains backward compatibility while adding the new automated withdrawal capability, with clear fee explanations and user notifications throughout the process.",
+  "source_pr": "https://github.com/dubinc/dub/pull/3553",
+  "before_sha": "110de950afac528ba50b872ad4bb4d761f2abbe0",
+  "after_sha": "ed26df954cb064a480e3fb00af3c92094c189a45",
+  "diff_stats": {
+    "additions": 577,
+    "deletions": 124,
+    "files_changed": 13
+  }
+}

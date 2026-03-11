@@ -1,0 +1,1707 @@
+diff --git a/.github/workflows/docker/dynamic-config-custom.yaml b/.github/workflows/docker/dynamic-config-custom.yaml
+index 49dddbb77..acaddf3c5 100644
+--- a/.github/workflows/docker/dynamic-config-custom.yaml
++++ b/.github/workflows/docker/dynamic-config-custom.yaml
+@@ -49,4 +49,8 @@ history.enableChasm:
+ history.enableTransitionHistory:
+   - value: true
+ component.nexusoperations.useSystemCallbackURL:
+-  - value: false
+\ No newline at end of file
++  - value: false
++frontend.WorkerHeartbeatsEnabled:
++  - value: true
++frontend.ListWorkersEnabled:
++  - value: true
+diff --git a/contrib/resourcetuner/cgroups.go b/contrib/sysinfo/cgroups.go
+similarity index 93%
+rename from contrib/resourcetuner/cgroups.go
+rename to contrib/sysinfo/cgroups.go
+index ab5012250..acfb1f3dd 100644
+--- a/contrib/resourcetuner/cgroups.go
++++ b/contrib/sysinfo/cgroups.go
+@@ -1,6 +1,6 @@
+ //go:build linux
+ 
+-package resourcetuner
++package sysinfo
+ 
+ import (
+ 	"errors"
+@@ -43,11 +43,11 @@ func (p *cGroupInfoImpl) GetLastCPUUsage() float64 {
+ func (p *cGroupInfoImpl) updateCGroupStats() error {
+ 	control, err := cgroup2.Load("/")
+ 	if err != nil {
+-		return fmt.Errorf("failed to get cgroup mem stats %w", err)
++		return fmt.Errorf("failed to load cgroup: %w", err)
+ 	}
+ 	metrics, err := control.Stat()
+ 	if err != nil {
+-		return fmt.Errorf("failed to get cgroup mem stats %w", err)
++		return fmt.Errorf("failed to get cgroup stats: %w", err)
+ 	}
+ 	// Only update if a limit has been set
+ 	if metrics.Memory.UsageLimit != 0 {
+@@ -56,7 +56,7 @@ func (p *cGroupInfoImpl) updateCGroupStats() error {
+ 
+ 	err = p.cgroupCpuCalc.updateCpuUsage(metrics)
+ 	if err != nil {
+-		return fmt.Errorf("failed to get cgroup cpu usage %w", err)
++		return fmt.Errorf("failed to get cgroup cpu usage: %w", err)
+ 	}
+ 	return nil
+ }
+diff --git a/contrib/resourcetuner/cgroups_common.go b/contrib/sysinfo/cgroups_common.go
+similarity index 95%
+rename from contrib/resourcetuner/cgroups_common.go
+rename to contrib/sysinfo/cgroups_common.go
+index f4fd3d244..b314a4599 100644
+--- a/contrib/resourcetuner/cgroups_common.go
++++ b/contrib/sysinfo/cgroups_common.go
+@@ -1,4 +1,4 @@
+-package resourcetuner
++package sysinfo
+ 
+ import (
+ 	"errors"
+diff --git a/contrib/resourcetuner/cgroups_notlinux.go b/contrib/sysinfo/cgroups_notlinux.go
+similarity index 94%
+rename from contrib/resourcetuner/cgroups_notlinux.go
+rename to contrib/sysinfo/cgroups_notlinux.go
+index 068e4220f..d89de073b 100644
+--- a/contrib/resourcetuner/cgroups_notlinux.go
++++ b/contrib/sysinfo/cgroups_notlinux.go
+@@ -1,6 +1,6 @@
+ //go:build !linux
+ 
+-package resourcetuner
++package sysinfo
+ 
+ import "errors"
+ 
+diff --git a/contrib/resourcetuner/cgroups_test.go b/contrib/sysinfo/cgroups_test.go
+similarity index 98%
+rename from contrib/resourcetuner/cgroups_test.go
+rename to contrib/sysinfo/cgroups_test.go
+index 57c69f005..a0102b32e 100644
+--- a/contrib/resourcetuner/cgroups_test.go
++++ b/contrib/sysinfo/cgroups_test.go
+@@ -1,4 +1,4 @@
+-package resourcetuner
++package sysinfo
+ 
+ import (
+ 	"errors"
+diff --git a/contrib/resourcetuner/go.mod b/contrib/sysinfo/go.mod
+similarity index 94%
+rename from contrib/resourcetuner/go.mod
+rename to contrib/sysinfo/go.mod
+index ac80a5858..ea15d3d0d 100644
+--- a/contrib/resourcetuner/go.mod
++++ b/contrib/sysinfo/go.mod
+@@ -1,4 +1,4 @@
+-module go.temporal.io/sdk/contrib/resourcetuner
++module go.temporal.io/sdk/contrib/sysinfo
+ 
+ go 1.23.0
+ 
+@@ -8,7 +8,6 @@ require (
+ 	github.com/containerd/cgroups/v3 v3.0.3
+ 	github.com/shirou/gopsutil/v4 v4.24.8
+ 	github.com/stretchr/testify v1.10.0
+-	go.einride.tech/pid v0.1.3
+ 	go.temporal.io/sdk v1.29.1
+ )
+ 
+@@ -31,7 +30,7 @@ require (
+ 	github.com/power-devops/perfstat v0.0.0-20210106213030-5aafc221ea8c // indirect
+ 	github.com/robfig/cron v1.2.0 // indirect
+ 	github.com/shoenig/go-m1cpu v0.1.6 // indirect
+-	github.com/sirupsen/logrus v1.9.3 // indirect
++	github.com/sirupsen/logrus v1.9.0 // indirect
+ 	github.com/stretchr/objx v0.5.2 // indirect
+ 	github.com/tklauser/go-sysconf v0.3.12 // indirect
+ 	github.com/tklauser/numcpus v0.6.1 // indirect
+diff --git a/contrib/resourcetuner/go.sum b/contrib/sysinfo/go.sum
+similarity index 97%
+rename from contrib/resourcetuner/go.sum
+rename to contrib/sysinfo/go.sum
+index 9e4126df1..6478bd8bf 100644
+--- a/contrib/resourcetuner/go.sum
++++ b/contrib/sysinfo/go.sum
+@@ -54,8 +54,8 @@ github.com/shoenig/go-m1cpu v0.1.6 h1:nxdKQNcEB6vzgA2E2bvzKIYRuNj7XNJ4S/aRSwKzFt
+ github.com/shoenig/go-m1cpu v0.1.6/go.mod h1:1JJMcUBvfNwpq05QDQVAnx3gUHr9IYF7GNg9SUEw2VQ=
+ github.com/shoenig/test v0.6.4 h1:kVTaSd7WLz5WZ2IaoM0RSzRsUD+m8wRR+5qvntpn4LU=
+ github.com/shoenig/test v0.6.4/go.mod h1:byHiCGXqrVaflBLAMq/srcZIHynQPQgeyvkvXnjqq0k=
+-github.com/sirupsen/logrus v1.9.3 h1:dueUQJ1C2q9oE3F7wvmSGAaVtTmUizReu6fjN8uqzbQ=
+-github.com/sirupsen/logrus v1.9.3/go.mod h1:naHLuLoDiP4jHNo9R0sCBMtWGeIprob74mVsIT4qYEQ=
++github.com/sirupsen/logrus v1.9.0 h1:trlNQbNUG3OdDrDil03MCb1H2o9nJ1x4/5LYw7byDE0=
++github.com/sirupsen/logrus v1.9.0/go.mod h1:naHLuLoDiP4jHNo9R0sCBMtWGeIprob74mVsIT4qYEQ=
+ github.com/stretchr/objx v0.1.0/go.mod h1:HFkY916IF+rwdDfMAkV7OtwuqBVzrE8GR6GFx+wExME=
+ github.com/stretchr/objx v0.5.2 h1:xuMeJ0Sdp5ZMRXx/aWO6RZxdr3beISkG5/G/aIRr3pY=
+ github.com/stretchr/objx v0.5.2/go.mod h1:FRsXN1f5AsAjCGJKqEizvkpNtU+EGNCLh3NxZ/8L+MA=
+@@ -141,5 +141,3 @@ gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c/go.mod h1:JHkPIbrfpd72SG/EV
+ gopkg.in/yaml.v3 v3.0.0-20200313102051-9f266ea9e77c/go.mod h1:K4uyk7z7BCEPqu6E+C64Yfv1cQ7kz7rIZviUmN+EgEM=
+ gopkg.in/yaml.v3 v3.0.1 h1:fxVm/GzAzEWqLHuvctI91KS9hhNmmWOoWu0XTYJS7CA=
+ gopkg.in/yaml.v3 v3.0.1/go.mod h1:K4uyk7z7BCEPqu6E+C64Yfv1cQ7kz7rIZviUmN+EgEM=
+-gotest.tools/v3 v3.5.1 h1:EENdUnS3pdur5nybKYIh2Vfgc8IUNBjxDPSjtiJcOzU=
+-gotest.tools/v3 v3.5.1/go.mod h1:isy3WKz7GK6uNw/sbHzfKBLvlvXwUyV06n6brMxxopU=
+diff --git a/contrib/sysinfo/sysinfo.go b/contrib/sysinfo/sysinfo.go
+new file mode 100644
+index 000000000..204b6ea63
+--- /dev/null
++++ b/contrib/sysinfo/sysinfo.go
+@@ -0,0 +1,111 @@
++package sysinfo
++
++import (
++	"context"
++	"runtime"
++	"sync"
++	"sync/atomic"
++	"time"
++
++	"github.com/shirou/gopsutil/v4/cpu"
++	"github.com/shirou/gopsutil/v4/mem"
++	"go.temporal.io/sdk/worker"
++)
++
++var sysInfoProvider = sync.OnceValue(func() *psUtilSystemInfoSupplier {
++	return &psUtilSystemInfoSupplier{
++		cGroupInfo: newCGroupInfo(),
++	}
++})
++
++// SysInfoProvider returns a shared SysInfoProvider using gopsutil.
++// Supports cgroup metrics in containerized Linux environments.
++func SysInfoProvider() worker.SysInfoProvider {
++	return sysInfoProvider()
++}
++
++type psUtilSystemInfoSupplier struct {
++	mu          sync.Mutex
++	lastRefresh atomic.Int64 // UnixNano, atomic for lock-free reads in maybeRefresh
++
++	lastMemStat  *mem.VirtualMemoryStat
++	lastCpuUsage float64
++
++	stopTryingToGetCGroupInfo bool
++	cGroupInfo                cGroupInfo
++}
++
++type cGroupInfo interface {
++	// Update requests an update of the cgroup stats. This is a no-op if not in a cgroup. Returns
++	// true if cgroup stats should continue to be updated, false if not in a cgroup or the returned
++	// error is considered unrecoverable.
++	Update() (bool, error)
++	// GetLastMemUsage returns last known memory usage as a fraction of the cgroup limit. 0 if not
++	// in a cgroup or limit is not set.
++	GetLastMemUsage() float64
++	// GetLastCPUUsage returns last known CPU usage as a fraction of the cgroup limit. 0 if not in a
++	// cgroup or limit is not set.
++	GetLastCPUUsage() float64
++}
++
++func (p *psUtilSystemInfoSupplier) MemoryUsage(infoContext *worker.SysInfoContext) (float64, error) {
++	if err := p.maybeRefresh(infoContext); err != nil {
++		return 0, err
++	}
++	p.mu.Lock()
++	defer p.mu.Unlock()
++	lastCGroupMem := p.cGroupInfo.GetLastMemUsage()
++	if lastCGroupMem != 0 {
++		return lastCGroupMem, nil
++	}
++	return p.lastMemStat.UsedPercent / 100, nil
++}
++
++func (p *psUtilSystemInfoSupplier) CpuUsage(infoContext *worker.SysInfoContext) (float64, error) {
++	if err := p.maybeRefresh(infoContext); err != nil {
++		return 0, err
++	}
++	p.mu.Lock()
++	defer p.mu.Unlock()
++	lastCGroupCPU := p.cGroupInfo.GetLastCPUUsage()
++	if lastCGroupCPU != 0 {
++		return lastCGroupCPU, nil
++	}
++	return p.lastCpuUsage / 100, nil
++}
++
++func (p *psUtilSystemInfoSupplier) maybeRefresh(infoContext *worker.SysInfoContext) error {
++	if time.Since(time.Unix(0, p.lastRefresh.Load())) < 100*time.Millisecond {
++		return nil
++	}
++	p.mu.Lock()
++	defer p.mu.Unlock()
++	// Double check refresh is still needed
++	if time.Since(time.Unix(0, p.lastRefresh.Load())) < 100*time.Millisecond {
++		return nil
++	}
++	ctx, cancelFn := context.WithTimeout(context.Background(), 1*time.Second)
++	defer cancelFn()
++	memStat, err := mem.VirtualMemoryWithContext(ctx)
++	if err != nil {
++		return err
++	}
++	cpuUsage, err := cpu.PercentWithContext(ctx, 0, false)
++	if err != nil {
++		return err
++	}
++
++	p.lastMemStat = memStat
++	p.lastCpuUsage = cpuUsage[0]
++
++	if runtime.GOOS == "linux" && !p.stopTryingToGetCGroupInfo {
++		continueUpdates, err := p.cGroupInfo.Update()
++		if err != nil {
++			infoContext.Logger.Warn("Failed to get cgroup stats", "error", err)
++		}
++		p.stopTryingToGetCGroupInfo = !continueUpdates
++	}
++
++	p.lastRefresh.Store(time.Now().UnixNano())
++	return nil
++}
+diff --git a/contrib/sysinfo/sysinfo_test.go b/contrib/sysinfo/sysinfo_test.go
+new file mode 100644
+index 000000000..8e8bfb6be
+--- /dev/null
++++ b/contrib/sysinfo/sysinfo_test.go
+@@ -0,0 +1,42 @@
++package sysinfo
++
++import (
++	"testing"
++
++	"github.com/stretchr/testify/assert"
++	"github.com/stretchr/testify/require"
++	"go.temporal.io/sdk/internal/log"
++	"go.temporal.io/sdk/worker"
++)
++
++func TestGetMemoryCpuUsage(t *testing.T) {
++	supplier := SysInfoProvider()
++	ctx := &worker.SysInfoContext{Logger: log.NewNopLogger()}
++
++	usage, err := supplier.MemoryUsage(ctx)
++	require.NoError(t, err)
++	assert.GreaterOrEqual(t, usage, 0.0)
++	assert.LessOrEqual(t, usage, 1.0)
++
++	usage, err = supplier.CpuUsage(ctx)
++	require.NoError(t, err)
++	assert.GreaterOrEqual(t, usage, 0.0)
++	assert.LessOrEqual(t, usage, 1.0)
++}
++
++func TestMaybeRefreshRateLimiting(t *testing.T) {
++	supplier := SysInfoProvider().(*psUtilSystemInfoSupplier)
++	ctx := &worker.SysInfoContext{Logger: log.NewNopLogger()}
++
++	// First call should refresh
++	firstUsage, err := supplier.MemoryUsage(ctx)
++	require.NoError(t, err)
++	firstRefresh := supplier.lastRefresh.Load()
++
++	// Immediate second call should not refresh (rate limited)
++	secondUsage, err := supplier.MemoryUsage(ctx)
++	require.NoError(t, err)
++	assert.Equal(t, firstRefresh, supplier.lastRefresh.Load())
++
++	assert.Equal(t, firstUsage, secondUsage)
++}
+diff --git a/internal/client.go b/internal/client.go
+index 31c5850f3..430c77859 100644
+--- a/internal/client.go
++++ b/internal/client.go
+@@ -4,6 +4,7 @@ import (
+ 	"context"
+ 	"crypto/tls"
+ 	"fmt"
++	"github.com/google/uuid"
+ 	"sync/atomic"
+ 	"time"
+ 
+@@ -601,6 +602,14 @@ type (
+ 		//
+ 		// NOTE: Experimental
+ 		Plugins []ClientPlugin
++
++		// WorkerHeartbeatInterval is the interval at which the worker will send heartbeats to the server.
++		// Interval must be between 1s and 60s, inclusive, or a negative value to disable.
++		//
++		// default: 0 defaults to 60s interval.
++		//
++		// NOTE: Experimental
++		WorkerHeartbeatInterval time.Duration
+ 	}
+ 
+ 	// HeadersProvider returns a map of gRPC headers that should be used on every request.
+@@ -1198,7 +1207,9 @@ func NewServiceClient(workflowServiceClient workflowservice.WorkflowServiceClien
+ 
+ 	// Collect set of applicable worker plugins and interceptors
+ 	var workerPlugins []WorkerPlugin
++	var clientPluginNames []string
+ 	for _, plugin := range options.Plugins {
++		clientPluginNames = append(clientPluginNames, plugin.Name())
+ 		if workerPlugin, _ := plugin.(WorkerPlugin); workerPlugin != nil {
+ 			workerPlugins = append(workerPlugins, workerPlugin)
+ 		}
+@@ -1210,6 +1221,18 @@ func NewServiceClient(workflowServiceClient workflowservice.WorkflowServiceClien
+ 		}
+ 	}
+ 
++	var heartbeatInterval time.Duration
++	if options.WorkerHeartbeatInterval < 0 {
++		heartbeatInterval = 0
++	} else if options.WorkerHeartbeatInterval == 0 {
++		heartbeatInterval = 60 * time.Second
++	} else {
++		if options.WorkerHeartbeatInterval < time.Second || options.WorkerHeartbeatInterval > 60*time.Second {
++			panic("WorkerHeartbeatInterval must be between 1 second and 60 seconds")
++		}
++		heartbeatInterval = options.WorkerHeartbeatInterval
++	}
++
+ 	client := &WorkflowClient{
+ 		workflowService:          workflowServiceClient,
+ 		conn:                     conn,
+@@ -1223,11 +1246,18 @@ func NewServiceClient(workflowServiceClient workflowservice.WorkflowServiceClien
+ 		contextPropagators:       options.ContextPropagators,
+ 		workerPlugins:            workerPlugins,
+ 		workerInterceptors:       workerInterceptors,
++		clientPluginNames:        clientPluginNames,
+ 		excludeInternalFromRetry: options.ConnectionOptions.excludeInternalFromRetry,
+ 		eagerDispatcher: &eagerWorkflowDispatcher{
+ 			workersByTaskQueue: make(map[string]map[eagerWorker]struct{}),
+ 		},
+-		getSystemInfoTimeout: options.ConnectionOptions.GetSystemInfoTimeout,
++		getSystemInfoTimeout:    options.ConnectionOptions.GetSystemInfoTimeout,
++		workerHeartbeatInterval: heartbeatInterval,
++		workerGroupingKey:       uuid.NewString(),
++	}
++
++	if heartbeatInterval > 0 {
++		client.heartbeatManager = newHeartbeatManager(client, heartbeatInterval, client.logger)
+ 	}
+ 
+ 	// Create outbound interceptor by wrapping backwards through chain
+diff --git a/internal/cmd/build/main.go b/internal/cmd/build/main.go
+index c949c056b..80376e1eb 100644
+--- a/internal/cmd/build/main.go
++++ b/internal/cmd/build/main.go
+@@ -159,7 +159,9 @@ func (b *builder) integrationTest() error {
+ 				"--dynamic-config-value", "history.enableChasm=true",
+ 				"--dynamic-config-value", "history.enableTransitionHistory=true",
+ 				"--dynamic-config-value", `component.nexusoperations.useSystemCallbackURL=false`,
+-				"--dynamic-config-value", `component.nexusoperations.callback.endpoint.template="http://localhost:7243/namespaces/{{.NamespaceName}}/nexus/callback"`},
++				"--dynamic-config-value", `component.nexusoperations.callback.endpoint.template="http://localhost:7243/namespaces/{{.NamespaceName}}/nexus/callback"`,
++				"--dynamic-config-value", "frontend.ListWorkersEnabled=true",
++			},
+ 		})
+ 		if err != nil {
+ 			return fmt.Errorf("failed starting dev server: %w", err)
+diff --git a/internal/internal_nexus_task_poller.go b/internal/internal_nexus_task_poller.go
+index 6537f3454..857fd56e7 100644
+--- a/internal/internal_nexus_task_poller.go
++++ b/internal/internal_nexus_task_poller.go
+@@ -42,6 +42,7 @@ func newNexusTaskPoller(
+ 			useBuildIDVersioning:    params.UseBuildIDForVersioning,
+ 			workerDeploymentVersion: params.DeploymentOptions.Version,
+ 			capabilities:            params.capabilities,
++			pollTimeTracker:         params.pollTimeTracker,
+ 		},
+ 		taskHandler:     taskHandler,
+ 		service:         service,
+@@ -90,11 +91,9 @@ func (ntp *nexusTaskPoller) poll(ctx context.Context) (taskForWorker, error) {
+ 		return nil, nil
+ 	}
+ 
+-	return &nexusTask{task: response}, nil
+-}
++	ntp.pollTimeTracker.recordPollSuccess(metrics.PollerTypeNexusTask)
+ 
+-func (ntp *nexusTaskPoller) Cleanup() error {
+-	return nil
++	return &nexusTask{task: response}, nil
+ }
+ 
+ // PollTask polls a new task
+diff --git a/internal/internal_nexus_worker.go b/internal/internal_nexus_worker.go
+index ba38bd6ef..d5f844ed5 100644
+--- a/internal/internal_nexus_worker.go
++++ b/internal/internal_nexus_worker.go
+@@ -78,10 +78,6 @@ func newNexusWorker(opts nexusWorkerOptions) (*nexusWorker, error) {
+ 
+ // Start the worker.
+ func (w *nexusWorker) Start() error {
+-	err := verifyNamespaceExist(w.workflowService, w.executionParameters.MetricsHandler, w.executionParameters.Namespace, w.worker.logger)
+-	if err != nil {
+-		return err
+-	}
+ 	w.worker.Start()
+ 	return nil
+ }
+diff --git a/internal/internal_task_pollers.go b/internal/internal_task_pollers.go
+index dba946879..c5e6dff2b 100644
+--- a/internal/internal_task_pollers.go
++++ b/internal/internal_task_pollers.go
+@@ -13,13 +13,10 @@ import (
+ 	"google.golang.org/protobuf/types/known/durationpb"
+ 	"google.golang.org/protobuf/types/known/wrapperspb"
+ 
+-	"github.com/google/uuid"
+-
+ 	commonpb "go.temporal.io/api/common/v1"
+ 	deploymentpb "go.temporal.io/api/deployment/v1"
+ 	enumspb "go.temporal.io/api/enums/v1"
+ 	historypb "go.temporal.io/api/history/v1"
+-	"go.temporal.io/api/serviceerror"
+ 	taskqueuepb "go.temporal.io/api/taskqueue/v1"
+ 	"go.temporal.io/api/workflowservice/v1"
+ 
+@@ -53,9 +50,6 @@ type (
+ 	taskPoller interface {
+ 		// PollTask polls for one new task
+ 		PollTask() (taskForWorker, error)
+-		// Called when the poller will no longer be polled. Presently only useful for
+-		// workflow workers.
+-		Cleanup() error
+ 	}
+ 
+ 	// taskProcessor interface to process tasks
+@@ -85,6 +79,10 @@ type (
+ 		workerDeploymentVersion WorkerDeploymentVersion
+ 		// Server's capabilities
+ 		capabilities *workflowservice.GetSystemInfoResponse_Capabilities
++		// tracks timestamp for last poll request, for worker heartbeating
++		pollTimeTracker *pollTimeTracker
++		// Unique identifier for worker
++		workerInstanceKey string
+ 	}
+ 
+ 	// numPollerMetric tracks the number of active pollers and publishes a metric on it.
+@@ -208,6 +206,9 @@ type (
+ )
+ 
+ func newNumPollerMetric(metricsHandler metrics.Handler, pollerType string) *numPollerMetric {
++	if heartbeatHandler, isHeartbeat := metricsHandler.(*heartbeatMetricsHandler); isHeartbeat {
++		metricsHandler = heartbeatHandler.forPoller(pollerType)
++	}
+ 	return &numPollerMetric{
+ 		gauge: metricsHandler.WithTags(metrics.PollerTags(pollerType)).Gauge(metrics.NumPoller),
+ 	}
+@@ -315,6 +316,7 @@ func newWorkflowTaskProcessor(
+ 	contextManager WorkflowContextManager,
+ 	service workflowservice.WorkflowServiceClient,
+ 	params workerExecutionParameters,
++	stickyUUID string,
+ ) *workflowTaskProcessor {
+ 	return &workflowTaskProcessor{
+ 		basePoller: basePoller{
+@@ -324,6 +326,8 @@ func newWorkflowTaskProcessor(
+ 			useBuildIDVersioning:    params.UseBuildIDForVersioning,
+ 			workerDeploymentVersion: params.DeploymentOptions.Version,
+ 			capabilities:            params.capabilities,
++			pollTimeTracker:         params.pollTimeTracker,
++			workerInstanceKey:       params.workerInstanceKey,
+ 		},
+ 		service:                      service,
+ 		namespace:                    params.Namespace,
+@@ -334,7 +338,7 @@ func newWorkflowTaskProcessor(
+ 		logger:                       params.Logger,
+ 		dataConverter:                params.DataConverter,
+ 		failureConverter:             params.FailureConverter,
+-		stickyUUID:                   uuid.NewString(),
++		stickyUUID:                   stickyUUID,
+ 		StickyScheduleToStartTimeout: params.StickyScheduleToStartTimeout,
+ 		stickyCacheSize:              params.cache.MaxWorkflowCacheSize(),
+ 		eagerActivityExecutor:        params.eagerActivityExecutor,
+@@ -343,36 +347,6 @@ func newWorkflowTaskProcessor(
+ 	}
+ }
+ 
+-// Best-effort attempt to indicate to Matching service that this workflow task
+-// poller's sticky queue will no longer be polled. Should be called when the
+-// poller is stopping. Failure to call ShutdownWorker is logged, but otherwise
+-// ignored.
+-func (wtp *workflowTaskPoller) Cleanup() error {
+-	ctx := context.Background()
+-	grpcCtx, cancel := newGRPCContext(ctx, grpcMetricsHandler(wtp.metricsHandler))
+-	defer cancel()
+-
+-	_, err := wtp.service.ShutdownWorker(grpcCtx, &workflowservice.ShutdownWorkerRequest{
+-		Namespace:       wtp.namespace,
+-		StickyTaskQueue: getWorkerTaskQueue(wtp.stickyUUID),
+-		Identity:        wtp.identity,
+-		Reason:          "graceful shutdown",
+-	})
+-
+-	// we ignore unimplemented
+-	if _, isUnimplemented := err.(*serviceerror.Unimplemented); isUnimplemented {
+-		return nil
+-	}
+-
+-	if err != nil {
+-		traceLog(func() {
+-			wtp.logger.Debug("ShutdownWorker failed.", tagError, err)
+-		})
+-	}
+-
+-	return err
+-}
+-
+ // PollTask polls a new task
+ func (wtp *workflowTaskPoller) PollTask() (taskForWorker, error) {
+ 	// Get the task.
+@@ -737,10 +711,6 @@ func newLocalActivityPoller(
+ 	}
+ }
+ 
+-func (latp *localActivityTaskPoller) Cleanup() error {
+-	return nil
+-}
+-
+ func (latp *localActivityTaskPoller) PollTask() (taskForWorker, error) {
+ 	return latp.laTunnel.getTask(), nil
+ }
+@@ -965,6 +935,7 @@ func (wtp *workflowTaskPoller) getNextPollRequest() (request *workflowservice.Po
+ 			wtp.useBuildIDVersioning,
+ 			wtp.workerDeploymentVersion,
+ 		),
++		WorkerInstanceKey: wtp.workerInstanceKey,
+ 	}
+ 	if wtp.getCapabilities().BuildIdBasedVersioning {
+ 		//lint:ignore SA1019 ignore deprecated versioning APIs
+@@ -1008,6 +979,12 @@ func (wtp *workflowTaskPoller) poll(ctx context.Context) (taskForWorker, error)
+ 		return &workflowTask{}, nil
+ 	}
+ 
++	if request.TaskQueue.GetKind() == enumspb.TASK_QUEUE_KIND_STICKY {
++		wtp.pollTimeTracker.recordPollSuccess(metrics.PollerTypeWorkflowStickyTask)
++	} else {
++		wtp.pollTimeTracker.recordPollSuccess(metrics.PollerTypeWorkflowTask)
++	}
++
+ 	wtp.updateBacklog(request.TaskQueue.GetKind(), response.GetBacklogCountHint())
+ 
+ 	task := wtp.toWorkflowTask(response)
+@@ -1155,6 +1132,8 @@ func newActivityTaskPoller(taskHandler ActivityTaskHandler, service workflowserv
+ 			useBuildIDVersioning:    params.UseBuildIDForVersioning,
+ 			workerDeploymentVersion: params.DeploymentOptions.Version,
+ 			capabilities:            params.capabilities,
++			pollTimeTracker:         params.pollTimeTracker,
++			workerInstanceKey:       params.workerInstanceKey,
+ 		},
+ 		taskHandler:         taskHandler,
+ 		service:             service,
+@@ -1194,6 +1173,7 @@ func (atp *activityTaskPoller) poll(ctx context.Context) (taskForWorker, error)
+ 			atp.useBuildIDVersioning,
+ 			atp.workerDeploymentVersion,
+ 		),
++		WorkerInstanceKey: atp.workerInstanceKey,
+ 	}
+ 
+ 	response, err := atp.pollActivityTaskQueue(ctx, request)
+@@ -1206,6 +1186,8 @@ func (atp *activityTaskPoller) poll(ctx context.Context) (taskForWorker, error)
+ 		return &activityTask{}, nil
+ 	}
+ 
++	atp.pollTimeTracker.recordPollSuccess(metrics.PollerTypeActivityTask)
++
+ 	workflowType := response.WorkflowType.GetName()
+ 	activityType := response.ActivityType.GetName()
+ 	metricsHandler := atp.metricsHandler.WithTags(metrics.ActivityTags(workflowType, activityType, atp.taskQueueName))
+@@ -1216,10 +1198,6 @@ func (atp *activityTaskPoller) poll(ctx context.Context) (taskForWorker, error)
+ 	return &activityTask{task: response}, nil
+ }
+ 
+-func (atp *activityTaskPoller) Cleanup() error {
+-	return nil
+-}
+-
+ // PollTask polls a new task
+ func (atp *activityTaskPoller) PollTask() (taskForWorker, error) {
+ 	// Get the task.
+diff --git a/internal/internal_task_pollers_test.go b/internal/internal_task_pollers_test.go
+index af70a53f6..8fde8791e 100644
+--- a/internal/internal_task_pollers_test.go
++++ b/internal/internal_task_pollers_test.go
+@@ -4,6 +4,7 @@ import (
+ 	"context"
+ 	"encoding/binary"
+ 	"errors"
++	"github.com/google/uuid"
+ 	"sync/atomic"
+ 	"testing"
+ 	"time"
+@@ -97,7 +98,7 @@ func TestWFTRacePrevention(t *testing.T) {
+ 			return &workflowservice.RespondWorkflowTaskFailedResponse{}, nil
+ 		})
+ 
+-	poller := newWorkflowTaskProcessor(taskHandler, contextManager, client, params)
++	poller := newWorkflowTaskProcessor(taskHandler, contextManager, client, params, uuid.NewString())
+ 
+ 	t.Log("Issue task0")
+ 	go func() { resultsChan <- poller.processWorkflowTask(&task0) }()
+@@ -188,7 +189,7 @@ func TestWFTCorruption(t *testing.T) {
+ 			return nil, errors.New("Failure responding to workflow task")
+ 		})
+ 
+-	poller := newWorkflowTaskProcessor(taskHandler, contextManager, client, params)
++	poller := newWorkflowTaskProcessor(taskHandler, contextManager, client, params, uuid.NewString())
+ 	processTaskDone := make(chan struct{})
+ 	go func() {
+ 		require.Error(t, poller.processWorkflowTask(&task0))
+@@ -329,7 +330,7 @@ func TestWFTReset(t *testing.T) {
+ 	client.EXPECT().RespondWorkflowTaskCompleted(gomock.Any(), gomock.Any()).
+ 		Return(&workflowservice.RespondWorkflowTaskCompletedResponse{}, nil)
+ 
+-	poller := newWorkflowTaskProcessor(taskHandler, contextManager, client, params)
++	poller := newWorkflowTaskProcessor(taskHandler, contextManager, client, params, uuid.NewString())
+ 	// Send a full history as part of the speculative WFT
+ 	require.NoError(t, poller.processWorkflowTask(&task0))
+ 	originalCachedExecution := cache.getWorkflowContext(runID)
+@@ -403,7 +404,7 @@ func TestWFTPanicInTaskHandler(t *testing.T) {
+ 		task0 = workflowTask{task: &pollResp0}
+ 	)
+ 
+-	poller := newWorkflowTaskProcessor(taskHandler, contextManager, client, params)
++	poller := newWorkflowTaskProcessor(taskHandler, contextManager, client, params, uuid.NewString())
+ 	require.Error(t, poller.processWorkflowTask(&task0))
+ 	// Workflow should not be in cache
+ 	require.Nil(t, cache.getWorkflowContext(runID))
+diff --git a/internal/internal_worker.go b/internal/internal_worker.go
+index 8bae608fc..f21c63a66 100644
+--- a/internal/internal_worker.go
++++ b/internal/internal_worker.go
+@@ -6,11 +6,15 @@ import (
+ 	"context"
+ 	"errors"
+ 	"fmt"
++	workerpb "go.temporal.io/api/worker/v1"
++	"google.golang.org/protobuf/types/known/durationpb"
++	"google.golang.org/protobuf/types/known/timestamppb"
+ 	"io"
+ 	"math"
+ 	"os"
+ 	"reflect"
+ 	"runtime"
++	"sort"
+ 	"strconv"
+ 	"strings"
+ 	"sync"
+@@ -24,6 +28,7 @@ import (
+ 	deploymentpb "go.temporal.io/api/deployment/v1"
+ 	enumspb "go.temporal.io/api/enums/v1"
+ 	historypb "go.temporal.io/api/history/v1"
++	"go.temporal.io/api/serviceerror"
+ 	"go.temporal.io/api/temporalproto"
+ 	"go.temporal.io/api/workflowservice/v1"
+ 	"go.temporal.io/api/workflowservicemock/v1"
+@@ -81,6 +86,7 @@ type (
+ 		identity            string
+ 		stopC               chan struct{}
+ 		localActivityStopC  chan struct{}
++		stickyUUID          string // Used for ShutdownWorker call
+ 	}
+ 
+ 	// ActivityWorker wraps the code for hosting activity types.
+@@ -208,6 +214,10 @@ type (
+ 		eagerActivityExecutor *eagerActivityExecutor
+ 
+ 		capabilities *workflowservice.GetSystemInfoResponse_Capabilities
++
++		pollTimeTracker *pollTimeTracker
++
++		workerInstanceKey string
+ 	}
+ 
+ 	// HistoryJSONOptions are options for HistoryFromJSON.
+@@ -264,6 +274,9 @@ func ensureRequiredParams(params *workerExecutionParameters) {
+ 				NumNexusSlots:         defaultMaxConcurrentTaskExecutionSize,
+ 			})
+ 	}
++	if params.pollTimeTracker == nil {
++		params.pollTimeTracker = &pollTimeTracker{}
++	}
+ }
+ 
+ // getBuildID returns either the user-defined build ID if it was provided, or an autogenerated one
+@@ -280,23 +293,6 @@ func (params *workerExecutionParameters) isInternalWorker() bool {
+ 	return params.Namespace == "temporal-system" || params.TaskQueue == "temporal-sys-per-ns-tq"
+ }
+ 
+-// verifyNamespaceExist does a DescribeNamespace operation on the specified namespace with backoff/retry
+-func verifyNamespaceExist(
+-	client workflowservice.WorkflowServiceClient,
+-	metricsHandler metrics.Handler,
+-	namespace string,
+-	logger log.Logger,
+-) error {
+-	ctx := context.Background()
+-	if namespace == "" {
+-		return errors.New("namespace cannot be empty")
+-	}
+-	grpcCtx, cancel := newGRPCContext(ctx, grpcMetricsHandler(metricsHandler), defaultGrpcRetryParameters(ctx))
+-	defer cancel()
+-	_, err := client.DescribeNamespace(grpcCtx, &workflowservice.DescribeNamespaceRequest{Namespace: namespace})
+-	return err
+-}
+-
+ func newWorkflowWorkerInternal(client *WorkflowClient, params workerExecutionParameters, ppMgr pressurePointMgr, overrides *workerOverrides, registry *registry) *workflowWorker {
+ 	workerStopChannel := make(chan struct{})
+ 	params.WorkerStopChannel = getReadOnlyChannel(workerStopChannel)
+@@ -324,7 +320,9 @@ func newWorkflowTaskWorkerInternal(
+ 	if client != nil {
+ 		service = client.workflowService
+ 	}
+-	taskProcessor := newWorkflowTaskProcessor(taskHandler, contextManager, service, params)
++	// Generate stickyUUID here so it can be stored in workflowWorker for ShutdownWorker call
++	stickyUUID := uuid.NewString()
++	taskProcessor := newWorkflowTaskProcessor(taskHandler, contextManager, service, params, stickyUUID)
+ 
+ 	var scalableTaskPollers []scalableTaskPoller
+ 	switch params.WorkflowTaskPollerBehavior.(type) {
+@@ -414,15 +412,12 @@ func newWorkflowTaskWorkerInternal(
+ 		identity:            params.Identity,
+ 		stopC:               stopC,
+ 		localActivityStopC:  laStopChannel,
++		stickyUUID:          stickyUUID,
+ 	}
+ }
+ 
+ // Start the worker.
+ func (ww *workflowWorker) Start() error {
+-	err := verifyNamespaceExist(ww.workflowService, ww.executionParameters.MetricsHandler, ww.executionParameters.Namespace, ww.worker.logger)
+-	if err != nil {
+-		return err
+-	}
+ 	ww.localActivityWorker.Start()
+ 	ww.worker.Start()
+ 	return nil // TODO: propagate error
+@@ -566,10 +561,6 @@ func newActivityWorker(
+ 
+ // Start the worker.
+ func (aw *activityWorker) Start() error {
+-	err := verifyNamespaceExist(aw.workflowService, aw.executionParameters.MetricsHandler, aw.executionParameters.Namespace, aw.worker.logger)
+-	if err != nil {
+-		return err
+-	}
+ 	aw.worker.Start()
+ 	return nil // TODO: propagate errors
+ }
+@@ -1169,6 +1160,7 @@ type AggregatedWorker struct {
+ 	registry       *registry
+ 	// Stores a boolean indicating whether the worker has already been started.
+ 	started      atomic.Bool
++	shuttingDown atomic.Bool
+ 	stopC        chan struct{}
+ 	fatalErr     error
+ 	fatalErrLock sync.Mutex
+@@ -1177,6 +1169,9 @@ type AggregatedWorker struct {
+ 	workerInstanceKey     string
+ 	plugins               []WorkerPlugin
+ 	pluginRegistryOptions *WorkerPluginConfigureWorkerRegistryOptions // Never nil
++
++	heartbeatMetrics  *heartbeatMetricsHandler
++	heartbeatCallback func() *workerpb.WorkerHeartbeat
+ }
+ 
+ // RegisterWorkflow registers workflow implementation with the AggregatedWorker
+@@ -1286,6 +1281,10 @@ func (aw *AggregatedWorker) start() error {
+ 	}
+ 	proto.Merge(aw.capabilities, capabilities)
+ 
++	if _, err := aw.client.loadNamespaceCapabilities(aw.executionParams.MetricsHandler); err != nil {
++		return err
++	}
++
+ 	if !util.IsInterfaceNil(aw.workflowWorker) {
+ 		if err := aw.workflowWorker.Start(); err != nil {
+ 			return err
+@@ -1353,6 +1352,12 @@ func (aw *AggregatedWorker) start() error {
+ 			return fmt.Errorf("failed to start a nexus worker: %w", err)
+ 		}
+ 	}
++
++	if aw.client.workerHeartbeatInterval > 0 {
++		if err := aw.registerHeartbeatWorker(); err != nil {
++			return fmt.Errorf("failed to register heartbeat worker: %w", err)
++		}
++	}
+ 	aw.logger.Info("Started Worker")
+ 	return nil
+ }
+@@ -1441,6 +1446,8 @@ func (aw *AggregatedWorker) Stop() {
+ 		close(aw.stopC)
+ 	}
+ 
++	aw.shutdownWorker()
++
+ 	// Issue stop through plugins
+ 	stop := func(context.Context, WorkerPluginStopWorkerOptions) {
+ 		if !util.IsInterfaceNil(aw.workflowWorker) {
+@@ -1470,9 +1477,66 @@ func (aw *AggregatedWorker) Stop() {
+ 		WorkerInstanceKey: aw.workerInstanceKey,
+ 	})
+ 
++	aw.unregisterHeartbeatWorker()
++
+ 	aw.logger.Info("Stopped Worker")
+ }
+ 
++func (aw *AggregatedWorker) registerHeartbeatWorker() error {
++	if aw.client.heartbeatManager == nil {
++		return nil
++	}
++	return aw.client.heartbeatManager.registerWorker(aw)
++}
++
++func (aw *AggregatedWorker) unregisterHeartbeatWorker() {
++	if aw.client.heartbeatManager == nil {
++		return
++	}
++	aw.client.heartbeatManager.unregisterWorker(aw)
++}
++
++// shutdownWorker sends a ShutdownWorker RPC to notify the server that this worker is shutting down.
++// When StickyTaskQueue is non-empty, this is a best-effort attempt to indicate to Matching service
++// that this workflow task poller's sticky queue will no longer be polled.
++//
++// NOTE: errors are logged but don't fail the shutdown.
++func (aw *AggregatedWorker) shutdownWorker() {
++	aw.shuttingDown.Store(true)
++
++	ctx := context.Background()
++	grpcCtx, cancel := newGRPCContext(ctx, grpcMetricsHandler(aw.executionParams.MetricsHandler))
++	defer cancel()
++
++	var heartbeat *workerpb.WorkerHeartbeat
++	if aw.heartbeatCallback != nil {
++		heartbeat = aw.heartbeatCallback()
++	}
++
++	var stickyTaskQueue string
++	if aw.workflowWorker != nil && aw.workflowWorker.stickyUUID != "" {
++		stickyTaskQueue = getWorkerTaskQueue(aw.workflowWorker.stickyUUID)
++	}
++
++	_, err := aw.client.workflowService.ShutdownWorker(grpcCtx, &workflowservice.ShutdownWorkerRequest{
++		Namespace:         aw.executionParams.Namespace,
++		StickyTaskQueue:   stickyTaskQueue,
++		Identity:          aw.executionParams.Identity,
++		Reason:            "graceful shutdown",
++		WorkerHeartbeat:   heartbeat,
++		WorkerInstanceKey: aw.workerInstanceKey,
++	})
++
++	// Ignore unimplemented (server doesn't support it)
++	if _, isUnimplemented := err.(*serviceerror.Unimplemented); isUnimplemented {
++		return
++	}
++
++	if err != nil {
++		aw.logger.Debug("ShutdownWorker rpc errored during worker shutdown.", tagError, err)
++	}
++}
++
+ // WorkflowReplayer is used to replay workflow code from an event history
+ type WorkflowReplayer struct {
+ 	registry                    *registry
+@@ -2026,6 +2090,17 @@ func NewAggregatedWorker(client *WorkflowClient, taskQueue string, options Worke
+ 	// should take a pointer to this struct and wait for it to be populated when the worker is run.
+ 	var capabilities workflowservice.GetSystemInfoResponse_Capabilities
+ 
++	baseMetricsHandler := client.metricsHandler.WithTags(metrics.TaskQueueTags(taskQueue))
++	var metricsHandler metrics.Handler
++	var heartbeatMetrics *heartbeatMetricsHandler
++
++	if client.workerHeartbeatInterval != 0 {
++		heartbeatMetrics = newHeartbeatMetricsHandler(baseMetricsHandler)
++		metricsHandler = heartbeatMetrics
++	} else {
++		metricsHandler = baseMetricsHandler
++	}
++
+ 	cache := NewWorkerCache()
+ 	workerParams := workerExecutionParameters{
+ 		Namespace:                        client.namespace,
+@@ -2037,7 +2112,7 @@ func NewAggregatedWorker(client *WorkflowClient, taskQueue string, options Worke
+ 		WorkerBuildID:                    options.BuildID,
+ 		UseBuildIDForVersioning:          options.UseBuildIDForVersioning || options.DeploymentOptions.UseVersioning,
+ 		DeploymentOptions:                options.DeploymentOptions,
+-		MetricsHandler:                   client.metricsHandler.WithTags(metrics.TaskQueueTags(taskQueue)),
++		MetricsHandler:                   metricsHandler,
+ 		Logger:                           client.logger,
+ 		EnableLoggingInReplay:            options.EnableLoggingInReplay,
+ 		BackgroundContext:                backgroundActivityContext,
+@@ -2059,7 +2134,9 @@ func NewAggregatedWorker(client *WorkflowClient, taskQueue string, options Worke
+ 			taskQueue:     taskQueue,
+ 			maxConcurrent: options.MaxConcurrentEagerActivityExecutionSize,
+ 		}),
+-		capabilities: &capabilities,
++		capabilities:      &capabilities,
++		pollTimeTracker:   &pollTimeTracker{},
++		workerInstanceKey: workerInstanceKey,
+ 	}
+ 
+ 	if options.MaxConcurrentWorkflowTaskPollers != 0 {
+@@ -2147,6 +2224,102 @@ func NewAggregatedWorker(client *WorkflowClient, taskQueue string, options Worke
+ 		})
+ 	}
+ 
++	// Get SysInfoProvider from tuner's slot supplier if it implements HasSysInfoProvider.
++	// If not available, heartbeats will report 0 for CPU/memory usage.
++	var sysInfoProvider SysInfoProvider
++	if sis, ok := options.Tuner.GetWorkflowTaskSlotSupplier().(HasSysInfoProvider); ok {
++		sysInfoProvider = sis.SysInfoProvider()
++	}
++
++	var heartbeatCallback func() *workerpb.WorkerHeartbeat
++	if client.workerHeartbeatInterval != 0 {
++		startTime := timestamppb.New(time.Now())
++		hostname, _ := os.Hostname()
++		pid := strconv.Itoa(os.Getpid())
++		previousHeartbeatTime := time.Now()
++		pluginInfos := collectPluginInfos(client.clientPluginNames, plugins)
++
++		var prevWorkflowProcessed, prevWorkflowFailed int64
++		var prevActivityProcessed, prevActivityFailed int64
++		var prevLocalActivityProcessed, prevLocalActivityFailed int64
++		var prevNexusProcessed, prevNexusFailed int64
++
++		populateOpts := &populateHeartbeatOptions{
++			workflowPollerBehavior:     workerParams.WorkflowTaskPollerBehavior,
++			activityPollerBehavior:     workerParams.ActivityTaskPollerBehavior,
++			nexusPollerBehavior:        workerParams.NexusTaskPollerBehavior,
++			prevWorkflowProcessed:      &prevWorkflowProcessed,
++			prevWorkflowFailed:         &prevWorkflowFailed,
++			prevActivityProcessed:      &prevActivityProcessed,
++			prevActivityFailed:         &prevActivityFailed,
++			prevLocalActivityProcessed: &prevLocalActivityProcessed,
++			prevLocalActivityFailed:    &prevLocalActivityFailed,
++			prevNexusProcessed:         &prevNexusProcessed,
++			prevNexusFailed:            &prevNexusFailed,
++			pollTimeTracker:            workerParams.pollTimeTracker,
++		}
++
++		var deploymentVersion *deploymentpb.WorkerDeploymentVersion
++		if options.DeploymentOptions.UseVersioning {
++			deploymentVersion = &deploymentpb.WorkerDeploymentVersion{
++				DeploymentName: options.DeploymentOptions.Version.DeploymentName,
++				BuildId:        options.DeploymentOptions.Version.BuildID,
++			}
++		}
++
++		// The callback can be invoked concurrently from the heartbeat worker goroutine and the shutdown path
++		var mu sync.Mutex
++		heartbeatCallback = func() *workerpb.WorkerHeartbeat {
++			cpuUsage := getCpuUsage(sysInfoProvider, workerParams.Logger)
++			memUsage := getMemUsage(sysInfoProvider, workerParams.Logger)
++
++			mu.Lock()
++			defer mu.Unlock()
++			if aw.workflowWorker != nil {
++				populateOpts.workflowSlotSupplierKind = aw.workflowWorker.worker.slotSupplier.GetSlotSupplierKind()
++				populateOpts.localActivitySlotSupplierKind = aw.workflowWorker.localActivityWorker.slotSupplier.GetSlotSupplierKind()
++			}
++			if aw.activityWorker != nil {
++				populateOpts.activitySlotSupplierKind = aw.activityWorker.worker.slotSupplier.GetSlotSupplierKind()
++			}
++			if aw.nexusWorker != nil {
++				populateOpts.nexusSlotSupplierKind = aw.nexusWorker.worker.slotSupplier.GetSlotSupplierKind()
++			}
++			heartbeatTime := time.Now()
++			elapsedSinceLastHeartbeat := heartbeatTime.Sub(previousHeartbeatTime)
++			previousHeartbeatTime = heartbeatTime
++
++			status := enumspb.WORKER_STATUS_RUNNING
++			if aw.shuttingDown.Load() {
++				status = enumspb.WORKER_STATUS_SHUTTING_DOWN
++			}
++
++			hb := &workerpb.WorkerHeartbeat{
++				WorkerInstanceKey: aw.workerInstanceKey,
++				WorkerIdentity:    aw.executionParams.Identity,
++				HostInfo: &workerpb.WorkerHostInfo{
++					HostName:            hostname,
++					WorkerGroupingKey:   aw.client.workerGroupingKey,
++					ProcessId:           pid,
++					CurrentHostCpuUsage: cpuUsage,
++					CurrentHostMemUsage: memUsage,
++				},
++				TaskQueue:                 aw.executionParams.TaskQueue,
++				DeploymentVersion:         deploymentVersion,
++				SdkName:                   SDKName,
++				SdkVersion:                SDKVersion,
++				Status:                    status,
++				StartTime:                 startTime,
++				HeartbeatTime:             timestamppb.New(heartbeatTime),
++				ElapsedSinceLastHeartbeat: durationpb.New(elapsedSinceLastHeartbeat),
++				Plugins:                   pluginInfos,
++			}
++			aw.heartbeatMetrics.PopulateHeartbeat(hb, populateOpts)
++
++			return hb
++		}
++	}
++
+ 	aw = &AggregatedWorker{
+ 		client:                client,
+ 		workflowWorker:        workflowWorker,
+@@ -2160,6 +2333,8 @@ func NewAggregatedWorker(client *WorkflowClient, taskQueue string, options Worke
+ 		workerInstanceKey:     workerInstanceKey,
+ 		plugins:               plugins,
+ 		pluginRegistryOptions: &pluginRegistryOptions,
++		heartbeatMetrics:      heartbeatMetrics,
++		heartbeatCallback:     heartbeatCallback,
+ 	}
+ 
+ 	// Set memoized start as a once-value that invokes plugins first
+@@ -2478,3 +2653,52 @@ func workerDeploymentVersionFromProtoOrString(wd *deploymentpb.WorkerDeploymentV
+ 		BuildID:        wd.BuildId,
+ 	}
+ }
++
++func getCpuUsage(supplier SysInfoProvider, logger log.Logger) float32 {
++	if supplier == nil {
++		return 0
++	}
++	cpu, err := supplier.CpuUsage(&SysInfoContext{Logger: logger})
++	if err != nil {
++		logger.Warn("Failed to get CPU usage for heartbeat", "error", err)
++		return 0
++	}
++	return float32(cpu)
++}
++
++func getMemUsage(supplier SysInfoProvider, logger log.Logger) float32 {
++	if supplier == nil {
++		return 0
++	}
++	mem, err := supplier.MemoryUsage(&SysInfoContext{Logger: logger})
++	if err != nil {
++		logger.Warn("Failed to get memory usage for heartbeat", "error", err)
++		return 0
++	}
++	return float32(mem)
++}
++
++// collectPluginInfos collects plugin names from client and worker plugins,
++// deduplicates them, and returns a slice of PluginInfo for heartbeat reporting.
++func collectPluginInfos(clientPluginNames []string, workerPlugins []WorkerPlugin) []*workerpb.PluginInfo {
++	set := make(map[string]struct{}, len(clientPluginNames)+len(workerPlugins))
++	result := make([]*workerpb.PluginInfo, 0, len(clientPluginNames)+len(workerPlugins))
++	for _, name := range clientPluginNames {
++		if _, found := set[name]; !found {
++			set[name] = struct{}{}
++			result = append(result, &workerpb.PluginInfo{Name: name})
++		}
++	}
++	for _, plugin := range workerPlugins {
++		if _, found := set[plugin.Name()]; !found {
++			set[plugin.Name()] = struct{}{}
++			result = append(result, &workerpb.PluginInfo{Name: plugin.Name()})
++		}
++	}
++
++	sort.Slice(result, func(i, j int) bool {
++		return result[i].Name < result[j].Name
++	})
++
++	return result
++}
+diff --git a/internal/internal_worker_base.go b/internal/internal_worker_base.go
+index 4f2ae1493..20b9133ec 100644
+--- a/internal/internal_worker_base.go
++++ b/internal/internal_worker_base.go
+@@ -324,6 +324,9 @@ func newBaseWorker(
+ ) *baseWorker {
+ 	ctx, cancel := context.WithCancel(context.Background())
+ 	logger := log.With(options.logger, tagWorkerType, options.workerType)
++	if heartbeatHandler, isHeartbeat := options.metricsHandler.(*heartbeatMetricsHandler); isHeartbeat {
++		options.metricsHandler = heartbeatHandler.forWorker(options.workerType)
++	}
+ 	metricsHandler := options.metricsHandler.WithTags(metrics.WorkerTags(options.workerType))
+ 	tss := newTrackingSlotSupplier(options.slotSupplier, trackingSlotSupplierOptions{
+ 		logger:         logger,
+@@ -692,13 +695,6 @@ func (bw *baseWorker) Stop() {
+ 	close(bw.stopCh)
+ 	bw.limiterContextCancel()
+ 
+-	for _, taskWorker := range bw.options.taskPollers {
+-		err := taskWorker.taskPoller.Cleanup()
+-		if err != nil {
+-			bw.logger.Error("Couldn't cleanup task worker", tagError, err)
+-		}
+-	}
+-
+ 	if success := awaitWaitGroup(&bw.stopWG, bw.options.stopTimeout); !success {
+ 		traceLog(func() {
+ 			bw.logger.Info("Worker graceful stop timed out.", "Stop timeout", bw.options.stopTimeout)
+diff --git a/internal/internal_worker_base_test.go b/internal/internal_worker_base_test.go
+index e900dbba7..a9de195d1 100644
+--- a/internal/internal_worker_base_test.go
++++ b/internal/internal_worker_base_test.go
+@@ -242,12 +242,6 @@ func (p *semaphoreProbeTaskPoller) PollTask() (taskForWorker, error) {
+ 	return nil, nil
+ }
+ 
+-// Cleanup implements taskPoller.
+-func (p *semaphoreProbeTaskPoller) Cleanup() error {
+-	p.Close()
+-	return nil
+-}
+-
+ func (p *semaphoreProbeTaskPoller) Allow(n int) {
+ 	for range n {
+ 		for {
+diff --git a/internal/internal_worker_heartbeat.go b/internal/internal_worker_heartbeat.go
+new file mode 100644
+index 000000000..74ddb9f73
+--- /dev/null
++++ b/internal/internal_worker_heartbeat.go
+@@ -0,0 +1,201 @@
++package internal
++
++import (
++	"context"
++	"fmt"
++	ilog "go.temporal.io/sdk/internal/log"
++	"sync"
++	"sync/atomic"
++	"time"
++
++	workerpb "go.temporal.io/api/worker/v1"
++	"go.temporal.io/api/workflowservice/v1"
++	"go.temporal.io/sdk/log"
++	"google.golang.org/grpc/codes"
++	"google.golang.org/grpc/status"
++)
++
++// heartbeatManager manages heartbeat workers across namespaces for a client.
++type heartbeatManager struct {
++	client   *WorkflowClient
++	interval time.Duration
++	logger   log.Logger
++
++	workersMutex sync.Mutex
++	workers      map[string]*sharedNamespaceWorker // namespace -> worker
++}
++
++// newHeartbeatManager creates a new heartbeatManager.
++func newHeartbeatManager(client *WorkflowClient, interval time.Duration, logger log.Logger) *heartbeatManager {
++	if logger == nil {
++		logger = ilog.NewDefaultLogger()
++	}
++	return &heartbeatManager{
++		client:   client,
++		interval: interval,
++		logger:   logger,
++		workers:  make(map[string]*sharedNamespaceWorker),
++	}
++}
++
++// registerWorker registers a worker's heartbeat callback with the shared heartbeat worker for the namespace.
++func (m *heartbeatManager) registerWorker(
++	worker *AggregatedWorker,
++) error {
++	capabilities, err := m.client.loadNamespaceCapabilities(worker.heartbeatMetrics)
++	if err != nil {
++		return fmt.Errorf("failed to get namespace capabilities: %w", err)
++	}
++	if !capabilities.GetWorkerHeartbeats() {
++		if m.logger != nil {
++			m.logger.Debug("Worker heartbeating configured, but server version does not support it.")
++		}
++		return nil
++	}
++
++	namespace := worker.executionParams.Namespace
++	m.workersMutex.Lock()
++	defer m.workersMutex.Unlock()
++
++	hw, ok := m.workers[namespace]
++	// If this is the first worker on the namespace, start a new shared namespace worker.
++	if !ok {
++		hw = &sharedNamespaceWorker{
++			client:    m.client,
++			namespace: namespace,
++			interval:  m.interval,
++			callbacks: make(map[string]func() *workerpb.WorkerHeartbeat),
++			stopC:     make(chan struct{}),
++			stoppedC:  make(chan struct{}),
++			logger:    m.logger,
++		}
++		m.workers[namespace] = hw
++		if hw.started.Swap(true) {
++			panic("heartbeat worker already started")
++		}
++		go hw.run()
++	}
++
++	hw.callbacksMutex.Lock()
++	hw.callbacks[worker.workerInstanceKey] = worker.heartbeatCallback
++	hw.callbacksMutex.Unlock()
++
++	return nil
++}
++
++// unregisterWorker removes a worker's heartbeat callback. If no callbacks remain for the namespace,
++// the shared heartbeat worker is stopped.
++func (m *heartbeatManager) unregisterWorker(worker *AggregatedWorker) {
++	m.workersMutex.Lock()
++	defer m.workersMutex.Unlock()
++
++	namespace := worker.executionParams.Namespace
++	hw, ok := m.workers[namespace]
++	if !ok {
++		return
++	}
++
++	hw.callbacksMutex.Lock()
++	delete(hw.callbacks, worker.workerInstanceKey)
++	remaining := len(hw.callbacks)
++	hw.callbacksMutex.Unlock()
++
++	if remaining == 0 {
++		hw.stop()
++		delete(m.workers, namespace)
++	}
++}
++
++// sharedNamespaceWorker handles heartbeating for all workers in a specific namespace for a specific client.
++type sharedNamespaceWorker struct {
++	client    *WorkflowClient
++	namespace string
++	interval  time.Duration
++	logger    log.Logger
++
++	// callbacksMutex should only be unlocked under
++	callbacksMutex sync.RWMutex
++	callbacks      map[string]func() *workerpb.WorkerHeartbeat // workerInstanceKey -> callback
++
++	stopC    chan struct{}
++	stoppedC chan struct{}
++	started  atomic.Bool
++}
++
++func (hw *sharedNamespaceWorker) run() {
++	defer close(hw.stoppedC)
++
++	ticker := time.NewTicker(hw.interval)
++	defer ticker.Stop()
++
++	for {
++		select {
++		case <-ticker.C:
++			if err := hw.sendHeartbeats(); err != nil {
++				hw.logger.Warn("Stopping heartbeat worker", "error", err)
++				return
++			}
++		case <-hw.stopC:
++			return
++		}
++	}
++}
++
++func (hw *sharedNamespaceWorker) sendHeartbeats() error {
++	hw.callbacksMutex.RLock()
++	callbacks := make([]func() *workerpb.WorkerHeartbeat, 0, len(hw.callbacks))
++	for _, cb := range hw.callbacks {
++		callbacks = append(callbacks, cb)
++	}
++	hw.callbacksMutex.RUnlock()
++
++	if len(callbacks) == 0 {
++		return nil
++	}
++
++	heartbeats := make([]*workerpb.WorkerHeartbeat, 0, len(callbacks))
++	for _, cb := range callbacks {
++		hb := cb()
++		heartbeats = append(heartbeats, hb)
++	}
++
++	_, err := hw.client.recordWorkerHeartbeat(context.Background(), &workflowservice.RecordWorkerHeartbeatRequest{
++		Namespace:       hw.namespace,
++		WorkerHeartbeat: heartbeats,
++	})
++
++	if err != nil {
++		if status.Code(err) == codes.Unimplemented {
++			// Server doesn't support heartbeats; return error to stop the worker.
++			return fmt.Errorf("server does not support worker heartbeats: %w", err)
++		}
++		// For other errors, log and continue heartbeating
++		hw.logger.Warn("Failed to send heartbeat", "Error", err)
++	}
++	return nil
++}
++
++func (hw *sharedNamespaceWorker) stop() {
++	if !hw.started.CompareAndSwap(true, false) {
++		return
++	}
++
++	close(hw.stopC)
++	<-hw.stoppedC
++}
++
++// pollTimeTracker tracks the last successful poll time for each poller type.
++type pollTimeTracker struct {
++	times sync.Map // pollerType (string) -> time.Time (stored as int64 nanos)
++}
++
++func (p *pollTimeTracker) recordPollSuccess(pollerType string) {
++	p.times.Store(pollerType, time.Now().UnixNano())
++}
++
++func (p *pollTimeTracker) getLastPollTime(pollerType string) time.Time {
++	if v, ok := p.times.Load(pollerType); ok {
++		return time.Unix(0, v.(int64))
++	}
++	return time.Time{}
++}
+diff --git a/internal/internal_worker_heartbeat_metrics.go b/internal/internal_worker_heartbeat_metrics.go
+new file mode 100644
+index 000000000..f829d5503
+--- /dev/null
++++ b/internal/internal_worker_heartbeat_metrics.go
+@@ -0,0 +1,323 @@
++package internal
++
++import (
++	"sync"
++	"sync/atomic"
++	"time"
++
++	workerpb "go.temporal.io/api/worker/v1"
++	"google.golang.org/protobuf/types/known/timestamppb"
++
++	"go.temporal.io/sdk/internal/common/metrics"
++)
++
++// Metrics we capture for heartbeat reporting.
++var (
++	capturedCounters = map[string]struct{}{
++		metrics.StickyCacheHit:                      {},
++		metrics.StickyCacheMiss:                     {},
++		metrics.WorkflowTaskExecutionFailureCounter: {},
++		metrics.ActivityExecutionFailedCounter:      {},
++		metrics.LocalActivityExecutionFailedCounter: {},
++		metrics.NexusTaskExecutionFailedCounter:     {},
++	}
++
++	// Timer recordings are counted (not their latencies) to track tasks processed.
++	capturedTimers = map[string]struct{}{
++		metrics.WorkflowTaskExecutionLatency:  {},
++		metrics.ActivityExecutionLatency:      {},
++		metrics.LocalActivityExecutionLatency: {},
++		metrics.NexusTaskExecutionLatency:     {},
++	}
++)
++
++// heartbeatMetricsHandler wraps a metrics handler and captures specific metrics
++// in memory for worker heartbeats.
++type heartbeatMetricsHandler struct {
++	underlying metrics.Handler
++	workerType string
++	pollerType string
++
++	// Keys are metric names, or "metricName:workerType" / "metricName:pollerType" for typed metrics.
++	metrics *sync.Map
++}
++
++// newHeartbeatMetricsHandler creates a new handler that captures specific metrics
++// for worker heartbeats while passing all metrics to the underlying handler.
++func newHeartbeatMetricsHandler(underlying metrics.Handler) *heartbeatMetricsHandler {
++	return &heartbeatMetricsHandler{
++		underlying: underlying,
++		metrics:    &sync.Map{},
++	}
++}
++
++// forWorker creates a new handler that captures metrics specific to a worker type, for worker heartbeating.
++// This should be called explicitly before calling WithTags on the returned handler.
++func (h *heartbeatMetricsHandler) forWorker(workerType string) metrics.Handler {
++	cpy := *h
++	cpy.workerType = workerType
++	return &cpy
++}
++
++// forPoller creates a new handler that captures metrics specific to a poller type, for worker heartbeating.
++// This should be called explicitly before calling WithTags on the returned handler.
++func (h *heartbeatMetricsHandler) forPoller(pollerType string) metrics.Handler {
++	cpy := *h
++	cpy.pollerType = pollerType
++	return &cpy
++}
++
++func (h *heartbeatMetricsHandler) WithTags(tags map[string]string) metrics.Handler {
++	cpy := *h
++	cpy.underlying = h.underlying.WithTags(tags)
++	return &cpy
++}
++
++func (h *heartbeatMetricsHandler) Counter(name string) metrics.Counter {
++	underlying := h.underlying.Counter(name)
++	if _, ok := capturedCounters[name]; ok {
++		return &capturingCounter{
++			underlying: underlying,
++			value:      h.getOrCreate(name),
++		}
++	}
++	return underlying
++}
++
++func (h *heartbeatMetricsHandler) Gauge(name string) metrics.Gauge {
++	underlying := h.underlying.Gauge(name)
++
++	switch name {
++	case metrics.StickyCacheSize:
++		return &capturingGauge{
++			underlying: underlying,
++			value:      h.getOrCreate(name),
++		}
++	case metrics.WorkerTaskSlotsAvailable, metrics.WorkerTaskSlotsUsed:
++		if h.workerType != "" {
++			return &capturingGauge{
++				underlying: underlying,
++				value:      h.getOrCreate(name + ":" + h.workerType),
++			}
++		}
++	case metrics.NumPoller:
++		if h.pollerType != "" {
++			return &capturingGauge{
++				underlying: underlying,
++				value:      h.getOrCreate(name + ":" + h.pollerType),
++			}
++		}
++	}
++
++	return underlying
++}
++
++func (h *heartbeatMetricsHandler) Timer(name string) metrics.Timer {
++	underlying := h.underlying.Timer(name)
++	if _, ok := capturedTimers[name]; ok {
++		return &capturingTimer{
++			underlying: underlying,
++			counter:    h.getOrCreate(name),
++		}
++	}
++	return underlying
++}
++
++func (h *heartbeatMetricsHandler) getOrCreate(key string) *atomic.Int64 {
++	if v, ok := h.metrics.Load(key); ok {
++		return v.(*atomic.Int64)
++	}
++	v := new(atomic.Int64)
++	actual, _ := h.metrics.LoadOrStore(key, v)
++	return actual.(*atomic.Int64)
++}
++
++func (h *heartbeatMetricsHandler) get(key string) int64 {
++	if v, ok := h.metrics.Load(key); ok {
++		return v.(*atomic.Int64).Load()
++	}
++	return 0
++}
++
++// populateHeartbeatOptions contains extra information needed to populate heartbeats.
++type populateHeartbeatOptions struct {
++	workflowSlotSupplierKind      string
++	activitySlotSupplierKind      string
++	localActivitySlotSupplierKind string
++	nexusSlotSupplierKind         string
++
++	workflowPollerBehavior PollerBehavior
++	activityPollerBehavior PollerBehavior
++	nexusPollerBehavior    PollerBehavior
++
++	// For delta calculations between heartbeats (mutated by PopulateHeartbeat).
++	prevWorkflowProcessed      *int64
++	prevWorkflowFailed         *int64
++	prevActivityProcessed      *int64
++	prevActivityFailed         *int64
++	prevLocalActivityProcessed *int64
++	prevLocalActivityFailed    *int64
++	prevNexusProcessed         *int64
++	prevNexusFailed            *int64
++
++	pollTimeTracker *pollTimeTracker
++}
++
++// PopulateHeartbeat fills in the metrics-related fields of the WorkerHeartbeat proto.
++func (h *heartbeatMetricsHandler) PopulateHeartbeat(hb *workerpb.WorkerHeartbeat, opts *populateHeartbeatOptions) {
++	hb.TotalStickyCacheHit = int32(h.get(metrics.StickyCacheHit))
++	hb.TotalStickyCacheMiss = int32(h.get(metrics.StickyCacheMiss))
++	hb.CurrentStickyCacheSize = int32(h.get(metrics.StickyCacheSize))
++
++	if opts.workflowSlotSupplierKind != "" {
++		hb.WorkflowTaskSlotsInfo = buildSlotsInfo(
++			opts.workflowSlotSupplierKind,
++			int32(h.get(metrics.WorkerTaskSlotsAvailable+":"+"WorkflowWorker")),
++			int32(h.get(metrics.WorkerTaskSlotsUsed+":"+"WorkflowWorker")),
++			h.get(metrics.WorkflowTaskExecutionLatency),
++			h.get(metrics.WorkflowTaskExecutionFailureCounter),
++			opts.prevWorkflowProcessed,
++			opts.prevWorkflowFailed,
++		)
++	}
++
++	if opts.activitySlotSupplierKind != "" {
++		hb.ActivityTaskSlotsInfo = buildSlotsInfo(
++			opts.activitySlotSupplierKind,
++			int32(h.get(metrics.WorkerTaskSlotsAvailable+":"+"ActivityWorker")),
++			int32(h.get(metrics.WorkerTaskSlotsUsed+":"+"ActivityWorker")),
++			h.get(metrics.ActivityExecutionLatency),
++			h.get(metrics.ActivityExecutionFailedCounter),
++			opts.prevActivityProcessed,
++			opts.prevActivityFailed,
++		)
++	}
++
++	if opts.localActivitySlotSupplierKind != "" {
++		hb.LocalActivitySlotsInfo = buildSlotsInfo(
++			opts.localActivitySlotSupplierKind,
++			int32(h.get(metrics.WorkerTaskSlotsAvailable+":"+"LocalActivityWorker")),
++			int32(h.get(metrics.WorkerTaskSlotsUsed+":"+"LocalActivityWorker")),
++			h.get(metrics.LocalActivityExecutionLatency),
++			h.get(metrics.LocalActivityExecutionFailedCounter),
++			opts.prevLocalActivityProcessed,
++			opts.prevLocalActivityFailed,
++		)
++	}
++
++	if opts.nexusSlotSupplierKind != "" {
++		hb.NexusTaskSlotsInfo = buildSlotsInfo(
++			opts.nexusSlotSupplierKind,
++			int32(h.get(metrics.WorkerTaskSlotsAvailable+":"+"NexusWorker")),
++			int32(h.get(metrics.WorkerTaskSlotsUsed+":"+"NexusWorker")),
++			h.get(metrics.NexusTaskExecutionLatency),
++			h.get(metrics.NexusTaskExecutionFailedCounter),
++			opts.prevNexusProcessed,
++			opts.prevNexusFailed,
++		)
++	}
++
++	hb.WorkflowPollerInfo = buildPollerInfo(
++		int32(h.get(metrics.NumPoller+":"+metrics.PollerTypeWorkflowTask)),
++		opts.pollTimeTracker.getLastPollTime(metrics.PollerTypeWorkflowTask),
++		opts.workflowPollerBehavior,
++	)
++	hb.WorkflowStickyPollerInfo = buildPollerInfo(
++		int32(h.get(metrics.NumPoller+":"+metrics.PollerTypeWorkflowStickyTask)),
++		opts.pollTimeTracker.getLastPollTime(metrics.PollerTypeWorkflowStickyTask),
++		opts.workflowPollerBehavior,
++	)
++	hb.ActivityPollerInfo = buildPollerInfo(
++		int32(h.get(metrics.NumPoller+":"+metrics.PollerTypeActivityTask)),
++		opts.pollTimeTracker.getLastPollTime(metrics.PollerTypeActivityTask),
++		opts.activityPollerBehavior,
++	)
++	hb.NexusPollerInfo = buildPollerInfo(
++		int32(h.get(metrics.NumPoller+":"+metrics.PollerTypeNexusTask)),
++		opts.pollTimeTracker.getLastPollTime(metrics.PollerTypeNexusTask),
++		opts.nexusPollerBehavior,
++	)
++}
++
++func (h *heartbeatMetricsHandler) Unwrap() metrics.Handler {
++	return h.underlying
++}
++
++func buildSlotsInfo(
++	supplierKind string,
++	slotsAvailable int32,
++	slotsUsed int32,
++	totalProcessed int64,
++	totalFailed int64,
++	prevProcessed *int64,
++	prevFailed *int64,
++) *workerpb.WorkerSlotsInfo {
++	intervalProcessed := totalProcessed - *prevProcessed
++	intervalFailed := totalFailed - *prevFailed
++
++	*prevProcessed = totalProcessed
++	*prevFailed = totalFailed
++
++	return &workerpb.WorkerSlotsInfo{
++		CurrentAvailableSlots:      slotsAvailable,
++		CurrentUsedSlots:           slotsUsed,
++		SlotSupplierKind:           supplierKind,
++		TotalProcessedTasks:        int32(totalProcessed),
++		TotalFailedTasks:           int32(totalFailed),
++		LastIntervalProcessedTasks: int32(intervalProcessed),
++		LastIntervalFailureTasks:   int32(intervalFailed),
++	}
++}
++
++func buildPollerInfo(currentPollers int32, lastSuccessfulPollTime time.Time, pollerBehavior PollerBehavior) *workerpb.WorkerPollerInfo {
++	var isAutoscaling bool
++	switch pollerBehavior.(type) {
++	case *pollerBehaviorAutoscaling:
++		isAutoscaling = true
++	}
++	var pollTime *timestamppb.Timestamp
++	if !lastSuccessfulPollTime.IsZero() {
++		pollTime = timestamppb.New(lastSuccessfulPollTime)
++	}
++
++	return &workerpb.WorkerPollerInfo{
++		CurrentPollers:         currentPollers,
++		LastSuccessfulPollTime: pollTime,
++		IsAutoscaling:          isAutoscaling,
++	}
++}
++
++// capturingCounter wraps a counter and captures its value in memory.
++type capturingCounter struct {
++	underlying metrics.Counter
++	value      *atomic.Int64
++}
++
++func (c *capturingCounter) Inc(delta int64) {
++	c.underlying.Inc(delta)
++	if delta > 0 {
++		c.value.Add(delta)
++	}
++}
++
++// capturingGauge wraps a gauge and captures its value in memory.
++type capturingGauge struct {
++	underlying metrics.Gauge
++	value      *atomic.Int64
++}
++
++func (g *capturingGauge) Update(f float64) {
++	g.underlying.Update(f)
++	g.value.Store(int64(f))
++}
++
++// capturingTimer wraps a timer and increments a counter each time Record is called.
++type capturingTimer struct {
++	underlying metrics.Timer
++	counter    *atomic.Int64
++}
++
++func (t *capturingTimer) Record(d time.Duration) {
++	t.underlying.Record(d)
++	t.counter.Add(1)
++}
+diff --git a/internal/internal_worker_interfaces_test.go b/internal/internal_worker_interfaces_test.go
+index 87361c7b6..58a491382 100644
+--- a/internal/internal_worker_interfaces_test.go
++++ b/internal/internal_worker_interfaces_test.go
+@@ -212,7 +212,6 @@ func (s *InterfacesTestSuite) TestInterface() {
+ 	s.service.EXPECT().PollWorkflowTaskQueue(gomock.Any(), gomock.Any(), gomock.Any()).Return(&workflowservice.PollWorkflowTaskQueueResponse{}, nil).AnyTimes()
+ 	s.service.EXPECT().RespondWorkflowTaskCompleted(gomock.Any(), gomock.Any(), gomock.Any()).Return(nil, nil).AnyTimes()
+ 	s.service.EXPECT().StartWorkflowExecution(gomock.Any(), gomock.Any(), gomock.Any()).Return(&workflowservice.StartWorkflowExecutionResponse{}, nil).AnyTimes()
+-	s.service.EXPECT().ShutdownWorker(gomock.Any(), gomock.Any(), gomock.Any()).Return(&workflowservice.ShutdownWorkerResponse{}, nil)
+
+... [truncated, 138477 chars total]

@@ -1,0 +1,78 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "api_design",
+      "recommendation": "Refactored migration template generation to use a unified formatRule helper function for consistent API rule handling in both JavaScript and Go migration templates",
+      "rationale": "The previous implementation had a bug where downgrade operations would clear API rules instead of restoring them to their previous state. This happened because the logic incorrectly assumed that if a rule changed, the downgrade should set it to null. The new approach treats the old rule as the target state for downgrades, ensuring proper restoration.",
+      "alternatives_considered": [
+        "Keeping the existing conditional logic but fixing the bug in each rule type",
+        "Creating separate helper functions for up and down migrations",
+        "Using reflection to handle all rule types generically"
+      ],
+      "files_affected": [
+        "plugins/migratecmd/templates.go"
+      ]
+    },
+    {
+      "dimension": "data_modeling",
+      "recommendation": "Maintained the same data structure for API rules (*string pointers) but changed the migration generation logic to properly track state transitions",
+      "rationale": "The underlying data model didn't need to change because the issue was in the migration generation logic, not the storage format. By preserving the existing *string pointer representation for rules, we maintain backward compatibility with existing migrations and database schemas while fixing the rollback behavior.",
+      "alternatives_considered": [
+        "Changing the data model to include previous rule values in a separate field",
+        "Storing rule history in a separate table",
+        "Using a different null representation for cleared rules"
+      ],
+      "files_affected": [
+        "plugins/migratecmd/templates.go"
+      ]
+    },
+    {
+      "dimension": "testing",
+      "recommendation": "Updated test expectations to reflect the corrected migration behavior, showing that listRule should be restored during downgrade rather than cleared",
+      "rationale": "The test changes demonstrate the fix: previously, a downgrade would set listRule to null, but now it correctly restores the original rule value. This ensures that the test suite validates the correct behavior and prevents regression.",
+      "alternatives_considered": [
+        "Keeping the old test expectations and marking them as expected failures",
+        "Creating entirely new test cases instead of modifying existing ones",
+        "Adding additional test coverage for all rule types"
+      ],
+      "files_affected": [
+        "plugins/migratecmd/migratecmd_test.go"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Simplified the conditional logic by comparing formatted rule strings instead of checking multiple edge cases separately",
+      "rationale": "The original code had complex conditionals checking for nil vs non-nil combinations and value comparisons. The new approach formats both old and new rules to strings and compares them directly, reducing the chance of logic errors and making the code more maintainable.",
+      "alternatives_considered": [
+        "Adding more detailed error messages for migration failures",
+        "Implementing validation to prevent invalid rule transitions",
+        "Creating a state machine to track rule changes"
+      ],
+      "files_affected": [
+        "plugins/migratecmd/templates.go"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Fix API Rule Rollback in Migration Templates",
+      "description": "Update the migration template generation to properly restore previous API rules during downgrade operations instead of clearing them",
+      "files_to_modify": [
+        "plugins/migratecmd/templates.go",
+        "plugins/migratecmd/migratecmd_test.go"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The changes fix a critical bug in PocketBase's migration system where downgrading migrations that modify API rules would incorrectly clear the rules instead of restoring them to their previous state. This was achieved by refactoring the template generation logic in both JavaScript and Go migration templates.\n\nThe key improvement is the introduction of a `formatRule` helper function that consistently formats rule values (including null/nil cases) for comparison. Instead of the previous complex conditional logic that tried to handle different edge cases (nil to value, value to nil, value to different value), the new approach simply compares the formatted old and new rule strings. If they differ, the 'up' migration uses the new rule format, and the 'down' migration uses the old rule format.\n\nThis change maintains backward compatibility with existing migration patterns while ensuring that downgrade operations correctly preserve the original API rule configuration. The test updates demonstrate the fix: previously, a downgrade would set `listRule` to null, but now it correctly restores it to `@request.auth.id != ''`. The implementation follows the DRY principle by extracting common formatting logic and applies the same fix to both JavaScript and Go template generation paths.",
+  "source_pr": "https://github.com/pocketbase/pocketbase/pull/3192",
+  "before_sha": "5e6949062f8462772af88995188646fffdcc7cc5",
+  "after_sha": "d423acad3b5a80139bda78702d469e54d0a4d293",
+  "diff_stats": {
+    "additions": 79,
+    "deletions": 63,
+    "files_changed": 2
+  }
+}

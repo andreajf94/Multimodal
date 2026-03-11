@@ -1,0 +1,92 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "dependency_management",
+      "recommendation": "Pinned rmcp-macros to exact version 0.6.3 in both workspace and MCP crate to prevent breaking changes from upstream updates",
+      "rationale": "The rmcp crate had a semver-breaking change in version 0.6.4, which could cause compilation failures or runtime issues. By locking to version 0.6.3, we ensure consistent builds across all development and deployment environments. This is critical for a deployment platform where build reproducibility is essential.",
+      "alternatives_considered": [
+        "Using a version range with upper bound (e.g., \"<0.6.4\")",
+        "Relying on Cargo.lock alone without explicit version pinning in Cargo.toml",
+        "Forking the dependency and maintaining a patched version"
+      ],
+      "files_affected": [
+        "Cargo.toml",
+        "mcp/Cargo.toml"
+      ]
+    },
+    {
+      "dimension": "workspace_consistency",
+      "recommendation": "Updated both workspace-level and crate-level Cargo.toml files to maintain consistent dependency versions across the entire project",
+      "rationale": "The shuttle-mcp crate is part of the workspace, so dependencies should be managed at both levels. The workspace Cargo.toml defines shared dependencies, while the crate-level Cargo.toml inherits them via workspace = true. This ensures all crates in the workspace use the same version, preventing version conflicts and diamond dependency problems.",
+      "alternatives_considered": [
+        "Only updating the workspace Cargo.toml and relying on inheritance",
+        "Only updating the mcp/Cargo.toml and duplicating the dependency specification"
+      ],
+      "files_affected": [
+        "Cargo.toml",
+        "mcp/Cargo.toml"
+      ]
+    },
+    {
+      "dimension": "version_management",
+      "recommendation": "Bumped shuttle-mcp version from 0.57.1 to 0.57.2 to reflect the dependency change",
+      "rationale": "Even though no functional code changed, adding a new dependency (rmcp-macros) constitutes a change that should be versioned. This follows semantic versioning practices where any change to dependencies that could affect the public API or behavior should result in a version bump. The patch version increment (0.57.1 \u2192 0.57.2) indicates a backward-compatible bug fix or minor improvement.",
+      "alternatives_considered": [
+        "Not bumping the version since no source code changed",
+        "Using a pre-release version suffix",
+        "Creating a separate changelog entry without version bump"
+      ],
+      "files_affected": [
+        "mcp/Cargo.toml",
+        "Cargo.lock"
+      ]
+    },
+    {
+      "dimension": "documentation_and_maintainability",
+      "recommendation": "Added clear comments explaining why the dependency is locked and when it can be unlocked",
+      "rationale": "The comment \"# locked due to semver-breaking change in 0.6.4. Remove this when unlocking `rmcp`\" serves as documentation for future maintainers. It explains the reason for the pinning and provides guidance on when and how to remove the restriction. This is important for technical debt management and prevents the pin from becoming permanent without understanding why it was added.",
+      "alternatives_considered": [
+        "Adding the pin without explanation",
+        "Creating a separate documentation file",
+        "Adding a TODO comment in the source code"
+      ],
+      "files_affected": [
+        "Cargo.toml",
+        "mcp/Cargo.toml"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Pin rmcp-macros dependency to prevent breaking changes",
+      "description": "Lock the rmcp-macros dependency to version 0.6.3 in response to a semver-breaking change in version 0.6.4, ensuring build consistency and preventing potential compilation or runtime issues in the MCP server functionality.",
+      "files_to_modify": [
+        "Cargo.toml",
+        "mcp/Cargo.toml"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-002",
+      "title": "Update Cargo.lock and version bump for shuttle-mcp",
+      "description": "Regenerate Cargo.lock with the new pinned dependency and bump the shuttle-mcp crate version from 0.57.1 to 0.57.2 to reflect the dependency addition, maintaining proper semantic versioning.",
+      "files_to_modify": [
+        "Cargo.lock",
+        "mcp/Cargo.toml"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The changes implement a defensive dependency management strategy by pinning the rmcp-macros crate to version 0.6.3 across the entire workspace. This was necessitated by a semver-breaking change in version 0.6.4 of the upstream dependency, which could introduce compilation failures or runtime issues in the MCP (Model Context Protocol) server functionality.\n\nThe approach follows Rust/Cargo best practices by updating both the workspace-level Cargo.toml (which defines shared dependencies for the entire project) and the crate-level mcp/Cargo.toml (which inherits these dependencies via workspace = true). This ensures consistency across all development and build environments. The shuttle-mcp crate version was bumped from 0.57.1 to 0.57.2 to reflect the dependency change, maintaining proper semantic versioning even though no source code was modified.\n\nKey patterns used include: 1) defensive dependency pinning to prevent upstream breaking changes from affecting the platform, 2) workspace inheritance to maintain dependency consistency, and 3) clear documentation via code comments to explain the rationale and provide guidance for future maintenance. The changes integrate seamlessly with the existing codebase structure, where the MCP crate is part of the larger shuttle workspace and follows established patterns for dependency management seen with other pinned dependencies like rmcp itself.",
+  "source_pr": "https://github.com/shuttle-hq/shuttle/pull/2121",
+  "before_sha": "4453cc629f674d22dd5e9771edbd5d7531d59694",
+  "after_sha": "c97d553f636c00985f30fce569c0ea9e2972212e",
+  "diff_stats": {
+    "additions": 7,
+    "deletions": 2,
+    "files_changed": 3
+  }
+}

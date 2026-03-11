@@ -1,0 +1,92 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "api_design",
+      "recommendation": "Replaced verbose Request::builder() patterns with concise method-specific constructors like Request::get() and Request::post()",
+      "rationale": "The HTTP request builder pattern using Request::builder() requires explicit method setting via .method(http::Method::GET) which is verbose and error-prone. The new approach uses method-specific constructors that are more concise, self-documenting, and reduce boilerplate. This follows Rust's convention of providing convenience constructors for common operations.",
+      "alternatives_considered": [
+        "Keeping the original builder pattern unchanged",
+        "Creating custom wrapper functions in each example",
+        "Using macros to generate the constructors"
+      ],
+      "files_affected": [
+        "examples/anyhow-error-response/src/main.rs",
+        "examples/form/src/main.rs",
+        "examples/simple-router-wasm/src/main.rs",
+        "examples/templates/src/main.rs",
+        "examples/testing/src/main.rs",
+        "examples/unix-domain-socket/src/main.rs",
+        "examples/validator/src/main.rs",
+        "examples/versioning/src/main.rs"
+      ]
+    },
+    {
+      "dimension": "code_maintainability",
+      "recommendation": "Standardized request construction patterns across all example applications",
+      "rationale": "Examples serve as documentation and reference for users. Consistent patterns make the codebase easier to understand, maintain, and copy. By applying the same refactoring across all examples, we ensure users see the recommended best practices uniformly. This reduces cognitive load when switching between examples.",
+      "alternatives_considered": [
+        "Only updating some examples as a demonstration",
+        "Adding comments about alternative patterns",
+        "Creating a separate examples directory with the new patterns"
+      ],
+      "files_affected": [
+        "examples/anyhow-error-response/src/main.rs",
+        "examples/form/src/main.rs",
+        "examples/simple-router-wasm/src/main.rs",
+        "examples/templates/src/main.rs",
+        "examples/testing/src/main.rs",
+        "examples/unix-domain-socket/src/main.rs",
+        "examples/validator/src/main.rs",
+        "examples/versioning/src/main.rs"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Maintained existing error handling patterns while simplifying request construction",
+      "rationale": "The refactoring preserved all existing .unwrap() calls and error handling logic. The change only affects the request construction pattern, not the error handling strategy. This ensures the examples continue to demonstrate proper error handling while benefiting from cleaner request construction syntax.",
+      "alternatives_considered": [
+        "Changing error handling patterns as part of the refactoring",
+        "Adding more robust error handling",
+        "Using ? operator instead of .unwrap()"
+      ],
+      "files_affected": [
+        "examples/anyhow-error-response/src/main.rs",
+        "examples/form/src/main.rs",
+        "examples/simple-router-wasm/src/main.rs",
+        "examples/templates/src/main.rs",
+        "examples/testing/src/main.rs",
+        "examples/unix-domain-socket/src/main.rs",
+        "examples/validator/src/main.rs",
+        "examples/versioning/src/main.rs"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Refactor HTTP request construction in examples",
+      "description": "Update all example applications to use method-specific Request constructors (Request::get(), Request::post()) instead of verbose Request::builder() patterns",
+      "files_to_modify": [
+        "examples/anyhow-error-response/src/main.rs",
+        "examples/form/src/main.rs",
+        "examples/simple-router-wasm/src/main.rs",
+        "examples/templates/src/main.rs",
+        "examples/testing/src/main.rs",
+        "examples/unix-domain-socket/src/main.rs",
+        "examples/validator/src/main.rs",
+        "examples/versioning/src/main.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "This change refactors HTTP request construction patterns across all example applications in the axum framework to use more concise and readable method-specific constructors. Instead of using the verbose Request::builder() pattern that requires explicit method setting (e.g., .method(http::Method::GET)), the examples now use direct constructors like Request::get(\"/\") and Request::post(\"/json\").\n\nThe refactoring improves code readability and reduces boilerplate while maintaining identical functionality. All examples continue to work exactly as before, preserving their error handling patterns and test assertions. This change demonstrates best practices to users who reference these examples when building their own axum applications.\n\nThe implementation follows a consistent pattern across all affected files: replacing Request::builder().method(Method::GET).uri(\"/\") with Request::get(\"/\") and similar transformations for POST requests. This standardization makes the codebase more maintainable and provides clearer examples for framework users. The changes are minimal and focused, affecting only request construction syntax without altering any business logic or test behavior.",
+  "source_pr": "https://github.com/tokio-rs/axum/pull/3653",
+  "before_sha": "57e24559051bd0df2104c70c9a63732ab2ec71bd",
+  "after_sha": "3f8956dcd007070be5449dd23102b7ee7f2e1b05",
+  "diff_stats": {
+    "additions": 20,
+    "deletions": 64,
+    "files_changed": 8
+  }
+}

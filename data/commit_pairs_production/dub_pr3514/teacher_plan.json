@@ -1,0 +1,173 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "data_modeling",
+      "recommendation": "Added date fields to customer context and extended condition attribute types to include 'date' type",
+      "rationale": "The feature required tracking customer signup and subscription dates for reward targeting. By adding these as optional date fields to the customer context schema, we maintain backward compatibility while enabling new functionality. The 'date' attribute type was added to the existing type system to ensure type safety and proper UI rendering.",
+      "alternatives_considered": [
+        "Storing dates as ISO strings instead of Date objects",
+        "Adding separate date-specific schemas instead of extending existing ones",
+        "Using string types with date validation instead of dedicated date type"
+      ],
+      "files_affected": [
+        "apps/web/lib/zod/schemas/rewards.ts"
+      ]
+    },
+    {
+      "dimension": "api_design",
+      "recommendation": "Propagated date fields through all sale tracking and commission creation entry points",
+      "rationale": "To ensure date-based conditions work across all revenue sources (Stripe, Shopify, manual tracking), we needed to add the date fields at every point where reward contexts are created. This ensures consistent behavior regardless of how a sale is recorded. The subscriptionStartDate calculation was also refined to use first commission date for better accuracy.",
+      "alternatives_considered": [
+        "Adding dates only to specific entry points",
+        "Creating a separate date context object",
+        "Using middleware to inject dates automatically"
+      ],
+      "files_affected": [
+        "apps/web/app/(ee)/api/stripe/integration/webhook/checkout-session-completed.ts",
+        "apps/web/app/(ee)/api/stripe/integration/webhook/invoice-paid.ts",
+        "apps/web/lib/api/conversions/track-sale.ts",
+        "apps/web/lib/integrations/shopify/create-sale.ts",
+        "apps/web/lib/partners/create-partner-commission.ts"
+      ]
+    },
+    {
+      "dimension": "ui_component_design",
+      "recommendation": "Created reusable DatePicker component in UI package and integrated it into rewards configuration",
+      "rationale": "Date selection needed to be consistent across the application. By building a dedicated DatePicker component in the shared UI package, we ensure consistent behavior and styling. The component supports custom triggers, localization, and accessibility features. Integration into the rewards logic UI conditionally renders the DatePicker for date-type attributes.",
+      "alternatives_considered": [
+        "Using native HTML date input",
+        "Integrating a third-party date picker library",
+        "Building date picker directly in the web app instead of UI package"
+      ],
+      "files_affected": [
+        "packages/ui/src/date-picker/date-picker.tsx",
+        "packages/ui/src/date-picker/index.ts",
+        "apps/web/ui/partners/rewards/rewards-logic.tsx"
+      ]
+    },
+    {
+      "dimension": "testing_strategy",
+      "recommendation": "Added comprehensive unit tests for date condition evaluation and end-to-end tests for sale rewards with date conditions",
+      "rationale": "Date comparisons have edge cases (timezone handling, undefined values, boundary conditions) that need thorough testing. Unit tests verify the evaluation logic works correctly, while E2E tests ensure the entire flow from sale tracking to commission creation works with real data. Test data includes timestamps to verify proper serialization.",
+      "alternatives_considered": [
+        "Only unit tests without E2E coverage",
+        "Mocking date handling instead of using real timestamps",
+        "Testing only basic date comparisons"
+      ],
+      "files_affected": [
+        "apps/web/tests/rewards/reward-conditions.test.ts",
+        "apps/web/tests/rewards/sale-reward.test.ts",
+        "apps/web/tests/utils/resource.ts"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Added proper validation for date values and graceful handling of undefined dates",
+      "rationale": "Date fields are optional in the schema, so the evaluation logic must handle undefined values gracefully (returning null/no match). The UI validates that date values are properly set before allowing condition creation. Date parsing and formatting utilities handle edge cases like invalid timestamps.",
+      "alternatives_considered": [
+        "Requiring dates to always be present",
+        "Throwing errors for undefined dates",
+        "Using default dates when undefined"
+      ],
+      "files_affected": [
+        "apps/web/lib/zod/schemas/rewards.ts",
+        "apps/web/tests/rewards/reward-conditions.test.ts",
+        "apps/web/ui/partners/rewards/rewards-logic.tsx"
+      ]
+    },
+    {
+      "dimension": "data_display",
+      "recommendation": "Enhanced display formatting for date values in tooltips and condition summaries",
+      "rationale": "Timestamps stored as numbers need to be human-readable in the UI. Added date formatting in tooltips using existing formatDateTime utility. The rewards logic UI shows formatted dates when displaying conditions, and the DatePicker shows formatted dates when selected.",
+      "alternatives_considered": [
+        "Showing raw timestamps",
+        "Creating separate date formatting component",
+        "Using relative time formatting"
+      ],
+      "files_affected": [
+        "apps/web/ui/partners/program-reward-modifiers-tooltip.tsx",
+        "apps/web/ui/partners/rewards/rewards-logic.tsx"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Extend reward schema with date support",
+      "description": "Add date fields to customer context schema and extend condition attribute types to support date comparisons",
+      "files_to_modify": [
+        "apps/web/lib/zod/schemas/rewards.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-002",
+      "title": "Propagate date fields through sale tracking flows",
+      "description": "Add signupDate and subscriptionStartDate to all reward context creation points across Stripe, Shopify, and manual sale tracking",
+      "files_to_modify": [
+        "apps/web/app/(ee)/api/stripe/integration/webhook/checkout-session-completed.ts",
+        "apps/web/app/(ee)/api/stripe/integration/webhook/invoice-paid.ts",
+        "apps/web/lib/api/conversions/track-sale.ts",
+        "apps/web/lib/integrations/shopify/create-sale.ts",
+        "apps/web/lib/partners/create-partner-commission.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-003",
+      "title": "Build DatePicker UI component",
+      "description": "Create reusable DatePicker component in UI package with proper accessibility, localization, and customization support",
+      "files_to_modify": [
+        "packages/ui/src/date-picker/index.ts"
+      ],
+      "files_to_create": [
+        "packages/ui/src/date-picker/date-picker.tsx"
+      ],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-004",
+      "title": "Integrate date conditions into rewards configuration UI",
+      "description": "Update rewards logic UI to conditionally show DatePicker for date-type attributes and handle date value formatting",
+      "files_to_modify": [
+        "apps/web/ui/partners/rewards/rewards-logic.tsx",
+        "apps/web/ui/partners/program-reward-modifiers-tooltip.tsx"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-005",
+      "title": "Add comprehensive date condition testing",
+      "description": "Create unit tests for date condition evaluation and E2E tests for sale rewards with date-based conditions",
+      "files_to_modify": [
+        "apps/web/tests/rewards/reward-conditions.test.ts",
+        "apps/web/tests/rewards/sale-reward.test.ts",
+        "apps/web/tests/utils/resource.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-006",
+      "title": "Fix payout update script logic",
+      "description": "Correct conditional logic in payout update script to prevent duplicate updates",
+      "files_to_modify": [
+        "apps/web/scripts/programs/update-commissions-paid.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation adds date-based reward conditions to the Dub platform through a systematic, layered approach. At the data layer, we extended the Zod schema to include optional date fields (signupDate, subscriptionStartDate) in the customer context and added a new 'date' attribute type to the condition system. This maintains backward compatibility while enabling new functionality.\n\nFor the API layer, we propagated these date fields through all sale tracking entry points\u2014Stripe webhooks, Shopify integration, and manual sale tracking\u2014ensuring consistent behavior across revenue sources. The subscriptionStartDate calculation was refined to use the first commission's creation date for accuracy, falling back to the current date when unavailable.\n\nThe UI layer features a new reusable DatePicker component built in the shared UI package, which supports customization, localization, and accessibility. This component is conditionally rendered in the rewards configuration UI when date-type attributes are selected, providing a consistent date selection experience. Date values are properly formatted in tooltips and condition displays using existing formatting utilities.\n\nTesting was comprehensive, covering both unit tests for the date evaluation logic (including edge cases like undefined dates and boundary conditions) and end-to-end tests that verify the complete flow from sale tracking to commission creation. The implementation follows the existing patterns in the codebase, leveraging the established reward condition evaluation system and integrating seamlessly with the partner commission infrastructure.",
+  "source_pr": "https://github.com/dubinc/dub/pull/3514",
+  "before_sha": "2924e5b24e0c858a745948e7d5ad66b6b30f3e1c",
+  "after_sha": "21a13f0e1a9afaad8b288f4711d0ef9443ec8225",
+  "diff_stats": {
+    "additions": 490,
+    "deletions": 135,
+    "files_changed": 14
+  }
+}

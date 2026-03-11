@@ -1,0 +1,862 @@
+diff --git a/apps/web/app/(ee)/api/stripe/integration/webhook/checkout-session-completed.ts b/apps/web/app/(ee)/api/stripe/integration/webhook/checkout-session-completed.ts
+index d87a8068d73..aea752d78dd 100644
+--- a/apps/web/app/(ee)/api/stripe/integration/webhook/checkout-session-completed.ts
++++ b/apps/web/app/(ee)/api/stripe/integration/webhook/checkout-session-completed.ts
+@@ -465,6 +465,7 @@ export async function checkoutSessionCompleted(
+       context: {
+         customer: {
+           country: customer.country,
++          signupDate: customer.createdAt,
+         },
+         sale: {
+           productId,
+diff --git a/apps/web/app/(ee)/api/stripe/integration/webhook/invoice-paid.ts b/apps/web/app/(ee)/api/stripe/integration/webhook/invoice-paid.ts
+index 6a527da2b4f..c0fb43b0c82 100644
+--- a/apps/web/app/(ee)/api/stripe/integration/webhook/invoice-paid.ts
++++ b/apps/web/app/(ee)/api/stripe/integration/webhook/invoice-paid.ts
+@@ -233,6 +233,7 @@ export async function invoicePaid(event: Stripe.Event, mode: StripeMode) {
+       context: {
+         customer: {
+           country: customer.country,
++          signupDate: customer.createdAt,
+         },
+         sale: {
+           productId: invoice.lines.data[0]?.pricing?.price_details?.product,
+diff --git a/apps/web/lib/api/conversions/track-sale.ts b/apps/web/lib/api/conversions/track-sale.ts
+index 63eb6508ce5..958ddfa1ee8 100644
+--- a/apps/web/lib/api/conversions/track-sale.ts
++++ b/apps/web/lib/api/conversions/track-sale.ts
+@@ -562,6 +562,7 @@ const _trackSale = async ({
+           context: {
+             customer: {
+               country: customer.country,
++              signupDate: customer.createdAt,
+               source,
+             },
+             sale: {
+diff --git a/apps/web/lib/integrations/shopify/create-sale.ts b/apps/web/lib/integrations/shopify/create-sale.ts
+index 5120a8e5015..783526dd527 100644
+--- a/apps/web/lib/integrations/shopify/create-sale.ts
++++ b/apps/web/lib/integrations/shopify/create-sale.ts
+@@ -151,6 +151,7 @@ export async function createShopifySale({
+       context: {
+         customer: {
+           country: customer.country,
++          signupDate: customer.createdAt,
+         },
+         sale: {
+           amount: saleData.amount,
+diff --git a/apps/web/lib/partners/create-partner-commission.ts b/apps/web/lib/partners/create-partner-commission.ts
+index 7e0d160d636..c72961843b5 100644
+--- a/apps/web/lib/partners/create-partner-commission.ts
++++ b/apps/web/lib/partners/create-partner-commission.ts
+@@ -117,10 +117,13 @@ export const createPartnerCommission = async ({
+         },
+       });
+ 
+-      const subscriptionDurationMonths = firstCommission
++      const subscriptionStartDate =
++        event === "sale" ? firstCommission?.createdAt ?? new Date() : undefined;
++
++      const subscriptionDurationMonths = subscriptionStartDate
+         ? differenceInMonths(
+             createdAt ?? new Date(), // account for custom commission creation date
+-            firstCommission.createdAt,
++            subscriptionStartDate,
+           )
+         : 0;
+ 
+@@ -128,6 +131,7 @@ export const createPartnerCommission = async ({
+         ...context,
+         customer: {
+           ...context?.customer,
++          subscriptionStartDate,
+           subscriptionDurationMonths,
+         },
+       };
+diff --git a/apps/web/lib/zod/schemas/rewards.ts b/apps/web/lib/zod/schemas/rewards.ts
+index 3b1cdd84909..109664a5689 100644
+--- a/apps/web/lib/zod/schemas/rewards.ts
++++ b/apps/web/lib/zod/schemas/rewards.ts
+@@ -20,7 +20,7 @@ export const COMMISSION_TYPES = [
+ export type RewardConditionEntityAttribute = {
+   id: string;
+   label: string;
+-  type: "string" | "enum" | "number" | "currency";
++  type: "string" | "enum" | "number" | "currency" | "date";
+   options?: {
+     id: string;
+     label: string;
+@@ -152,6 +152,16 @@ export const REWARD_CONDITIONS: Record<
+             label: "Subscription duration",
+             type: "number",
+           },
++          {
++            id: "subscriptionStartDate",
++            label: "Subscription start date",
++            type: "date",
++          },
++          {
++            id: "signupDate",
++            label: "Signup date",
++            type: "date",
++          },
+         ],
+       },
+       PARTNER_ENTITY,
+@@ -218,6 +228,9 @@ export const NUMBER_CONDITION_OPERATORS: (typeof CONDITION_OPERATORS)[number][]
+     "less_than_or_equal",
+   ];
+ 
++export const DATE_CONDITION_OPERATORS: (typeof CONDITION_OPERATORS)[number][] =
++  ["greater_than", "greater_than_or_equal", "less_than", "less_than_or_equal"];
++
+ export const CONDITION_OPERATOR_LABELS = {
+   equals_to: "is",
+   not_equals: "is not",
+@@ -355,6 +368,8 @@ export const rewardContextSchema = z.object({
+     .object({
+       country: z.string().nullish(),
+       source: z.enum(CUSTOMER_SOURCES).default("tracked").nullish(),
++      signupDate: z.date().nullish(),
++      subscriptionStartDate: z.date().nullish(),
+       subscriptionDurationMonths: z.number().nullish(),
+     })
+     .optional(),
+diff --git a/apps/web/scripts/programs/update-commissions-paid.ts b/apps/web/scripts/programs/update-commissions-paid.ts
+index 59c18eb6a92..98993c25b02 100644
+--- a/apps/web/scripts/programs/update-commissions-paid.ts
++++ b/apps/web/scripts/programs/update-commissions-paid.ts
+@@ -68,16 +68,17 @@ async function main() {
+           id: payoutId,
+         },
+       });
++    } else {
++      console.log(`Updating payout ${payoutId} with amount ${payoutAmount}`);
++      await prisma.payout.update({
++        where: {
++          id: payoutId,
++        },
++        data: {
++          amount: payoutAmount,
++        },
++      });
+     }
+-    console.log(`Updating payout ${payoutId} with amount ${payoutAmount}`);
+-    await prisma.payout.update({
+-      where: {
+-        id: payoutId,
+-      },
+-      data: {
+-        amount: payoutAmount,
+-      },
+-    });
+   }
+ 
+   console.log(
+diff --git a/apps/web/tests/rewards/reward-conditions.test.ts b/apps/web/tests/rewards/reward-conditions.test.ts
+index 34c9beccc8f..026ba6c3a47 100644
+--- a/apps/web/tests/rewards/reward-conditions.test.ts
++++ b/apps/web/tests/rewards/reward-conditions.test.ts
+@@ -1754,4 +1754,119 @@ describe("evaluateRewardConditions", () => {
+       expect(result).toBe(null);
+     });
+   });
++
++  describe("date conditions", () => {
++    const cutoffDate = new Date("2024-06-01T00:00:00.000Z");
++    const cutoffTimestamp = cutoffDate.getTime();
++
++    const beforeDate = new Date("2024-01-01T00:00:00.000Z");
++    const afterDate = new Date("2024-12-01T00:00:00.000Z");
++
++    const lessThanCondition = [
++      {
++        operator: "AND" as const,
++        type: "flat" as const,
++        amountInCents: 5000,
++        conditions: [
++          {
++            entity: "customer" as const,
++            attribute: "signupDate" as const,
++            operator: "less_than" as const,
++            value: cutoffTimestamp,
++          },
++        ],
++      },
++    ];
++
++    const greaterThanOrEqualCondition = [
++      {
++        operator: "AND" as const,
++        type: "flat" as const,
++        amountInCents: 5000,
++        conditions: [
++          {
++            entity: "customer" as const,
++            attribute: "subscriptionStartDate" as const,
++            operator: "greater_than_or_equal" as const,
++            value: cutoffTimestamp,
++          },
++        ],
++      },
++    ];
++
++    test("should match when signupDate is before the cutoff (less_than)", () => {
++      const context: RewardContext = {
++        customer: {
++          signupDate: beforeDate,
++        },
++      };
++
++      const result = evaluateRewardConditions({
++        conditions: lessThanCondition,
++        context,
++      });
++
++      expect(result).toEqual(lessThanCondition[0]);
++    });
++
++    test("should not match when signupDate is after the cutoff (less_than)", () => {
++      const context: RewardContext = {
++        customer: {
++          signupDate: afterDate,
++        },
++      };
++
++      const result = evaluateRewardConditions({
++        conditions: lessThanCondition,
++        context,
++      });
++
++      expect(result).toBeNull();
++    });
++
++    test("should match when subscriptionStartDate is on the cutoff (greater_than_or_equal)", () => {
++      const context: RewardContext = {
++        customer: {
++          subscriptionStartDate: cutoffDate,
++        },
++      };
++
++      const result = evaluateRewardConditions({
++        conditions: greaterThanOrEqualCondition,
++        context,
++      });
++
++      expect(result).toEqual(greaterThanOrEqualCondition[0]);
++    });
++
++    test("should not match when subscriptionStartDate is before the cutoff (greater_than_or_equal)", () => {
++      const context: RewardContext = {
++        customer: {
++          subscriptionStartDate: beforeDate,
++        },
++      };
++
++      const result = evaluateRewardConditions({
++        conditions: greaterThanOrEqualCondition,
++        context,
++      });
++
++      expect(result).toBeNull();
++    });
++
++    test("should not match when signupDate is undefined", () => {
++      const context: RewardContext = {
++        customer: {
++          signupDate: undefined,
++        },
++      };
++
++      const result = evaluateRewardConditions({
++        conditions: lessThanCondition,
++        context,
++      });
++
++      expect(result).toBeNull();
++    });
++  });
+ });
+diff --git a/apps/web/tests/rewards/sale-reward.test.ts b/apps/web/tests/rewards/sale-reward.test.ts
+index 518c1f82891..5aba9b755aa 100644
+--- a/apps/web/tests/rewards/sale-reward.test.ts
++++ b/apps/web/tests/rewards/sale-reward.test.ts
+@@ -7,6 +7,7 @@ import {
+ import {
+   E2E_CUSTOMER_COUNTRY_CONDITIONS_EXTERNAL_ID,
+   E2E_CUSTOMER_SALE_CONDITIONS_EXTERNAL_ID,
++  E2E_CUSTOMER_SIGNUP_DATE_CONDITIONS_EXTERNAL_ID,
+   E2E_SALE_REWARD,
+   E2E_TRACK_CLICK_HEADERS,
+ } from "tests/utils/resource";
+@@ -152,4 +153,24 @@ describe.concurrent("Sale rewards with conditions", async () => {
+       expectedEarnings: E2E_SALE_REWARD.modifiers[3].amountInCents!,
+     });
+   });
++
++  test("when {Customer} {Signup Date} is {greater than} {Feb 16, 2026} AND {less than} {Feb 18, 2026}", async () => {
++    const sale = randomSale("E2E customer signup date condition");
++
++    const trackSaleResponse = await http.post<TrackSaleResponse>({
++      path: "/track/sale",
++      body: {
++        ...sale,
++        customerExternalId: E2E_CUSTOMER_SIGNUP_DATE_CONDITIONS_EXTERNAL_ID,
++      },
++    });
++
++    expect(trackSaleResponse.status).toEqual(200);
++
++    await verifyCommission({
++      http,
++      invoiceId: sale.invoiceId,
++      expectedEarnings: E2E_SALE_REWARD.modifiers[4].amountInCents!,
++    });
++  });
+ });
+diff --git a/apps/web/tests/utils/resource.ts b/apps/web/tests/utils/resource.ts
+index 417aa68e314..72c670dbadc 100644
+--- a/apps/web/tests/utils/resource.ts
++++ b/apps/web/tests/utils/resource.ts
+@@ -43,6 +43,8 @@ export const E2E_CUSTOMER_SALE_CONDITIONS_EXTERNAL_ID =
+   "cus_pqc8qRtofpu6ZqvutyNDGAU2";
+ export const E2E_CUSTOMER_COUNTRY_CONDITIONS_EXTERNAL_ID =
+   "cus_LnZbkb8boLsOn1YGLPxZGZMU";
++export const E2E_CUSTOMER_SIGNUP_DATE_CONDITIONS_EXTERNAL_ID =
++  "cus_VsvO2EmMis3LiMeR6tGty9Wy";
+ 
+ // Rewards specific
+ export const E2E_SALE_REWARD = {
+@@ -111,6 +113,27 @@ export const E2E_SALE_REWARD = {
+       maxDuration: null,
+       amountInCents: 2000,
+     },
++    {
++      id: "4968d41e-faf2-438d-847e-eda43116492a",
++      type: "flat",
++      operator: "AND",
++      conditions: [
++        {
++          value: 1771228800000,
++          entity: "customer",
++          operator: "greater_than",
++          attribute: "signupDate",
++        },
++        {
++          value: 1771401600000,
++          entity: "customer",
++          operator: "less_than",
++          attribute: "signupDate",
++        },
++      ],
++      maxDuration: null,
++      amountInCents: 3300,
++    },
+   ],
+ };
+ 
+diff --git a/apps/web/ui/partners/program-reward-modifiers-tooltip.tsx b/apps/web/ui/partners/program-reward-modifiers-tooltip.tsx
+index ad5eee477a1..a3d0b4c2c92 100644
+--- a/apps/web/ui/partners/program-reward-modifiers-tooltip.tsx
++++ b/apps/web/ui/partners/program-reward-modifiers-tooltip.tsx
+@@ -13,6 +13,7 @@ import {
+   capitalize,
+   cn,
+   currencyFormatter,
++  formatDateTime,
+   pluralize,
+ } from "@dub/utils";
+ import { formatDuration } from "date-fns";
+@@ -199,12 +200,17 @@ const RewardItem = ({
+                             : attribute?.type === "currency"
+                               ? // Currency value
+                                 currencyFormatter(Number(condition.value))
+-                              : // Everything else
+-                                attribute?.options
+-                                ? attribute.options.find(
+-                                    (o) => o.id === condition.value,
+-                                  )?.label ?? condition.value.toString()
+-                                : condition.value.toString())}
++                              : attribute?.type === "date"
++                                ? // Date+time value
++                                  formatDateTime(
++                                    new Date(Number(condition.value)),
++                                  )
++                                : // Everything else
++                                  attribute?.options
++                                  ? attribute.options.find(
++                                      (o) => o.id === condition.value,
++                                    )?.label ?? condition.value.toString()
++                                  : condition.value.toString())}
+                 </span>
+               </li>
+             );
+diff --git a/apps/web/ui/partners/rewards/rewards-logic.tsx b/apps/web/ui/partners/rewards/rewards-logic.tsx
+index 99ef9dcb8f8..948ed42fbfc 100644
+--- a/apps/web/ui/partners/rewards/rewards-logic.tsx
++++ b/apps/web/ui/partners/rewards/rewards-logic.tsx
+@@ -9,6 +9,7 @@ import { RECURRING_MAX_DURATIONS } from "@/lib/zod/schemas/misc";
+ import {
+   CONDITION_OPERATOR_LABELS,
+   CONDITION_OPERATORS,
++  DATE_CONDITION_OPERATORS,
+   ENUM_CONDITION_OPERATORS,
+   NUMBER_CONDITION_OPERATORS,
+   REWARD_CONDITIONS,
+@@ -22,6 +23,7 @@ import {
+   Button,
+   Check2,
+   ChevronRight,
++  DatePicker,
+   InvoiceDollar,
+   MoneyBills2,
+   Popover,
+@@ -33,6 +35,7 @@ import {
+   cn,
+   COUNTRIES,
+   currencyFormatter,
++  formatDate,
+   pluralize,
+   truncate,
+ } from "@dub/utils";
+@@ -254,6 +257,15 @@ const formatValue = (
+     if (option) return option.label;
+   }
+ 
++  // For date values, format timestamp as readable date + time
++  if (type === "date") {
++    if (!value || isNaN(Number(value))) {
++      return "Value";
++    }
++
++    return formatDate(new Date(Number(value)));
++  }
++
+   // For numeric values, show the number as is
+   if (["number", "currency"].includes(type)) {
+     return type === "number"
+@@ -434,9 +446,13 @@ function ConditionLogic({
+                                 ? typeof condition.value !== "number"
+                                   ? { value: "" }
+                                   : null
+-                                : typeof condition.value !== "string"
+-                                  ? { value: "" }
+-                                  : null),
++                                : attributeType === "date"
++                                  ? typeof condition.value !== "number"
++                                    ? { value: undefined }
++                                    : null
++                                  : typeof condition.value !== "string"
++                                    ? { value: "" }
++                                    : null),
+                           },
+                           {
+                             shouldDirty: true,
+@@ -447,7 +463,9 @@ function ConditionLogic({
+                         ? NUMBER_CONDITION_OPERATORS
+                         : attributeType === "enum"
+                           ? ENUM_CONDITION_OPERATORS
+-                          : STRING_CONDITION_OPERATORS
++                          : attributeType === "date"
++                            ? DATE_CONDITION_OPERATORS
++                            : STRING_CONDITION_OPERATORS
+                       ).map((operator) => ({
+                         text: CONDITION_OPERATOR_LABELS[operator],
+                         value: operator,
+@@ -457,120 +475,159 @@ function ConditionLogic({
+                 )}{" "}
+                 {condition.operator && (
+                   <>
+-                    <InlineBadgePopover
+-                      text={formatValue(condition.value, attribute)}
+-                      invalid={
+-                        Array.isArray(condition.value)
+-                          ? condition.value.filter(Boolean).length === 0
+-                          : ["number", "currency"].includes(attributeType)
+-                            ? condition.value === "" ||
+-                              isNaN(Number(condition.value))
+-                            : !condition.value
+-                      }
+-                      buttonClassName={cn(
+-                        condition.attribute === "productId" && "rounded-r-none",
+-                      )}
+-                    >
+-                      {/* Country selection */}
+-                      {condition.attribute === "country" ? (
+-                        // Country selector
+-                        <InlineBadgePopoverMenu
+-                          search
+-                          selectedValue={
+-                            (condition.value as string[] | undefined) ??
+-                            (isArrayValue ? [] : undefined)
+-                          }
+-                          items={Object.entries(COUNTRIES).map(
+-                            ([key, name]) => ({
+-                              text: name,
+-                              value: key,
+-                              icon: (
+-                                <img
+-                                  alt={`${key} flag`}
+-                                  src={`https://hatscripts.github.io/circle-flags/flags/${key.toLowerCase()}.svg`}
+-                                  className="size-3 shrink-0"
+-                                />
+-                              ),
+-                            }),
+-                          )}
+-                          onSelect={(value) => {
+-                            setValue(conditionKey, {
+-                              ...condition,
+-                              value: isArrayValue
+-                                ? Array.isArray(condition.value)
+-                                  ? (condition.value as string[]).includes(
+-                                      value,
+-                                    )
+-                                    ? (condition.value.filter(
+-                                        (v) => v !== value,
+-                                      ) as string[])
+-                                    : ([...condition.value, value] as string[])
+-                                  : [value]
+-                                : value,
+-                            });
+-                          }}
+-                        />
+-                      ) : attribute?.options ? (
+-                        // Select option selector
+-                        <InlineBadgePopoverMenu
+-                          search={attribute.options.length > 4}
+-                          selectedValue={
+-                            (condition.value as string[] | undefined) ??
+-                            (isArrayValue ? [] : undefined)
+-                          }
+-                          items={attribute.options.map(({ id, label }) => ({
+-                            text: label,
+-                            value: id,
+-                          }))}
+-                          onSelect={(value) => {
+-                            setValue(conditionKey, {
+-                              ...condition,
+-                              value: isArrayValue
++                    {attributeType === "date" ? (
++                      <DatePicker
++                        value={
++                          condition.value
++                            ? new Date(condition.value as number)
++                            : undefined
++                        }
++                        onChange={(date) =>
++                          setValue(conditionKey, {
++                            ...condition,
++                            value: date ? date.getTime() : undefined,
++                          })
++                        }
++                        placeholder={condition.label || "Select date"}
++                        invalid={!condition.value}
++                        trigger={({ displayValue, placeholder, invalid }) => (
++                          <button
++                            type="button"
++                            className={cn(
++                              "inline-block rounded px-1.5 text-left text-sm font-semibold transition-colors",
++                              invalid
++                                ? "bg-orange-50 text-orange-500 hover:bg-orange-100 data-[state=open]:bg-orange-100"
++                                : "bg-blue-50 text-blue-700 hover:bg-blue-100 data-[state=open]:bg-blue-100",
++                            )}
++                          >
++                            {displayValue ?? placeholder}
++                          </button>
++                        )}
++                        showYearNavigation
++                      />
++                    ) : (
++                      <InlineBadgePopover
++                        text={formatValue(condition.value, attribute)}
++                        invalid={
++                          Array.isArray(condition.value)
++                            ? condition.value.filter(Boolean).length === 0
++                            : ["number", "currency"].includes(attributeType)
++                              ? condition.value === "" ||
++                                isNaN(Number(condition.value))
++                              : !condition.value
++                        }
++                        buttonClassName={cn(
++                          condition.attribute === "productId" &&
++                            "rounded-r-none",
++                        )}
++                      >
++                        {/* Country selection */}
++                        {condition.attribute === "country" ? (
++                          // Country selector
++                          <InlineBadgePopoverMenu
++                            search
++                            selectedValue={
++                              (condition.value as string[] | undefined) ??
++                              (isArrayValue ? [] : undefined)
++                            }
++                            items={Object.entries(COUNTRIES).map(
++                              ([key, name]) => ({
++                                text: name,
++                                value: key,
++                                icon: (
++                                  <img
++                                    alt={`${key} flag`}
++                                    src={`https://hatscripts.github.io/circle-flags/flags/${key.toLowerCase()}.svg`}
++                                    className="size-3 shrink-0"
++                                  />
++                                ),
++                              }),
++                            )}
++                            onSelect={(value) => {
++                              setValue(conditionKey, {
++                                ...condition,
++                                value: isArrayValue
++                                  ? Array.isArray(condition.value)
++                                    ? (condition.value as string[]).includes(
++                                        value,
++                                      )
++                                      ? (condition.value.filter(
++                                          (v) => v !== value,
++                                        ) as string[])
++                                      : ([
++                                          ...condition.value,
++                                          value,
++                                        ] as string[])
++                                    : [value]
++                                  : value,
++                              });
++                            }}
++                          />
++                        ) : attribute?.options ? (
++                          // Select option selector
++                          <InlineBadgePopoverMenu
++                            search={attribute.options.length > 4}
++                            selectedValue={
++                              (condition.value as string[] | undefined) ??
++                              (isArrayValue ? [] : undefined)
++                            }
++                            items={attribute.options.map(({ id, label }) => ({
++                              text: label,
++                              value: id,
++                            }))}
++                            onSelect={(value) => {
++                              setValue(conditionKey, {
++                                ...condition,
++                                value: isArrayValue
++                                  ? Array.isArray(condition.value)
++                                    ? (condition.value as string[]).includes(
++                                        value,
++                                      )
++                                      ? (condition.value.filter(
++                                          (v) => v !== value,
++                                        ) as string[])
++                                      : ([
++                                          ...condition.value,
++                                          value,
++                                        ] as string[])
++                                    : [value]
++                                  : value,
++                              });
++                            }}
++                          />
++                        ) : isArrayValue ? (
++                          // String array input
++                          <InlineBadgePopoverInputs
++                            values={
++                              condition.value
+                                 ? Array.isArray(condition.value)
+-                                  ? (condition.value as string[]).includes(
+-                                      value,
+-                                    )
+-                                    ? (condition.value.filter(
+-                                        (v) => v !== value,
+-                                      ) as string[])
+-                                    : ([...condition.value, value] as string[])
+-                                  : [value]
+-                                : value,
+-                            });
+-                          }}
+-                        />
+-                      ) : isArrayValue ? (
+-                        // String array input
+-                        <InlineBadgePopoverInputs
+-                          values={
+-                            condition.value
+-                              ? Array.isArray(condition.value)
+-                                ? condition.value.map(String)
+-                                : [condition.value.toString()]
+-                              : [""]
+-                          }
+-                          onChange={(values) => {
+-                            setValue(conditionKey, {
+-                              ...condition,
+-                              value: values,
+-                            });
+-                          }}
+-                        />
+-                      ) : ["number", "currency"].includes(attributeType) ? (
+-                        // Number/currency input
+-                        <AmountInput
+-                          fieldKey={`${conditionKey}.value`}
+-                          type={attributeType as "number" | "currency"}
+-                        />
+-                      ) : (
+-                        // String input
+-                        <InlineBadgePopoverInput
+-                          {...register(`${conditionKey}.value`, {
+-                            required: true,
+-                          })}
+-                        />
+-                      )}
+-                    </InlineBadgePopover>
++                                  ? condition.value.map(String)
++                                  : [condition.value.toString()]
++                                : [""]
++                            }
++                            onChange={(values) => {
++                              setValue(conditionKey, {
++                                ...condition,
++                                value: values,
++                              });
++                            }}
++                          />
++                        ) : ["number", "currency"].includes(attributeType) ? (
++                          // Number/currency input
++                          <AmountInput
++                            fieldKey={`${conditionKey}.value`}
++                            type={attributeType as "number" | "currency"}
++                          />
++                        ) : (
++                          // String input
++                          <InlineBadgePopoverInput
++                            {...register(`${conditionKey}.value`, {
++                              required: true,
++                            })}
++                          />
++                        )}
++                      </InlineBadgePopover>
++                    )}
+ 
+                     {condition.attribute === "subscriptionDurationMonths" && (
+                       <span> months</span>
+diff --git a/packages/ui/src/date-picker/date-picker.tsx b/packages/ui/src/date-picker/date-picker.tsx
+new file mode 100644
+index 00000000000..a88f720fc26
+--- /dev/null
++++ b/packages/ui/src/date-picker/date-picker.tsx
+@@ -0,0 +1,108 @@
++import { enUS } from "date-fns/locale";
++import { ReactElement, useEffect, useState } from "react";
++import { Popover } from "../popover";
++import { Calendar as CalendarPrimitive } from "./calendar";
++import { DatePickerContext, formatDate } from "./shared";
++import { Trigger } from "./trigger";
++import { PickerProps } from "./types";
++
++export type DatePickerTriggerRenderProps = {
++  displayValue: string | null;
++  placeholder: string;
++  open: boolean;
++  disabled?: boolean;
++  invalid?: boolean;
++};
++
++export type DatePickerProps = {
++  value?: Date | null;
++  defaultValue?: Date | null;
++  onChange?: (date: Date | undefined) => void;
++  /** Custom trigger element. Receives displayValue, placeholder, open, and disabled. Must return a single React element (e.g. <button>) so the popover can attach open behavior. */
++  trigger?: (props: DatePickerTriggerRenderProps) => ReactElement;
++  invalid?: boolean;
++} & PickerProps;
++
++export function DatePicker({
++  value,
++  defaultValue,
++  onChange,
++  trigger: customTrigger,
++  disabled,
++  disableNavigation,
++  disabledDays,
++  showYearNavigation = false,
++  locale = enUS,
++  placeholder = "Select date",
++  hasError,
++  invalid,
++  align = "center",
++  className,
++  ...props
++}: DatePickerProps) {
++  const [open, setOpen] = useState(false);
++  const [selected, setSelected] = useState<Date | undefined>(
++    value ?? defaultValue ?? undefined,
++  );
++
++  useEffect(() => {
++    setSelected(value ?? undefined);
++  }, [value]);
++
++  const onSelect = (date: Date | undefined) => {
++    setSelected(date);
++    onChange?.(date);
++    setOpen(false);
++  };
++
++  const displayValue = selected ? formatDate(selected, locale) : null;
++
++  return (
++    <DatePickerContext.Provider value={{ isOpen: open, setIsOpen: setOpen }}>
++      <Popover
++        align={align}
++        openPopover={open}
++        setOpenPopover={setOpen}
++        popoverContentClassName="rounded-xl"
++        content={
++          <div className="flex w-full">
++            <CalendarPrimitive
++              mode="single"
++              selected={selected}
++              onSelect={onSelect}
++              disabled={disabledDays}
++              disableNavigation={disableNavigation}
++              showYearNavigation={showYearNavigation}
++              locale={locale}
++              className="p-3"
++              {...props}
++            />
++          </div>
++        }
++      >
++        {customTrigger ? (
++          customTrigger({
++            displayValue,
++            placeholder,
++            open,
++            disabled,
++            invalid,
++          })
++        ) : (
++          <Trigger
++            placeholder={placeholder}
++            disabled={disabled}
++            className={className}
++            hasError={hasError}
++            aria-required={props.required || props["aria-required"]}
++            aria-invalid={props["aria-invalid"]}
++            aria-label={props["aria-label"]}
++            aria-labelledby={props["aria-labelledby"]}
++          >
++            {displayValue}
++          </Trigger>
++        )}
++      </Popover>
++    </DatePickerContext.Provider>
++  );
++}
+diff --git a/packages/ui/src/date-picker/index.ts b/packages/ui/src/date-picker/index.ts
+index 11dacfa4353..b15587adf8b 100644
+--- a/packages/ui/src/date-picker/index.ts
++++ b/packages/ui/src/date-picker/index.ts
+@@ -1,3 +1,4 @@
+ export * from "./calendar";
++export * from "./date-picker";
+ export * from "./date-range-picker";
+ export { DatePickerContext } from "./shared";

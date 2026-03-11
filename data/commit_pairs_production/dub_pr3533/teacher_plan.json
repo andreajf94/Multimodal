@@ -1,0 +1,94 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "design_system_integration",
+      "recommendation": "Replaced hardcoded color values with semantic design system tokens for dark mode support",
+      "rationale": "The original code used static color values like `text-neutral-900` that don't adapt to dark mode. By switching to semantic tokens like `text-content-emphasis`, `text-content-subtle`, and `bg-bg-subtle`, the components now properly respond to the application's theme context. This ensures consistent theming across light and dark modes without duplicating styles.",
+      "alternatives_considered": [
+        "Adding separate dark mode classes with `dark:` prefixes",
+        "Creating component-specific theme overrides",
+        "Using CSS variables directly instead of semantic tokens"
+      ],
+      "files_affected": [
+        "apps/web/app/(ee)/app.dub.co/embed/referrals/links-list.tsx",
+        "apps/web/app/(ee)/app.dub.co/embed/referrals/page-client.tsx",
+        "packages/ui/src/combobox/index.tsx"
+      ]
+    },
+    {
+      "dimension": "component_consistency",
+      "recommendation": "Applied consistent token naming across all affected components to maintain visual harmony",
+      "rationale": "The changes ensure that similar UI elements use the same semantic tokens across different components. For example, muted text consistently uses `text-content-muted`, borders use `border-border-subtle`, and background states use `bg-bg-subtle`. This creates a predictable design language that's easier to maintain and ensures visual consistency throughout the referral embed interface.",
+      "alternatives_considered": [
+        "Creating component-specific token variations",
+        "Using different token names for similar visual treatments",
+        "Keeping some hardcoded values for specific components"
+      ],
+      "files_affected": [
+        "apps/web/app/(ee)/app.dub.co/embed/referrals/links-list.tsx",
+        "apps/web/app/(ee)/app.dub.co/embed/referrals/page-client.tsx",
+        "packages/ui/src/combobox/index.tsx"
+      ]
+    },
+    {
+      "dimension": "accessibility_considerations",
+      "recommendation": "Improved color contrast by using semantic tokens that are designed for proper contrast ratios",
+      "rationale": "Semantic design tokens like `text-content-emphasis` and `text-content-subtle` are pre-configured to maintain WCAG-compliant contrast ratios in both light and dark modes. This ensures that text remains readable against backgrounds, improving accessibility for users with visual impairments or in different lighting conditions.",
+      "alternatives_considered": [
+        "Manually calculating and applying contrast ratios",
+        "Using opacity-based approaches instead of semantic colors",
+        "Adding separate accessibility-focused classes"
+      ],
+      "files_affected": [
+        "apps/web/app/(ee)/app.dub.co/embed/referrals/links-list.tsx",
+        "apps/web/app/(ee)/app.dub.co/embed/referrals/page-client.tsx",
+        "packages/ui/src/combobox/index.tsx"
+      ]
+    },
+    {
+      "dimension": "shared_component_library",
+      "recommendation": "Updated the shared UI combobox component to support dark mode throughout the application",
+      "rationale": "By modifying the combobox in the shared `packages/ui` library, the dark mode fixes automatically propagate to all usages of this component across the application. This is more efficient than fixing each usage individually and ensures consistency. The combobox is a complex component with multiple interactive states, so fixing it at the source prevents dark mode issues in other parts of the app.",
+      "alternatives_considered": [
+        "Creating a dark-mode-specific combobox variant",
+        "Overriding styles at the usage level",
+        "Using CSS-in-JS to dynamically apply dark mode styles"
+      ],
+      "files_affected": [
+        "packages/ui/src/combobox/index.tsx"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Referral Embed Dark Mode Color Token Migration",
+      "description": "Update referral embed UI components to use semantic design tokens for proper dark mode support",
+      "files_to_modify": [
+        "apps/web/app/(ee)/app.dub.co/embed/referrals/links-list.tsx",
+        "apps/web/app/(ee)/app.dub.co/embed/referrals/page-client.tsx"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-002",
+      "title": "Shared Combobox Component Dark Mode Enhancement",
+      "description": "Update the shared combobox component in the UI package to support dark mode with semantic tokens",
+      "files_to_modify": [
+        "packages/ui/src/combobox/index.tsx"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    }
+  ],
+  "implementation_summary": "The implementation focused on migrating hardcoded color values to semantic design tokens to enable proper dark mode support for the referral embed components. The changes were made across three files: two referral embed-specific components and one shared UI component.\n\nThe approach was systematic, replacing specific color classes like `text-neutral-900`, `text-neutral-600`, and `border-neutral-200` with semantic tokens such as `text-content-emphasis`, `text-content-subtle`, and `border-border-subtle`. This ensures that colors adapt correctly based on the active theme (light/dark) without needing separate style rules for each mode. The semantic token system provides a consistent design language where `-emphasis` indicates primary content, `-subtle` indicates secondary content, and `-muted` indicates tertiary or disabled content.\n\nA key architectural decision was to update the shared combobox component in the UI package rather than just fixing the specific usage in the referral embed. This ensures that all combobox instances throughout the application benefit from the dark mode improvements, maintaining consistency and reducing future maintenance overhead. The changes maintain all existing functionality while improving accessibility through better contrast ratios and creating a more cohesive visual experience across both light and dark themes.",
+  "source_pr": "https://github.com/dubinc/dub/pull/3533",
+  "before_sha": "6ebba7954fb8d421bb8607c2ae25d8b0c47b8865",
+  "after_sha": "60419ac3ebba18873e85a8c7667bf20709e17b5f",
+  "diff_stats": {
+    "additions": 26,
+    "deletions": 26,
+    "files_changed": 3
+  }
+}

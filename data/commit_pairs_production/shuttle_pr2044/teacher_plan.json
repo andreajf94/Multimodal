@@ -1,0 +1,155 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "code_organization",
+      "recommendation": "Extracted Docker build logic into a separate `shuttle-builder` crate with template-based Dockerfile generation",
+      "rationale": "The Docker build pipeline was previously embedded in deployment logic. By extracting it to a dedicated crate, we achieve better separation of concerns, reusability across commands (build, run, deploy), and maintainability. The template-based approach using Askama allows for clean separation of Dockerfile templates from rendering logic.",
+      "alternatives_considered": [
+        "Keeping Docker logic inline in cargo-shuttle",
+        "Using string concatenation instead of templates",
+        "Creating a separate binary instead of a library"
+      ],
+      "files_affected": [
+        "builder/Cargo.toml",
+        "builder/src/lib.rs",
+        "builder/templates/"
+      ]
+    },
+    {
+      "dimension": "cli_design",
+      "recommendation": "Added new `shuttle build` command with both native and Docker build modes, plus shorthand aliases for common commands",
+      "rationale": "The feature request required local Docker builds matching the platform's pipeline. Adding a dedicated `build` command provides clear separation from `run` and `deploy`. Shorthand aliases (i, b, r, d) improve developer ergonomics for frequent operations while maintaining discoverability through visible_aliases.",
+      "alternatives_considered": [
+        "Adding Docker flags to existing commands only",
+        "Creating separate `shuttle docker-build` command",
+        "Using subcommands instead of flags for build modes"
+      ],
+      "files_affected": [
+        "cargo-shuttle/src/args.rs",
+        "cargo-shuttle/src/lib.rs"
+      ]
+    },
+    {
+      "dimension": "build_system",
+      "recommendation": "Refactored build logic to separate concerns: cargo_build for native builds, render_rust_dockerfile for Docker builds, and gather_rust_build_args for parameter collection",
+      "rationale": "Previously, build logic was tightly coupled with run command. By separating concerns, we can reuse the same build parameter gathering for both native and Docker builds. This ensures consistency between build modes and makes the code more testable.",
+      "alternatives_considered": [
+        "Keeping monolithic build_workspace function",
+        "Duplicating build logic for native and Docker modes",
+        "Using trait-based abstraction for different build strategies"
+      ],
+      "files_affected": [
+        "cargo-shuttle/src/builder.rs",
+        "cargo-shuttle/src/lib.rs"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Added experimental warnings for Docker-related commands and improved error contexts for build failures",
+      "rationale": "Since Docker build/run commands are experimental, explicit warnings help set user expectations. Improved error contexts (like 'writing archive', 'spawning docker run process') make debugging easier when issues occur with the new experimental features.",
+      "alternatives_considered": [
+        "Silently failing on experimental features",
+        "Requiring explicit --experimental flag",
+        "Only warning on first use"
+      ],
+      "files_affected": [
+        "cargo-shuttle/src/lib.rs"
+      ]
+    },
+    {
+      "dimension": "testing",
+      "recommendation": "Added comprehensive tests for Dockerfile template rendering with pretty_assertions for readable test output",
+      "rationale": "Dockerfile generation is critical infrastructure. The tests verify template rendering produces correct Dockerfiles with various build arguments. Using pretty_assertions ensures test failures show clear diffs between expected and actual output.",
+      "alternatives_considered": [
+        "No tests for template rendering",
+        "Using string comparison without diff output",
+        "Integration tests only"
+      ],
+      "files_affected": [
+        "builder/src/lib.rs",
+        "builder/tests/rust.Dockerfile"
+      ]
+    },
+    {
+      "dimension": "dependency_management",
+      "recommendation": "Added askama for template rendering and updated workspace dependencies to include the new builder crate",
+      "rationale": "Askama provides type-safe template rendering with compile-time validation, which is safer than string concatenation for generating Dockerfiles. Adding shuttle-builder to workspace dependencies ensures consistent versioning across the monorepo.",
+      "alternatives_considered": [
+        "Using handlebars or other template engines",
+        "Manual string formatting",
+        "Generating Dockerfiles at build time vs runtime"
+      ],
+      "files_affected": [
+        "Cargo.lock",
+        "Cargo.toml",
+        "builder/Cargo.toml"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Extract Docker build pipeline into reusable crate",
+      "description": "Create shuttle-builder crate with template-based Dockerfile generation that matches the platform's build pipeline",
+      "files_to_modify": [
+        "Cargo.toml",
+        "Cargo.lock",
+        ".circleci/config.yml"
+      ],
+      "files_to_create": [
+        "builder/Cargo.toml",
+        "builder/src/lib.rs",
+        "builder/templates/cargo-chef.Dockerfile",
+        "builder/templates/runtime-base.Dockerfile",
+        "builder/templates/rust.Dockerfile.jinja2",
+        "builder/tests/rust.Dockerfile"
+      ],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-002",
+      "title": "Add shuttle build command with native and Docker modes",
+      "description": "Implement new build command supporting both native cargo builds and Docker-based builds using the extracted builder crate",
+      "files_to_modify": [
+        "cargo-shuttle/Cargo.toml",
+        "cargo-shuttle/src/args.rs",
+        "cargo-shuttle/src/builder.rs",
+        "cargo-shuttle/src/lib.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-003",
+      "title": "Enhance shuttle run command with Docker support",
+      "description": "Extend existing run command to support --docker flag for building and running projects in Docker containers locally",
+      "files_to_modify": [
+        "cargo-shuttle/src/args.rs",
+        "cargo-shuttle/src/lib.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-004",
+      "title": "Add CLI shorthand aliases and improve output formatting",
+      "description": "Add visible aliases for common commands (i, b, r, d) and improve output formatting to match cargo's style",
+      "files_to_modify": [
+        "cargo-shuttle/src/args.rs",
+        "cargo-shuttle/src/lib.rs",
+        "cargo-shuttle/src/util/mod.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation adds local Docker build and run capabilities to the Shuttle CLI through a well-architected separation of concerns. A new `shuttle-builder` crate was created to encapsulate Dockerfile template rendering using Askama, ensuring the local Docker builds match the platform's production pipeline exactly. This crate provides reusable templates for cargo-chef and runtime-base Dockerfiles, with a Jinja2 template for the main Rust Dockerfile that conditionally includes build arguments like package names, features, and optimization flags.\n\nThe CLI was extended with a new `shuttle build` command that supports both native builds (using cargo build) and Docker builds (using the extracted builder crate). The existing `shuttle run` command was enhanced with a `--docker` flag that performs a local Docker build followed by `docker run`. Both experimental Docker features display appropriate warnings to users. Shorthand command aliases (i, b, r, d) were added for improved developer ergonomics.\n\nKey refactoring included separating build logic from run logic, creating a shared `BuildArgsShared` struct for parameters common to build and run commands, and improving output formatting to match cargo's style. The changes integrate cleanly with the existing codebase by reusing the existing project loading, secret management, and local provisioner server infrastructure while adding new capabilities for local environment debugging.",
+  "source_pr": "https://github.com/shuttle-hq/shuttle/pull/2044",
+  "before_sha": "c83c0d4c78387f07fc46e39a92163120afc4cbee",
+  "after_sha": "764a3cda229cca61afe66503c2a2dcb18e314628",
+  "diff_stats": {
+    "additions": 786,
+    "deletions": 268,
+    "files_changed": 17
+  }
+}

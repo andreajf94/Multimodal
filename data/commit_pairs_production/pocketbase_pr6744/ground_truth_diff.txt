@@ -1,0 +1,47 @@
+diff --git a/apis/file.go b/apis/file.go
+index b18689d2d..997e74ee3 100644
+--- a/apis/file.go
++++ b/apis/file.go
+@@ -19,7 +19,7 @@ import (
+ 	"golang.org/x/sync/singleflight"
+ )
+ 
+-var imageContentTypes = []string{"image/png", "image/jpg", "image/jpeg", "image/gif"}
++var imageContentTypes = []string{"image/png", "image/jpg", "image/jpeg", "image/gif", "image/webp"}
+ var defaultThumbSizes = []string{"100x100"}
+ 
+ // bindFileApi registers the file api endpoints and the corresponding handlers.
+diff --git a/go.mod b/go.mod
+index 429ead32c..47fb1c9ed 100644
+--- a/go.mod
++++ b/go.mod
+@@ -18,6 +18,7 @@ require (
+ 	github.com/spf13/cast v1.7.1
+ 	github.com/spf13/cobra v1.9.1
+ 	golang.org/x/crypto v0.37.0
++	golang.org/x/image v0.26.0
+ 	golang.org/x/net v0.39.0
+ 	golang.org/x/oauth2 v0.29.0
+ 	golang.org/x/sync v0.13.0
+@@ -39,7 +40,6 @@ require (
+ 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
+ 	github.com/spf13/pflag v1.0.6 // indirect
+ 	golang.org/x/exp v0.0.0-20250408133849-7e4ce0ab07d0 // indirect
+-	golang.org/x/image v0.26.0 // indirect
+ 	golang.org/x/mod v0.24.0 // indirect
+ 	golang.org/x/sys v0.32.0 // indirect
+ 	golang.org/x/text v0.24.0 // indirect
+diff --git a/tools/filesystem/filesystem.go b/tools/filesystem/filesystem.go
+index a6ad37d7b..a2887ff62 100644
+--- a/tools/filesystem/filesystem.go
++++ b/tools/filesystem/filesystem.go
+@@ -21,6 +21,9 @@ import (
+ 	"github.com/pocketbase/pocketbase/tools/filesystem/internal/s3blob"
+ 	"github.com/pocketbase/pocketbase/tools/filesystem/internal/s3blob/s3"
+ 	"github.com/pocketbase/pocketbase/tools/list"
++
++	// explicit webp decoder because disintegration/imaging does not support webp
++	_ "golang.org/x/image/webp"
+ )
+ 
+ // note: the same as blob.ErrNotFound for backward compatibility with earlier versions

@@ -1,0 +1,137 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "security",
+      "recommendation": "Created a dedicated EscapedFilename wrapper type to handle filename escaping for Content-Disposition headers, preventing header parameter injection vulnerabilities.",
+      "rationale": "The implementation follows RFC 2616 quoted-string rules where backslashes and double quotes must be escaped with a backslash when inside quoted strings. This prevents attackers from injecting additional parameters into the Content-Disposition header by breaking out of the quoted-string boundary (similar to CVE-2023-29401). A dedicated type ensures consistent escaping logic across the codebase.",
+      "alternatives_considered": [
+        "Using string replacement functions directly in each response builder",
+        "Implementing escaping in the HeaderValue creation layer",
+        "Using a third-party HTTP header formatting library"
+      ],
+      "files_affected": [
+        "axum-extra/src/response/content_disposition.rs"
+      ]
+    },
+    {
+      "dimension": "api_design",
+      "recommendation": "Implemented the escaping logic as a Display formatter on EscapedFilename, making it transparent to use in format! macros and ensuring proper integration with existing code patterns.",
+      "rationale": "By implementing fmt::Display for EscapedFilename, the escaping happens automatically when the type is formatted, making the API ergonomic and reducing boilerplate. This follows Rust's convention of using the Display trait for user-facing string representations and ensures the escaping logic is centralized.",
+      "alternatives_considered": [
+        "Adding an explicit .escape() method that returns a String",
+        "Implementing AsRef<str> with escaping",
+        "Creating a separate function that takes &str and returns String"
+      ],
+      "files_affected": [
+        "axum-extra/src/response/content_disposition.rs"
+      ]
+    },
+    {
+      "dimension": "code_organization",
+      "recommendation": "Created a new content_disposition module with conditional compilation based on feature flags, and made it internal (pub(crate)) to maintain clean public API boundaries.",
+      "rationale": "The new module organizes escaping logic in one place, making it reusable by both Attachment and FileStream responses. Conditional compilation ensures the module is only included when either of the relevant features is enabled, keeping the binary size minimal for users who don't need these features. The pub(crate) visibility prevents exposing internal implementation details.",
+      "alternatives_considered": [
+        "Putting the escaping logic directly in each response module",
+        "Making it a public API for users to escape filenames manually",
+        "Adding it to a utility module instead of response-specific module"
+      ],
+      "files_affected": [
+        "axum-extra/src/response/mod.rs",
+        "axum-extra/src/response/content_disposition.rs"
+      ]
+    },
+    {
+      "dimension": "testing",
+      "recommendation": "Added comprehensive unit tests for both the escaping logic itself and integration tests for the response builders, covering edge cases with special characters.",
+      "rationale": "Tests verify that backslashes and double quotes are properly escaped, and more importantly, that malicious filenames attempting parameter injection are neutralized. The tests use realistic attack patterns (like the CVE-2023-29401 example) to ensure security guarantees. Both unit tests for EscapedFilename and integration tests for Attachment and FileStream ensure the fix works at all levels.",
+      "alternatives_considered": [
+        "Only testing the escaping logic without response integration tests",
+        "Using property-based testing instead of specific examples",
+        "Adding fuzzing tests for filename inputs"
+      ],
+      "files_affected": [
+        "axum-extra/src/response/attachment.rs",
+        "axum-extra/src/response/content_disposition.rs",
+        "axum-extra/src/response/file_stream.rs"
+      ]
+    },
+    {
+      "dimension": "backward_compatibility",
+      "recommendation": "Maintained the same public API for Attachment::filename() and FileStream::file_name() methods while changing the internal implementation to apply escaping.",
+      "rationale": "Users don't need to change their code - filenames with special characters will now be properly escaped instead of causing malformed headers or security vulnerabilities. The API remains identical, which is crucial for a library used by many projects. The change is purely additive in terms of safety.",
+      "alternatives_considered": [
+        "Changing the API to require pre-escaped filenames",
+        "Adding new methods like .safe_filename() alongside existing ones",
+        "Deprecating the old methods and introducing new ones"
+      ],
+      "files_affected": [
+        "axum-extra/src/response/attachment.rs",
+        "axum-extra/src/response/file_stream.rs"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Implement Content-Disposition filename escaping core logic",
+      "description": "Create the EscapedFilename wrapper type with Display implementation that properly escapes backslashes and double quotes for safe inclusion in HTTP headers.",
+      "files_to_modify": [],
+      "files_to_create": [
+        "axum-extra/src/response/content_disposition.rs"
+      ],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-002",
+      "title": "Update Attachment response to use filename escaping",
+      "description": "Modify the Attachment response builder to use EscapedFilename when constructing Content-Disposition headers, replacing the manual byte vector construction with proper escaping.",
+      "files_to_modify": [
+        "axum-extra/src/response/attachment.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-003",
+      "title": "Update FileStream response to use filename escaping",
+      "description": "Modify the FileStream response builder to use EscapedFilename when setting Content-Disposition headers, ensuring consistent escaping across both response types.",
+      "files_to_modify": [
+        "axum-extra/src/response/file_stream.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-004",
+      "title": "Add comprehensive tests for filename escaping",
+      "description": "Add unit tests for the EscapedFilename type and integration tests for both Attachment and FileStream responses to verify proper escaping of special characters and prevention of parameter injection attacks.",
+      "files_to_modify": [
+        "axum-extra/src/response/attachment.rs",
+        "axum-extra/src/response/content_disposition.rs",
+        "axum-extra/src/response/file_stream.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-005",
+      "title": "Update module organization and documentation",
+      "description": "Add the new content_disposition module with conditional compilation, update CHANGELOG.md to document the security fix, and ensure proper module visibility.",
+      "files_to_modify": [
+        "axum-extra/src/response/mod.rs",
+        "axum-extra/CHANGELOG.md"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation addresses a security vulnerability in Content-Disposition header generation by adding proper filename escaping. The core approach creates a dedicated `EscapedFilename` wrapper type that implements `Display` to automatically escape backslashes and double quotes when formatted. This follows RFC 2616 quoted-string rules and prevents header parameter injection attacks similar to CVE-2023-29401.\n\nThe changes integrate cleanly with the existing codebase by maintaining the same public API for `Attachment::filename()` and `FileStream::file_name()` methods while changing their internal implementations to use the new escaping logic. The `EscapedFilename` type is placed in a new `content_disposition` module with conditional compilation based on feature flags, ensuring it's only included when needed. This modular approach allows both response types to share the same escaping logic consistently.\n\nComprehensive tests were added at multiple levels: unit tests for the escaping logic itself, and integration tests for both response builders using realistic attack patterns. The implementation demonstrates good security practices by proactively handling edge cases and following established HTTP standards, while maintaining backward compatibility and clean API design.",
+  "source_pr": "https://github.com/tokio-rs/axum/pull/3664",
+  "before_sha": "e9909fef4dae10997ef7c6683006e8bf7b61c571",
+  "after_sha": "60a0d2838f1837eee2c359473f6d302f7f39b88e",
+  "diff_stats": {
+    "additions": 161,
+    "deletions": 6,
+    "files_changed": 5
+  }
+}

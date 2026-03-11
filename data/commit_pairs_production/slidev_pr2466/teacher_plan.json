@@ -1,0 +1,113 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "ui_interaction",
+      "recommendation": "Implemented a dual-axis resizing system using CSS custom properties and pointer event handlers to allow dynamic panel adjustment in presenter mode",
+      "rationale": "Used CSS custom properties (--slidev-presenter-notes-width, --slidev-presenter-notes-row-size) to control grid dimensions, enabling real-time updates without re-rendering the entire component. Pointer events provide better touch and pen support compared to mouse events alone.",
+      "alternatives_considered": [
+        "CSS resize property (limited browser support and customization)",
+        "Third-party drag-and-drop libraries (added bundle size)",
+        "Separate components for each resizer type (code duplication)"
+      ],
+      "files_affected": [
+        "packages/client/pages/presenter.vue"
+      ]
+    },
+    {
+      "dimension": "state_management",
+      "recommendation": "Used VueUse's useLocalStorage for persistent resizing preferences and reactive computed properties to manage layout-specific resizing logic",
+      "rationale": "Persisting panel sizes across sessions improves UX. Reactive computed properties (isNotesResizable, isNotesRowResizable) centralize layout logic, making the template cleaner and more maintainable.",
+      "alternatives_considered": [
+        "Vuex/Pinia store (overkill for simple UI state)",
+        "URL parameters (complex for multiple values)",
+        "Session storage (less persistent than localStorage)"
+      ],
+      "files_affected": [
+        "packages/client/pages/presenter.vue"
+      ]
+    },
+    {
+      "dimension": "responsive_design",
+      "recommendation": "Integrated media queries with resizing logic to handle layout variations (wide vs stacked modes in layout 1)",
+      "rationale": "Used VueUse's useMediaQuery to reactively detect aspect ratio changes, ensuring resizers adapt correctly when layout 1 switches between wide and stacked modes based on viewport.",
+      "alternatives_considered": [
+        "CSS-only media queries (wouldn't integrate with JavaScript logic)",
+        "Window resize listeners (more manual implementation)",
+        "Separate layout components (increased complexity)"
+      ],
+      "files_affected": [
+        "packages/client/pages/presenter.vue"
+      ]
+    },
+    {
+      "dimension": "testing_strategy",
+      "recommendation": "Created comprehensive Cypress E2E tests that verify resizer visibility per layout and CSS variable application",
+      "rationale": "E2E tests simulate real user interactions across different layouts and viewport sizes, catching integration issues that unit tests might miss. Tests verify both UI elements and underlying CSS mechanics.",
+      "alternatives_considered": [
+        "Unit tests with Jest (wouldn't test visual layout)",
+        "Manual testing only (not reproducible)",
+        "Visual regression tests (more complex setup)"
+      ],
+      "files_affected": [
+        "cypress/e2e/examples/presenter-resizer.spec.ts"
+      ]
+    },
+    {
+      "dimension": "accessibility",
+      "recommendation": "Added ARIA attributes (role='separator', aria-orientation) and keyboard-accessible titles to resizer handles",
+      "rationale": "ARIA attributes make resizers understandable to assistive technologies. Title attributes provide tooltips for all users, improving discoverability of the resizing feature.",
+      "alternatives_considered": [
+        "No accessibility features (poor UX for disabled users)",
+        "Complex keyboard navigation (out of scope for MVP)",
+        "Screen reader announcements (could be added later)"
+      ],
+      "files_affected": [
+        "packages/client/pages/presenter.vue"
+      ]
+    },
+    {
+      "dimension": "css_architecture",
+      "recommendation": "Used CSS Grid with custom properties for dynamic sizing and created reusable resizer styles with pseudo-elements",
+      "rationale": "CSS Grid provides precise layout control. Custom properties enable dynamic updates without JavaScript DOM manipulation. Pseudo-elements create visual resizer handles without extra HTML elements.",
+      "alternatives_considered": [
+        "Flexbox with JavaScript calculations (more complex)",
+        "Absolute positioning with transforms (harder to maintain)",
+        "CSS-in-JS (not aligned with existing UnoCSS setup)"
+      ],
+      "files_affected": [
+        "packages/client/pages/presenter.vue"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Presenter Mode Resizable Panels Core Implementation",
+      "description": "Add resizable borders to presenter mode interface with vertical and horizontal resizers for all three layout configurations",
+      "files_to_modify": [
+        "packages/client/pages/presenter.vue"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-002",
+      "title": "Resizer E2E Test Suite",
+      "description": "Create comprehensive Cypress tests to verify resizer functionality across different layouts and viewport sizes",
+      "files_to_modify": [],
+      "files_to_create": [
+        "cypress/e2e/examples/presenter-resizer.spec.ts"
+      ],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation adds resizable panels to Slidev's presenter mode by introducing a sophisticated dual-axis resizing system. The core approach uses CSS custom properties (--slidev-presenter-notes-width, --slidev-presenter-notes-row-size) that are dynamically updated via JavaScript based on pointer interactions. These properties control the CSS Grid layout dimensions, allowing real-time panel adjustments without component re-renders.\n\nKey patterns include the use of VueUse composables for persistent state (useLocalStorage), media query detection (useMediaQuery), and event handling (useEventListener). The resizing logic is centralized in reactive computed properties that determine which resizers should be active based on the current layout and viewport conditions. This creates a clean separation between the business logic and template rendering.\n\nThe changes integrate seamlessly with the existing codebase by extending the presenter.vue component without breaking existing functionality. The resizer handles are implemented as absolutely positioned elements with pseudo-elements for visual styling, maintaining the existing UnoCSS utility class patterns. The E2E tests ensure the feature works correctly across all three layout modes and properly updates the CSS variables during interaction.\n\nNotable design choices include: 1) Using pointer events instead of mouse events for better touch device support, 2) Implementing bounds checking with viewport-relative maximums to prevent panels from becoming unusably large or small, and 3) Creating a unified vertical resizer for layout 1's wide mode that spans the full interface height for better UX. The solution balances flexibility with constraints, allowing customization while maintaining usable defaults.",
+  "source_pr": "https://github.com/slidevjs/slidev/pull/2466",
+  "before_sha": "0c483b3c9769d651212a8525b896ba29ec5784bf",
+  "after_sha": "6774d9d7cdf62201135f498ec8cd9d8318629dda",
+  "diff_stats": {
+    "additions": 408,
+    "deletions": 52,
+    "files_changed": 2
+  }
+}

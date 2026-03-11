@@ -1,0 +1,74 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "data_modeling",
+      "recommendation": "Added an optional 'description' field to the DeploymentResponse struct as Option<String> to maintain backward compatibility",
+      "rationale": "Using Option<String> ensures existing deployments without descriptions continue to work, and the field can be omitted entirely when not provided. This follows Rust's idiomatic approach for optional fields and prevents breaking changes to the API.",
+      "alternatives_considered": [
+        "Required String field (would break existing deployments)",
+        "Empty string default (wouldn't distinguish between 'no description' and 'empty description')",
+        "Separate struct with description (would require more extensive refactoring)"
+      ],
+      "files_affected": [
+        "common/src/models/deployment.rs"
+      ]
+    },
+    {
+      "dimension": "api_design",
+      "recommendation": "Updated TypeScript type definitions to mirror the Rust model changes, ensuring frontend-backend type consistency",
+      "rationale": "The types.ts file is generated/updated to maintain type safety across the Rust backend and TypeScript frontend. Making the field optional (? string) in TypeScript matches the Rust Option<String> semantics, preventing type errors when the field is absent.",
+      "alternatives_considered": [
+        "Separate TypeScript-only type (would create inconsistency)",
+        "Required field in TypeScript (would cause compilation errors with existing data)",
+        "Using union types (overly complex for a simple optional field)"
+      ],
+      "files_affected": [
+        "common/types.ts"
+      ]
+    },
+    {
+      "dimension": "serialization",
+      "recommendation": "Relied on existing serde derive attributes to automatically handle serialization/deserialization of the new field",
+      "rationale": "The DeploymentResponse struct already uses #[derive(Serialize, Deserialize)], so adding a new Option<String> field automatically gets proper JSON serialization (omitted when None, present when Some). This minimizes code changes and leverages established patterns.",
+      "alternatives_considered": [
+        "Custom serialization logic (unnecessary complexity)",
+        "Separate DTO struct (would require mapping logic)",
+        "Manual serde implementation (more error-prone)"
+      ],
+      "files_affected": [
+        "common/src/models/deployment.rs"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Add description field to deployment model",
+      "description": "Extend the DeploymentResponse struct in the Rust backend to include an optional description field for storing deployment context and notes",
+      "files_to_modify": [
+        "common/src/models/deployment.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-002",
+      "title": "Update TypeScript type definitions",
+      "description": "Synchronize TypeScript interface definitions with the updated Rust model to maintain type safety across the full stack",
+      "files_to_modify": [
+        "common/types.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation adds a simple but important feature: allowing users to attach descriptive notes to deployments. The approach is minimal and focused, adding only an optional 'description' field to the DeploymentResponse struct in both Rust and TypeScript.\n\nThe key design choice was to make the field optional (Option<String> in Rust, ? string in TypeScript), which ensures backward compatibility with existing deployments and API consumers. This follows the principle of additive changes - new functionality can be adopted gradually without breaking existing systems. The implementation leverages the existing serde serialization infrastructure, so no additional serialization logic was needed.\n\nThe changes are isolated to the data model layer, affecting only the deployment response structure. This keeps the change scope small and reduces the risk of unintended side effects. The TypeScript update ensures that frontend code can safely interact with the new field when it becomes available, maintaining the type safety that's important in a TypeScript codebase. This pattern of coordinated Rust-TypeScript updates is consistent with the codebase's established practices for shared type definitions.",
+  "source_pr": "https://github.com/shuttle-hq/shuttle/pull/2127",
+  "before_sha": "1c7ed0a2965f4ae1d2b021a3a93cb09b8d00e2de",
+  "after_sha": "5681bafe581b99eee832f3e5b158826195173971",
+  "diff_stats": {
+    "additions": 2,
+    "deletions": 0,
+    "files_changed": 2
+  }
+}

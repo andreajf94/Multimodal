@@ -1,0 +1,142 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "api_design",
+      "recommendation": "Created a separate presigned URL generation endpoint instead of embedding file upload in resource creation/update endpoints",
+      "rationale": "Separating URL generation from resource creation follows the single responsibility principle. The client first gets a signed URL, uploads directly to storage, then calls the resource API with just the storage key. This reduces server load, prevents base64 encoding overhead, and enables better error handling for upload failures.",
+      "alternatives_considered": [
+        "Keeping base64 file upload in existing endpoints with size validation",
+        "Using multipart form uploads to the same endpoints",
+        "Implementing a streaming upload API"
+      ],
+      "files_affected": [
+        "apps/web/lib/actions/partners/program-resources/get-program-resource-upload-url.ts"
+      ]
+    },
+    {
+      "dimension": "data_modeling",
+      "recommendation": "Changed from storing base64-encoded files to storing storage keys and derived URLs",
+      "rationale": "Instead of embedding file data in API requests, the system now stores cloud storage keys (e.g., 'programs/{programId}/logos/...') and constructs URLs server-side using R2_URL. This reduces database bloat, improves performance, and aligns with cloud-native storage patterns. File size validation happens before URL generation.",
+      "alternatives_considered": [
+        "Storing full URLs directly from client uploads",
+        "Keeping base64 storage with compression",
+        "Using content-addressable storage with hashes"
+      ],
+      "files_affected": [
+        "apps/web/lib/actions/partners/program-resources/add-program-resource.ts",
+        "apps/web/lib/actions/partners/program-resources/update-program-resource.ts"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Implemented comprehensive error handling with user-friendly toast messages and server-side validation",
+      "rationale": "Added try-catch blocks in UI components to catch upload errors and display meaningful messages. Server-side validation includes file size limits (10MB), key path validation, and proper error propagation. Old file deletion happens only after successful database updates to prevent data loss.",
+      "alternatives_considered": [
+        "Silent failures with automatic retries",
+        "Generic error messages without specific details",
+        "Client-only validation without server checks"
+      ],
+      "files_affected": [
+        "apps/web/app/app.dub.co/(dashboard)/[slug]/(ee)/program/resources/program-brand-assets/add-file-modal.tsx",
+        "apps/web/app/app.dub.co/(dashboard)/[slug]/(ee)/program/resources/program-brand-assets/add-logo-modal.tsx",
+        "apps/web/lib/actions/partners/program-resources/update-program-resource.ts"
+      ]
+    },
+    {
+      "dimension": "security",
+      "recommendation": "Added server-side validation of storage key paths and file size limits before URL generation",
+      "rationale": "Prevents path traversal attacks by validating that keys start with 'programs/{programId}/'. Enforces 10MB file size limit server-side before generating signed URLs. Uses short-lived signed URLs (5 minutes) to minimize exposure. Content-Type headers are set appropriately for SVG files.",
+      "alternatives_considered": [
+        "Client-only validation",
+        "Long-lived signed URLs",
+        "No path validation"
+      ],
+      "files_affected": [
+        "apps/web/lib/actions/partners/program-resources/get-program-resource-upload-url.ts",
+        "apps/web/lib/actions/partners/program-resources/constants.ts"
+      ]
+    },
+    {
+      "dimension": "client_architecture",
+      "recommendation": "Created a custom React hook (useUploadProgramResource) to encapsulate upload logic",
+      "rationale": "Centralizes upload logic including getting signed URLs, setting appropriate headers, and handling the PUT request. Promotes code reuse between logo and file uploads. Provides a clean abstraction that components can consume without dealing with fetch details.",
+      "alternatives_considered": [
+        "Duplicate upload logic in each modal component",
+        "Creating a generic upload service",
+        "Using a third-party upload library"
+      ],
+      "files_affected": [
+        "apps/web/app/app.dub.co/(dashboard)/[slug]/(ee)/program/resources/program-brand-assets/use-upload-program-resource.ts"
+      ]
+    },
+    {
+      "dimension": "storage_integration",
+      "recommendation": "Enhanced storage client to support content-length headers in signed URLs",
+      "rationale": "Added content-length header support to the getSignedUploadUrl method to enforce file size limits at the storage layer. This provides defense in depth - both server validation and storage layer enforcement. The storage client remains generic for reuse across the codebase.",
+      "alternatives_considered": [
+        "Relying only on server-side validation",
+        "Creating a specialized program resource storage client",
+        "Hardcoding headers in the UI layer"
+      ],
+      "files_affected": [
+        "apps/web/lib/storage.ts"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Implement presigned URL generation endpoint",
+      "description": "Create server action to generate signed PUT URLs for direct client uploads to cloud storage with validation",
+      "files_to_modify": [],
+      "files_to_create": [
+        "apps/web/lib/actions/partners/program-resources/get-program-resource-upload-url.ts",
+        "apps/web/lib/actions/partners/program-resources/constants.ts"
+      ],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-002",
+      "title": "Update resource creation/update actions to use storage keys",
+      "description": "Modify add and update actions to accept storage keys instead of base64 files, with proper validation and old file cleanup",
+      "files_to_modify": [
+        "apps/web/lib/actions/partners/program-resources/add-program-resource.ts",
+        "apps/web/lib/actions/partners/program-resources/update-program-resource.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-003",
+      "title": "Create client upload hook and update UI components",
+      "description": "Build React hook for upload logic and refactor logo/file modals to use direct upload flow with progress handling",
+      "files_to_modify": [
+        "apps/web/app/app.dub.co/(dashboard)/[slug]/(ee)/program/resources/program-brand-assets/add-file-modal.tsx",
+        "apps/web/app/app.dub.co/(dashboard)/[slug]/(ee)/program/resources/program-brand-assets/add-logo-modal.tsx"
+      ],
+      "files_to_create": [
+        "apps/web/app/app.dub.co/(dashboard)/[slug]/(ee)/program/resources/program-brand-assets/use-upload-program-resource.ts"
+      ],
+      "estimated_effort": "large"
+    },
+    {
+      "id": "T-004",
+      "title": "Enhance storage client for upload requirements",
+      "description": "Add content-length header support to signed URL generation for storage-layer size enforcement",
+      "files_to_modify": [
+        "apps/web/lib/storage.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation introduces a client-side upload flow for program brand assets using presigned PUT URLs, replacing the previous base64-embedded file approach. The architecture follows a three-step process: 1) Client requests a signed URL from a new server endpoint with file metadata, 2) Client uploads directly to cloud storage using the signed URL, 3) Client calls existing resource APIs with just the storage key.\n\nKey patterns include separation of concerns between URL generation and resource management, server-side validation before URL issuance, and atomic updates with proper cleanup of old files. The storage client was enhanced to support content-length headers for additional security. A custom React hook encapsulates the upload logic, promoting reuse across logo and file upload components.\n\nThe changes integrate well with the existing codebase by maintaining the same API contracts for resource creation/update (with key instead of file), leveraging the existing storage abstraction, and preserving all existing validation and permission checks. The approach reduces server load, improves upload performance for large files, and provides better user feedback during uploads.",
+  "source_pr": "https://github.com/dubinc/dub/pull/3558",
+  "before_sha": "64bccd14e562dd3d9ce06b737a708137faf1adaa",
+  "after_sha": "1d88456f7e3222c62f8d9fe18aa61b5148df6a63",
+  "diff_stats": {
+    "additions": 317,
+    "deletions": 154,
+    "files_changed": 8
+  }
+}

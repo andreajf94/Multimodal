@@ -1,0 +1,90 @@
+diff --git a/axum/src/routing/mod.rs b/axum/src/routing/mod.rs
+index 60babd781c..a76eee5d27 100644
+--- a/axum/src/routing/mod.rs
++++ b/axum/src/routing/mod.rs
+@@ -57,6 +57,21 @@ macro_rules! panic_on_err {
+     };
+ }
+ 
++const TAKE_ONCE_ROUTE_PANIC_MSG: &str =
++    "TakeOnceRoute called more than once; if this was not triggered by an intentional test, this should never happen. Please file an issue.";
++
++fn take_route_or_internal_error(service: &mut Option<Route>) -> Route {
++    service.take().unwrap_or_else(|| {
++        if cfg!(debug_assertions) {
++            panic!("{TAKE_ONCE_ROUTE_PANIC_MSG}");
++        }
++
++        Route::new(service_fn(|_req: Request| async move {
++            Ok::<_, Infallible>(http::StatusCode::INTERNAL_SERVER_ERROR.into_response())
++        }))
++    })
++}
++
+ #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+ pub(crate) struct RouteId(usize);
+ 
+@@ -374,7 +389,7 @@ where
+     }
+ 
+     fn fallback_endpoint(self, endpoint: Endpoint<S>) -> Self {
+-        // TODO make this better, get rid of the `unwrap`s.
++        // TODO make this better.
+         // We need the returned `Service` to be `Clone` and the function inside `service_fn` to be
+         // `FnMut` so instead of just using the owned service, we do this trick with `Option`. We
+         // know this will be called just once so it's fine. We're doing that so that we avoid one
+@@ -392,7 +407,8 @@ where
+                                 move |mut request: Request| {
+                                     #[cfg(feature = "matched-path")]
+                                     request.extensions_mut().remove::<MatchedPath>();
+-                                    service.take().unwrap().oneshot_inner_owned(request)
++                                    let route = take_route_or_internal_error(&mut service);
++                                    route.oneshot_inner_owned(request)
+                                 }
+                             )
+                         }
+@@ -411,7 +427,8 @@ where
+                                 move |mut request: Request| {
+                                     #[cfg(feature = "matched-path")]
+                                     request.extensions_mut().remove::<MatchedPath>();
+-                                    service.take().unwrap().oneshot_inner_owned(request)
++                                    let route = take_route_or_internal_error(&mut service);
++                                    route.oneshot_inner_owned(request)
+                                 }
+                             )
+                         }
+diff --git a/axum/src/routing/tests/mod.rs b/axum/src/routing/tests/mod.rs
+index 969710627e..e4450b3617 100644
+--- a/axum/src/routing/tests/mod.rs
++++ b/axum/src/routing/tests/mod.rs
+@@ -45,6 +45,30 @@ mod handle_error;
+ mod merge;
+ mod nest;
+ 
++#[cfg(all(feature = "tokio", debug_assertions))]
++#[test]
++fn take_route_or_internal_error_panics_on_second_call() {
++    let route = super::Route::new(service_fn(|_req: Request| async move {
++        Ok::<_, Infallible>("ok")
++    }));
++
++    let mut service = Some(route);
++    let _ = super::take_route_or_internal_error(&mut service);
++
++    let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
++        let _ = super::take_route_or_internal_error(&mut service);
++    }))
++    .expect_err("take_route_or_internal_error should panic on the second call in debug mode");
++
++    let panic_message = panic
++        .downcast_ref::<&str>()
++        .copied()
++        .or_else(|| panic.downcast_ref::<String>().map(String::as_str))
++        .unwrap_or("<non-string panic>");
++
++    assert_eq!(panic_message, super::TAKE_ONCE_ROUTE_PANIC_MSG);
++}
++
+ #[crate::test]
+ async fn hello_world() {
+     async fn root(_: Request) -> &'static str {

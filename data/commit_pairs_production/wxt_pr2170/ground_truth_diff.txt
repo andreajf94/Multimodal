@@ -1,0 +1,77 @@
+diff --git a/packages/module-react/modules/react.ts b/packages/module-react/modules/react.ts
+index 0d2b5951c..d01aa9936 100644
+--- a/packages/module-react/modules/react.ts
++++ b/packages/module-react/modules/react.ts
+@@ -1,15 +1,16 @@
+ import 'wxt';
+ import { addImportPreset, addViteConfig, defineWxtModule } from 'wxt/modules';
+ import react, { Options as PluginOptions } from '@vitejs/plugin-react';
++import type { PluginOption } from 'vite';
+ 
+ export default defineWxtModule<ReactModuleOptions>({
+   name: '@wxt-dev/module-react',
+   configKey: 'react',
+   setup(wxt, options) {
+-    const { vite } = options ?? {};
++    const { vite, vitePluginsBefore } = options ?? {};
+ 
+     addViteConfig(wxt, () => ({
+-      plugins: [react(vite)],
++      plugins: [...(vitePluginsBefore ?? []), react(vite)],
+     }));
+ 
+     addImportPreset(wxt, 'react');
+@@ -30,6 +31,12 @@ export default defineWxtModule<ReactModuleOptions>({
+ 
+ export interface ReactModuleOptions {
+   vite?: PluginOptions;
++  /**
++   * Vite plugins to add before the `react()` plugin. Some plugins like the
++   * `@tanstack/router-plugin` need to be added before `react()` to work
++   * correctly.
++   */
++  vitePluginsBefore?: PluginOption[];
+ }
+ 
+ declare module 'wxt' {
+diff --git a/packages/module-react/package.json b/packages/module-react/package.json
+index 738d9ef0c..23dc71104 100644
+--- a/packages/module-react/package.json
++++ b/packages/module-react/package.json
+@@ -45,18 +45,20 @@
+     "prepare": "buildc --deps-only -- wxt prepare"
+   },
+   "peerDependencies": {
++    "vite": "^5.4.19 || ^6.3.4 || ^7.0.0",
+     "wxt": ">=0.19.16"
+   },
+   "dependencies": {
+     "@vitejs/plugin-react": "^4.4.1 || ^5.0.0"
+   },
+   "devDependencies": {
+-    "@types/react": "^19.2.13",
+     "@types/react-dom": "^19.2.3",
++    "@types/react": "^19.2.13",
+     "publint": "^0.3.17",
+-    "react": "^19.2.4",
+     "react-dom": "^19.2.4",
++    "react": "^19.2.4",
+     "typescript": "^5.9.3",
++    "vite": "^7.0.0",
+     "wxt": "workspace:*"
+   }
+ }
+diff --git a/pnpm-lock.yaml b/pnpm-lock.yaml
+index c26b44761..41826d2a8 100644
+--- a/pnpm-lock.yaml
++++ b/pnpm-lock.yaml
+@@ -277,6 +277,9 @@ importers:
+       typescript:
+         specifier: ^5.9.3
+         version: 5.9.3
++      vite:
++        specifier: ^7.0.0
++        version: 7.3.1(@types/node@20.19.32)(jiti@2.6.1)(sass@1.97.3)(tsx@4.21.0)(yaml@2.8.2)
+       wxt:
+         specifier: workspace:*
+         version: link:../wxt

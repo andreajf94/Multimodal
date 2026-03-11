@@ -1,0 +1,85 @@
+diff --git a/packages/slidev/node/syntax/transform/code-wrapper.ts b/packages/slidev/node/syntax/transform/code-wrapper.ts
+index 0335df724e..8d82267520 100644
+--- a/packages/slidev/node/syntax/transform/code-wrapper.ts
++++ b/packages/slidev/node/syntax/transform/code-wrapper.ts
+@@ -2,7 +2,7 @@ import type { MarkdownTransformContext } from '@slidev/types'
+ import { normalizeRangeStr } from './utils'
+ 
+ // eslint-disable-next-line regexp/no-super-linear-backtracking
+-export const reCodeBlock = /^```([\w'-]+)?\s*(?:\[(.*?)\])?\s*(?:\{([\w*,|-]+)\}\s*?(\{[^}]*\})?([^\r\n]*))?\r?\n((?:(?!^```)[\s\S])*?)^```$/gm
++export const reCodeBlock = /^```([\w'-]+)?[ \t]*(?:\[(.*?)\])?[ \t]*(?:\{([\w*,|-]+)\}[ \t]*(\{[^}]*\})?([^\r\n]*))?\r?\n((?:(?!^```)[\s\S])*?)^```$/gm
+ 
+ /**
+  * Transform code block with wrapper
+diff --git a/test/__snapshots__/transform.test.ts.snap b/test/__snapshots__/transform.test.ts.snap
+index 99112fb263..d2327a90b3 100644
+--- a/test/__snapshots__/transform.test.ts.snap
++++ b/test/__snapshots__/transform.test.ts.snap
+@@ -1,5 +1,33 @@
+ // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+ 
++exports[`code-wrapper with square brackets in code 1`] = `
++"
++
++<CodeBlockWrapper v-bind="{}" :title='""' :ranges='[]'>
++
++\`\`\`csharp
++[Flags]
++enum MyEnum {}
++\`\`\`
++
++</CodeBlockWrapper>
++"
++`;
++
++exports[`code-wrapper with title and square brackets in code 1`] = `
++"
++
++<CodeBlockWrapper v-bind="{}" :title='"MyEnum.cs"' :ranges='[]'>
++
++\`\`\`csharp [MyEnum.cs]
++[Flags]
++enum MyEnum {}
++\`\`\`
++
++</CodeBlockWrapper>
++"
++`;
++
+ exports[`external snippet 1`] = `
+ "
+ \`\`\`ts {2|3|4}{lines:true}
+diff --git a/test/transform.test.ts b/test/transform.test.ts
+index c97cc77121..8ebe49e344 100644
+--- a/test/transform.test.ts
++++ b/test/transform.test.ts
+@@ -177,3 +177,29 @@ it('external snippet', () => {
+ 
+   expect(ctx.s.toString()).toMatchSnapshot()
+ })
++
++it('code-wrapper with square brackets in code', () => {
++  const ctx = createTransformContext(`
++\`\`\`csharp
++[Flags]
++enum MyEnum {}
++\`\`\`
++`)
++
++  transformCodeWrapper(ctx)
++
++  expect(ctx.s.toString()).toMatchSnapshot()
++})
++
++it('code-wrapper with title and square brackets in code', () => {
++  const ctx = createTransformContext(`
++\`\`\`csharp [MyEnum.cs]
++[Flags]
++enum MyEnum {}
++\`\`\`
++`)
++
++  transformCodeWrapper(ctx)
++
++  expect(ctx.s.toString()).toMatchSnapshot()
++})

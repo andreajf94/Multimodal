@@ -1,0 +1,11 @@
+{
+  "feature_name": "Revert OpenTelemetry SDK Upgrade",
+  "description": "Revert the OpenTelemetry SDK upgrade from v1.40.0 to its previous version to address CI flakiness issues. This involves downgrading OpenTelemetry dependencies and related transitive dependencies across multiple modules, and adjusting test code that was modified during the original upgrade. The goal is to stabilize the CI pipeline for the upcoming v1.41.0 release.",
+  "functional_requirements": [
+    "Downgrade OpenTelemetry SDK and related dependencies in contrib/datadog, contrib/opentelemetry, and test modules to their previous stable versions",
+    "Update Go version declarations and toolchain specifications in contrib/opentelemetry/go.mod and test/go.mod to match the downgraded dependencies",
+    "Remove test modifications introduced during the upgrade, specifically reverting conditional nil-checking in integration tests and simplifying retry logic in worker deployment tests"
+  ],
+  "project_name": "sdk-go",
+  "source_pr": "https://github.com/temporalio/sdk-go/pull/2221"
+}

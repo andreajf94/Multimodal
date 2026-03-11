@@ -1,0 +1,929 @@
+diff --git a/packages/client/composables/usePreloadImages.ts b/packages/client/composables/usePreloadImages.ts
+new file mode 100644
+index 0000000000..ef07824807
+--- /dev/null
++++ b/packages/client/composables/usePreloadImages.ts
+@@ -0,0 +1,83 @@
++import type { SlideRoute } from '@slidev/types'
++import type { ComputedRef, Ref } from 'vue'
++import configs from '#slidev/configs'
++import { watchEffect } from 'vue'
++
++const loaded = new Set<string>()
++const loading = new Set<string>()
++
++function resolveUrl(url: string): string {
++  if (url.startsWith('http') || url.startsWith('//'))
++    return url
++  const base = (import.meta.env.BASE_URL || '/').replace(/\/$/, '')
++  return `${base}${url.startsWith('/') ? url : `/${url}`}`
++}
++
++function preloadImage(url: string): void {
++  const resolved = resolveUrl(url)
++  if (loaded.has(resolved) || loading.has(resolved))
++    return
++  loading.add(resolved)
++  const img = new Image()
++  img.onload = () => {
++    loading.delete(resolved)
++    loaded.add(resolved)
++  }
++  img.onerror = () => {
++    loading.delete(resolved)
++  }
++  img.src = resolved
++}
++
++function preloadSlideImages(route: SlideRoute): void {
++  const images = route.meta?.slide?.images
++  if (images?.length) {
++    for (const url of images)
++      preloadImage(url)
++  }
++}
++
++export function usePreloadImages(
++  currentRoute: ComputedRef<SlideRoute>,
++  prevRoute: ComputedRef<SlideRoute>,
++  nextRoute: ComputedRef<SlideRoute>,
++  slides: Ref<SlideRoute[]>,
++): void {
++  const config = configs.preloadImages
++  if (config === false)
++    return
++
++  const ahead = (typeof config === 'object' && config?.ahead) || 3
++
++  // Preload current + prev + next + look-ahead window
++  watchEffect(() => {
++    const current = currentRoute.value
++    const all = slides.value
++    if (!current || !all?.length)
++      return
++
++    preloadSlideImages(current)
++    preloadSlideImages(prevRoute.value)
++    preloadSlideImages(nextRoute.value)
++
++    // Preload ahead window
++    const currentIdx = current.no - 1
++    for (let i = 1; i <= ahead; i++) {
++      const idx = currentIdx + i
++      if (idx < all.length)
++        preloadSlideImages(all[idx])
++    }
++  })
++
++  // Preload all remaining slides after 3s
++  watchEffect((onCleanup) => {
++    const all = slides.value
++    const timeout = setTimeout(() => {
++      if (all?.length) {
++        for (const route of all)
++          preloadSlideImages(route)
++      }
++    }, 3000)
++    onCleanup(() => clearTimeout(timeout))
++  })
++}
+diff --git a/packages/client/constants.ts b/packages/client/constants.ts
+index dbc12a5c86..64736cccdc 100644
+--- a/packages/client/constants.ts
++++ b/packages/client/constants.ts
+@@ -87,4 +87,5 @@ export const HEADMATTER_FIELDS = [
+   'seoMeta',
+   'notesAutoRuby',
+   'magicMoveDuration',
++  'preloadImages',
+ ]
+diff --git a/packages/client/internals/SlidesShow.vue b/packages/client/internals/SlidesShow.vue
+index 57d4039877..a3fb25b2e0 100644
+--- a/packages/client/internals/SlidesShow.vue
++++ b/packages/client/internals/SlidesShow.vue
+@@ -5,6 +5,7 @@ import { recomputeAllPoppers } from 'floating-vue'
+ import { computed, shallowRef, TransitionGroup, watchEffect } from 'vue'
+ import { createFixedClicks } from '../composables/useClicks'
+ import { useNav } from '../composables/useNav'
++import { usePreloadImages } from '../composables/usePreloadImages'
+ import { useViewTransition } from '../composables/useViewTransition'
+ import { CLICKS_MAX } from '../constants'
+ import { activeDragElement, disableTransition, hmrSkipTransition } from '../state'
+@@ -49,6 +50,9 @@ watchEffect((onCleanup) => {
+   onCleanup(() => clearTimeout(timeout))
+ })
+ 
++// preload images for nearby slides
++usePreloadImages(currentSlideRoute, prevRoute, nextRoute, slides)
++
+ const hasViewTransition = useViewTransition()
+ 
+ const DrawingLayer = shallowRef<any>()
+diff --git a/packages/parser/src/config.ts b/packages/parser/src/config.ts
+index 40a4f6f791..42c7d57f50 100644
+--- a/packages/parser/src/config.ts
++++ b/packages/parser/src/config.ts
+@@ -51,6 +51,7 @@ export function getDefaultConfig(): SlidevConfig {
+     duration: '30min',
+     timer: 'stopwatch',
+     magicMoveDuration: 800,
++    preloadImages: true,
+   }
+ }
+ 
+diff --git a/packages/parser/src/core.ts b/packages/parser/src/core.ts
+index 99bfbf9340..de71dcce8f 100644
+--- a/packages/parser/src/core.ts
++++ b/packages/parser/src/core.ts
+@@ -66,6 +66,60 @@ function matter(code: string, options: SlidevParserOptions) {
+   }
+ }
+ 
++const IMAGE_EXTENSIONS = /\.(?:png|jpe?g|gif|svg|webp|avif|ico|bmp|tiff?)$/i
++
++/**
++ * Extract image URLs from slide content and frontmatter.
++ * Strips code blocks first to avoid false positives.
++ */
++export function extractImages(content: string, frontmatter: Record<string, any>): string[] {
++  const images = new Set<string>()
++
++  // Collect from frontmatter keys
++  for (const key of ['image', 'backgroundImage', 'background']) {
++    const val = frontmatter[key]
++    if (typeof val === 'string' && val && !val.startsWith('data:')) {
++      // For `background`, only include if it looks like an image URL
++      if (key === 'background') {
++        if (IMAGE_EXTENSIONS.test(val) || val.startsWith('/') || val.startsWith('http'))
++          images.add(val)
++      }
++      else {
++        images.add(val)
++      }
++    }
++  }
++
++  // Strip code blocks to avoid false positives
++  const stripped = content.replace(/^```[\s\S]+?^```/gm, '')
++
++  // Markdown images: ![alt](url)
++  for (const [, url] of stripped.matchAll(/!\[[^\]]*\]\(([^)]+)\)/g)) {
++    if (url && !url.startsWith('data:'))
++      images.add(url.trim())
++  }
++
++  // Vue component props: src="url", image="url"
++  for (const [, url] of stripped.matchAll(/\b(?:src|image)=["']([^"']+)["']/g)) {
++    if (url && !url.startsWith('data:') && !url.includes('{{') && IMAGE_EXTENSIONS.test(url))
++      images.add(url.trim())
++  }
++
++  // Vue bound props: :src="'/path/to/img.png'"
++  for (const [, url] of stripped.matchAll(/:(?:src|image)=["']'([^']+)'["']/g)) {
++    if (url && !url.startsWith('data:') && IMAGE_EXTENSIONS.test(url))
++      images.add(url.trim())
++  }
++
++  // CSS url() with image extension filter
++  for (const [, url] of stripped.matchAll(/url\(["']?([^"')]+)["']?\)/g)) {
++    if (url && !url.startsWith('data:') && IMAGE_EXTENSIONS.test(url))
++      images.add(url.trim())
++  }
++
++  return Array.from(images)
++}
++
+ export function detectFeatures(code: string): SlidevDetectedFeatures {
+   return {
+     katex: !!code.match(/\$.*?\$/) || !!code.match(/\$\$/),
+@@ -104,6 +158,8 @@ export function parseSlide(raw: string, options: SlidevParserOptions = {}): Omit
+   if (frontmatter.level)
+     level = frontmatter.level || 1
+ 
++  const images = extractImages(content, frontmatter)
++
+   return {
+     raw,
+     title,
+@@ -116,6 +172,7 @@ export function parseSlide(raw: string, options: SlidevParserOptions = {}): Omit
+     frontmatterDoc: matterResult.doc,
+     frontmatterRaw: matterResult.raw,
+     note,
++    images,
+   }
+ }
+ 
+diff --git a/packages/slidev/node/setups/indexHtml.ts b/packages/slidev/node/setups/indexHtml.ts
+index f6c166d33e..bc04c2c84d 100644
+--- a/packages/slidev/node/setups/indexHtml.ts
++++ b/packages/slidev/node/setups/indexHtml.ts
+@@ -16,6 +16,33 @@ function toAttrValue(unsafe: unknown) {
+   return JSON.stringify(escapeHtml(String(unsafe)))
+ }
+ 
++function collectPreloadImages(data: Omit<ResolvedSlidevOptions, 'utils'>['data'], base?: string): ResolvableLink[] {
++  const config = data.config
++  if (config.preloadImages === false)
++    return []
++
++  const seen = new Set<string>()
++  const links: ResolvableLink[] = []
++  const basePrefix = base ? base.replace(/\/$/, '') : ''
++
++  for (const slide of data.slides) {
++    const images = slide.images || slide.source?.images
++    if (!images?.length)
++      continue
++    for (const url of images) {
++      if (seen.has(url))
++        continue
++      seen.add(url)
++      const href = url.startsWith('http') || url.startsWith('//')
++        ? url
++        : `${basePrefix}${url.startsWith('/') ? url : `/${url}`}`
++      links.push({ rel: 'preload', as: 'image', href })
++    }
++  }
++
++  return links
++}
++
+ export default async function setupIndexHtml({ mode, entry, clientRoot, userRoot, roots, data, base }: Omit<ResolvedSlidevOptions, 'utils'>): Promise<string> {
+   let main = await readFile(join(clientRoot, 'index.html'), 'utf-8')
+   let body = ''
+@@ -75,6 +102,7 @@ export default async function setupIndexHtml({ mode, entry, clientRoot, userRoot
+         link: [
+           data.config.favicon ? { rel: 'icon', href: data.config.favicon } : null,
+           ...webFontsLink,
++          ...collectPreloadImages(data, base),
+         ].filter(x => x),
+         meta: [
+           { 'http-equiv': 'Content-Type', 'content': 'text/html; charset=UTF-8' },
+diff --git a/packages/types/src/frontmatter.ts b/packages/types/src/frontmatter.ts
+index 4a7d51eff3..0037a3a38a 100644
+--- a/packages/types/src/frontmatter.ts
++++ b/packages/types/src/frontmatter.ts
+@@ -311,6 +311,16 @@ export interface HeadmatterConfig extends TransitionOptions {
+    * @default 800
+    */
+   magicMoveDuration?: number
++  /**
++   * Preload images extracted from slides for faster navigation.
++   *
++   * - `true` - enable with default look-ahead of 3 slides
++   * - `false` - disable image preloading
++   * - `{ ahead: number }` - enable with custom look-ahead window
++   *
++   * @default true
++   */
++  preloadImages?: boolean | { ahead?: number }
+ }
+ 
+ export interface Frontmatter extends TransitionOptions {
+diff --git a/packages/types/src/types.ts b/packages/types/src/types.ts
+index c35835cb12..eca3cad665 100644
+--- a/packages/types/src/types.ts
++++ b/packages/types/src/types.ts
+@@ -13,6 +13,11 @@ export interface SlideInfoBase {
+   note?: string
+   title?: string
+   level?: number
++  /**
++   * Image URLs extracted from the slide content (frontmatter, markdown, Vue components, CSS).
++   * Populated at parse time to survive build-mode content stripping.
++   */
++  images?: string[]
+ }
+ 
+ export interface SourceSlideInfo extends SlideInfoBase {
+diff --git a/packages/vscode/schema/headmatter.json b/packages/vscode/schema/headmatter.json
+index eed7f8c778..4cb70a2bb9 100644
+--- a/packages/vscode/schema/headmatter.json
++++ b/packages/vscode/schema/headmatter.json
+@@ -551,6 +551,24 @@
+           "markdownDescription": "Duration for shiki magic move transitions in milliseconds",
+           "default": 800
+         },
++        "preloadImages": {
++          "anyOf": [
++            {
++              "type": "boolean"
++            },
++            {
++              "type": "object",
++              "properties": {
++                "ahead": {
++                  "type": "number"
++                }
++              }
++            }
++          ],
++          "description": "Preload images extracted from slides for faster navigation.\n\n- `true` - enable with default look-ahead of 3 slides\n- `false` - disable image preloading\n- `{ ahead: number }` - enable with custom look-ahead window",
++          "markdownDescription": "Preload images extracted from slides for faster navigation.\n\n- `true` - enable with default look-ahead of 3 slides\n- `false` - disable image preloading\n- `{ ahead: number }` - enable with custom look-ahead window",
++          "default": true
++        },
+         "defaults": {
+           "$ref": "#/definitions/Frontmatter",
+           "description": "Default frontmatter options applied to all slides",
+diff --git a/test/__snapshots__/parser.test.ts.snap b/test/__snapshots__/parser.test.ts.snap
+index c28e38134d..196cda4480 100644
+--- a/test/__snapshots__/parser.test.ts.snap
++++ b/test/__snapshots__/parser.test.ts.snap
+@@ -130,6 +130,7 @@ fonts:
+   mono: Fira Code
+ ",
+       "frontmatterStyle": "frontmatter",
++      "images": [],
+       "index": 0,
+       "level": 1,
+       "note": undefined,
+@@ -196,6 +197,7 @@ layout: center
+ layout: center
+ ",
+       "frontmatterStyle": "frontmatter",
++      "images": [],
+       "index": 1,
+       "level": 1,
+       "note": "This is note",
+@@ -239,6 +241,7 @@ This is note
+       "frontmatterDoc": undefined,
+       "frontmatterRaw": undefined,
+       "frontmatterStyle": undefined,
++      "images": [],
+       "index": 2,
+       "level": 1,
+       "note": undefined,
+@@ -283,6 +286,7 @@ Hey",
+       "frontmatterRaw": "layout: text
+ ",
+       "frontmatterStyle": "frontmatter",
++      "images": [],
+       "index": 3,
+       "level": undefined,
+       "note": "This is note",
+@@ -348,6 +352,7 @@ Also part of the code block
+       "frontmatterDoc": undefined,
+       "frontmatterRaw": undefined,
+       "frontmatterStyle": undefined,
++      "images": [],
+       "index": 4,
+       "level": undefined,
+       "note": undefined,
+@@ -401,6 +406,7 @@ Content 1
+ layout: from yaml
+ ",
+       "frontmatterStyle": "yaml",
++      "images": [],
+       "index": 5,
+       "level": undefined,
+       "note": undefined,
+@@ -461,6 +467,7 @@ Content 2",
+       "frontmatterRaw": "layout: cover
+ ",
+       "frontmatterStyle": "frontmatter",
++      "images": [],
+       "index": 6,
+       "level": 1,
+       "note": undefined,
+@@ -523,6 +530,7 @@ Content 3",
+       "frontmatterDoc": undefined,
+       "frontmatterRaw": undefined,
+       "frontmatterStyle": undefined,
++      "images": [],
+       "index": 7,
+       "level": 1,
+       "note": undefined,
+@@ -649,6 +657,7 @@ exports[`md parser > mdc.md > slides 1`] = `
+       "frontmatterRaw": "mdc: true
+ ",
+       "frontmatterStyle": "frontmatter",
++      "images": [],
+       "index": 0,
+       "level": 1,
+       "note": undefined,
+@@ -782,6 +791,7 @@ console.log('Hello World')
+       "frontmatterDoc": undefined,
+       "frontmatterRaw": undefined,
+       "frontmatterStyle": undefined,
++      "images": [],
+       "index": 0,
+       "level": 1,
+       "note": undefined,
+@@ -838,6 +848,7 @@ console.log('Hello World')
+       "frontmatterDoc": undefined,
+       "frontmatterRaw": undefined,
+       "frontmatterStyle": undefined,
++      "images": [],
+       "index": 1,
+       "level": 1,
+       "note": undefined,
+@@ -876,6 +887,7 @@ Nice to meet you
+       "frontmatterDoc": undefined,
+       "frontmatterRaw": undefined,
+       "frontmatterStyle": undefined,
++      "images": [],
+       "index": 2,
+       "level": undefined,
+       "note": undefined,
+@@ -980,6 +992,7 @@ exports[`md parser > multi-entries.md > slides 1`] = `
+         "frontmatterRaw": "src: sub/page1.md
+ ",
+         "frontmatterStyle": "frontmatter",
++        "images": [],
+         "imports": [
+           {
+             "content": "# Page 1",
+@@ -991,6 +1004,7 @@ exports[`md parser > multi-entries.md > slides 1`] = `
+             "frontmatterDoc": undefined,
+             "frontmatterRaw": undefined,
+             "frontmatterStyle": undefined,
++            "images": [],
+             "index": 0,
+             "level": 1,
+             "note": undefined,
+@@ -1027,6 +1041,7 @@ src: sub/page1.md
+       "frontmatterDoc": undefined,
+       "frontmatterRaw": undefined,
+       "frontmatterStyle": undefined,
++      "images": [],
+       "index": 0,
+       "level": 1,
+       "note": undefined,
+@@ -1067,6 +1082,9 @@ src: sub/page1.md
+ background: https://sli.dev/demo-cover.png#2
+ ",
+         "frontmatterStyle": "frontmatter",
++        "images": [
++          "https://sli.dev/demo-cover.png#2",
++        ],
+         "imports": [
+           {
+             "content": "# Page 2
+@@ -1087,6 +1105,7 @@ background: https://sli.dev/demo-cover.png#2
+             "frontmatterRaw": "layout: cover
+ ",
+             "frontmatterStyle": "frontmatter",
++            "images": [],
+             "index": 0,
+             "level": 1,
+             "note": undefined,
+@@ -1139,6 +1158,7 @@ background: https://sli.dev/demo-cover.png#2
+       "frontmatterRaw": "layout: cover
+ ",
+       "frontmatterStyle": "frontmatter",
++      "images": [],
+       "index": 0,
+       "level": 1,
+       "note": undefined,
+@@ -1181,6 +1201,9 @@ layout: cover
+ background: https://sli.dev/demo-cover.png#34
+ ",
+         "frontmatterStyle": "frontmatter",
++        "images": [
++          "https://sli.dev/demo-cover.png#34",
++        ],
+         "imports": [
+           {
+             "content": "# Page 3",
+@@ -1192,6 +1215,7 @@ background: https://sli.dev/demo-cover.png#34
+             "frontmatterDoc": undefined,
+             "frontmatterRaw": undefined,
+             "frontmatterStyle": undefined,
++            "images": [],
+             "index": 0,
+             "level": 1,
+             "note": undefined,
+@@ -1220,6 +1244,7 @@ background: https://sli.dev/demo-cover.png#34
+             "frontmatterRaw": "layout: cover
+ ",
+             "frontmatterStyle": "frontmatter",
++            "images": [],
+             "index": 1,
+             "level": 1,
+             "note": undefined,
+@@ -1263,6 +1288,7 @@ background: https://sli.dev/demo-cover.png#34
+       "frontmatterDoc": undefined,
+       "frontmatterRaw": undefined,
+       "frontmatterStyle": undefined,
++      "images": [],
+       "index": 0,
+       "level": 1,
+       "note": undefined,
+@@ -1303,6 +1329,9 @@ background: https://sli.dev/demo-cover.png#34
+ background: https://sli.dev/demo-cover.png#34
+ ",
+         "frontmatterStyle": "frontmatter",
++        "images": [
++          "https://sli.dev/demo-cover.png#34",
++        ],
+         "imports": [
+           {
+             "content": "# Page 3",
+@@ -1314,6 +1343,7 @@ background: https://sli.dev/demo-cover.png#34
+             "frontmatterDoc": undefined,
+             "frontmatterRaw": undefined,
+             "frontmatterStyle": undefined,
++            "images": [],
+             "index": 0,
+             "level": 1,
+             "note": undefined,
+@@ -1342,6 +1372,7 @@ background: https://sli.dev/demo-cover.png#34
+             "frontmatterRaw": "layout: cover
+ ",
+             "frontmatterStyle": "frontmatter",
++            "images": [],
+             "index": 1,
+             "level": 1,
+             "note": undefined,
+@@ -1394,6 +1425,7 @@ background: https://sli.dev/demo-cover.png#34
+       "frontmatterRaw": "layout: cover
+ ",
+       "frontmatterStyle": "frontmatter",
++      "images": [],
+       "index": 1,
+       "level": 1,
+       "note": undefined,
+@@ -1436,6 +1468,9 @@ layout: cover
+ background: https://sli.dev/demo-cover.png#14
+ ",
+         "frontmatterStyle": "frontmatter",
++        "images": [
++          "https://sli.dev/demo-cover.png#14",
++        ],
+         "imports": [
+           {
+             "content": "",
+@@ -1452,6 +1487,7 @@ background: https://sli.dev/demo-cover.png#14
+             "frontmatterRaw": "src: /sub/page1.md
+ ",
+             "frontmatterStyle": "frontmatter",
++            "images": [],
+             "imports": [
+               {
+                 "content": "# Page 1",
+@@ -1463,6 +1499,7 @@ background: https://sli.dev/demo-cover.png#14
+                 "frontmatterDoc": undefined,
+                 "frontmatterRaw": undefined,
+                 "frontmatterStyle": undefined,
++                "images": [],
+                 "index": 0,
+                 "level": 1,
+                 "note": undefined,
+@@ -1499,6 +1536,7 @@ src: /sub/page1.md
+             "frontmatterRaw": "src: page2.md
+ ",
+             "frontmatterStyle": "frontmatter",
++            "images": [],
+             "imports": [
+               {
+                 "content": "# Page 2
+@@ -1519,6 +1557,7 @@ src: /sub/page1.md
+                 "frontmatterRaw": "layout: cover
+ ",
+                 "frontmatterStyle": "frontmatter",
++                "images": [],
+                 "index": 0,
+                 "level": 1,
+                 "note": undefined,
+@@ -1561,6 +1600,7 @@ src: page2.md
+             "frontmatterRaw": "src: ../sub/pages3-4.md
+ ",
+             "frontmatterStyle": "frontmatter",
++            "images": [],
+             "imports": [
+               {
+                 "content": "# Page 3",
+@@ -1572,6 +1612,7 @@ src: page2.md
+                 "frontmatterDoc": undefined,
+                 "frontmatterRaw": undefined,
+                 "frontmatterStyle": undefined,
++                "images": [],
+                 "index": 0,
+                 "level": 1,
+                 "note": undefined,
+@@ -1600,6 +1641,7 @@ src: page2.md
+                 "frontmatterRaw": "layout: cover
+ ",
+                 "frontmatterStyle": "frontmatter",
++                "images": [],
+                 "index": 1,
+                 "level": 1,
+                 "note": undefined,
+@@ -1655,6 +1697,7 @@ background: https://sli.dev/demo-cover.png#14
+         "frontmatterRaw": "src: /sub/page1.md
+ ",
+         "frontmatterStyle": "frontmatter",
++        "images": [],
+         "imports": [
+           {
+             "content": "# Page 1",
+@@ -1666,6 +1709,7 @@ background: https://sli.dev/demo-cover.png#14
+             "frontmatterDoc": undefined,
+             "frontmatterRaw": undefined,
+             "frontmatterStyle": undefined,
++            "images": [],
+             "index": 0,
+             "level": 1,
+             "note": undefined,
+@@ -1702,6 +1746,7 @@ src: /sub/page1.md
+       "frontmatterDoc": undefined,
+       "frontmatterRaw": undefined,
+       "frontmatterStyle": undefined,
++      "images": [],
+       "index": 0,
+       "level": 1,
+       "note": undefined,
+@@ -1742,6 +1787,9 @@ src: /sub/page1.md
+ background: https://sli.dev/demo-cover.png#14
+ ",
+         "frontmatterStyle": "frontmatter",
++        "images": [
++          "https://sli.dev/demo-cover.png#14",
++        ],
+         "imports": [
+           {
+             "content": "",
+@@ -1758,6 +1806,7 @@ background: https://sli.dev/demo-cover.png#14
+             "frontmatterRaw": "src: /sub/page1.md
+ ",
+             "frontmatterStyle": "frontmatter",
++            "images": [],
+             "imports": [
+               {
+                 "content": "# Page 1",
+@@ -1769,6 +1818,7 @@ background: https://sli.dev/demo-cover.png#14
+                 "frontmatterDoc": undefined,
+                 "frontmatterRaw": undefined,
+                 "frontmatterStyle": undefined,
++                "images": [],
+                 "index": 0,
+                 "level": 1,
+                 "note": undefined,
+@@ -1805,6 +1855,7 @@ src: /sub/page1.md
+             "frontmatterRaw": "src: page2.md
+ ",
+             "frontmatterStyle": "frontmatter",
++            "images": [],
+             "imports": [
+               {
+                 "content": "# Page 2
+@@ -1825,6 +1876,7 @@ src: /sub/page1.md
+                 "frontmatterRaw": "layout: cover
+ ",
+                 "frontmatterStyle": "frontmatter",
++                "images": [],
+                 "index": 0,
+                 "level": 1,
+                 "note": undefined,
+@@ -1867,6 +1919,7 @@ src: page2.md
+             "frontmatterRaw": "src: ../sub/pages3-4.md
+ ",
+             "frontmatterStyle": "frontmatter",
++            "images": [],
+             "imports": [
+               {
+                 "content": "# Page 3",
+@@ -1878,6 +1931,7 @@ src: page2.md
+                 "frontmatterDoc": undefined,
+                 "frontmatterRaw": undefined,
+                 "frontmatterStyle": undefined,
++                "images": [],
+                 "index": 0,
+                 "level": 1,
+                 "note": undefined,
+@@ -1906,6 +1960,7 @@ src: page2.md
+                 "frontmatterRaw": "layout: cover
+ ",
+                 "frontmatterStyle": "frontmatter",
++                "images": [],
+                 "index": 1,
+                 "level": 1,
+                 "note": undefined,
+@@ -1961,6 +2016,7 @@ background: https://sli.dev/demo-cover.png#14
+         "frontmatterRaw": "src: page2.md
+ ",
+         "frontmatterStyle": "frontmatter",
++        "images": [],
+         "imports": [
+           {
+             "content": "# Page 2
+@@ -1981,6 +2037,7 @@ background: https://sli.dev/demo-cover.png#14
+             "frontmatterRaw": "layout: cover
+ ",
+             "frontmatterStyle": "frontmatter",
++            "images": [],
+             "index": 0,
+             "level": 1,
+             "note": undefined,
+@@ -2032,6 +2089,7 @@ src: page2.md
+       "frontmatterRaw": "layout: cover
+ ",
+       "frontmatterStyle": "frontmatter",
++      "images": [],
+       "index": 0,
+       "level": 1,
+       "note": undefined,
+@@ -2074,6 +2132,9 @@ layout: cover
+ background: https://sli.dev/demo-cover.png#14
+ ",
+         "frontmatterStyle": "frontmatter",
++        "images": [
++          "https://sli.dev/demo-cover.png#14",
++        ],
+         "imports": [
+           {
+             "content": "",
+@@ -2090,6 +2151,7 @@ background: https://sli.dev/demo-cover.png#14
+             "frontmatterRaw": "src: /sub/page1.md
+ ",
+             "frontmatterStyle": "frontmatter",
++            "images": [],
+             "imports": [
+               {
+                 "content": "# Page 1",
+@@ -2101,6 +2163,7 @@ background: https://sli.dev/demo-cover.png#14
+                 "frontmatterDoc": undefined,
+                 "frontmatterRaw": undefined,
+                 "frontmatterStyle": undefined,
++                "images": [],
+                 "index": 0,
+                 "level": 1,
+                 "note": undefined,
+@@ -2137,6 +2200,7 @@ src: /sub/page1.md
+             "frontmatterRaw": "src: page2.md
+ ",
+             "frontmatterStyle": "frontmatter",
++            "images": [],
+             "imports": [
+               {
+                 "content": "# Page 2
+@@ -2157,6 +2221,7 @@ src: /sub/page1.md
+                 "frontmatterRaw": "layout: cover
+ ",
+                 "frontmatterStyle": "frontmatter",
++                "images": [],
+                 "index": 0,
+                 "level": 1,
+                 "note": undefined,
+@@ -2199,6 +2264,7 @@ src: page2.md
+             "frontmatterRaw": "src: ../sub/pages3-4.md
+ ",
+             "frontmatterStyle": "frontmatter",
++            "images": [],
+             "imports": [
+               {
+                 "content": "# Page 3",
+@@ -2210,6 +2276,7 @@ src: page2.md
+                 "frontmatterDoc": undefined,
+                 "frontmatterRaw": undefined,
+                 "frontmatterStyle": undefined,
++                "images": [],
+                 "index": 0,
+                 "level": 1,
+                 "note": undefined,
+@@ -2238,6 +2305,7 @@ src: page2.md
+                 "frontmatterRaw": "layout: cover
+ ",
+                 "frontmatterStyle": "frontmatter",
++                "images": [],
+                 "index": 1,
+                 "level": 1,
+                 "note": undefined,
+@@ -2293,6 +2361,7 @@ background: https://sli.dev/demo-cover.png#14
+         "frontmatterRaw": "src: ../sub/pages3-4.md
+ ",
+         "frontmatterStyle": "frontmatter",
++        "images": [],
+         "imports": [
+           {
+             "content": "# Page 3",
+@@ -2304,6 +2373,7 @@ background: https://sli.dev/demo-cover.png#14
+             "frontmatterDoc": undefined,
+             "frontmatterRaw": undefined,
+             "frontmatterStyle": undefined,
++            "images": [],
+             "index": 0,
+             "level": 1,
+             "note": undefined,
+@@ -2332,6 +2402,7 @@ background: https://sli.dev/demo-cover.png#14
+             "frontmatterRaw": "layout: cover
+ ",
+             "frontmatterStyle": "frontmatter",
++            "images": [],
+             "index": 1,
+             "level": 1,
+             "note": undefined,
+@@ -2374,6 +2445,7 @@ src: ../sub/pages3-4.md
+       "frontmatterDoc": undefined,
+       "frontmatterRaw": undefined,
+       "frontmatterStyle": undefined,
++      "images": [],
+       "index": 0,
+       "level": 1,
+       "note": undefined,
+@@ -2414,6 +2486,9 @@ src: ../sub/pages3-4.md
+ background: https://sli.dev/demo-cover.png#14
+ ",
+         "frontmatterStyle": "frontmatter",
++        "images": [
++          "https://sli.dev/demo-cover.png#14",
++        ],
+         "imports": [
+           {
+             "content": "",
+@@ -2430,6 +2505,7 @@ background: https://sli.dev/demo-cover.png#14
+             "frontmatterRaw": "src: /sub/page1.md
+ ",
+             "frontmatterStyle": "frontmatter",
++            "images": [],
+             "imports": [
+               {
+                 "content": "# Page 1",
+@@ -2441,6 +2517,7 @@ background: https://sli.dev/demo-cover.png#14
+                 "frontmatterDoc": undefined,
+                 "frontmatterRaw": undefined,
+                 "frontmatterStyle": undefined,
++                "images": [],
+                 "index": 0,
+                 "level": 1,
+                 "note": undefined,
+@@ -2477,6 +2554,7 @@ src: /sub/page1.md
+             "frontmatterRaw": "src: page2.md
+ ",
+             "frontmatterStyle": "frontmatter",
++            "images": [],
+             "imports": [
+               {
+                 "content": "# Page 2
+@@ -2497,6 +2575,7 @@ src: /sub/page1.md
+                 "frontmatterRaw": "layout: cover
+ ",
+                 "frontmatterStyle": "frontmatter",
++                "images": [],
+                 "index": 0,
+                 "level": 1,
+                 "note": undefined,
+@@ -2539,6 +2618,7 @@ src: page2.md
+             "frontmatterRaw": "src: ../sub/pages3-4.md
+ ",
+             "frontmatterStyle": "frontmatter",
++            "images": [],
+             "imports": [
+               {
+                 "content": "# Page 3",
+@@ -2550,6 +2630,7 @@ src: page2.md
+                 "frontmatterDoc": undefined,
+                 "frontmatterRaw": undefined,
+                 "frontmatterStyle": undefined,
++                "images": [],
+                 "index": 0,
+                 "level": 1,
+                 "note": undefined,
+@@ -2578,6 +2659,7 @@ src: page2.md
+                 "frontmatterRaw": "layout: cover
+ ",
+                 "frontmatterStyle": "frontmatter",
++                "images": [],
+                 "index": 1,
+                 "level": 1,
+                 "note": undefined,
+@@ -2633,6 +2715,7 @@ background: https://sli.dev/demo-cover.png#14
+         "frontmatterRaw": "src: ../sub/pages3-4.md
+ ",
+         "frontmatterStyle": "frontmatter",
++        "images": [],
+         "imports": [
+           {
+             "content": "# Page 3",
+@@ -2644,6 +2727,7 @@ background: https://sli.dev/demo-cover.png#14
+             "frontmatterDoc": undefined,
+             "frontmatterRaw": undefined,
+             "frontmatterStyle": undefined,
++            "images": [],
+             "index": 0,
+             "level": 1,
+             "note": undefined,
+@@ -2672,6 +2756,7 @@ background: https://sli.dev/demo-cover.png#14
+             "frontmatterRaw": "layout: cover
+ ",
+             "frontmatterStyle": "frontmatter",
++            "images": [],
+             "index": 1,
+             "level": 1,
+             "note": undefined,
+@@ -2723,6 +2808,7 @@ src: ../sub/pages3-4.md
+       "frontmatterRaw": "layout: cover
+ ",
+       "frontmatterStyle": "frontmatter",
++      "images": [],
+       "index": 1,
+       "level": 1,
+       "note": undefined,
+@@ -2767,6 +2853,7 @@ $x+2$",
+       "frontmatterDoc": undefined,
+       "frontmatterRaw": undefined,
+       "frontmatterStyle": undefined,
++      "images": [],
+       "index": 4,
+       "level": 1,
+       "note": undefined,

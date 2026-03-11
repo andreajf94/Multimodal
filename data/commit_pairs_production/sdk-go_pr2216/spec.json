@@ -1,0 +1,13 @@
+{
+  "feature_name": "Trampolining API for Versioned Continue-As-New",
+  "description": "Implement a trampolining mechanism that allows pinned workflows to detect when their target deployment version has changed and optionally upgrade to the new version via continue-as-new. This provides a clean separation between version change detection and continue-as-new suggestions to prevent infinite loops.",
+  "functional_requirements": [
+    "Add a GetTargetWorkflowDeploymentVersionChanged() method to WorkflowInfo that returns a boolean indicating if the workflow's target deployment version has changed since execution started",
+    "Create a ContinueAsNewVersioningBehavior type with an AutoUpgrade option that can be set on ContinueAsNewError/ContinueAsNewErrorOptions",
+    "Add a ContinueAsNewSuggestedReason enum and GetContinueAsNewSuggestedReasons() method on WorkflowInfo to retrieve suggested reasons for continuing as new",
+    "Implement test suite support via SetContinueAsNewSuggestedReasons() and SetTargetWorkflowDeploymentVersionChanged() methods for testing the trampolining flow",
+    "Create integration tests demonstrating the full trampolining flow where a v1 pinned workflow detects version change, performs continue-as-new with AutoUpgrade, and completes execution on v2"
+  ],
+  "project_name": "sdk-go",
+  "source_pr": "https://github.com/temporalio/sdk-go/pull/2216"
+}

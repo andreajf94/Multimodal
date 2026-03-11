@@ -1,0 +1,181 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "api_design",
+      "recommendation": "Added new API methods to WorkflowInfo for version change detection and continue-as-new suggestions: GetTargetWorkflowDeploymentVersionChanged() and GetContinueAsNewSuggestedReasons(). Created new enum types ContinueAsNewVersioningBehavior and ContinueAsNewSuggestedReason.",
+      "rationale": "These APIs provide a clean separation between detection logic (what changed) and action logic (what to do about it). This prevents infinite loops by allowing workflows to explicitly check for version changes before deciding to continue-as-new. The enum-based approach provides type safety and clear documentation of available options.",
+      "alternatives_considered": [
+        "Adding a single method that returns both detection and suggestion",
+        "Using callback-based approach for automatic upgrade",
+        "Embedding version change detection directly in continue-as-new error"
+      ],
+      "files_affected": [
+        "internal/workflow.go",
+        "workflow/workflow.go"
+      ]
+    },
+    {
+      "dimension": "data_modeling",
+      "recommendation": "Extended ContinueAsNewError and ContinueAsNewErrorOptions with InitialVersioningBehavior field to control versioning behavior of the new run. Added new fields to internal workflow state: continueAsNewSuggestedReasons, targetWorkerDeploymentVersionChanged, and InitialVersioningBehavior.",
+      "rationale": "The InitialVersioningBehavior field allows workflows to specify whether the new run should auto-upgrade or inherit the pinned version. This is essential for the trampolining pattern where a pinned workflow wants to upgrade to a new version. Storing these flags in workflow state ensures they persist across workflow tasks.",
+      "alternatives_considered": [
+        "Adding version upgrade as a separate error type",
+        "Using workflow context metadata instead of error fields",
+        "Making version upgrade automatic based on server flags"
+      ],
+      "files_affected": [
+        "internal/error.go",
+        "internal/internal_workflow.go",
+        "internal/workflow.go"
+      ]
+    },
+    {
+      "dimension": "protocol_serialization",
+      "recommendation": "Added protocol buffer conversions for new enums and fields: continueAsNewVersioningBehaviorToProto() and convertContinueAsNewSuggestedReasonsFromProto(). Updated command serialization in internal_task_handlers.go to include InitialVersioningBehavior in continue-as-new commands.",
+      "rationale": "The SDK needs to serialize the new fields to protobuf for communication with Temporal server. The conversion functions ensure type safety between Go enums and protobuf enums. The command serialization ensures the server receives the versioning behavior for the new run.",
+      "alternatives_considered": [
+        "Using raw integers for enum serialization",
+        "Adding new message types instead of extending existing ones",
+        "Using JSON serialization for new fields"
+      ],
+      "files_affected": [
+        "internal/internal_event_handlers.go",
+        "internal/internal_task_handlers.go",
+        "internal/workflow.go"
+      ]
+    },
+    {
+      "dimension": "testing",
+      "recommendation": "Added test suite support methods SetContinueAsNewSuggestedReasons() and SetTargetWorkerDeploymentVersionChanged() for unit testing. Created comprehensive integration test TestContinueAsNewWithVersionUpgrade demonstrating the full trampolining flow.",
+      "rationale": "Testing is critical for complex stateful behavior like version trampolining. The test suite methods allow developers to simulate server-side conditions in unit tests. The integration test validates the entire flow: v1 pinned workflow detects version change, continues-as-new with AutoUpgrade, and completes on v2.",
+      "alternatives_considered": [
+        "Relying only on server-side tests",
+        "Not providing test suite helpers",
+        "Testing only the detection or action parts separately"
+      ],
+      "files_affected": [
+        "internal/internal_workflow_testsuite.go",
+        "internal/workflow_testsuite.go",
+        "test/worker_deployment_test.go"
+      ]
+    },
+    {
+      "dimension": "backward_compatibility",
+      "recommendation": "Marked new features as experimental in documentation comments and used default/unspecified enum values for backward compatibility. Updated all go.mod files to use go.temporal.io/api v1.62.2.",
+      "rationale": "The experimental markers warn users that APIs may change. Default enum values ensure existing code continues to work without modification. The API version bump is necessary because the new protobuf fields and enums are defined in the API package.",
+      "alternatives_considered": [
+        "Making features stable immediately",
+        "Using feature flags",
+        "Creating separate experimental packages"
+      ],
+      "files_affected": [
+        "contrib/datadog/go.mod",
+        "contrib/envconfig/go.mod",
+        "contrib/opentelemetry/go.mod",
+        "contrib/opentracing/go.mod",
+        "contrib/sysinfo/go.mod",
+        "contrib/tally/go.mod",
+        "go.mod",
+        "internal/cmd/build/go.mod",
+        "test/go.mod"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Extended ContinueAsNewError creation to propagate InitialVersioningBehavior from options. Updated both NewContinueAsNewError and NewContinueAsNewErrorWithOptions to handle the new field.",
+      "rationale": "Consistent error creation ensures that workflows using either API get the same behavior. Propagating the field from options to the error ensures that workflows can control versioning behavior when continuing as new.",
+      "alternatives_considered": [
+        "Creating a separate error type for version upgrade",
+        "Adding versioning behavior as a separate parameter to existing methods",
+        "Using workflow context instead of error fields"
+      ],
+      "files_affected": [
+        "internal/error.go"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Add version change detection and continue-as-new suggestion APIs",
+      "description": "Implement GetTargetWorkflowDeploymentVersionChanged() and GetContinueAsNewSuggestedReasons() methods on WorkflowInfo. Create ContinueAsNewVersioningBehavior and ContinueAsNewSuggestedReason enum types.",
+      "files_to_modify": [
+        "internal/workflow.go",
+        "workflow/workflow.go"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-002",
+      "title": "Extend continue-as-new with versioning behavior control",
+      "description": "Add InitialVersioningBehavior field to ContinueAsNewError and ContinueAsNewErrorOptions. Update error creation and serialization to handle the new field.",
+      "files_to_modify": [
+        "internal/error.go",
+        "internal/internal_workflow.go",
+        "internal/internal_task_handlers.go"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-003",
+      "title": "Implement server event processing for new fields",
+      "description": "Process new fields from WorkflowTaskStarted event: SuggestContinueAsNewReasons and TargetWorkerDeploymentVersionChanged. Convert protobuf enums to Go enums.",
+      "files_to_modify": [
+        "internal/internal_event_handlers.go"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-004",
+      "title": "Add test suite support for new features",
+      "description": "Create SetContinueAsNewSuggestedReasons() and SetTargetWorkerDeploymentVersionChanged() methods on TestWorkflowEnvironment for unit testing.",
+      "files_to_modify": [
+        "internal/internal_workflow_testsuite.go",
+        "internal/workflow_testsuite.go"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-005",
+      "title": "Create integration test for trampolining flow",
+      "description": "Implement TestContinueAsNewWithVersionUpgrade integration test demonstrating v1 pinned workflow detecting version change, continuing-as-new with AutoUpgrade, and completing on v2.",
+      "files_to_modify": [
+        "test/worker_deployment_test.go",
+        "test/workflow_test.go"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "large"
+    },
+    {
+      "id": "T-006",
+      "title": "Update dependencies to support new API features",
+      "description": "Bump go.temporal.io/api dependency to v1.62.2 across all go.mod files to access new protobuf definitions.",
+      "files_to_modify": [
+        "contrib/datadog/go.mod",
+        "contrib/envconfig/go.mod",
+        "contrib/opentelemetry/go.mod",
+        "contrib/opentracing/go.mod",
+        "contrib/sysinfo/go.mod",
+        "contrib/tally/go.mod",
+        "go.mod",
+        "internal/cmd/build/go.mod",
+        "test/go.mod"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation introduces a trampolining mechanism for versioned continue-as-new in Temporal's Go SDK. The core design separates detection (has the target version changed?) from action (should I continue-as-new with auto-upgrade?). This is achieved through two main API additions: GetTargetWorkflowDeploymentVersionChanged() on WorkflowInfo for detection, and a new InitialVersioningBehavior field on ContinueAsNewError for action control.\n\nThe architecture follows Temporal's existing patterns: new fields are added to internal state structures, protobuf conversions handle serialization to/from server messages, and test suite methods enable comprehensive testing. The ContinueAsNewVersioningBehavior enum provides explicit control over whether the new run should inherit the pinned version or auto-upgrade to the current target. This prevents infinite loops because workflows must explicitly check for version changes before deciding to continue-as-new.\n\nThe integration test demonstrates the complete trampolining flow: a v1 pinned workflow periodically checks GetTargetWorkerDeploymentVersionChanged(), and when it detects the target has changed to v2, it continues-as-new with InitialVersioningBehavior set to AutoUpgrade. The new run then executes on v2. All changes are marked as experimental and maintain backward compatibility through default enum values and careful API design.",
+  "source_pr": "https://github.com/temporalio/sdk-go/pull/2216",
+  "before_sha": "9126a773a5047354aee97a6fd90ff7235b8c96ca",
+  "after_sha": "85b681e064923121171b5433ed9bc008e07f7c69",
+  "diff_stats": {
+    "additions": 435,
+    "deletions": 57,
+    "files_changed": 28
+  }
+}

@@ -1,0 +1,66 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "dependency_management",
+      "recommendation": "Removed the unused `reqwest-eventsource` dependency from the SSE example's Cargo.toml and updated Cargo.lock accordingly",
+      "rationale": "The dependency was identified as unused in the example code, meaning it was adding unnecessary bloat to the build process without providing any functional benefit. Removing unused dependencies reduces compile times, decreases binary size, and simplifies the dependency graph, which is especially important for example projects that users might copy as starting points.",
+      "alternatives_considered": [
+        "Keeping the dependency 'just in case' it might be needed later",
+        "Marking it as optional with a feature flag",
+        "Adding a comment explaining why it's present but unused"
+      ],
+      "files_affected": [
+        "examples/sse/Cargo.toml",
+        "examples/Cargo.lock"
+      ]
+    },
+    {
+      "dimension": "example_maintenance",
+      "recommendation": "Ensured the SSE example remains functional without the removed dependency by verifying it still compiles and works correctly",
+      "rationale": "Examples in a framework codebase serve as reference implementations and starting points for users. They should demonstrate best practices, including minimal dependency usage. The example was already using `eventsource-stream` directly for testing, making `reqwest-eventsource` redundant. This cleanup aligns with the principle of keeping examples lean and focused.",
+      "alternatives_considered": [
+        "Rewriting the example to actually use `reqwest-eventsource`",
+        "Keeping both dependencies but documenting why both are present",
+        "Removing `eventsource-stream` instead and using only `reqwest-eventsource`"
+      ],
+      "files_affected": [
+        "examples/sse/Cargo.toml"
+      ]
+    },
+    {
+      "dimension": "build_optimization",
+      "recommendation": "Removed transitive dependencies (`futures-timer`, `reqwest-eventsource` package entry) from Cargo.lock when removing the main dependency",
+      "rationale": "Cargo.lock tracks exact versions of all dependencies in the dependency tree. When a direct dependency is removed, its transitive dependencies are also removed from the lock file if no other package depends on them. This cleanup ensures the lock file accurately reflects the actual dependency state and prevents stale entries from accumulating over time.",
+      "alternatives_considered": [
+        "Leaving the transitive dependencies in Cargo.lock (they would be ignored by Cargo anyway)",
+        "Manually cleaning only the direct dependency entry",
+        "Regenerating the entire lock file from scratch"
+      ],
+      "files_affected": [
+        "examples/Cargo.lock"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Remove unused reqwest-eventsource dependency from SSE example",
+      "description": "Clean up the SSE example by removing an unnecessary dependency that was not being used in the code, reducing build times and dependency footprint for users who copy this example",
+      "files_to_modify": [
+        "examples/sse/Cargo.toml",
+        "examples/Cargo.lock"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "This change implements a straightforward dependency cleanup in the axum framework's SSE example. The implementation involved removing the `reqwest-eventsource` dependency from the example's Cargo.toml file and updating the workspace-level Cargo.lock file to reflect this removal.\n\nThe key insight driving this change was that the SSE example was already using the `eventsource-stream` crate directly for testing Server-Sent Events functionality, making the higher-level `reqwest-eventsource` wrapper unnecessary. This is a common pattern in framework maintenance where example code is periodically reviewed to ensure it follows best practices and doesn't accumulate unnecessary dependencies.\n\nThe implementation follows Rust/Cargo conventions perfectly: when a dependency is removed from Cargo.toml, Cargo automatically removes it from the dependency graph during the next build. The Cargo.lock file was updated to remove not just the `reqwest-eventsource` entry but also its transitive dependencies (like `futures-timer`) that were no longer needed by any package in the workspace. This change integrates seamlessly with the existing codebase as it doesn't modify any actual Rust source code\u2014only dependency declarations\u2014and maintains backward compatibility while improving the example's hygiene.",
+  "source_pr": "https://github.com/tokio-rs/axum/pull/3668",
+  "before_sha": "60a0d2838f1837eee2c359473f6d302f7f39b88e",
+  "after_sha": "6a03c63f5cf7e2368cebf0e095fb3b035f7f7594",
+  "diff_stats": {
+    "additions": 0,
+    "deletions": 24,
+    "files_changed": 2
+  }
+}

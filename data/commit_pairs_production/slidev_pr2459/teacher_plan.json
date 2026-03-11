@@ -1,0 +1,144 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "data_modeling",
+      "recommendation": "Added an `images` array field to the `SlideInfoBase` interface to store extracted image URLs at parse time, ensuring they survive build-mode content stripping.",
+      "rationale": "Image URLs need to be available at runtime for preloading, but slide content might be stripped during build optimization. By extracting and storing URLs during parsing, we create a persistent metadata field that can be accessed by both build-time and runtime components.",
+      "alternatives_considered": [
+        "Runtime DOM scraping",
+        "Separate manifest file",
+        "In-memory cache only"
+      ],
+      "files_affected": [
+        "packages/types/src/types.ts",
+        "packages/parser/src/core.ts"
+      ]
+    },
+    {
+      "dimension": "api_design",
+      "recommendation": "Created a flexible `preloadImages` configuration option that supports boolean values or an object with an `ahead` property for custom look-ahead windows.",
+      "rationale": "Users need control over preloading behavior - some may want to disable it entirely, while others may want to customize the look-ahead window based on their presentation's characteristics. The union type provides maximum flexibility with minimal complexity.",
+      "alternatives_considered": [
+        "Simple boolean only",
+        "Multiple separate configuration options",
+        "Hard-coded behavior"
+      ],
+      "files_affected": [
+        "packages/types/src/frontmatter.ts",
+        "packages/parser/src/config.ts",
+        "packages/vscode/schema/headmatter.json"
+      ]
+    },
+    {
+      "dimension": "performance_optimization",
+      "recommendation": "Implemented a two-phase preloading strategy: immediate preloading for current/adjacent slides plus configurable look-ahead, followed by delayed preloading of all remaining slides after 3 seconds.",
+      "rationale": "This balances immediate user experience (ensuring smooth navigation to nearby slides) with overall presentation readiness. The delayed bulk preloading prevents network contention during initial slide load while ensuring all images are eventually loaded.",
+      "alternatives_considered": [
+        "Preload all immediately",
+        "Lazy load only on navigation",
+        "Predictive loading based on user behavior"
+      ],
+      "files_affected": [
+        "packages/client/composables/usePreloadImages.ts"
+      ]
+    },
+    {
+      "dimension": "build_time_optimization",
+      "recommendation": "Added build-time generation of `<link rel=\"preload\">` tags in the HTML head for all extracted images, leveraging the browser's early loading capabilities.",
+      "rationale": "HTML preload hints allow browsers to start fetching images before any JavaScript executes, providing the earliest possible start time. This complements runtime preloading for optimal performance across different navigation patterns.",
+      "alternatives_considered": [
+        "Runtime-only preloading",
+        "Service worker caching",
+        "HTTP/2 server push"
+      ],
+      "files_affected": [
+        "packages/slidev/node/setups/indexHtml.ts"
+      ]
+    },
+    {
+      "dimension": "content_parsing",
+      "recommendation": "Implemented comprehensive image URL extraction from multiple sources: frontmatter properties, markdown syntax, Vue component props, and CSS url() references, with code block stripping to avoid false positives.",
+      "rationale": "Images can be referenced in various ways in Slidev presentations. The extraction needs to be thorough but intelligent - stripping code blocks prevents matching image URLs within code examples while capturing all actual presentation images.",
+      "alternatives_considered": [
+        "Simple regex matching only",
+        "AST-based parsing",
+        "Browser-based extraction"
+      ],
+      "files_affected": [
+        "packages/parser/src/core.ts"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Added URL resolution with base path handling and duplicate prevention using Sets, with proper cleanup of loading state on both success and error.",
+      "rationale": "Image URLs can be relative or absolute, and the same image might be referenced multiple times. The implementation handles these edge cases while ensuring failed loads don't block subsequent attempts.",
+      "alternatives_considered": [
+        "No URL resolution",
+        "No duplicate prevention",
+        "Retry logic on failure"
+      ],
+      "files_affected": [
+        "packages/client/composables/usePreloadImages.ts",
+        "packages/slidev/node/setups/indexHtml.ts"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Image URL Extraction and Storage",
+      "description": "Add image extraction logic to the parser and extend the data model to store extracted URLs in slide metadata",
+      "files_to_modify": [
+        "packages/parser/src/core.ts",
+        "packages/types/src/types.ts",
+        "test/__snapshots__/parser.test.ts.snap"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-002",
+      "title": "Configuration System Extension",
+      "description": "Add preloadImages configuration option with TypeScript types, default values, and VS Code schema updates",
+      "files_to_modify": [
+        "packages/types/src/frontmatter.ts",
+        "packages/parser/src/config.ts",
+        "packages/vscode/schema/headmatter.json",
+        "packages/client/constants.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-003",
+      "title": "Runtime Preloading Composable",
+      "description": "Create Vue composable for navigation-aware image preloading with two-phase loading strategy",
+      "files_to_modify": [
+        "packages/client/internals/SlidesShow.vue"
+      ],
+      "files_to_create": [
+        "packages/client/composables/usePreloadImages.ts"
+      ],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-004",
+      "title": "Build-Time HTML Preload Generation",
+      "description": "Generate preload link tags in HTML head during build process for early browser loading",
+      "files_to_modify": [
+        "packages/slidev/node/setups/indexHtml.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The smart image preloading system was implemented through a multi-layered approach that works at both build time and runtime. At the core is a comprehensive image extraction engine in the parser that identifies image URLs from all possible sources - frontmatter properties (image, backgroundImage, background), markdown syntax, Vue component props, and CSS url() references. These extracted URLs are stored in a new `images` field on slide metadata, ensuring they persist through build optimizations.\n\nThe system provides flexible configuration through a `preloadImages` option that can be disabled entirely, enabled with defaults, or customized with a specific look-ahead window. This configuration is integrated into Slidev's existing frontmatter system and VS Code schema for developer experience consistency.\n\nRuntime preloading is handled by a Vue composable that implements a two-phase strategy: immediate preloading of current, previous, next, and configurable look-ahead slides (default 3), followed by delayed preloading of all remaining slides after 3 seconds. This balances immediate navigation smoothness with eventual completeness. Complementing this, build-time HTML generation adds `<link rel=\"preload\">` tags to the document head, giving browsers the earliest possible start on image fetching.\n\nThe implementation integrates seamlessly with Slidev's existing architecture - the parser extensions maintain backward compatibility, the configuration follows existing patterns, and the runtime composable plugs into the existing navigation system. The solution addresses the core requirement of eliminating visible loading flashes while maintaining flexibility and performance across different presentation scenarios.",
+  "source_pr": "https://github.com/slidevjs/slidev/pull/2459",
+  "before_sha": "932dc3ce773b56e20c77613d4d4d00ba1d96a3ee",
+  "after_sha": "f175ddb7a8100837c6c935e84835bd8058d4e1fc",
+  "diff_stats": {
+    "additions": 294,
+    "deletions": 0,
+    "files_changed": 10
+  }
+}

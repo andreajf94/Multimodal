@@ -1,0 +1,207 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "api_design",
+      "recommendation": "Added WorkerHeartbeatInterval configuration option to ClientOptions with validation (1s-60s range) and default of 60s. This allows users to control heartbeat frequency or disable it with negative values.",
+      "rationale": "Heartbeats need to be configurable to balance server load vs. freshness of worker status. The 1s-60s range prevents excessive server load while ensuring timely updates. Default of 60s provides reasonable freshness without overwhelming the server.",
+      "alternatives_considered": [
+        "Hard-coded interval",
+        "Wider range without validation",
+        "Separate configuration struct"
+      ],
+      "files_affected": [
+        "internal/client.go"
+      ]
+    },
+    {
+      "dimension": "data_modeling",
+      "recommendation": "Created workerpb.WorkerHeartbeat protobuf structure containing worker identity, host info, resource usage, task processing stats, and plugin information. This provides a comprehensive view of worker state.",
+      "rationale": "The server needs detailed information to monitor worker health, resource utilization, and task processing capabilities. Including plugin info helps with debugging and compatibility checks.",
+      "alternatives_considered": [
+        "Minimal heartbeat with just worker ID",
+        "Separate messages for different data types"
+      ],
+      "files_affected": [
+        "internal/internal_worker.go"
+      ]
+    },
+    {
+      "dimension": "system_architecture",
+      "recommendation": "Centralized heartbeat management in heartbeatManager that coordinates heartbeats across all workers. Each AggregatedWorker registers with the manager and provides a callback to generate heartbeat data.",
+      "rationale": "Centralized management ensures consistent heartbeat behavior across all worker types and prevents duplicate heartbeats. Callback pattern allows each worker to provide its specific metrics while maintaining separation of concerns.",
+      "alternatives_considered": [
+        "Each worker sends its own heartbeats independently",
+        "Heartbeat as part of poller loop"
+      ],
+      "files_affected": [
+        "internal/internal_worker.go",
+        "internal/internal_worker_heartbeat.go"
+      ]
+    },
+    {
+      "dimension": "resource_management",
+      "recommendation": "Refactored resource tuner functionality into sysinfo package with improved cgroup support and gopsutil integration. Created SysInfoProvider interface for extensible resource monitoring.",
+      "rationale": "Removing external dependency reduces complexity and improves maintainability. The new design supports both cgroup-aware container environments and traditional host monitoring with graceful fallbacks.",
+      "alternatives_considered": [
+        "Keep external dependency",
+        "Implement minimal resource monitoring only"
+      ],
+      "files_affected": [
+        "contrib/sysinfo/cgroups.go",
+        "contrib/sysinfo/cgroups_common.go",
+        "contrib/sysinfo/cgroups_notlinux.go",
+        "contrib/sysinfo/sysinfo.go"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Implemented graceful degradation for resource monitoring - if cgroup stats fail, fall back to host stats. Added rate limiting (100ms) to prevent excessive system calls.",
+      "rationale": "Worker heartbeats should not fail due to transient resource monitoring issues. Rate limiting prevents performance degradation from frequent system calls while maintaining acceptable freshness.",
+      "alternatives_considered": [
+        "Fail heartbeats on monitoring errors",
+        "No rate limiting with caching"
+      ],
+      "files_affected": [
+        "contrib/sysinfo/sysinfo.go"
+      ]
+    },
+    {
+      "dimension": "integration_patterns",
+      "recommendation": "Added WorkerInstanceKey to all poll requests and ShutdownWorker calls. This allows the server to correlate heartbeats with specific pollers and clean up properly.",
+      "rationale": "Worker identification needs to be consistent across all interactions with the server. Including the key in poll requests ensures the server can track which workers are actively polling.",
+      "alternatives_considered": [
+        "Separate identification mechanisms for heartbeats vs polling",
+        "Using only worker identity without instance key"
+      ],
+      "files_affected": [
+        "internal/internal_task_pollers.go",
+        "internal/internal_worker.go"
+      ]
+    },
+    {
+      "dimension": "shutdown_handling",
+      "recommendation": "Enhanced ShutdownWorker call to always send final heartbeat during cleanup, regardless of sticky queue configuration. This ensures server knows when workers are shutting down.",
+      "rationale": "Previous implementation only sent ShutdownWorker for sticky queues. Now all workers send final heartbeats, providing complete shutdown visibility to the server.",
+      "alternatives_considered": [
+        "Keep old behavior",
+        "Separate shutdown notification from heartbeats"
+      ],
+      "files_affected": [
+        "internal/internal_worker.go"
+      ]
+    },
+    {
+      "dimension": "metrics_collection",
+      "recommendation": "Created heartbeatMetricsHandler wrapper that intercepts metrics to populate heartbeat statistics. This provides task processing rates without modifying existing metrics collection.",
+      "rationale": "Reusing existing metrics infrastructure ensures consistency and reduces code duplication. The wrapper pattern allows adding heartbeat-specific metrics without affecting other metric consumers.",
+      "alternatives_considered": [
+        "Separate metrics collection for heartbeats",
+        "Modifying existing metrics handlers"
+      ],
+      "files_affected": [
+        "internal/internal_worker_heartbeat_metrics.go"
+      ]
+    },
+    {
+      "dimension": "testing",
+      "recommendation": "Added comprehensive integration tests for worker heartbeats, including enabling server-side features via dynamic configuration. Created sysinfo unit tests for resource monitoring.",
+      "rationale": "Heartbeat functionality requires end-to-end testing with a real server. Dynamic configuration ensures test environment matches production capabilities. Unit tests verify resource monitoring works correctly.",
+      "alternatives_considered": [
+        "Mock-only testing",
+        "No integration tests"
+      ],
+      "files_affected": [
+        ".github/workflows/docker/dynamic-config-custom.yaml",
+        "test/worker_heartbeat_test.go",
+        "contrib/sysinfo/sysinfo_test.go"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Resource Monitoring Infrastructure",
+      "description": "Refactor resource tuner into sysinfo package with cgroup and host monitoring capabilities. Remove external dependency and create SysInfoProvider interface.",
+      "files_to_modify": [
+        "contrib/resourcetuner/cgroups.go",
+        "contrib/resourcetuner/cgroups_common.go",
+        "contrib/resourcetuner/cgroups_notlinux.go",
+        "contrib/resourcetuner/cgroups_test.go",
+        "contrib/resourcetuner/go.mod",
+        "contrib/resourcetuner/go.sum"
+      ],
+      "files_to_create": [
+        "contrib/sysinfo/sysinfo.go",
+        "contrib/sysinfo/sysinfo_test.go"
+      ],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-002",
+      "title": "Heartbeat Core Infrastructure",
+      "description": "Implement heartbeat manager, metrics collection, and protobuf structures. Add configuration options and integrate with worker lifecycle.",
+      "files_to_modify": [
+        "internal/client.go",
+        "internal/internal_worker.go"
+      ],
+      "files_to_create": [
+        "internal/internal_worker_heartbeat.go",
+        "internal/internal_worker_heartbeat_metrics.go"
+      ],
+      "estimated_effort": "large"
+    },
+    {
+      "id": "T-003",
+      "title": "Poller Integration",
+      "description": "Add worker instance keys to all pollers, track poll times, and integrate with heartbeat system. Remove old Cleanup methods.",
+      "files_to_modify": [
+        "internal/internal_task_pollers.go",
+        "internal/internal_task_pollers_test.go",
+        "internal/internal_nexus_task_poller.go",
+        "internal/internal_nexus_worker.go"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-004",
+      "title": "Shutdown and Cleanup",
+      "description": "Enhance shutdown sequence to always send final heartbeat. Centralize namespace verification and improve worker cleanup.",
+      "files_to_modify": [
+        "internal/internal_worker.go",
+        "worker/tuning.go",
+        "internal/resource_tuner.go",
+        "internal/tuning.go"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-005",
+      "title": "Testing Infrastructure",
+      "description": "Add integration tests for heartbeat functionality and update CI configuration to enable server-side features.",
+      "files_to_modify": [
+        ".github/workflows/docker/dynamic-config-custom.yaml",
+        "internal/cmd/build/main.go",
+        "test/go.mod",
+        "test/go.sum",
+        "test/integration_test.go",
+        "test/test_utils_test.go"
+      ],
+      "files_to_create": [
+        "test/worker_heartbeat_test.go",
+        "test/worker_tuner_test.go"
+      ],
+      "estimated_effort": "medium"
+    }
+  ],
+  "implementation_summary": "The worker heartbeat system implementation follows a layered approach that integrates deeply with the existing Temporal Go SDK architecture. At the core, a new heartbeatManager coordinates periodic heartbeats across all worker types, using a callback pattern where each AggregatedWorker provides its specific metrics. This design ensures consistency while allowing worker-specific data collection.\n\nKey patterns include the wrapper pattern for metrics collection (heartbeatMetricsHandler), the strategy pattern for resource monitoring (SysInfoProvider), and the observer pattern for plugin integration. The system gracefully degrades when resource monitoring fails and includes rate limiting to prevent performance impact.\n\nThe implementation removes the external resource tuner dependency by refactoring its functionality into a new sysinfo package within the contrib directory. This package provides both cgroup-aware monitoring for containerized environments and traditional host monitoring using gopsutil, with automatic fallback between them.\n\nIntegration with the existing codebase is comprehensive: all poller types now include worker instance keys, the shutdown sequence has been enhanced to ensure final heartbeats are always sent, and namespace verification has been centralized at the AggregatedWorker level for efficiency. The changes maintain backward compatibility while adding the new heartbeat capability as an opt-in feature configurable via ClientOptions.",
+  "source_pr": "https://github.com/temporalio/sdk-go/pull/2186",
+  "before_sha": "d4185ea231ee3815e25ce87835e07d17a57c7c58",
+  "after_sha": "3f64d34e51f41f6d38c18b4a922da660b187f3c8",
+  "diff_stats": {
+    "additions": 2253,
+    "deletions": 349,
+    "files_changed": 33
+  }
+}

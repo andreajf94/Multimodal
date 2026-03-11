@@ -1,0 +1,151 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "code_organization",
+      "recommendation": "Consolidated payout-related utilities into a dedicated `lib/payouts/` directory by moving files from `lib/payouts/api/` and `lib/partners/api/` to the root of `lib/payouts/`",
+      "rationale": "The payout system was previously scattered across multiple directories (`lib/payouts/api/`, `lib/partners/api/`), making it difficult to locate related functionality. By consolidating all payout utilities into a single directory, we improve discoverability and maintain a clear separation of concerns. This follows the existing pattern in the codebase where related functionality is grouped together (e.g., `lib/analytics/`, `lib/stripe/`).",
+      "alternatives_considered": [
+        "Keeping the existing structure with payout logic split between directories",
+        "Creating a completely new directory structure for all partner-related code",
+        "Moving all payout logic into `lib/partners/` directory"
+      ],
+      "files_affected": [
+        "apps/web/lib/payouts/api/create-payouts-idempotency-key.ts \u2192 apps/web/lib/payouts/create-payouts-idempotency-key.ts",
+        "apps/web/lib/payouts/api/get-partner-payout-methods.ts \u2192 apps/web/lib/payouts/get-partner-payout-methods.ts",
+        "apps/web/lib/payouts/api/mark-payouts-as-processed.ts \u2192 apps/web/lib/payouts/mark-payouts-as-processed.ts",
+        "apps/web/lib/partners/api/recompute-partner-payout-state.ts \u2192 apps/web/lib/payouts/recompute-partner-payout-state.ts"
+      ]
+    },
+    {
+      "dimension": "api_design",
+      "recommendation": "Updated import paths across the codebase to reference the new consolidated payout utilities location",
+      "rationale": "After reorganizing the directory structure, all import statements needed to be updated to point to the new file locations. This ensures that the codebase remains consistent and all dependencies are properly resolved. The changes were made systematically across API routes, webhook handlers, and UI components.",
+      "alternatives_considered": [
+        "Using path aliases or module resolution to avoid updating imports",
+        "Creating re-export files to maintain backward compatibility",
+        "Using symbolic links to preserve old paths"
+      ],
+      "files_affected": [
+        "apps/web/app/(ee)/api/partner-profile/payouts/settings/route.ts",
+        "apps/web/app/(ee)/api/stripe/connect/v2/webhook/recipient-account-closed.ts",
+        "apps/web/app/(ee)/api/stripe/connect/v2/webhook/recipient-configuration-updated.ts",
+        "apps/web/app/(ee)/api/stripe/connect/webhook/account-application-deauthorized.ts",
+        "apps/web/app/(ee)/api/stripe/connect/webhook/account-updated.ts",
+        "apps/web/app/(ee)/partners.dub.co/(onboarding)/onboarding/payouts/page.tsx",
+        "apps/web/lib/partners/create-stablecoin-payout.ts",
+        "apps/web/lib/partners/create-stripe-transfer.ts"
+      ]
+    },
+    {
+      "dimension": "data_modeling",
+      "recommendation": "Enhanced payout reminder system to include all payout statuses (pending, processing, processed, failed) instead of just 'pending'",
+      "rationale": "The original implementation only sent reminders for payouts with 'pending' status, but partners need reminders for payouts in various states (processing, processed, failed) to stay informed about their payout lifecycle. This change ensures comprehensive communication with partners about their payout status.",
+      "alternatives_considered": [
+        "Keeping the original behavior of only reminding about pending payouts",
+        "Creating separate reminder systems for different payout statuses",
+        "Adding configuration options for which statuses trigger reminders"
+      ],
+      "files_affected": [
+        "apps/web/app/(ee)/api/cron/payouts/reminders/partners/route.ts"
+      ]
+    },
+    {
+      "dimension": "business_logic",
+      "recommendation": "Enhanced the `recomputePartnerPayoutState` utility to be called after PayPal OAuth connection to automatically update partner payout eligibility",
+      "rationale": "When a partner connects their PayPal account, we need to recalculate their payout eligibility based on the new payment method. Previously, this logic was handled inline in the PayPal callback. By extracting it to the reusable `recomputePartnerPayoutState` function, we ensure consistent behavior across all payout method connections (Stripe, PayPal, etc.) and reduce code duplication.",
+      "alternatives_considered": [
+        "Keeping the payout state recomputation logic inline in the PayPal callback",
+        "Creating a separate function specific to PayPal payout state updates",
+        "Triggering the recomputation asynchronously via a queue"
+      ],
+      "files_affected": [
+        "apps/web/app/(ee)/api/paypal/callback/route.ts"
+      ]
+    },
+    {
+      "dimension": "constants_organization",
+      "recommendation": "Reorganized payout constants to group related configuration values together and improve readability",
+      "rationale": "The original constants file had values scattered without clear grouping. By reorganizing related constants together (holding periods, fee structures, amount limits), we make the configuration more maintainable and easier to understand. This follows the principle of grouping related configuration values to improve cognitive load when reading the file.",
+      "alternatives_considered": [
+        "Keeping the original order of constants",
+        "Creating separate constant files for different payout aspects",
+        "Moving constants to environment variables"
+      ],
+      "files_affected": [
+        "apps/web/lib/constants/payouts.ts"
+      ]
+    },
+    {
+      "dimension": "scripting_utilities",
+      "recommendation": "Enhanced the processed-payouts script to include more detailed filtering and output formatting",
+      "rationale": "The original script only showed aggregate statistics. By adding detailed payout listing with partner information and better filtering criteria (positive amounts, partners with enabled payouts), we create a more useful debugging and monitoring tool. The tabular output format makes it easier to scan and analyze payout data during development and troubleshooting.",
+      "alternatives_considered": [
+        "Keeping the simple aggregate output",
+        "Creating a separate script for detailed payout listing",
+        "Adding command-line arguments for different output formats"
+      ],
+      "files_affected": [
+        "apps/web/scripts/processed-payouts.ts"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Consolidate payout utilities directory structure",
+      "description": "Move payout-related utility functions from scattered locations into a unified `lib/payouts/` directory to improve code organization and discoverability",
+      "files_to_modify": [
+        "apps/web/lib/payouts/api/create-payouts-idempotency-key.ts",
+        "apps/web/lib/payouts/api/get-partner-payout-methods.ts",
+        "apps/web/lib/payouts/api/mark-payouts-as-processed.ts",
+        "apps/web/lib/partners/api/recompute-partner-payout-state.ts"
+      ],
+      "files_to_create": [
+        "apps/web/lib/payouts/create-payouts-idempotency-key.ts",
+        "apps/web/lib/payouts/get-partner-payout-methods.ts",
+        "apps/web/lib/payouts/mark-payouts-as-processed.ts",
+        "apps/web/lib/payouts/recompute-partner-payout-state.ts"
+      ],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-002",
+      "title": "Update import paths for consolidated payout utilities",
+      "description": "Update all import statements across the codebase to reference the new locations of payout utility functions",
+      "files_to_modify": [
+        "apps/web/app/(ee)/api/partner-profile/payouts/settings/route.ts",
+        "apps/web/app/(ee)/api/paypal/callback/route.ts",
+        "apps/web/app/(ee)/api/stripe/connect/v2/webhook/recipient-account-closed.ts",
+        "apps/web/app/(ee)/api/stripe/connect/v2/webhook/recipient-configuration-updated.ts",
+        "apps/web/app/(ee)/api/stripe/connect/webhook/account-application-deauthorized.ts",
+        "apps/web/app/(ee)/api/stripe/connect/webhook/account-updated.ts",
+        "apps/web/app/(ee)/partners.dub.co/(onboarding)/onboarding/payouts/page.tsx",
+        "apps/web/lib/partners/create-stablecoin-payout.ts",
+        "apps/web/lib/partners/create-stripe-transfer.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-003",
+      "title": "Enhance payout reminder system and utilities",
+      "description": "Improve payout reminder system to include all payout statuses, enhance payout constants organization, and improve payout monitoring script",
+      "files_to_modify": [
+        "apps/web/app/(ee)/api/cron/payouts/reminders/partners/route.ts",
+        "apps/web/lib/constants/payouts.ts",
+        "apps/web/scripts/processed-payouts.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    }
+  ],
+  "implementation_summary": "The payout system reorganization focused on improving code maintainability through better organization and enhanced functionality. The core change was consolidating payout-related utilities from scattered locations (`lib/payouts/api/` and `lib/partners/api/`) into a unified `lib/payouts/` directory. This follows the established pattern in the codebase where related functionality is grouped together, making it easier for developers to locate and understand payout-related code.\n\nKey architectural decisions included updating all import paths to reference the new file locations, ensuring consistency across the codebase. The reorganization also provided an opportunity to enhance existing functionality: the payout reminder system was expanded to include all payout statuses (not just 'pending'), the payout constants were logically regrouped for better readability, and the payout monitoring script was enhanced with detailed output formatting.\n\nAn important pattern emerged in the PayPal callback implementation, where the `recomputePartnerPayoutState` utility was integrated to ensure consistent payout eligibility calculation across all payment methods. This demonstrates the benefit of having well-organized utilities that can be reused across different parts of the system. The changes maintain all existing functionality while creating a more maintainable structure for future payout feature development.",
+  "source_pr": "https://github.com/dubinc/dub/pull/3552",
+  "before_sha": "7d8db3db1e45071658fbef9c6eb7a096de870756",
+  "after_sha": "72e13c85cc55da5e037a7841c9542ed243b55d0e",
+  "diff_stats": {
+    "additions": 75,
+    "deletions": 34,
+    "files_changed": 16
+  }
+}

@@ -1,0 +1,149 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "dependency_management",
+      "recommendation": "Upgraded reactive-vscode from v0.4.1 to v1.0.0-beta.1 to leverage improved configuration system and API enhancements",
+      "rationale": "The beta version introduces breaking changes that improve type safety and configuration management. The upgrade was necessary to fix line number decorations and access new features like the defineConfig API which provides better TypeScript support.",
+      "alternatives_considered": [
+        "Staying on v0.4.1 and maintaining custom workarounds",
+        "Forking reactive-vscode to patch specific issues"
+      ],
+      "files_affected": [
+        "pnpm-lock.yaml",
+        "pnpm-workspace.yaml"
+      ]
+    },
+    {
+      "dimension": "configuration_management",
+      "recommendation": "Replaced individual config refs with a unified config object using defineConfig API",
+      "rationale": "The new reactive-vscode v1.0.0-beta.1 introduces a more type-safe defineConfig approach that consolidates all configuration properties into a single object with proper TypeScript typing. This reduces boilerplate and improves maintainability.",
+      "alternatives_considered": [
+        "Keeping the old defineConfigs approach with multiple refs",
+        "Creating a custom configuration wrapper"
+      ],
+      "files_affected": [
+        "packages/vscode/src/configs.ts",
+        "packages/vscode/src/commands.ts",
+        "packages/vscode/src/composables/useServerDetector.ts",
+        "packages/vscode/src/views/previewWebview.ts",
+        "packages/vscode/src/projects.ts",
+        "packages/vscode/src/views/annotations.ts"
+      ]
+    },
+    {
+      "dimension": "api_migration",
+      "recommendation": "Updated all reactive-vscode API calls to match v1.0.0-beta.1 signatures",
+      "rationale": "The new version has renamed and restructured several APIs: useLogger \u2192 defineLogger, useFsWatcher \u2192 useFileSystemWatcher, useAbsolutePath \u2192 useAbsoluteUri, useControlledTerminal \u2192 manual terminal management. These changes required updating imports and usage patterns throughout the codebase.",
+      "alternatives_considered": [
+        "Creating adapter functions to maintain old API compatibility",
+        "Selectively upgrading only broken APIs"
+      ],
+      "files_affected": [
+        "packages/vscode/src/composables/useDevServer.ts",
+        "packages/vscode/src/views/logger.ts",
+        "packages/vscode/src/projects.ts",
+        "packages/vscode/src/views/slidesTree.ts"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Added null checks in useFocusedSlide to prevent crashes when selection is undefined",
+      "rationale": "The line number decoration fix required ensuring that selection.value exists before accessing its properties. This prevents runtime errors when the editor doesn't have a valid selection.",
+      "alternatives_considered": [
+        "Using optional chaining throughout the code",
+        "Adding a default selection object"
+      ],
+      "files_affected": [
+        "packages/vscode/src/composables/useFocusedSlide.ts"
+      ]
+    },
+    {
+      "dimension": "terminal_management",
+      "recommendation": "Replaced useControlledTerminal with manual terminal creation using shallowRef",
+      "rationale": "The new reactive-vscode version removed useControlledTerminal, requiring manual terminal lifecycle management. Using shallowRef ensures proper reactivity while avoiding deep observation of the terminal object.",
+      "alternatives_considered": [
+        "Creating a custom useControlledTerminal hook",
+        "Using a different terminal management library"
+      ],
+      "files_affected": [
+        "packages/vscode/src/composables/useDevServer.ts"
+      ]
+    },
+    {
+      "dimension": "reactive_patterns",
+      "recommendation": "Updated watch expressions to use getter functions for config properties",
+      "rationale": "With the new config object, watching nested properties requires using getter functions () => config.property instead of direct property references to ensure proper reactivity tracking.",
+      "alternatives_considered": [
+        "Creating computed values for each config property",
+        "Using toRefs on the config object"
+      ],
+      "files_affected": [
+        "packages/vscode/src/views/annotations.ts",
+        "packages/vscode/src/views/previewWebview.ts",
+        "packages/vscode/src/projects.ts"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Dependency Upgrade and Configuration Migration",
+      "description": "Update reactive-vscode to v1.0.0-beta.1 and migrate from defineConfigs to defineConfig API",
+      "files_to_modify": [
+        "packages/vscode/src/configs.ts",
+        "pnpm-lock.yaml",
+        "pnpm-workspace.yaml"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-002",
+      "title": "API Compatibility Updates",
+      "description": "Update all reactive-vscode API calls to match new v1.0.0-beta.1 signatures",
+      "files_to_modify": [
+        "packages/vscode/src/commands.ts",
+        "packages/vscode/src/composables/useDevServer.ts",
+        "packages/vscode/src/views/logger.ts",
+        "packages/vscode/src/projects.ts",
+        "packages/vscode/src/views/slidesTree.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "large"
+    },
+    {
+      "id": "T-003",
+      "title": "Line Number Decoration Fix",
+      "description": "Fix broken line number decorations by adding null checks and updating reactive patterns",
+      "files_to_modify": [
+        "packages/vscode/src/composables/useFocusedSlide.ts",
+        "packages/vscode/src/views/annotations.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-004",
+      "title": "Configuration Usage Updates",
+      "description": "Update all config references to use the new unified config object with proper reactive patterns",
+      "files_to_modify": [
+        "packages/vscode/src/commands.ts",
+        "packages/vscode/src/composables/useServerDetector.ts",
+        "packages/vscode/src/views/previewWebview.ts",
+        "packages/vscode/src/projects.ts",
+        "packages/vscode/src/views/annotations.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    }
+  ],
+  "implementation_summary": "The implementation involved a major dependency upgrade from reactive-vscode v0.4.1 to v1.0.0-beta.1, which introduced breaking API changes that required updates throughout the VSCode extension codebase. The key change was migrating from the old defineConfigs approach with individual reactive refs to a new defineConfig API that provides a unified, type-safe configuration object. This required updating all configuration references from individual variables like forceEnabled.value to config['force-enabled'].\n\nSignificant API changes included: useLogger \u2192 defineLogger, useFsWatcher \u2192 useFileSystemWatcher, useAbsolutePath \u2192 useAbsoluteUri, and the removal of useControlledTerminal which necessitated manual terminal management using shallowRef. The line number decoration fix was addressed by adding proper null checks in useFocusedSlide to prevent crashes when selection is undefined.\n\nThe changes integrate well with the existing codebase by maintaining the same functional behavior while leveraging the improved type safety and configuration management of the new reactive-vscode version. The migration required careful updating of reactive patterns, particularly watch expressions that now need getter functions for config properties to ensure proper reactivity tracking. The overall approach demonstrates a systematic upgrade strategy that addresses both dependency management and API compatibility in a cohesive manner.",
+  "source_pr": "https://github.com/slidevjs/slidev/pull/2418",
+  "before_sha": "afc13707a74a62f90b6dad3543d4fcf85b389f4a",
+  "after_sha": "aef781c2d279da1b3173e01572f277ba60ff689b",
+  "diff_stats": {
+    "additions": 99,
+    "deletions": 165,
+    "files_changed": 12
+  }
+}

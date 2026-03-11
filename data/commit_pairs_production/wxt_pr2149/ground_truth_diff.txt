@@ -1,0 +1,303 @@
+diff --git a/docs/guide/essentials/wxt-modules.md b/docs/guide/essentials/wxt-modules.md
+index 6296e2611..22ac97634 100644
+--- a/docs/guide/essentials/wxt-modules.md
++++ b/docs/guide/essentials/wxt-modules.md
+@@ -141,6 +141,58 @@ console.log(config.myModule);
+ 
+ This is very useful when [generating runtime code](#generate-runtime-module).
+ 
++#### Add custom entrypoint options
++
++Modules can add custom options to entrypoints by augmenting the entrypoint options types. This allows you to add custom configuration that can be accessed during the build process.
++
++```ts
++import { defineWxtModule } from 'wxt/modules';
++import 'wxt';
++
++declare module 'wxt' {
++  export interface BackgroundEntrypointOptions {
++    // Add custom options to the background entrypoint
++    myCustomOption?: string;
++  }
++}
++
++export default defineWxtModule({
++  setup(wxt) {
++    wxt.hook('entrypoints:resolved', (_, entrypoints) => {
++      const background = entrypoints.find((e) => e.type === 'background');
++      if (background) {
++        console.log('Custom option:', background.options.myCustomOption);
++      }
++    });
++  },
++});
++```
++
++Now users can set the custom option in their entrypoint:
++
++```ts [entrypoints/background.ts]
++export default defineBackground({
++  myCustomOption: 'custom value',
++  main() {
++    // ...
++  },
++});
++```
++
++This works for all other JS and HTML entrypoints, here's an example of how to pass a custom option from an HTML file.
++
++```html [entrypoints/popup.html]
++<html>
++  <head>
++    <meta name="wxt.myHtmlOption" content="custom value" />
++    <title>Popup</title>
++  </head>
++  <body>
++    <!-- ... -->
++  </body>
++</html>
++```
++
+ #### Generate output file
+ 
+ ```ts
+diff --git a/packages/wxt/src/core/utils/building/__tests__/find-entrypoints.test.ts b/packages/wxt/src/core/utils/building/__tests__/find-entrypoints.test.ts
+index 3355bd51b..a8edb2156 100644
+--- a/packages/wxt/src/core/utils/building/__tests__/find-entrypoints.test.ts
++++ b/packages/wxt/src/core/utils/building/__tests__/find-entrypoints.test.ts
+@@ -112,7 +112,9 @@ describe('findEntrypoints', () => {
+         name: 'options',
+         inputPath: resolve(config.entrypointsDir, 'options.html'),
+         outputDir: config.outDir,
+-        options: {},
++        options: {
++          title: 'Default Title',
++        },
+         skipped: false,
+       },
+     ],
+@@ -133,6 +135,7 @@ describe('findEntrypoints', () => {
+         outputDir: config.outDir,
+         options: {
+           openInTab: true,
++          title: 'Title',
+         },
+         skipped: false,
+       },
+@@ -150,6 +153,33 @@ describe('findEntrypoints', () => {
+     },
+   );
+ 
++  it('should extract wxt.* meta tags from HTML entrypoints', async () => {
++    const path = 'popup.html';
++    const content = `
++      <html>
++        <head>
++          <meta name="manifest.default_icon" content="{ '16': '/icon/16.png' }" />
++          <meta name="wxt.custom_option" content="custom_value" />
++          <meta name="wxt.anotherOption" content="true" />
++          <title>Test Title</title>
++        </head>
++      </html>
++    `;
++
++    globMock.mockResolvedValueOnce([path]);
++    readFileMock.mockResolvedValueOnce(content);
++
++    const entrypoints = await findEntrypoints();
++
++    expect(entrypoints).toHaveLength(1);
++    expect(entrypoints[0].options).toMatchObject({
++      defaultIcon: { '16': '/icon/16.png' },
++      customOption: 'custom_value',
++      anotherOption: true,
++      defaultTitle: 'Test Title',
++    });
++  });
++
+   it.each<[string, Omit<ContentScriptEntrypoint, 'options'>]>([
+     [
+       'content.ts',
+diff --git a/packages/wxt/src/core/utils/building/find-entrypoints.ts b/packages/wxt/src/core/utils/building/find-entrypoints.ts
+index 81abc0715..f6992fe0d 100644
+--- a/packages/wxt/src/core/utils/building/find-entrypoints.ts
++++ b/packages/wxt/src/core/utils/building/find-entrypoints.ts
+@@ -115,20 +115,14 @@ export async function findEntrypoints(): Promise<Entrypoint[]> {
+             ...info,
+             type,
+             outputDir: resolve(wxt.config.outDir, CONTENT_SCRIPT_OUT_DIR),
+-            options: {
+-              include: options.include,
+-              exclude: options.exclude,
+-            },
++            options,
+           };
+         default:
+           return {
+             ...info,
+             type,
+             outputDir: wxt.config.outDir,
+-            options: {
+-              include: options.include,
+-              exclude: options.exclude,
+-            },
++            options,
+           };
+       }
+     }),
+@@ -200,7 +194,7 @@ async function importEntrypoints(infos: EntrypointInfo[]) {
+   return resMap;
+ }
+ 
+-/** Extract `manifest.` options from meta tags, converting snake_case keys to camelCase */
++/** Extract `manifest.` and `wxt.` options from meta tags, converting snake_case keys to camelCase */
+ async function importHtmlEntrypoint(
+   info: EntrypointInfo,
+ ): Promise<Record<string, any>> {
+@@ -214,9 +208,16 @@ async function importHtmlEntrypoint(
+ 
+   metaTags.forEach((tag) => {
+     const name = tag.name;
+-    if (!name.startsWith('manifest.')) return;
++    let key: string;
++
++    if (name.startsWith('manifest.')) {
++      key = camelCase(name.slice(9));
++    } else if (name.startsWith('wxt.')) {
++      key = camelCase(name.slice(4));
++    } else {
++      return;
++    }
+ 
+-    const key = camelCase(name.slice(9));
+     try {
+       res[key] = JSON5.parse(tag.content);
+     } catch {
+@@ -266,24 +267,20 @@ async function getPopupEntrypoint(
+   info: EntrypointInfo,
+   options: Record<string, any>,
+ ): Promise<PopupEntrypoint> {
++  // Extract non-per-browser options
++  const { themeIcons, title, type, ...perBrowserOptions } = options;
++
+   const strictOptions: PopupEntrypoint['options'] = resolvePerBrowserOptions(
+     {
+-      browserStyle: options.browserStyle,
+-      exclude: options.exclude,
+-      include: options.include,
+-      defaultIcon: options.defaultIcon,
+-      defaultTitle: options.title,
+-      mv2Key: options.type,
+-      defaultArea: options.defaultArea,
++      ...perBrowserOptions,
++      defaultTitle: title,
++      mv2Key: type,
+     },
+     wxt.config.browser,
+   );
+   if (strictOptions.mv2Key && strictOptions.mv2Key !== 'page_action')
+     strictOptions.mv2Key = 'browser_action';
+ 
+-  // themeIcons is an array of objects, not a per-browser option
+-  const themeIcons = options.themeIcons;
+-
+   return {
+     type: 'popup',
+     name: 'popup',
+@@ -300,16 +297,7 @@ async function getOptionsEntrypoint(
+   return {
+     type: 'options',
+     name: 'options',
+-    options: resolvePerBrowserOptions(
+-      {
+-        browserStyle: options.browserStyle,
+-        chromeStyle: options.chromeStyle,
+-        exclude: options.exclude,
+-        include: options.include,
+-        openInTab: options.openInTab,
+-      },
+-      wxt.config.browser,
+-    ),
++    options: resolvePerBrowserOptions(options, wxt.config.browser),
+     inputPath: info.inputPath,
+     outputDir: wxt.config.outDir,
+   };
+@@ -324,10 +312,7 @@ async function getUnlistedPageEntrypoint(
+     name: info.name,
+     inputPath: info.inputPath,
+     outputDir: wxt.config.outDir,
+-    options: {
+-      include: options.include,
+-      exclude: options.exclude,
+-    },
++    options,
+   };
+ }
+ 
+@@ -340,13 +325,7 @@ async function getUnlistedScriptEntrypoint(
+     name,
+     inputPath,
+     outputDir: wxt.config.outDir,
+-    options: resolvePerBrowserOptions(
+-      {
+-        include: options.include,
+-        exclude: options.exclude,
+-      },
+-      wxt.config.browser,
+-    ),
++    options: resolvePerBrowserOptions(options, wxt.config.browser),
+   };
+ }
+ 
+@@ -355,15 +334,7 @@ async function getBackgroundEntrypoint(
+   options: Record<string, any>,
+ ): Promise<BackgroundEntrypoint> {
+   const strictOptions: BackgroundEntrypoint['options'] =
+-    resolvePerBrowserOptions(
+-      {
+-        include: options.include,
+-        exclude: options.exclude,
+-        persistent: options.persistent,
+-        type: options.type,
+-      },
+-      wxt.config.browser,
+-    );
++    resolvePerBrowserOptions(options, wxt.config.browser);
+ 
+   if (wxt.config.manifestVersion !== 3) {
+     delete strictOptions.type;
+@@ -400,17 +371,16 @@ async function getSidepanelEntrypoint(
+   info: EntrypointInfo,
+   options: Record<string, any>,
+ ): Promise<SidepanelEntrypoint> {
++  // Extract non-per-browser options and rename title to defaultTitle
++  const { title, ...perBrowserOptions } = options;
++
+   return {
+     type: 'sidepanel',
+     name: info.name,
+     options: resolvePerBrowserOptions(
+       {
+-        browserStyle: options.browserStyle,
+-        exclude: options.exclude,
+-        include: options.include,
+-        defaultIcon: options.defaultIcon,
+-        defaultTitle: options.title,
+-        openAtInstall: options.openAtInstall,
++        ...perBrowserOptions,
++        defaultTitle: title,
+       },
+       wxt.config.browser,
+     ),
+diff --git a/packages/wxt/src/types.ts b/packages/wxt/src/types.ts
+index 43ba58ea0..04b5306e4 100644
+--- a/packages/wxt/src/types.ts
++++ b/packages/wxt/src/types.ts
+@@ -684,6 +684,7 @@ export interface PopupEntrypointOptions extends BaseEntrypointOptions {
+ }
+ 
+ export interface OptionsEntrypointOptions extends BaseEntrypointOptions {
++  title?: string;
+   openInTab?: PerBrowserOption<boolean>;
+   browserStyle?: PerBrowserOption<boolean>;
+   chromeStyle?: PerBrowserOption<boolean>;

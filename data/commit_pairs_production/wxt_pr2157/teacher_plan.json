@@ -1,0 +1,79 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "dependency_management",
+      "recommendation": "Updated publish-browser-extension dependency from ^4.0.0 to ^4.0.4 to ensure compatibility with the dynamic import approach and access to newer package features",
+      "rationale": "Version 4.0.4 includes important fixes and improvements over 4.0.0, particularly around ESM compatibility. The update ensures the dynamic import approach works reliably with the latest stable version of the dependency.",
+      "alternatives_considered": [
+        "Keeping the dependency range as ^4.0.0 (but might have compatibility issues)",
+        "Using a broader range like ^4.x.x (less specific about minimum required fixes)",
+        "Pinning to exact version 4.0.4 (too restrictive for users)"
+      ],
+      "files_affected": [
+        "packages/wxt/package.json",
+        "pnpm-lock.yaml"
+      ]
+    },
+    {
+      "dimension": "module_system_compatibility",
+      "recommendation": "Replaced static import with dynamic import (import()) in the CLI entry point to handle both CommonJS and ESM module formats transparently",
+      "rationale": "publish-browser-extension v4+ switched to ESM-only distribution, while earlier versions (v2, v3) used CommonJS. Dynamic imports work with both module systems, allowing the CLI to load whichever version the user has installed without breaking changes.",
+      "alternatives_considered": [
+        "Maintaining separate entry points for CJS vs ESM",
+        "Using require() with a try-catch fallback to import()",
+        "Forcing users to upgrade to v4+ only (breaking change)"
+      ],
+      "files_affected": [
+        "packages/wxt/bin/wxt-publish-extension.mjs"
+      ]
+    },
+    {
+      "dimension": "cli_design",
+      "recommendation": "Used top-level await in the CLI entry point to handle the asynchronous dynamic import while maintaining the same CLI interface",
+      "rationale": "The CLI entry point is an ES module (.mjs extension), allowing use of top-level await. This keeps the implementation simple and maintains the same command-line interface for users while handling the async module loading internally.",
+      "alternatives_considered": [
+        "Wrapping the import in an async IIFE (more verbose)",
+        "Using .then() chaining (less readable)",
+        "Converting the entire file to use async/await with a main() function"
+      ],
+      "files_affected": [
+        "packages/wxt/bin/wxt-publish-extension.mjs"
+      ]
+    },
+    {
+      "dimension": "backward_compatibility",
+      "recommendation": "Maintained support for older publish-browser-extension versions (^2.3.0 || ^3.0.2) in the dependency range while adding ^4.0.4",
+      "rationale": "Users may have projects locked to older versions of publish-browser-extension. By keeping the version range inclusive of older versions and using dynamic imports, we ensure backward compatibility while enabling the newer ESM version.",
+      "alternatives_considered": [
+        "Dropping support for v2 and v3 (simpler but breaking)",
+        "Creating a compatibility layer to normalize differences between versions",
+        "Using peer dependencies to let users choose their version"
+      ],
+      "files_affected": [
+        "packages/wxt/package.json"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Update publish-browser-extension dependency and enable ESM compatibility",
+      "description": "Upgrade the publish-browser-extension dependency to version 4.0.4+ and modify the CLI entry point to use dynamic imports for compatibility with both CommonJS (v2, v3) and ESM (v4+) module formats",
+      "files_to_modify": [
+        "packages/wxt/package.json",
+        "packages/wxt/bin/wxt-publish-extension.mjs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The changes implement a backward-compatible solution for handling the transition of publish-browser-extension from CommonJS to ESM module format. The core change is in the CLI entry point (wxt-publish-extension.mjs), where a static import statement was replaced with a dynamic import() call. This allows the module to be loaded asynchronously and works with both CommonJS (versions 2.x and 3.x) and ESM (version 4.x) package structures.\n\nThe dependency version was updated from ^4.0.0 to ^4.0.4 to ensure compatibility with the dynamic import approach and to include any fixes in the newer patch version. The version range still supports older versions (^2.3.0 || ^3.0.2) for backward compatibility. The lock file updates show that publish-browser-extension 4.0.4 brings in several new dependencies including jsonwebtoken, listr2@10.1.0, and related utilities, indicating the newer version has expanded functionality.\n\nThis approach follows the principle of progressive enhancement - users with older versions continue to work, while users with newer versions get the benefits of ESM. The use of top-level await in the .mjs file is idiomatic and keeps the implementation clean. The changes are minimal and focused, affecting only the publishing functionality without touching the rest of the build system.",
+  "source_pr": "https://github.com/wxt-dev/wxt/pull/2157",
+  "before_sha": "c04b49f19648dc5e70bf5d469f4ec071c2595a0b",
+  "after_sha": "db3e29df168b2d34f4eaf59bb2af44e51b7ae98c",
+  "diff_stats": {
+    "additions": 109,
+    "deletions": 38,
+    "files_changed": 3
+  }
+}

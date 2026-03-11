@@ -1,0 +1,106 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "api_design",
+      "recommendation": "Added a new PUT endpoint at `/admin/users/{user_id}` for suspending users, reusing the existing user update pattern rather than creating a dedicated `/suspend` endpoint.",
+      "rationale": "This follows RESTful conventions where updating a user resource (including suspension status) uses PUT on the user resource. It maintains consistency with other admin operations and minimizes API surface area. The empty request body indicates this is a simple state change operation.",
+      "alternatives_considered": [
+        "Creating a dedicated POST /admin/users/{user_id}/suspend endpoint",
+        "Using PATCH with a partial update payload",
+        "Adding a query parameter to the existing user update endpoint"
+      ],
+      "files_affected": [
+        "admin/src/client.rs"
+      ]
+    },
+    {
+      "dimension": "data_modeling",
+      "recommendation": "Added `suspended_at: Option<DateTime<Utc>>` field to the UserResponse struct to track suspension timestamps with nullable semantics.",
+      "rationale": "Using `Option<DateTime>` allows distinguishing between never-suspended (None) and suspended (Some(timestamp)). This follows the existing pattern for optional timestamps in the codebase. The nullable approach supports both suspension and future unsuspension operations without requiring a separate status field.",
+      "alternatives_considered": [
+        "Adding a boolean `is_suspended` field",
+        "Creating a separate `UserSuspension` table with history",
+        "Using an enum for user status (active, suspended, banned)"
+      ],
+      "files_affected": [
+        "common/src/models/user.rs",
+        "common/types.ts"
+      ]
+    },
+    {
+      "dimension": "user_experience",
+      "recommendation": "Added a 3-second delay and warning message before executing the suspend command to prevent accidental suspensions.",
+      "rationale": "Admin operations that can disrupt user access require safety measures. The delay gives the administrator time to cancel (Ctrl+C) if the command was issued accidentally. The warning message provides clear feedback about what's about to happen.",
+      "alternatives_considered": [
+        "Adding a confirmation prompt (y/n)",
+        "Requiring a --force flag for immediate execution",
+        "Implementing a dry-run mode first"
+      ],
+      "files_affected": [
+        "admin/src/lib.rs"
+      ]
+    },
+    {
+      "dimension": "type_safety",
+      "recommendation": "Updated both Rust backend models and TypeScript frontend types in sync to maintain type consistency across the stack.",
+      "rationale": "The `types.ts` file is generated from Rust types (likely via typeshare). Keeping these synchronized ensures frontend consumers have accurate type definitions and prevents runtime errors. This follows the established pattern of maintaining parallel type definitions.",
+      "alternatives_considered": [
+        "Only updating Rust types and letting frontend handle missing fields",
+        "Creating separate DTOs for frontend consumption",
+        "Using a schema-first approach with OpenAPI"
+      ],
+      "files_affected": [
+        "common/src/models/user.rs",
+        "common/types.ts"
+      ]
+    },
+    {
+      "dimension": "cli_design",
+      "recommendation": "Added the suspend command as a top-level admin command with consistent naming pattern (`suspend-user`).",
+      "rationale": "Follows the existing command structure where user management operations are grouped under intuitive verbs. The kebab-case naming matches other commands like `delete-user` and `set-account-tier`. This maintains CLI consistency and discoverability.",
+      "alternatives_considered": [
+        "Adding a subcommand under `user suspend`",
+        "Using flags on an existing user update command",
+        "Creating a separate `moderation` command group"
+      ],
+      "files_affected": [
+        "admin/src/args.rs",
+        "admin/src/lib.rs"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Add user suspension data model",
+      "description": "Extend the UserResponse struct to include suspension timestamp field and update display formatting to show suspension status.",
+      "files_to_modify": [
+        "common/src/models/user.rs",
+        "common/types.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-002",
+      "title": "Implement admin CLI suspend command",
+      "description": "Add new suspend-user command to admin CLI with safety delay and API client integration.",
+      "files_to_modify": [
+        "admin/src/args.rs",
+        "admin/src/client.rs",
+        "admin/src/lib.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation adds user suspension capability to the Shuttle admin CLI through a minimal, consistent approach. The core change is adding a `suspended_at` timestamp field to the UserResponse model, using Rust's `Option<DateTime<Utc>>` to represent nullable suspension status. This follows existing patterns in the codebase for optional timestamps and allows clean distinction between never-suspended and suspended states.\n\nThe admin CLI gains a new `suspend-user` command that calls a PUT endpoint on the user resource. The implementation includes a 3-second safety delay with warning message to prevent accidental suspensions, demonstrating good admin tool design. The API client method reuses the existing HTTP client patterns, maintaining consistency with other admin operations.\n\nImportantly, both Rust backend types and generated TypeScript frontend types are updated in sync, ensuring type safety across the full stack. The display formatting in the UserResponse's Display implementation is extended to show suspension timestamps when present, maintaining the existing user information display pattern. This change integrates cleanly with the existing architecture without requiring significant refactoring or new abstractions.",
+  "source_pr": "https://github.com/shuttle-hq/shuttle/pull/2129",
+  "before_sha": "90fdf1b5ddbf46dc29aade35528e1e3e414a4b15",
+  "after_sha": "0e66b3e56111d7f426060cdb21e9c8bb2544d7eb",
+  "diff_stats": {
+    "additions": 24,
+    "deletions": 0,
+    "files_changed": 5
+  }
+}

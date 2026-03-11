@@ -1,0 +1,130 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "api_design",
+      "recommendation": "Added a new 'unsuspend' subcommand to the admin CLI that accepts a user identifier (email) as an argument, following the existing pattern of 'suspend' command.",
+      "rationale": "Maintained consistency with the existing CLI structure by mirroring the suspend command's interface. This ensures users familiar with the suspend command can easily use unsuspend with minimal learning curve. The email parameter was chosen as the identifier since it's already used in the suspend command and is a natural way for admins to identify users.",
+      "alternatives_considered": [
+        "Using user ID instead of email",
+        "Creating a separate command structure",
+        "Adding unsuspend as a flag to the suspend command"
+      ],
+      "files_affected": [
+        "admin/src/args.rs",
+        "admin/src/client.rs",
+        "admin/src/lib.rs"
+      ]
+    },
+    {
+      "dimension": "client_server_communication",
+      "recommendation": "Implemented a new API client method `unsuspend_user` that sends a POST request to `/admin/users/{email}/unsuspend` endpoint.",
+      "rationale": "Followed RESTful conventions by using POST for state-changing operations and maintaining the same URL pattern as the suspend endpoint (/admin/users/{email}/suspend). This ensures consistency with the existing API design and makes the API predictable for consumers.",
+      "alternatives_considered": [
+        "Using PATCH or PUT method",
+        "Creating a different endpoint structure",
+        "Using query parameters instead of path parameters"
+      ],
+      "files_affected": [
+        "admin/src/client.rs",
+        "admin/src/lib.rs"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Reused the existing error handling pattern from the suspend command, returning a Result type that propagates errors to the CLI layer.",
+      "rationale": "Leveraged the established error handling infrastructure to ensure consistent error reporting and avoid duplicating error handling logic. This maintains the same user experience for both suspend and unsuspend operations.",
+      "alternatives_considered": [
+        "Creating custom error types for unsuspend",
+        "Implementing different error handling strategy"
+      ],
+      "files_affected": [
+        "admin/src/client.rs",
+        "admin/src/lib.rs"
+      ]
+    },
+    {
+      "dimension": "dependency_management",
+      "recommendation": "Updated Rust toolchain from 1.86.0 to 1.89.0 in CI configuration and Cargo.lock dependencies.",
+      "rationale": "Kept dependencies up-to-date with the latest stable Rust version to benefit from compiler improvements, security fixes, and new language features. This is a maintenance task unrelated to the feature but important for overall codebase health.",
+      "alternatives_considered": [
+        "Keeping the old Rust version",
+        "Updating to a different version"
+      ],
+      "files_affected": [
+        ".circleci/config.yml",
+        "Cargo.lock"
+      ]
+    },
+    {
+      "dimension": "testing",
+      "recommendation": "Updated integration tests to reflect the new unsuspend functionality, ensuring the CLI command works correctly end-to-end.",
+      "rationale": "Maintained test coverage by updating existing integration tests to account for the new command. This ensures the feature doesn't break existing functionality and works as expected in the broader system context.",
+      "alternatives_considered": [
+        "Creating separate tests for unsuspend",
+        "Not updating tests and risking regression"
+      ],
+      "files_affected": [
+        "cargo-shuttle/tests/integration/init.rs",
+        "cargo-shuttle/tests/integration/main.rs",
+        "cargo-shuttle/tests/integration/run.rs"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Add unsuspend command to admin CLI",
+      "description": "Implement the frontend CLI interface for unsuspending users, including argument parsing and command registration",
+      "files_to_modify": [
+        "admin/src/args.rs",
+        "admin/src/lib.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-002",
+      "title": "Implement API client for unsuspend endpoint",
+      "description": "Add the HTTP client method to call the backend unsuspend API endpoint",
+      "files_to_modify": [
+        "admin/src/client.rs",
+        "admin/src/lib.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-003",
+      "title": "Update dependencies and toolchain",
+      "description": "Update Rust version and dependencies to latest stable versions",
+      "files_to_modify": [
+        ".circleci/config.yml",
+        "Cargo.lock",
+        "common/Cargo.toml"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-004",
+      "title": "Update integration tests",
+      "description": "Modify existing integration tests to work with the new unsuspend command",
+      "files_to_modify": [
+        "cargo-shuttle/tests/integration/init.rs",
+        "cargo-shuttle/tests/integration/main.rs",
+        "cargo-shuttle/tests/integration/run.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation adds an 'unsuspend' command to the Shuttle admin CLI, allowing administrators to reverse user suspensions. The approach follows the existing patterns in the codebase for consistency and maintainability.\n\nThe changes are structured across three main areas: CLI interface, API client, and testing. In the CLI layer, a new 'unsuspend' subcommand was added to the admin command parser, mirroring the existing 'suspend' command's interface by accepting an email parameter. This ensures a consistent user experience. The API client was extended with an `unsuspend_user` method that sends a POST request to the `/admin/users/{email}/unsuspend` endpoint, following RESTful conventions and maintaining the same URL pattern as the suspend operation.\n\nNotably, the implementation leverages the existing error handling and command dispatch infrastructure, minimizing code duplication. The changes integrate seamlessly with the existing architecture by extending rather than modifying core patterns. Additionally, the PR includes routine maintenance updates to the Rust toolchain and dependencies, which is a separate but important aspect of keeping the codebase healthy. The integration tests were updated to ensure the new functionality works correctly within the broader system context.",
+  "source_pr": "https://github.com/shuttle-hq/shuttle/pull/2131",
+  "before_sha": "0e66b3e56111d7f426060cdb21e9c8bb2544d7eb",
+  "after_sha": "a594474cd90f7e77e7d6f5eaaec3270a2f99bc7c",
+  "diff_stats": {
+    "additions": 541,
+    "deletions": 597,
+    "files_changed": 9
+  }
+}

@@ -39,10 +39,21 @@ from repodesign.training.data_gen_commit_pair import generate_commit_pair_exampl
 def clone_at_commit(clone_url: str, sha: str, dest: str, timeout: int = 180) -> bool:
     """Clone a repo and checkout a specific commit."""
     try:
-        # Fetch just enough history to reach the target commit
+        # Add GitHub token if available
+        auth_url = clone_url
+        gh_token = os.environ.get("GITHUB_TOKEN")
+        if gh_token and "github.com" in clone_url:
+            auth_url = clone_url.replace("https://", f"https://{gh_token}@")
+        
+        # Shallow clone without checkout
         subprocess.run(
-            ["git", "clone", "--filter=blob:none", "--no-checkout", clone_url, dest],
+            ["git", "clone", "--filter=blob:none", "--no-checkout", auth_url, dest],
             capture_output=True, timeout=timeout, check=True,
+        )
+        # Fetch the specific commit (needed for old commits not in shallow history)
+        subprocess.run(
+            ["git", "fetch", "origin", sha],
+            capture_output=True, timeout=60, check=True, cwd=dest,
         )
         subprocess.run(
             ["git", "checkout", sha],

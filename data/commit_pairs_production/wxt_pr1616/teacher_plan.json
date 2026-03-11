@@ -1,0 +1,103 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "testing",
+      "recommendation": "Added comprehensive unit tests for the auto-icons module using Vitest",
+      "rationale": "The module lacked test coverage, making it difficult to verify the fix for icon override behavior and ensure future changes don't break existing functionality. Tests provide confidence in the implementation and document expected behavior.",
+      "alternatives_considered": [
+        "Manual testing only",
+        "End-to-end integration tests",
+        "No testing at all"
+      ],
+      "files_affected": [
+        "packages/auto-icons/src/__test__/index.test.ts",
+        "packages/auto-icons/vitest.config.ts",
+        "packages/auto-icons/package.json"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Fixed a bug where the warning about manifest icons being overwritten would prevent further execution",
+      "rationale": "The original code had a `return` statement after logging the warning, which would exit the hook early and prevent the auto-icons from being properly added to the manifest. This was likely an oversight that could cause the module to fail silently.",
+      "alternatives_considered": [
+        "Keeping the return and handling it differently",
+        "Making the warning conditional",
+        "Removing the warning entirely"
+      ],
+      "files_affected": [
+        "packages/auto-icons/src/index.ts"
+      ]
+    },
+    {
+      "dimension": "dependency_management",
+      "recommendation": "Added Vitest as a dev dependency and configured test scripts",
+      "rationale": "Testing framework needed to be explicitly declared as a dependency to run tests. The package.json was updated to include a test script that builds dependencies first, ensuring tests run against the built code.",
+      "alternatives_considered": [
+        "Using an existing test runner from another package",
+        "Making tests run against source code directly",
+        "Not adding a test script"
+      ],
+      "files_affected": [
+        "packages/auto-icons/package.json",
+        "pnpm-lock.yaml"
+      ]
+    },
+    {
+      "dimension": "test_architecture",
+      "recommendation": "Created a comprehensive test suite covering all module functionality including edge cases",
+      "rationale": "The 629-line test file thoroughly tests module setup, options handling, manifest generation, icon generation, public paths, and error scenarios. This ensures the fix for icon override behavior can be properly validated and future regressions are caught.",
+      "alternatives_considered": [
+        "Minimal tests covering only the bug fix",
+        "Snapshot testing only",
+        "Integration tests instead of unit tests"
+      ],
+      "files_affected": [
+        "packages/auto-icons/src/__test__/index.test.ts"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Add comprehensive testing infrastructure to auto-icons module",
+      "description": "Set up Vitest testing framework, add dev dependencies, and create test configuration to enable unit testing of the auto-icons module",
+      "files_to_modify": [
+        "packages/auto-icons/package.json",
+        "pnpm-lock.yaml"
+      ],
+      "files_to_create": [
+        "packages/auto-icons/vitest.config.ts"
+      ],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-002",
+      "title": "Fix bug where warning prevents manifest icon generation",
+      "description": "Remove the return statement that causes the hook to exit early when warning about existing manifest icons, ensuring auto-icons are still generated",
+      "files_to_modify": [
+        "packages/auto-icons/src/index.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-003",
+      "title": "Create comprehensive test suite for auto-icons module",
+      "description": "Implement 629 lines of unit tests covering all aspects of the auto-icons module including module setup, options handling, manifest generation, icon generation, public paths, and error scenarios",
+      "files_to_modify": [],
+      "files_to_create": [
+        "packages/auto-icons/src/__test__/index.test.ts"
+      ],
+      "estimated_effort": "large"
+    }
+  ],
+  "implementation_summary": "The changes implement a testing-first approach to address the auto-icons override behavior issue. Rather than directly modifying the icon generation logic as requested in the feature description, the team first established a robust testing foundation. This is a strategic decision that ensures any future changes to the icon override behavior can be properly validated.\n\nThe implementation adds Vitest as the testing framework, which aligns with the existing tech stack (the project already uses Vitest in other packages like runner and i18n). The comprehensive test suite (629 lines) meticulously mocks dependencies like fs-extra and sharp, and tests all aspects of the module including edge cases like empty sizes arrays, file system errors, and sharp processing failures.\n\nInterestingly, the actual fix for the icon override behavior mentioned in the feature request (checking for existing default icons in the public directory) is NOT implemented in these changes. Instead, the team fixed a related bug where a warning about manifest icons would prevent execution, and established the testing infrastructure needed to safely implement the requested feature in a future change. This demonstrates a disciplined approach to software development: first ensure you can test the behavior, then implement the fix.\n\nThe changes integrate well with the existing codebase by following established patterns: using Vitest for testing, maintaining consistent TypeScript usage, and following the monorepo's dependency management approach with pnpm workspace linking.",
+  "source_pr": "https://github.com/wxt-dev/wxt/pull/1616",
+  "before_sha": "42047246358a98fb1f910ef2e16f210e46c6b9a0",
+  "after_sha": "01d16067d00c8b1c90685a9cf8b750187f79bd20",
+  "diff_stats": {
+    "additions": 644,
+    "deletions": 2,
+    "files_changed": 5
+  }
+}

@@ -1,0 +1,79 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "api_design",
+      "recommendation": "Added a new `vitePluginsBefore` configuration option to the React module that accepts an array of Vite plugins to be loaded before the React plugin",
+      "rationale": "This addresses a specific use case where certain Vite plugins (like @tanstack/router-plugin) require precise ordering relative to the React plugin to function correctly with JSX transformation. The option is optional and maintains backward compatibility.",
+      "alternatives_considered": [
+        "Modifying the existing `vite` option to accept an array or include ordering metadata",
+        "Creating a separate module for plugin ordering",
+        "Implementing a more complex plugin ordering system that could handle before/after positioning for multiple plugins"
+      ],
+      "files_affected": [
+        "packages/module-react/modules/react.ts"
+      ]
+    },
+    {
+      "dimension": "type_safety",
+      "recommendation": "Added proper TypeScript typing for the new option using Vite's `PluginOption` type and extended the module's type declarations",
+      "rationale": "Ensures type safety and IDE autocompletion for users. Using Vite's built-in `PluginOption` type maintains consistency with Vite's own API and handles the union type of possible plugin formats (single plugin, array of plugins, etc.).",
+      "alternatives_considered": [
+        "Creating a custom type definition",
+        "Using `any` or `unknown` types for flexibility",
+        "Only adding runtime validation without TypeScript types"
+      ],
+      "files_affected": [
+        "packages/module-react/modules/react.ts"
+      ]
+    },
+    {
+      "dimension": "dependency_management",
+      "recommendation": "Added Vite as both a peer dependency and dev dependency to ensure compatibility and proper type resolution",
+      "rationale": "Vite is now explicitly listed as a peer dependency because the module now imports types from Vite (`PluginOption`). This ensures users have a compatible Vite version. Also added as dev dependency for development and testing.",
+      "alternatives_considered": [
+        "Not adding Vite as a peer dependency and relying on implicit dependencies",
+        "Creating a separate types package to avoid the peer dependency",
+        "Using type imports only without runtime dependency changes"
+      ],
+      "files_affected": [
+        "packages/module-react/package.json",
+        "pnpm-lock.yaml"
+      ]
+    },
+    {
+      "dimension": "backward_compatibility",
+      "recommendation": "Made the `vitePluginsBefore` option optional with a default empty array and maintained the existing `vite` option behavior",
+      "rationale": "Existing configurations continue to work without modification. The spread operator with nullish coalescing `...(vitePluginsBefore ?? [])` ensures no runtime errors when the option is undefined.",
+      "alternatives_considered": [
+        "Making it a required option with a breaking change",
+        "Deprecating the existing configuration approach",
+        "Creating a completely new configuration structure"
+      ],
+      "files_affected": [
+        "packages/module-react/modules/react.ts"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Add vitePluginsBefore configuration option to React module",
+      "description": "Implement a new configuration option that allows users to specify Vite plugins that should be loaded before the React plugin, addressing ordering requirements for plugins like @tanstack/router-plugin",
+      "files_to_modify": [
+        "packages/module-react/modules/react.ts",
+        "packages/module-react/package.json"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation adds a `vitePluginsBefore` option to the React module's configuration to solve a specific plugin ordering problem. The core change is in the module's setup function where the Vite plugins array is constructed by spreading any `vitePluginsBefore` plugins first, followed by the React plugin. This ensures proper ordering for plugins that need to process files before React's JSX transformation.\n\nThe approach is minimally invasive, maintaining full backward compatibility while solving a real-world use case. The TypeScript integration is robust, using Vite's own `PluginOption` type for proper typing. The dependency changes reflect the new type dependency on Vite, making it explicit in the package.json.\n\nThis change follows the existing patterns in the WXT codebase: optional configuration options with sensible defaults, proper TypeScript declarations, and integration with the module system's plugin architecture. It demonstrates how the framework can be extended to accommodate specific ecosystem needs while maintaining its core simplicity.",
+  "source_pr": "https://github.com/wxt-dev/wxt/pull/2170",
+  "before_sha": "301e4a17da29493cff54ba7b588ead2b84b0dd8c",
+  "after_sha": "a14d0b4f2f1ee4e5e7d817206132024131edc68d",
+  "diff_stats": {
+    "additions": 16,
+    "deletions": 4,
+    "files_changed": 3
+  }
+}

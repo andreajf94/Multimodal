@@ -1,0 +1,76 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "concurrency_management",
+      "recommendation": "Added a dedicated cancellable context for heartbeat operations that gets canceled during worker shutdown",
+      "rationale": "Previously, heartbeat RPCs used context.Background() which cannot be canceled, causing potential hangs during worker shutdown. By creating a cancellable context specific to heartbeat operations, we ensure clean shutdown by propagating cancellation to all in-flight gRPC calls.",
+      "alternatives_considered": [
+        "Using the worker's main context (would require restructuring context propagation)",
+        "Adding timeout contexts to each heartbeat call (less clean, requires per-call management)",
+        "Using a separate cancellation channel (more complex than context pattern)"
+      ],
+      "files_affected": [
+        "internal/internal_worker_heartbeat.go"
+      ]
+    },
+    {
+      "dimension": "lifecycle_management",
+      "recommendation": "Added heartbeatCancel function to sharedNamespaceWorker struct and called it before other shutdown signals",
+      "rationale": "The heartbeat context must be canceled before closing the stopC channel to ensure the run() goroutine can exit cleanly. This ordering prevents deadlocks where heartbeat RPCs block the worker from seeing shutdown signals.",
+      "alternatives_considered": [
+        "Canceling context after closing stopC (could still cause hangs)",
+        "Using a single context for all operations (could cancel non-heartbeat operations prematurely)"
+      ],
+      "files_affected": [
+        "internal/internal_worker_heartbeat.go"
+      ]
+    },
+    {
+      "dimension": "testing_strategy",
+      "recommendation": "Created a comprehensive test that simulates blocked heartbeat RPCs and verifies clean shutdown",
+      "rationale": "The test uses gomock to simulate a gRPC call that blocks until context cancellation, then verifies that stop() returns promptly. This directly tests the functional requirement of preventing shutdown hangs.",
+      "alternatives_considered": [
+        "Unit testing without mocking (would require actual gRPC server)",
+        "Testing only the context cancellation logic in isolation (wouldn't verify integration)"
+      ],
+      "files_affected": [
+        "internal/internal_worker_heartbeat_test.go"
+      ]
+    },
+    {
+      "dimension": "api_design",
+      "recommendation": "Maintained backward compatibility by not changing public APIs, only internal implementation",
+      "rationale": "The change is purely internal to the heartbeat manager and sharedNamespaceWorker, affecting only how heartbeats are sent during shutdown. No public interfaces or user-facing behavior changes.",
+      "alternatives_considered": [
+        "Exposing context configuration to users (unnecessary complexity)",
+        "Changing worker.Stop() signature (breaking change)"
+      ],
+      "files_affected": [
+        "internal/internal_worker_heartbeat.go"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Implement cancellable context for worker heartbeats",
+      "description": "Add heartbeat-specific context that can be canceled during worker shutdown to prevent hanging RPC calls",
+      "files_to_modify": [
+        "internal/internal_worker_heartbeat.go"
+      ],
+      "files_to_create": [
+        "internal/internal_worker_heartbeat_test.go"
+      ],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation addresses a critical shutdown issue where worker heartbeat RPCs could hang indefinitely during worker teardown. The core change introduces a dedicated cancellable context (heartbeatCtx) within the sharedNamespaceWorker struct, which replaces the previous use of context.Background() for RecordWorkerHeartbeat gRPC calls.\n\nThe solution follows Go's idiomatic context pattern for cancellation propagation. When a sharedNamespaceWorker is created, it now initializes both a context and its corresponding cancel function. During normal operation, heartbeat RPCs use this context. When stop() is called, heartbeatCancel() is invoked first, before other shutdown signals, ensuring any blocked RPCs are immediately unblocked with context cancellation errors.\n\nThis approach integrates cleanly with the existing codebase by maintaining the same structural patterns and requiring minimal changes. The test file demonstrates the problem scenario and validates the fix by simulating a blocked RPC and verifying that stop() returns promptly. The implementation is surgical, affecting only the specific area where the issue occurs without introducing broader architectural changes.",
+  "source_pr": "https://github.com/temporalio/sdk-go/pull/2215",
+  "before_sha": "dbd5b3c7bd1b84face7859510a50f38be1387b49",
+  "after_sha": "873af48cf4cd3ce503b6815745194e0f035ac1fc",
+  "diff_stats": {
+    "additions": 95,
+    "deletions": 8,
+    "files_changed": 2
+  }
+}

@@ -1,0 +1,142 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "dependency_management",
+      "recommendation": "Replaced markdown-it with markdown-exit as the core markdown processing library",
+      "rationale": "markdown-exit provides better handling of code block escaping and is maintained by the same ecosystem. This reduces maintenance overhead and improves reliability of code rendering in slides. The change aligns with upstream updates in unplugin-vue-markdown which also migrated to markdown-exit.",
+      "alternatives_considered": [
+        "Continue maintaining custom escape logic",
+        "Use a different markdown library",
+        "Fork and patch markdown-it"
+      ],
+      "files_affected": [
+        "package.json",
+        "packages/slidev/package.json",
+        "docs/package.json",
+        "pnpm-lock.yaml",
+        "pnpm-workspace.yaml"
+      ]
+    },
+    {
+      "dimension": "api_design",
+      "recommendation": "Updated API naming from markdown-it to markdown-exit terminology while maintaining compatibility",
+      "rationale": "Changed configuration option names from `markdownItSetup` to `markdownSetup` and `markdownItOptions` to `markdownOptions` to reflect the new library while maintaining similar API surface. This provides a clear migration path and reduces confusion for users.",
+      "alternatives_considered": [
+        "Keep old API names with new implementation",
+        "Create a completely new API",
+        "Use adapter pattern to maintain backward compatibility"
+      ],
+      "files_affected": [
+        "docs/custom/config-vite.md",
+        "packages/slidev/node/vite/markdown.ts"
+      ]
+    },
+    {
+      "dimension": "type_safety",
+      "recommation": "Updated TypeScript imports and type definitions from MarkdownIt to MarkdownExit",
+      "rationale": "Ensures type safety across the codebase by updating all type imports and annotations. Added @ts-expect-error comments where necessary for compatibility with existing plugins that expect MarkdownItAsync types, since markdown-exit is API-compatible but has different type definitions.",
+      "alternatives_considered": [
+        "Create custom type definitions",
+        "Use type assertions",
+        "Ignore TypeScript errors"
+      ],
+      "files_affected": [
+        "packages/slidev/node/commands/shared.ts",
+        "packages/slidev/node/syntax/markdown-it/index.ts",
+        "packages/slidev/node/syntax/markdown-it/markdown-it-escape-code.ts",
+        "packages/slidev/node/syntax/markdown-it/markdown-it-link.ts",
+        "packages/slidev/node/syntax/markdown-it/markdown-it-v-drag.ts",
+        "packages/slidev/node/utils.ts",
+        "packages/slidev/node/vite/loaders.ts"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Implemented custom escapeHtml function to replace markdown-it's utility",
+      "rationale": "markdown-exit doesn't export the same escapeHtml utility as markdown-it, so a simple replacement function was created. This ensures HTML escaping continues to work in the index.html generation without adding unnecessary dependencies.",
+      "alternatives_considered": [
+        "Import escapeHtml from another library",
+        "Use DOM API for escaping",
+        "Remove escaping entirely"
+      ],
+      "files_affected": [
+        "packages/slidev/node/setups/indexHtml.ts"
+      ]
+    },
+    {
+      "dimension": "async_handling",
+      "recommendation": "Updated markdown-it-escape-code plugin to handle async rendering",
+      "rationale": "markdown-exit uses async rendering by default, so the code_inline renderer rule needed to be updated to async/await pattern. This ensures the v-pre attribute continues to be added to inline code elements for Vue compatibility.",
+      "alternatives_considered": [
+        "Convert to sync rendering",
+        "Use different plugin architecture",
+        "Remove the feature"
+      ],
+      "files_affected": [
+        "packages/slidev/node/syntax/markdown-it/markdown-it-escape-code.ts"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Core dependency migration from markdown-it to markdown-exit",
+      "description": "Replace all imports and usage of markdown-it with markdown-exit throughout the codebase",
+      "files_to_modify": [
+        "packages/slidev/node/commands/shared.ts",
+        "packages/slidev/node/vite/loaders.ts",
+        "packages/slidev/node/syntax/markdown-it/index.ts",
+        "packages/slidev/node/syntax/markdown-it/markdown-it-escape-code.ts",
+        "packages/slidev/node/syntax/markdown-it/markdown-it-link.ts",
+        "packages/slidev/node/syntax/markdown-it/markdown-it-v-drag.ts",
+        "packages/slidev/node/utils.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-002",
+      "title": "Update package dependencies and lockfile",
+      "description": "Remove markdown-it and @types/markdown-it dependencies, add markdown-exit, and update unplugin-vue-markdown to compatible version",
+      "files_to_modify": [
+        "package.json",
+        "packages/slidev/package.json",
+        "docs/package.json",
+        "pnpm-lock.yaml",
+        "pnpm-workspace.yaml"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-003",
+      "title": "Update configuration API and documentation",
+      "description": "Rename configuration options from markdownIt* to markdown* and update documentation examples",
+      "files_to_modify": [
+        "docs/custom/config-vite.md",
+        "packages/slidev/node/vite/markdown.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-004",
+      "title": "Fix HTML escaping utility",
+      "description": "Implement custom escapeHtml function to replace markdown-it's utility that's no longer available",
+      "files_to_modify": [
+        "packages/slidev/node/setups/indexHtml.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation replaces the markdown-it library with markdown-exit to improve code block escaping reliability and reduce maintenance overhead. This was a coordinated change that required updates across multiple layers of the application: dependency management, type definitions, API surface, and internal utilities.\n\nThe migration follows a systematic approach: first updating all imports and type annotations from MarkdownIt to MarkdownExit, then adjusting the configuration API to reflect the new library while maintaining backward compatibility through similar naming patterns. The escapeHtml utility function had to be reimplemented since markdown-exit doesn't export this helper, demonstrating a thoughtful trade-off between dependency reduction and functionality preservation.\n\nNotably, the change was coordinated with an update to unplugin-vue-markdown v30.0.0, which also migrated to markdown-exit, ensuring compatibility across the ecosystem. The TypeScript handling shows careful attention to detail with @ts-expect-error comments for plugin compatibility, acknowledging that while the APIs are compatible, the type definitions differ. This migration improves the robustness of code rendering in slides while maintaining all existing functionality through careful API design and implementation.",
+  "source_pr": "https://github.com/slidevjs/slidev/pull/2468",
+  "before_sha": "807caae3a019cb98e3a573bfebc947c0b53a74bb",
+  "after_sha": "0d9fffa2516d763941a8d407d6a340a58efc2ae1",
+  "diff_stats": {
+    "additions": 63,
+    "deletions": 56,
+    "files_changed": 15
+  }
+}

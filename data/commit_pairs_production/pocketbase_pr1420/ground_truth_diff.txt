@@ -1,0 +1,114 @@
+diff --git a/tools/filesystem/file.go b/tools/filesystem/file.go
+index b881e7b29..64a7012bf 100644
+--- a/tools/filesystem/file.go
++++ b/tools/filesystem/file.go
+@@ -1,6 +1,8 @@
+ package filesystem
+ 
+ import (
++	"bytes"
++	"errors"
+ 	"fmt"
+ 	"io"
+ 	"mime/multipart"
+@@ -46,6 +48,23 @@ func NewFileFromPath(path string) (*File, error) {
+ 	return f, nil
+ }
+ 
++// NewFileFromBytes creates a new File instance from the provided byte slice.
++func NewFileFromBytes(b []byte, name string) (*File, error) {
++	size := len(b)
++	if size == 0 {
++		return nil, errors.New("cannot create an empty file")
++	}
++
++	f := &File{}
++
++	f.Reader = &BytesReader{b}
++	f.Size = int64(size)
++	f.OriginalName = name
++	f.Name = normalizeName(f.Reader, f.OriginalName)
++
++	return f, nil
++}
++
+ // NewFileFromMultipart creates a new File instace from the provided multipart header.
+ func NewFileFromMultipart(mh *multipart.FileHeader) (*File, error) {
+ 	f := &File{}
+@@ -87,6 +106,28 @@ func (r *PathReader) Open() (io.ReadSeekCloser, error) {
+ 
+ // -------------------------------------------------------------------
+ 
++var _ FileReader = (*BytesReader)(nil)
++
++type BytesReader struct {
++	Bytes []byte
++}
++
++// Open implements the [filesystem.FileReader] interface.
++func (r *BytesReader) Open() (io.ReadSeekCloser, error) {
++	return &bytesReadSeekCloser{bytes.NewReader(r.Bytes)}, nil
++}
++
++// bytesReadSeekCloser implements io.ReadSeekCloser
++type bytesReadSeekCloser struct {
++	*bytes.Reader
++}
++
++func (r *bytesReadSeekCloser) Close() error {
++	return nil
++}
++
++// -------------------------------------------------------------------
++
+ var extInvalidCharsRegex = regexp.MustCompile(`[^\w\.\*\-\+\=\#]+`)
+ 
+ func normalizeName(fr FileReader, name string) string {
+diff --git a/tools/filesystem/file_test.go b/tools/filesystem/file_test.go
+index d6b45a680..6e59f1bf1 100644
+--- a/tools/filesystem/file_test.go
++++ b/tools/filesystem/file_test.go
+@@ -12,7 +12,7 @@ import (
+ 	"github.com/pocketbase/pocketbase/tools/filesystem"
+ )
+ 
+-func TestNewFileFromFromPath(t *testing.T) {
++func TestNewFileFromPath(t *testing.T) {
+ 	testDir := createTestDir(t)
+ 	defer os.RemoveAll(testDir)
+ 
+@@ -43,6 +43,34 @@ func TestNewFileFromFromPath(t *testing.T) {
+ 	}
+ }
+ 
++func TestNewFileFromBytes(t *testing.T) {
++	// nil bytes
++	if _, err := filesystem.NewFileFromBytes(nil, "photo.jpg"); err == nil {
++		t.Fatal("Expected error, got nil")
++	}
++
++	// zero bytes
++	if _, err := filesystem.NewFileFromBytes([]byte{}, "photo.jpg"); err == nil {
++		t.Fatal("Expected error, got nil")
++	}
++
++	originalName := "image_! noext"
++	normalizedNamePattern := regexp.QuoteMeta("image_noext_") + `\w{10}` + regexp.QuoteMeta(".txt")
++	f, err := filesystem.NewFileFromBytes([]byte("text\n"), originalName)
++	if err != nil {
++		t.Fatal(err)
++	}
++	if f.Size != 5 {
++		t.Fatalf("Expected Size %v, got %v", 5, f.Size)
++	}
++	if f.OriginalName != originalName {
++		t.Fatalf("Expected originalName %q, got %q", originalName, f.OriginalName)
++	}
++	if match, _ := regexp.Match(normalizedNamePattern, []byte(f.Name)); !match {
++		t.Fatalf("Expected Name to match %v, got %q (%v)", normalizedNamePattern, f.Name, err)
++	}
++}
++
+ func TestNewFileFromMultipart(t *testing.T) {
+ 	formData, mp, err := tests.MockMultipartData(nil, "test")
+ 	if err != nil {

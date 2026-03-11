@@ -1,0 +1,12 @@
+{
+  "feature_name": "Simplify Local Project Name Resolution",
+  "description": "Update the cargo-shuttle tool to simplify how it determines the local project name, particularly when running in non-cargo workspaces or when the `--id` or `--name` flags are provided. The new logic should avoid errors by not assuming a cargo workspace must exist and by removing dependency on Shuttle.toml for local name resolution. Refactor the CLI integration tests to use assert_cmd and process to eliminate side effects like setting a global API key.",
+  "functional_requirements": [
+    "Implement a new fallback sequence for resolving the local project name: first use the workspace root package name if it exists, else use the name of the cargo workspace root directory, else use the name of the working directory.",
+    "Remove the previous logic that resolved the local name from Shuttle.toml and assumed a cargo workspace must exist, ensuring commands work correctly in non-cargo workspaces.",
+    "Fix metadata errors in project-related commands (e.g., run, build) when the `--id` or `--name` flags are provided, ensuring they function without errors.",
+    "Refactor all CLI integration tests to use assert_cmd and process for command execution, eliminating any side effects such as setting a global API key during test runs."
+  ],
+  "project_name": "shuttle",
+  "source_pr": "https://github.com/shuttle-hq/shuttle/pull/2125"
+}

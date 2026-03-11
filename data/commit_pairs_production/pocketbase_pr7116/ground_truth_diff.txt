@@ -1,0 +1,51 @@
+diff --git a/core/base.go b/core/base.go
+index 15f16ae9a..0d4f58c44 100644
+--- a/core/base.go
++++ b/core/base.go
+@@ -12,7 +12,6 @@ import (
+ 	"regexp"
+ 	"runtime"
+ 	"strings"
+-	"syscall"
+ 	"time"
+ 
+ 	"github.com/fatih/color"
+@@ -773,7 +772,7 @@ func (app *BaseApp) Restart() error {
+ 			}
+ 		}()
+ 
+-		return syscall.Exec(execPath, os.Args, os.Environ())
++		return exec(execPath, os.Args, os.Environ())
+ 	})
+ }
+ 
+diff --git a/core/syscall.go b/core/syscall.go
+new file mode 100644
+index 000000000..3b7cbfdf0
+--- /dev/null
++++ b/core/syscall.go
+@@ -0,0 +1,9 @@
++//go:build !(js && wasm)
++
++package core
++
++import "syscall"
++
++func exec(argv0 string, argv []string, envv []string) error {
++	return syscall.Exec(argv0, argv, envv)
++}
+diff --git a/core/syscall_wasm.go b/core/syscall_wasm.go
+new file mode 100644
+index 000000000..a971fb6ad
+--- /dev/null
++++ b/core/syscall_wasm.go
+@@ -0,0 +1,9 @@
++//go:build js && wasm
++
++package core
++
++import "errors"
++
++func exec(argv0 string, argv []string, envv []string) error {
++	return errors.ErrUnsupported
++}

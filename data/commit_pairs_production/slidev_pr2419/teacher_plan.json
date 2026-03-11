@@ -1,0 +1,67 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "parsing_algorithm",
+      "recommendation": "Modified the regular expression for code block parsing to use `[ \\t]*` instead of `\\s*` for whitespace matching before the optional title bracket",
+      "rationale": "The original regex used `\\s*` which matches any whitespace character including newlines. This caused the parser to incorrectly interpret square brackets at the beginning of code content (like C# attributes) as titles when there were newlines between the language specifier and the code content. By restricting to only spaces and tabs (`[ \\t]*`), we ensure that the title bracket detection only occurs on the same line as the code block opening.",
+      "alternatives_considered": [
+        "Adding lookahead assertions to check for newlines before title brackets",
+        "Implementing a two-pass parsing approach to separate title detection from content parsing",
+        "Using a more sophisticated parser instead of regex for code blocks"
+      ],
+      "files_affected": [
+        "packages/slidev/node/syntax/transform/code-wrapper.ts"
+      ]
+    },
+    {
+      "dimension": "testing_strategy",
+      "recommendation": "Added two comprehensive test cases to verify both the bug fix and backward compatibility",
+      "rationale": "The tests cover: 1) Code blocks with square brackets in the first line of content but no title (the bug scenario), and 2) Code blocks with both a title and square brackets in content (to ensure existing functionality works). This dual approach validates that the fix doesn't break legitimate title parsing while solving the reported issue.",
+      "alternatives_considered": [
+        "Only testing the bug scenario without verifying backward compatibility",
+        "Adding more edge cases with different whitespace patterns",
+        "Creating integration tests instead of unit tests"
+      ],
+      "files_affected": [
+        "test/transform.test.ts",
+        "test/__snapshots__/transform.test.ts.snap"
+      ]
+    },
+    {
+      "dimension": "regex_design",
+      "recommendation": "Applied the same whitespace restriction pattern consistently throughout the regex for title and attribute parsing",
+      "rationale": "The regex pattern `[ \\t]*` was applied not just before the title bracket but also before the optional attribute section (`{([\\w*,|-]+)}`). This ensures consistent parsing behavior and prevents similar issues with attributes that might contain square brackets. The change maintains the existing capture groups while refining the whitespace matching behavior.",
+      "alternatives_considered": [
+        "Only fixing the specific problematic whitespace match before the title bracket",
+        "Rewriting the entire regex with named capture groups for clarity",
+        "Using a parser combinator library instead of regex"
+      ],
+      "files_affected": [
+        "packages/slidev/node/syntax/transform/code-wrapper.ts"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Fix code block title parsing for C# and similar languages",
+      "description": "Update the code block regex parser to correctly handle square brackets at the beginning of code content without interpreting them as titles",
+      "files_to_modify": [
+        "packages/slidev/node/syntax/transform/code-wrapper.ts",
+        "test/transform.test.ts",
+        "test/__snapshots__/transform.test.ts.snap"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation addresses a parsing bug where code blocks with square brackets at the beginning of their content (common in C# attributes like `[Flags]`) were incorrectly interpreted as having titles. The core fix was modifying the regular expression in `code-wrapper.ts` to use `[ \\t]*` instead of `\\s*` for whitespace matching, restricting it to only spaces and tabs rather than all whitespace characters including newlines.\n\nThis change ensures that title bracket detection (`[.*?]`) only occurs on the same line as the code block opening delimiter (` ``` `), preventing square brackets on subsequent lines from being misinterpreted. The fix was applied consistently throughout the regex pattern, including before optional attribute sections, to maintain uniform parsing behavior.\n\nTo validate the fix, two test cases were added: one for the bug scenario (C# code with `[Flags]` but no title) and one for backward compatibility (code with both a title and square brackets in content). The snapshot tests verify that the transformed output correctly wraps code blocks without extracting incorrect titles, while preserving legitimate title parsing functionality. This minimal change maintains the existing architecture's reliance on regex-based parsing while fixing a specific edge case that affected real-world usage with C# and potentially other languages using similar syntax.",
+  "source_pr": "https://github.com/slidevjs/slidev/pull/2419",
+  "before_sha": "aef781c2d279da1b3173e01572f277ba60ff689b",
+  "after_sha": "719e6e3821fa562d9df33a6e085e7d4734c4f5a3",
+  "diff_stats": {
+    "additions": 55,
+    "deletions": 1,
+    "files_changed": 3
+  }
+}

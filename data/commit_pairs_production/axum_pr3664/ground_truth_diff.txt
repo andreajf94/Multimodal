@@ -1,0 +1,238 @@
+diff --git a/axum-extra/CHANGELOG.md b/axum-extra/CHANGELOG.md
+index cc92ff340b..9ebd3a2f3c 100644
+--- a/axum-extra/CHANGELOG.md
++++ b/axum-extra/CHANGELOG.md
+@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning].
+ 
+ # Unreleased
+ 
++- **fixed:** Escape backslashes and double quotes in `Content-Disposition` filenames
++  to prevent header parameter injection in `Attachment` and `FileStream` ([#3664])
+ - **breaking:** Remove the deprecated `Host`, `Scheme` and `OptionalPath`
+   extractors ([#3599])
+   - Also remove `HostRejection` which only had `FailedToResolveHost`
+@@ -23,6 +25,7 @@ and this project adheres to [Semantic Versioning].
+       .route_with_tsr("/path", post(/* handler */))
+   ```
+ 
++[#3664]: https://github.com/tokio-rs/axum/pull/3664
+ [#3599]: https://github.com/tokio-rs/axum/pull/3599
+ [#3586]: https://github.com/tokio-rs/axum/pull/3586
+ 
+diff --git a/axum-extra/src/response/attachment.rs b/axum-extra/src/response/attachment.rs
+index b2af0aede1..87a8680c09 100644
+--- a/axum-extra/src/response/attachment.rs
++++ b/axum-extra/src/response/attachment.rs
+@@ -1,3 +1,4 @@
++use super::content_disposition::EscapedFilename;
+ use axum_core::response::IntoResponse;
+ use http::{header, HeaderMap, HeaderValue};
+ use tracing::error;
+@@ -87,11 +88,11 @@ where
+         }
+ 
+         let content_disposition = if let Some(filename) = self.filename {
+-            let mut bytes = b"attachment; filename=\"".to_vec();
+-            bytes.extend_from_slice(filename.as_bytes());
+-            bytes.push(b'\"');
+-
+-            HeaderValue::from_bytes(&bytes).expect("This was a HeaderValue so this can not fail")
++            let filename_str = filename
++                .to_str()
++                .expect("This was a HeaderValue so this can not fail");
++            let value = format!("attachment; filename=\"{}\"", EscapedFilename(filename_str));
++            HeaderValue::try_from(value).expect("This was a HeaderValue so this can not fail")
+         } else {
+             HeaderValue::from_static("attachment")
+         };
+@@ -101,3 +102,49 @@ where
+         (headers, self.inner).into_response()
+     }
+ }
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++    use axum_core::response::IntoResponse;
++    use http::header::CONTENT_DISPOSITION;
++
++    #[test]
++    fn attachment_without_filename() {
++        let attachment = Attachment::new("data").into_response();
++        let value = attachment.headers().get(CONTENT_DISPOSITION).unwrap();
++        assert_eq!(value, "attachment");
++    }
++
++    #[test]
++    fn attachment_with_normal_filename() {
++        let attachment = Attachment::new("data")
++            .filename("report.pdf")
++            .into_response();
++        let value = attachment.headers().get(CONTENT_DISPOSITION).unwrap();
++        assert_eq!(value, "attachment; filename=\"report.pdf\"");
++    }
++
++    #[test]
++    fn attachment_filename_escapes_quotes() {
++        // A filename containing a double quote should be escaped to prevent
++        // Content-Disposition parameter injection (see CVE-2023-29401)
++        let attachment = Attachment::new("data")
++            .filename("evil\"; filename*=UTF-8''pwned.txt; x=\"")
++            .into_response();
++        let value = attachment.headers().get(CONTENT_DISPOSITION).unwrap();
++        assert_eq!(
++            value,
++            "attachment; filename=\"evil\\\"; filename*=UTF-8''pwned.txt; x=\\\"\""
++        );
++    }
++
++    #[test]
++    fn attachment_filename_escapes_backslashes() {
++        let attachment = Attachment::new("data")
++            .filename("file\\name.txt")
++            .into_response();
++        let value = attachment.headers().get(CONTENT_DISPOSITION).unwrap();
++        assert_eq!(value, "attachment; filename=\"file\\\\name.txt\"");
++    }
++}
+diff --git a/axum-extra/src/response/content_disposition.rs b/axum-extra/src/response/content_disposition.rs
+new file mode 100644
+index 0000000000..a4a34884ec
+--- /dev/null
++++ b/axum-extra/src/response/content_disposition.rs
+@@ -0,0 +1,46 @@
++use std::fmt::{self, Write};
++
++/// A wrapper type that escapes backslashes and double quotes when formatted,
++/// for safe inclusion in Content-Disposition header quoted-strings.
++///
++/// This prevents Content-Disposition header parameter injection
++/// (similar to CVE-2023-29401).
++pub(crate) struct EscapedFilename<'a>(pub &'a str);
++
++impl fmt::Display for EscapedFilename<'_> {
++    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
++        for c in self.0.chars() {
++            if c == '\\' || c == '"' {
++                f.write_char('\\')?;
++            }
++            f.write_char(c)?;
++        }
++        Ok(())
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    #[test]
++    fn no_special_characters() {
++        assert_eq!(EscapedFilename("report.pdf").to_string(), "report.pdf");
++    }
++
++    #[test]
++    fn escapes_double_quotes() {
++        assert_eq!(
++            EscapedFilename("evil\"; filename*=UTF-8''pwned.txt; x=\"").to_string(),
++            "evil\\\"; filename*=UTF-8''pwned.txt; x=\\\"",
++        );
++    }
++
++    #[test]
++    fn escapes_backslashes() {
++        assert_eq!(
++            EscapedFilename("file\\name.txt").to_string(),
++            "file\\\\name.txt",
++        );
++    }
++}
+diff --git a/axum-extra/src/response/file_stream.rs b/axum-extra/src/response/file_stream.rs
+index 11b7913429..95f224760a 100644
+--- a/axum-extra/src/response/file_stream.rs
++++ b/axum-extra/src/response/file_stream.rs
+@@ -276,7 +276,10 @@ where
+         if let Some(file_name) = self.file_name {
+             resp = resp.header(
+                 header::CONTENT_DISPOSITION,
+-                format!("attachment; filename=\"{file_name}\""),
++                format!(
++                    "attachment; filename=\"{}\"",
++                    super::content_disposition::EscapedFilename(&file_name)
++                ),
+             );
+         }
+ 
+@@ -601,6 +604,59 @@ mod tests {
+         Some((start, end))
+     }
+ 
++    #[tokio::test]
++    async fn filename_escapes_quotes() -> Result<(), Box<dyn std::error::Error>> {
++        let app = Router::new().route(
++            "/file",
++            get(|| async {
++                let file_content = b"data".to_vec();
++                let reader = Cursor::new(file_content);
++                let stream = ReaderStream::new(reader);
++                // Filename containing double quotes that could cause parameter injection
++                FileStream::new(stream)
++                    .file_name("evil\"; filename*=UTF-8''pwned.txt; x=\"")
++                    .into_response()
++            }),
++        );
++
++        let response = app
++            .oneshot(Request::builder().uri("/file").body(Body::empty())?)
++            .await?;
++
++        assert_eq!(response.status(), StatusCode::OK);
++        assert_eq!(
++            response.headers().get("content-disposition").unwrap(),
++            "attachment; filename=\"evil\\\"; filename*=UTF-8''pwned.txt; x=\\\"\""
++        );
++        Ok(())
++    }
++
++    #[tokio::test]
++    async fn filename_escapes_backslashes() -> Result<(), Box<dyn std::error::Error>> {
++        let app = Router::new().route(
++            "/file",
++            get(|| async {
++                let file_content = b"data".to_vec();
++                let reader = Cursor::new(file_content);
++                let stream = ReaderStream::new(reader);
++                FileStream::new(stream)
++                    .file_name("file\\name.txt")
++                    .into_response()
++            }),
++        );
++
++        let response = app
++            .oneshot(Request::builder().uri("/file").body(Body::empty())?)
++            .await?;
++
++        assert_eq!(response.status(), StatusCode::OK);
++        assert_eq!(
++            response.headers().get("content-disposition").unwrap(),
++            "attachment; filename=\"file\\\\name.txt\""
++        );
++        Ok(())
++    }
++
+     #[tokio::test]
+     async fn response_range_empty_file() -> Result<(), Box<dyn std::error::Error>> {
+         let file = tempfile::NamedTempFile::new()?;
+diff --git a/axum-extra/src/response/mod.rs b/axum-extra/src/response/mod.rs
+index 5460c6946f..e3ec32fc9a 100644
+--- a/axum-extra/src/response/mod.rs
++++ b/axum-extra/src/response/mod.rs
+@@ -1,5 +1,8 @@
+ //! Additional types for generating responses.
+ 
++#[cfg(any(feature = "attachment", feature = "file-stream"))]
++mod content_disposition;
++
+ #[cfg(feature = "erased-json")]
+ mod erased_json;
+ 

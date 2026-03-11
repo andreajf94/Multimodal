@@ -1,0 +1,72 @@
+diff --git a/docs/custom/config-code-runners.md b/docs/custom/config-code-runners.md
+index e7d05d0cc2..6eb4a8f933 100644
+--- a/docs/custom/config-code-runners.md
++++ b/docs/custom/config-code-runners.md
+@@ -64,7 +64,7 @@ The runner can either return a text or HTML output, or an element to be mounted.
+ 
+ ## Additional Runner Dependencies
+ 
+-By default, Slidev will scan the Markdown source and automatically import the necessary dependencies for the code runners. If you want to manually import dependencies, you can use the `monacoRunAdditionalDeps` option in the slide frontmatter:
++By default, Slidev will scan the Markdown source and automatically import the necessary dependencies for the code runners. If you want to manually import dependencies, you can use the `monacoRunAdditionalDeps` option in the [headmatter](./index#headmatter):
+ 
+ ```yaml
+ monacoRunAdditionalDeps:
+diff --git a/packages/client/setup/code-runners.ts b/packages/client/setup/code-runners.ts
+index 3aecf7a4bf..9713ad5246 100644
+--- a/packages/client/setup/code-runners.ts
++++ b/packages/client/setup/code-runners.ts
+@@ -71,16 +71,16 @@ function runJavaScript(code: string): CodeRunnerOutputs {
+   vmConsole.info = vmConsole.log = vmConsole.debug = vmConsole.warn = vmConsole.error = logger
+   vmConsole.clear = () => result.value.length = 0
+   try {
+-    const safeJS = `return async (console, __slidev_import, __slidev_on_error) => {
++    const wrappedCode = `return async (console, __slidev_import, __slidev_on_error) => {
+     ${configs.monacoRunUseStrict ? `"use strict";` : ''}
+       try {
+-        ${sanitizeJS(code)}
++        ${fixupCode(code)}
+       } catch (e) {
+         __slidev_on_error(e)
+       }
+     }`
+     // eslint-disable-next-line no-new-func
+-    ;(new Function(safeJS)())(vmConsole, (specifier: string) => {
++    ;(new Function(wrappedCode)())(vmConsole, (specifier: string) => {
+       const mod = deps[specifier]
+       if (!mod)
+         throw new Error(`Module not found: ${specifier}.\nAvailable modules: ${Object.keys(deps).join(', ')}. Please refer to https://sli.dev/custom/config-code-runners#additional-runner-dependencies`)
+@@ -154,7 +154,7 @@ function runJavaScript(code: string): CodeRunnerOutputs {
+     return textRep
+   }
+ 
+-  function sanitizeJS(code: string) {
++  function fixupCode(code: string) {
+     // The reflect-metadata runtime is available, so allow that to go through
+     code = code.replace(`import "reflect-metadata"`, '').replace(`require("reflect-metadata")`, '')
+     // Transpiled typescript sometimes contains an empty export, remove it.
+@@ -181,7 +181,7 @@ export async function runTypeScript(code: string) {
+     },
+   }).outputText
+ 
+-  const importRegex = /import\s*\((.+)\)/g
++  const importRegex = /\bimport\s*\((.+)\)/g
+   code = code.replace(importRegex, (_full, specifier) => `__slidev_import(${specifier})`)
+ 
+   return runJavaScript(code)
+diff --git a/packages/slidev/node/virtual/monaco-deps.ts b/packages/slidev/node/virtual/monaco-deps.ts
+index b16f98be50..cf08608b59 100644
+--- a/packages/slidev/node/virtual/monaco-deps.ts
++++ b/packages/slidev/node/virtual/monaco-deps.ts
+@@ -7,7 +7,11 @@ export const templateMonacoRunDeps: VirtualModuleTemplate = {
+   async getContent({ userRoot, data }) {
+     if (!data.features.monaco)
+       return ''
+-    const deps = uniq(data.features.monaco.deps.concat(data.config.monacoTypesAdditionalPackages))
++    const deps = uniq([
++      ...data.features.monaco.deps,
++      ...(data.config.monacoTypesAdditionalPackages || []),
++      ...(data.config.monacoRunAdditionalDeps || []),
++    ])
+     const importerPath = resolve(userRoot, './snippets/__importer__.ts')
+     let result = ''
+     for (let i = 0; i < deps.length; i++) {

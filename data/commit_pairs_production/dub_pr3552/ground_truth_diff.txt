@@ -1,0 +1,310 @@
+diff --git a/apps/web/app/(ee)/api/cron/payouts/reminders/partners/route.ts b/apps/web/app/(ee)/api/cron/payouts/reminders/partners/route.ts
+index 19a5b210223..c3c72e6debd 100644
+--- a/apps/web/app/(ee)/api/cron/payouts/reminders/partners/route.ts
++++ b/apps/web/app/(ee)/api/cron/payouts/reminders/partners/route.ts
+@@ -29,11 +29,13 @@ async function handler(req: Request) {
+       });
+     }
+ 
+-    // Get pending payouts grouped by partner and program, ordered by amount desc
+-    const pendingPayouts = await prisma.payout.groupBy({
++    // Get unsent payouts grouped by partner and program, ordered by amount desc
++    const unsentPayouts = await prisma.payout.groupBy({
+       by: ["partnerId", "programId"],
+       where: {
+-        status: "pending",
++        status: {
++          in: ["pending", "processing", "processed", "failed"],
++        },
+         programId: {
+           not: ACME_PROGRAM_ID,
+         },
+@@ -63,21 +65,21 @@ async function handler(req: Request) {
+       take: BATCH_SIZE,
+     });
+ 
+-    if (!pendingPayouts.length) {
++    if (!unsentPayouts.length) {
+       return logAndRespond("No action needed.");
+     }
+ 
+-    const hasMoreToProcess = pendingPayouts.length === BATCH_SIZE;
++    const hasMoreToProcess = unsentPayouts.length === BATCH_SIZE;
+ 
+     console.log(
+-      `Found ${pendingPayouts.length} partner-program combinations needing reminders${hasMoreToProcess ? " (more to process)" : ""}`,
++      `Found ${unsentPayouts.length} partner-program combinations needing reminders${hasMoreToProcess ? " (more to process)" : ""}`,
+     );
+ 
+     const [partnerData, programData] = await Promise.all([
+       prisma.partner.findMany({
+         where: {
+           id: {
+-            in: pendingPayouts.map((payout) => payout.partnerId),
++            in: unsentPayouts.map((payout) => payout.partnerId),
+           },
+           OR: [
+             {
+@@ -101,7 +103,7 @@ async function handler(req: Request) {
+       prisma.program.findMany({
+         where: {
+           id: {
+-            in: pendingPayouts.map((payout) => payout.programId),
++            in: unsentPayouts.map((payout) => payout.programId),
+           },
+         },
+       }),
+@@ -124,7 +126,7 @@ async function handler(req: Request) {
+       }
+     >();
+ 
+-    for (const payout of pendingPayouts) {
++    for (const payout of unsentPayouts) {
+       const { partnerId, programId } = payout;
+       const { amount } = payout._sum;
+ 
+diff --git a/apps/web/app/(ee)/api/partner-profile/payouts/settings/route.ts b/apps/web/app/(ee)/api/partner-profile/payouts/settings/route.ts
+index 95e55428cc4..4f381434338 100644
+--- a/apps/web/app/(ee)/api/partner-profile/payouts/settings/route.ts
++++ b/apps/web/app/(ee)/api/partner-profile/payouts/settings/route.ts
+@@ -1,5 +1,5 @@
+ import { withPartnerProfile } from "@/lib/auth/partner";
+-import { getPartnerPayoutMethods } from "@/lib/payouts/api/get-partner-payout-methods";
++import { getPartnerPayoutMethods } from "@/lib/payouts/get-partner-payout-methods";
+ import { NextResponse } from "next/server";
+ 
+ // GET /api/partner-profile/payouts/settings
+diff --git a/apps/web/app/(ee)/api/paypal/callback/route.ts b/apps/web/app/(ee)/api/paypal/callback/route.ts
+index 8f81a9ce39f..eef0d45861b 100644
+--- a/apps/web/app/(ee)/api/paypal/callback/route.ts
++++ b/apps/web/app/(ee)/api/paypal/callback/route.ts
+@@ -1,4 +1,5 @@
+ import { getSession } from "@/lib/auth";
++import { recomputePartnerPayoutState } from "@/lib/payouts/recompute-partner-payout-state";
+ import { paypalOAuthProvider } from "@/lib/paypal/oauth";
+ import { sendEmail } from "@dub/email";
+ import ConnectedPaypalAccount from "@dub/email/templates/connected-paypal-account";
+@@ -65,15 +66,20 @@ export const GET = async (req: Request) => {
+       },
+     });
+ 
++    const { payoutsEnabledAt, defaultPayoutMethod } =
++      await recomputePartnerPayoutState({
++        ...partner,
++        paypalEmail: paypalUser.email,
++      });
++
+     const updatedPartner = await prisma.partner.update({
+       where: {
+         id: defaultPartnerId,
+       },
+       data: {
+         paypalEmail: paypalUser.email,
+-        ...(!partner.payoutsEnabledAt && {
+-          payoutsEnabledAt: new Date(),
+-        }),
++        payoutsEnabledAt,
++        defaultPayoutMethod,
+       },
+     });
+ 
+diff --git a/apps/web/app/(ee)/api/stripe/connect/v2/webhook/recipient-account-closed.ts b/apps/web/app/(ee)/api/stripe/connect/v2/webhook/recipient-account-closed.ts
+index ad2e947af22..8000f974498 100644
+--- a/apps/web/app/(ee)/api/stripe/connect/v2/webhook/recipient-account-closed.ts
++++ b/apps/web/app/(ee)/api/stripe/connect/v2/webhook/recipient-account-closed.ts
+@@ -1,4 +1,4 @@
+-import { recomputePartnerPayoutState } from "@/lib/partners/api/recompute-partner-payout-state";
++import { recomputePartnerPayoutState } from "@/lib/payouts/recompute-partner-payout-state";
+ 
+ import { prisma } from "@dub/prisma";
+ import type Stripe from "stripe";
+diff --git a/apps/web/app/(ee)/api/stripe/connect/v2/webhook/recipient-configuration-updated.ts b/apps/web/app/(ee)/api/stripe/connect/v2/webhook/recipient-configuration-updated.ts
+index 566d1138d23..1ec5f5a86b9 100644
+--- a/apps/web/app/(ee)/api/stripe/connect/v2/webhook/recipient-configuration-updated.ts
++++ b/apps/web/app/(ee)/api/stripe/connect/v2/webhook/recipient-configuration-updated.ts
+@@ -1,5 +1,5 @@
+ import { detectDuplicatePayoutMethodFraud } from "@/lib/api/fraud/detect-duplicate-payout-method-fraud";
+-import { recomputePartnerPayoutState } from "@/lib/partners/api/recompute-partner-payout-state";
++import { recomputePartnerPayoutState } from "@/lib/payouts/recompute-partner-payout-state";
+ import { getStripeStablecoinPayoutMethod } from "@/lib/stripe/get-stripe-recipient-payout-method";
+ 
+ import { sendEmail } from "@dub/email";
+diff --git a/apps/web/app/(ee)/api/stripe/connect/webhook/account-application-deauthorized.ts b/apps/web/app/(ee)/api/stripe/connect/webhook/account-application-deauthorized.ts
+index 2dbab559997..32f68262140 100644
+--- a/apps/web/app/(ee)/api/stripe/connect/webhook/account-application-deauthorized.ts
++++ b/apps/web/app/(ee)/api/stripe/connect/webhook/account-application-deauthorized.ts
+@@ -1,4 +1,4 @@
+-import { recomputePartnerPayoutState } from "@/lib/partners/api/recompute-partner-payout-state";
++import { recomputePartnerPayoutState } from "@/lib/payouts/recompute-partner-payout-state";
+ import { prisma } from "@dub/prisma";
+ import type Stripe from "stripe";
+ 
+diff --git a/apps/web/app/(ee)/api/stripe/connect/webhook/account-updated.ts b/apps/web/app/(ee)/api/stripe/connect/webhook/account-updated.ts
+index b0d58be6c47..c9e33d6e2eb 100644
+--- a/apps/web/app/(ee)/api/stripe/connect/webhook/account-updated.ts
++++ b/apps/web/app/(ee)/api/stripe/connect/webhook/account-updated.ts
+@@ -1,7 +1,7 @@
+ import { detectDuplicatePayoutMethodFraud } from "@/lib/api/fraud/detect-duplicate-payout-method-fraud";
+ import { qstash } from "@/lib/cron";
+-import { recomputePartnerPayoutState } from "@/lib/partners/api/recompute-partner-payout-state";
+ import { getPartnerBankAccount } from "@/lib/partners/get-partner-bank-account";
++import { recomputePartnerPayoutState } from "@/lib/payouts/recompute-partner-payout-state";
+ import { sendEmail } from "@dub/email";
+ import ConnectedPayoutMethod from "@dub/email/templates/connected-payout-method";
+ import DuplicatePayoutMethod from "@dub/email/templates/duplicate-payout-method";
+diff --git a/apps/web/app/(ee)/partners.dub.co/(onboarding)/onboarding/payouts/page.tsx b/apps/web/app/(ee)/partners.dub.co/(onboarding)/onboarding/payouts/page.tsx
+index c42fc3586e6..41bc5bd5e4c 100644
+--- a/apps/web/app/(ee)/partners.dub.co/(onboarding)/onboarding/payouts/page.tsx
++++ b/apps/web/app/(ee)/partners.dub.co/(onboarding)/onboarding/payouts/page.tsx
+@@ -1,5 +1,5 @@
+ import { getSession } from "@/lib/auth";
+-import { getPartnerPayoutMethods } from "@/lib/payouts/api/get-partner-payout-methods";
++import { getPartnerPayoutMethods } from "@/lib/payouts/get-partner-payout-methods";
+ import { PayoutMethodSelector } from "@/ui/partners/payouts/payout-method-cards";
+ import { prisma } from "@dub/prisma";
+ import Link from "next/link";
+diff --git a/apps/web/lib/constants/payouts.ts b/apps/web/lib/constants/payouts.ts
+index 70a0415e027..bf2a50fafe0 100644
+--- a/apps/web/lib/constants/payouts.ts
++++ b/apps/web/lib/constants/payouts.ts
+@@ -1,22 +1,23 @@
+ import Stripe from "stripe";
+ import { PaymentMethodOption } from "../types";
+ 
++export const PAYOUT_HOLDING_PERIOD_DAYS = [0, 7, 14, 30, 60, 90];
++export const ALLOWED_MIN_PAYOUT_AMOUNTS = [0, 1000, 2000, 5000, 10000];
++
+ export const PAYOUTS_SHEET_ITEMS_LIMIT = 10;
+-export const PAYOUT_FAILURE_FEE_CENTS = 1000; // 10 USD
++export const ELIGIBLE_PAYOUTS_MAX_PAGE_SIZE = 500;
++export const CUTOFF_PERIOD_MAX_PAYOUTS = 1000;
++
++export const STABLECOIN_PAYOUT_FEE_RATE = 0.005; // 0.5%
+ export const FAST_ACH_FEE_CENTS = 2500; // $25
++export const PAYOUT_FAILURE_FEE_CENTS = 1000; // 10 USD
+ export const FOREX_MARKUP_RATE = 0.005; // 0.5%
+ 
+-export const PAYOUT_HOLDING_PERIOD_DAYS = [0, 7, 14, 30, 60, 90];
+-export const ALLOWED_MIN_PAYOUT_AMOUNTS = [0, 1000, 2000, 5000, 10000];
+ export const INVOICE_MIN_PAYOUT_AMOUNT_CENTS = 1000; // $10
+ export const MIN_WITHDRAWAL_AMOUNT_CENTS = 1000; // $10
+ export const BELOW_MIN_WITHDRAWAL_FEE_CENTS = 50; // $0.50
+-export const STABLECOIN_PAYOUT_FEE_RATE = 0.005; // 0.5%
+ export const MIN_FORCE_WITHDRAWAL_AMOUNT_CENTS = 100; // $1 (doesn't make sense to force a withdrawal for less than $1)
+ 
+-export const ELIGIBLE_PAYOUTS_MAX_PAGE_SIZE = 500;
+-export const CUTOFF_PERIOD_MAX_PAYOUTS = 1000;
+-
+ // Direct debit payment types for Partner payout
+ export const DIRECT_DEBIT_PAYMENT_TYPES_INFO: {
+   type: Stripe.PaymentMethod.Type;
+diff --git a/apps/web/lib/partners/create-stablecoin-payout.ts b/apps/web/lib/partners/create-stablecoin-payout.ts
+index ebfdce327d3..a2119641263 100644
+--- a/apps/web/lib/partners/create-stablecoin-payout.ts
++++ b/apps/web/lib/partners/create-stablecoin-payout.ts
+@@ -4,8 +4,8 @@ import { prisma } from "@dub/prisma";
+ import { PartnerPayoutMethod, Prisma } from "@dub/prisma/client";
+ import { currencyFormatter, prettyPrint } from "@dub/utils";
+ import { STABLECOIN_PAYOUT_FEE_RATE } from "../constants/payouts";
+-import { createPayoutsIdempotencyKey } from "../payouts/api/create-payouts-idempotency-key";
+-import { markPayoutsAsProcessed } from "../payouts/api/mark-payouts-as-processed";
++import { createPayoutsIdempotencyKey } from "../payouts/create-payouts-idempotency-key";
++import { markPayoutsAsProcessed } from "../payouts/mark-payouts-as-processed";
+ import { createStripeOutboundPayment } from "../stripe/create-stripe-outbound-payment";
+ import { fundFinancialAccount } from "../stripe/fund-financial-account";
+ import { getStripeRecipientAccount } from "../stripe/get-stripe-recipient-account";
+diff --git a/apps/web/lib/partners/create-stripe-transfer.ts b/apps/web/lib/partners/create-stripe-transfer.ts
+index a56605a9069..ac879ba0c34 100644
+--- a/apps/web/lib/partners/create-stripe-transfer.ts
++++ b/apps/web/lib/partners/create-stripe-transfer.ts
+@@ -9,8 +9,8 @@ import PartnerPayoutProcessed from "@dub/email/templates/partner-payout-processe
+ import { prisma } from "@dub/prisma";
+ import { Prisma } from "@dub/prisma/client";
+ import { currencyFormatter, pluralize } from "@dub/utils";
+-import { createPayoutsIdempotencyKey } from "../payouts/api/create-payouts-idempotency-key";
+-import { markPayoutsAsProcessed } from "../payouts/api/mark-payouts-as-processed";
++import { createPayoutsIdempotencyKey } from "../payouts/create-payouts-idempotency-key";
++import { markPayoutsAsProcessed } from "../payouts/mark-payouts-as-processed";
+ 
+ export const createStripeTransfer = async ({
+   partnerId,
+diff --git a/apps/web/lib/payouts/api/create-payouts-idempotency-key.ts b/apps/web/lib/payouts/create-payouts-idempotency-key.ts
+similarity index 100%
+rename from apps/web/lib/payouts/api/create-payouts-idempotency-key.ts
+rename to apps/web/lib/payouts/create-payouts-idempotency-key.ts
+diff --git a/apps/web/lib/payouts/api/get-partner-payout-methods.ts b/apps/web/lib/payouts/get-partner-payout-methods.ts
+similarity index 100%
+rename from apps/web/lib/payouts/api/get-partner-payout-methods.ts
+rename to apps/web/lib/payouts/get-partner-payout-methods.ts
+diff --git a/apps/web/lib/payouts/api/mark-payouts-as-processed.ts b/apps/web/lib/payouts/mark-payouts-as-processed.ts
+similarity index 100%
+rename from apps/web/lib/payouts/api/mark-payouts-as-processed.ts
+rename to apps/web/lib/payouts/mark-payouts-as-processed.ts
+diff --git a/apps/web/lib/partners/api/recompute-partner-payout-state.ts b/apps/web/lib/payouts/recompute-partner-payout-state.ts
+similarity index 100%
+rename from apps/web/lib/partners/api/recompute-partner-payout-state.ts
+rename to apps/web/lib/payouts/recompute-partner-payout-state.ts
+diff --git a/apps/web/scripts/processed-payouts.ts b/apps/web/scripts/processed-payouts.ts
+index 34f7426e793..b318b7f4d2c 100644
+--- a/apps/web/scripts/processed-payouts.ts
++++ b/apps/web/scripts/processed-payouts.ts
+@@ -1,15 +1,23 @@
+ import { prisma } from "@dub/prisma";
++import { Prisma } from "@dub/prisma/client";
+ import { currencyFormatter } from "@dub/utils";
+ import "dotenv-flow/config";
+ 
+ async function main() {
+-  const processedPayouts = await prisma.payout.aggregate({
+-    where: {
+-      status: "processed",
+-      partner: {
+-        paypalEmail: null,
++  const where: Prisma.PayoutWhereInput = {
++    status: "processed",
++    amount: {
++      gt: 0,
++    },
++    partner: {
++      payoutsEnabledAt: {
++        not: null,
+       },
+     },
++  };
++
++  const processedPayouts = await prisma.payout.aggregate({
++    where,
+     _count: {
+       id: true,
+     },
+@@ -22,6 +30,30 @@ async function main() {
+     count: processedPayouts._count.id,
+     amount: currencyFormatter(processedPayouts._sum.amount ?? 0),
+   });
++
++  const listOfPayouts = await prisma.payout.findMany({
++    where,
++    include: {
++      partner: {
++        select: {
++          email: true,
++        },
++      },
++    },
++    take: 100,
++    orderBy: {
++      paidAt: "asc",
++    },
++  });
++
++  console.table(
++    listOfPayouts.map((payout) => ({
++      id: payout.id,
++      partner: payout.partner.email,
++      amount: currencyFormatter(payout.amount),
++      paidAt: payout.paidAt,
++    })),
++  );
+ }
+ 
+ main();

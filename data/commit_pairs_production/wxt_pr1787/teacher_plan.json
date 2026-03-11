@@ -1,0 +1,134 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "performance_optimization",
+      "recommendation": "Migrated Vite plugin filtering logic from JavaScript to Rolldown's native filter system by replacing conditional checks with filter objects",
+      "rationale": "Rolldown (Rust-based bundler) can process filters at the Rust level, reducing JavaScript execution overhead. This moves filtering logic from runtime JavaScript checks to compile-time Rust filtering, improving build performance by minimizing V8 execution and enabling better optimization at the bundler level.",
+      "alternatives_considered": [
+        "Keeping JavaScript conditionals as-is (simpler but less performant)",
+        "Creating custom filtering utilities in JavaScript (still JavaScript overhead)",
+        "Rewriting entire plugins in Rust (too invasive, breaks compatibility)"
+      ],
+      "files_affected": [
+        "packages/wxt/src/core/builders/vite/plugins/devHtmlPrerender.ts",
+        "packages/wxt/src/core/builders/vite/plugins/download.ts",
+        "packages/wxt/src/core/builders/vite/plugins/extensionApiMock.ts",
+        "packages/wxt/src/core/builders/vite/plugins/noopBackground.ts",
+        "packages/wxt/src/core/builders/vite/plugins/removeEntrypointMainFunction.ts",
+        "packages/wxt/src/core/builders/vite/plugins/resolveAppConfig.ts",
+        "packages/wxt/src/core/builders/vite/plugins/resolveVirtualModules.ts",
+        "packages/wxt/src/core/builders/vite/plugins/wxtPluginLoader.ts"
+      ]
+    },
+    {
+      "dimension": "api_design",
+      "recommendation": "Standardized plugin hook patterns by converting simple function hooks to object-based handlers with filter properties",
+      "rationale": "Vite/Rolldown's filter API expects a consistent object structure with `filter` and `handler` properties. This creates a uniform interface across all plugins, making the codebase more maintainable and predictable. The filter objects use RegExp patterns for precise matching, which is more declarative than imperative conditionals.",
+      "alternatives_considered": [
+        "Mixed approach (some hooks with filters, some without) - would create inconsistency",
+        "Wrapper functions to convert old-style hooks - adds abstraction layer",
+        "Custom filtering middleware - would still require JavaScript execution"
+      ],
+      "files_affected": [
+        "packages/wxt/src/core/builders/vite/plugins/devHtmlPrerender.ts",
+        "packages/wxt/src/core/builders/vite/plugins/download.ts",
+        "packages/wxt/src/core/builders/vite/plugins/extensionApiMock.ts",
+        "packages/wxt/src/core/builders/vite/plugins/noopBackground.ts",
+        "packages/wxt/src/core/builders/vite/plugins/removeEntrypointMainFunction.ts",
+        "packages/wxt/src/core/builders/vite/plugins/resolveAppConfig.ts",
+        "packages/wxt/src/core/builders/vite/plugins/resolveVirtualModules.ts",
+        "packages/wxt/src/core/builders/vite/plugins/wxtPluginLoader.ts"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Maintained existing error handling while simplifying condition checks within handlers",
+      "rationale": "By moving filtering to Rolldown, the handlers no longer need to check if they should run - they're only invoked for matching IDs. This reduces boilerplate and potential for missed condition checks. The actual business logic and error handling remains unchanged within handlers.",
+      "alternatives_considered": [
+        "Adding additional validation in handlers (redundant with filters)",
+        "Removing all conditionals (could break edge cases)",
+        "Adding comprehensive error logging for filter mismatches (over-engineering)"
+      ],
+      "files_affected": [
+        "packages/wxt/src/core/builders/vite/plugins/devHtmlPrerender.ts",
+        "packages/wxt/src/core/builders/vite/plugins/resolveAppConfig.ts",
+        "packages/wxt/src/core/builders/vite/plugins/wxtPluginLoader.ts"
+      ]
+    },
+    {
+      "dimension": "compatibility",
+      "recommendation": "Ensured backward compatibility by preserving exact plugin behavior while changing implementation",
+      "rationale": "The changes are purely structural - moving filtering logic from JavaScript to Rolldown without altering plugin functionality. All existing tests should pass, and the public API remains unchanged. This allows for performance gains without breaking existing extensions.",
+      "alternatives_considered": [
+        "Changing plugin signatures (would break existing code)",
+        "Adding new plugin types alongside old ones (increases complexity)",
+        "Requiring migration from users (poor developer experience)"
+      ],
+      "files_affected": [
+        "packages/wxt/src/core/builders/vite/plugins/devHtmlPrerender.ts",
+        "packages/wxt/src/core/builders/vite/plugins/download.ts",
+        "packages/wxt/src/core/builders/vite/plugins/extensionApiMock.ts",
+        "packages/wxt/src/core/builders/vite/plugins/noopBackground.ts",
+        "packages/wxt/src/core/builders/vite/plugins/removeEntrypointMainFunction.ts",
+        "packages/wxt/src/core/builders/vite/plugins/resolveAppConfig.ts",
+        "packages/wxt/src/core/builders/vite/plugins/resolveVirtualModules.ts",
+        "packages/wxt/src/core/builders/vite/plugins/wxtPluginLoader.ts"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Migrate Vite Plugin Hooks to Rolldown Filter API",
+      "description": "Convert all Vite plugin resolveId, load, and transform hooks from function-based to object-based with filter properties to leverage Rolldown's native filtering system",
+      "files_to_modify": [
+        "packages/wxt/src/core/builders/vite/plugins/devHtmlPrerender.ts",
+        "packages/wxt/src/core/builders/vite/plugins/download.ts",
+        "packages/wxt/src/core/builders/vite/plugins/extensionApiMock.ts",
+        "packages/wxt/src/core/builders/vite/plugins/noopBackground.ts",
+        "packages/wxt/src/core/builders/vite/plugins/removeEntrypointMainFunction.ts",
+        "packages/wxt/src/core/builders/vite/plugins/resolveAppConfig.ts",
+        "packages/wxt/src/core/builders/vite/plugins/resolveVirtualModules.ts",
+        "packages/wxt/src/core/builders/vite/plugins/wxtPluginLoader.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-002",
+      "title": "Fix Null Safety in HTML Transformation",
+      "description": "Add optional chaining to document.head access in wxtPluginLoader to prevent potential null reference errors",
+      "files_to_modify": [
+        "packages/wxt/src/core/builders/vite/plugins/wxtPluginLoader.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-003",
+      "title": "Optimize Regular Expression Patterns",
+      "description": "Convert string matching logic to efficient RegExp patterns for Rolldown filter compatibility and better performance",
+      "files_to_modify": [
+        "packages/wxt/src/core/builders/vite/plugins/devHtmlPrerender.ts",
+        "packages/wxt/src/core/builders/vite/plugins/download.ts",
+        "packages/wxt/src/core/builders/vite/plugins/extensionApiMock.ts",
+        "packages/wxt/src/core/builders/vite/plugins/noopBackground.ts",
+        "packages/wxt/src/core/builders/vite/plugins/removeEntrypointMainFunction.ts",
+        "packages/wxt/src/core/builders/vite/plugins/resolveAppConfig.ts",
+        "packages/wxt/src/core/builders/vite/plugins/resolveVirtualModules.ts",
+        "packages/wxt/src/core/builders/vite/plugins/wxtPluginLoader.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The changes implement a systematic migration from JavaScript-based conditional filtering in Vite plugins to Rolldown's native filter system. This optimization moves filtering logic from the JavaScript runtime to Rust, where Rolldown can process it more efficiently during the build process. Each plugin's `resolveId`, `load`, and `transform` hooks were converted from simple functions to objects with `filter` and `handler` properties, allowing Rolldown to pre-filter which modules should be processed by each handler.\n\nThe key pattern across all changes is the transformation of imperative conditionals (like `if (id.startsWith('url:'))`) into declarative filter objects (like `filter: { id: /^url:/ }`). This not only improves performance but also makes the code more consistent and maintainable. The `devHtmlPrerender` plugin shows the most complex transformation, where multiple filtering conditions were consolidated into comprehensive filter patterns.\n\nImportantly, the implementation maintains full backward compatibility - the business logic within each handler remains unchanged, ensuring existing functionality is preserved. The changes integrate seamlessly with the existing codebase because they leverage Vite/Rolldown's existing plugin API, requiring no changes to the broader architecture. The null safety fix in `wxtPluginLoader` (adding `?.` to `document.head`) demonstrates attention to edge cases that might have been missed in the original implementation.",
+  "source_pr": "https://github.com/wxt-dev/wxt/pull/1787",
+  "before_sha": "ae55aecb0dedc7094e4156e14bbbee29efba15f0",
+  "after_sha": "9673604878138c12e75620ab10d8026be3c1ff53",
+  "diff_stats": {
+    "additions": 190,
+    "deletions": 123,
+    "files_changed": 8
+  }
+}

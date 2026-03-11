@@ -1,0 +1,144 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "data_modeling",
+      "recommendation": "Created a dedicated `github.rs` module in the common models to centralize GitHub integration types, separating them from other domain models while maintaining cohesion within the models directory.",
+      "rationale": "GitHub integration involves multiple related entities (installations, repos, branches, requests) that form a cohesive domain. Grouping them in a separate module improves maintainability and discoverability compared to scattering them across existing files or creating a top-level module.",
+      "alternatives_considered": [
+        "Adding GitHub types directly to existing model files like `project.rs` or `deployment.rs`",
+        "Creating a separate top-level `github` module outside the models directory",
+        "Using feature flags to conditionally include GitHub types"
+      ],
+      "files_affected": [
+        "common/src/models/github.rs",
+        "common/src/models/mod.rs"
+      ]
+    },
+    {
+      "dimension": "api_design",
+      "recommendation": "Designed request/response types that mirror GitHub API structures while adapting them to Shuttle's domain needs, using consistent naming patterns (e.g., `*Request`, `*Response` suffixes).",
+      "rationale": "The types follow RESTful API conventions and map cleanly to expected HTTP endpoints. Using `u32` for IDs (with TODOs for `u64`) balances TypeScript compatibility with GitHub's actual 64-bit IDs. The separation of `GithubInstallationsResponse` into `accounts` and `repos` arrays reflects the logical grouping of data from GitHub's API.",
+      "alternatives_considered": [
+        "Using generic API wrapper types",
+        "Directly exposing GitHub API types without adaptation",
+        "Using string IDs instead of numeric IDs"
+      ],
+      "files_affected": [
+        "common/src/models/github.rs"
+      ]
+    },
+    {
+      "dimension": "type_safety",
+      "recommendation": "Added `#[typeshare::typeshare]` attribute to all GitHub-related types and updated existing types (`TemplatesSchema`, `TemplateDefinition`) to ensure TypeScript type generation.",
+      "rationale": "The `typeshare` crate automatically generates TypeScript definitions from Rust types. Adding this attribute ensures type safety across the full stack - frontend, backend, and API clients can share the same type definitions, reducing bugs and improving developer experience.",
+      "alternatives_considered": [
+        "Manual TypeScript type definitions",
+        "Using a different code generation tool",
+        "Leaving TypeScript types untyped or using `any`"
+      ],
+      "files_affected": [
+        "common/src/models/github.rs",
+        "common/src/templates.rs",
+        "common/types.ts"
+      ]
+    },
+    {
+      "dimension": "backward_compatibility",
+      "recommendation": "Added optional fields (`redeployment_of`, `repo_link`) to existing response types rather than creating breaking changes to APIs.",
+      "rationale": "Optional fields with `Option<T>` allow gradual rollout of new features without breaking existing clients. The `redeployment_of` field in `DeploymentResponse` and `repo_link` in `ProjectResponse` can be `None` for existing deployments/projects, maintaining backward compatibility.",
+      "alternatives_considered": [
+        "Creating new response types entirely",
+        "Using versioned APIs (v1, v2)",
+        "Making fields required and migrating all existing data"
+      ],
+      "files_affected": [
+        "common/src/models/deployment.rs",
+        "common/src/models/project.rs"
+      ]
+    },
+    {
+      "dimension": "documentation",
+      "recommendation": "Enhanced the `ProjectResponse` display implementation to show GitHub repository linkage information when present, improving CLI user experience.",
+      "rationale": "The `Display` implementation for `ProjectResponse` now includes repository linkage details, making the CLI output more informative. This follows the principle of progressive disclosure - showing additional context only when relevant data exists.",
+      "alternatives_considered": [
+        "Creating a separate CLI command for GitHub info",
+        "Not displaying GitHub info in standard project output",
+        "Using a verbose flag to control GitHub info display"
+      ],
+      "files_affected": [
+        "common/src/models/project.rs"
+      ]
+    },
+    {
+      "dimension": "code_quality",
+      "recommendation": "Added `#[allow(clippy::large_enum_variant)]` to `CommandOutput` enum in cargo-shuttle to suppress a lint warning, acknowledging a known code smell while prioritizing feature delivery.",
+      "rationale": "The `CommandOutput` enum likely contains large variants (possibly including the new GitHub types). Rather than refactoring the entire enum structure (which could be complex), we suppress the lint with an explicit annotation, documenting the trade-off between code purity and development velocity.",
+      "alternatives_considered": [
+        "Refactoring the `CommandOutput` enum to use boxing or indirection",
+        "Ignoring the lint globally",
+        "Restructuring the command output system entirely"
+      ],
+      "files_affected": [
+        "cargo-shuttle/src/lib.rs"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Add GitHub Integration Core Types",
+      "description": "Create comprehensive type definitions for GitHub integration functionality including installations, repositories, branches, and related request/response structures",
+      "files_to_modify": [
+        "common/src/models/github.rs",
+        "common/src/models/mod.rs",
+        "common/types.ts"
+      ],
+      "files_to_create": [
+        "common/src/models/github.rs"
+      ],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-002",
+      "title": "Enhance Project and Deployment Models with GitHub Context",
+      "description": "Extend existing project and deployment models to include GitHub repository linkage and redeployment tracking capabilities",
+      "files_to_modify": [
+        "common/src/models/project.rs",
+        "common/src/models/deployment.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-003",
+      "title": "Update Template System for GitHub Integration",
+      "description": "Extend template definitions to support GitHub template repositories and required secrets, ensuring TypeScript type generation",
+      "files_to_modify": [
+        "common/src/templates.rs",
+        "common/types.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-004",
+      "title": "Maintenance and Examples Update",
+      "description": "Update examples submodule and address code quality warnings related to new types",
+      "files_to_modify": [
+        "cargo-shuttle/src/lib.rs",
+        "examples"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation adds comprehensive GitHub integration type definitions to Shuttle's common library, enabling type-safe GitHub operations across the platform. The approach centers on creating a dedicated `github.rs` module within the existing models structure, which maintains architectural consistency while providing a clear separation of concerns.\n\nKey patterns include the use of request/response type pairs (e.g., `LinkGithubRepoRequest`, `GithubInstallationsResponse`) that map cleanly to REST API endpoints, and the systematic application of `#[typeshare::typeshare]` attributes to ensure TypeScript type generation. The design prioritizes backward compatibility by adding optional fields to existing models rather than breaking changes, and enhances user experience by extending display implementations to show GitHub context.\n\nThe changes integrate seamlessly with Shuttle's existing architecture: types are placed in the appropriate `common/models/` directory for shared usage, follow established serialization patterns with `serde`, and leverage the existing `typeshare` infrastructure for cross-language type safety. The implementation also thoughtfully extends related systems like the template definitions to support GitHub template repositories, demonstrating a holistic approach to the GitHub integration feature.",
+  "source_pr": "https://github.com/shuttle-hq/shuttle/pull/2126",
+  "before_sha": "0781c0da4953d4dc51ec55d1a00f9ff27359393b",
+  "after_sha": "1c7ed0a2965f4ae1d2b021a3a93cb09b8d00e2de",
+  "diff_stats": {
+    "additions": 228,
+    "deletions": 3,
+    "files_changed": 8
+  }
+}

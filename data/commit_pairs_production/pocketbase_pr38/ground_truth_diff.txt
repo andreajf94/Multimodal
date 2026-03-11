@@ -1,0 +1,740 @@
+diff --git a/.gitignore b/.gitignore
+index 5d03e3d29..e8d8093f1 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -1,4 +1,5 @@
+ /.vscode/
++.idea
+ 
+ .DS_Store
+ 
+diff --git a/Makefile b/Makefile
+new file mode 100644
+index 000000000..6dc9b9a8d
+--- /dev/null
++++ b/Makefile
+@@ -0,0 +1,9 @@
++lint:
++	golangci-lint run -c ./golangci.yml ./...
++
++test:
++	go test -v --cover ./...
++
++test-report:
++	go test -v --cover -coverprofile=coverage.out ./...
++	go tool cover -html=coverage.out
+diff --git a/apis/admin.go b/apis/admin.go
+index 51276db4e..476349ccf 100644
+--- a/apis/admin.go
++++ b/apis/admin.go
+@@ -66,7 +66,7 @@ func (api *adminApi) refresh(c echo.Context) error {
+ func (api *adminApi) emailAuth(c echo.Context) error {
+ 	form := forms.NewAdminLogin(api.app)
+ 	if readErr := c.Bind(form); readErr != nil {
+-		return rest.NewBadRequestError("An error occured while reading the submitted data.", readErr)
++		return rest.NewBadRequestError("An error occurred while reading the submitted data.", readErr)
+ 	}
+ 
+ 	admin, submitErr := form.Submit()
+@@ -80,11 +80,11 @@ func (api *adminApi) emailAuth(c echo.Context) error {
+ func (api *adminApi) requestPasswordReset(c echo.Context) error {
+ 	form := forms.NewAdminPasswordResetRequest(api.app)
+ 	if err := c.Bind(form); err != nil {
+-		return rest.NewBadRequestError("An error occured while reading the submitted data.", err)
++		return rest.NewBadRequestError("An error occurred while reading the submitted data.", err)
+ 	}
+ 
+ 	if err := form.Validate(); err != nil {
+-		return rest.NewBadRequestError("An error occured while validating the form.", err)
++		return rest.NewBadRequestError("An error occurred while validating the form.", err)
+ 	}
+ 
+ 	// run in background because we don't need to show the result
+@@ -101,7 +101,7 @@ func (api *adminApi) requestPasswordReset(c echo.Context) error {
+ func (api *adminApi) confirmPasswordReset(c echo.Context) error {
+ 	form := forms.NewAdminPasswordResetConfirm(api.app)
+ 	if readErr := c.Bind(form); readErr != nil {
+-		return rest.NewBadRequestError("An error occured while reading the submitted data.", readErr)
++		return rest.NewBadRequestError("An error occurred while reading the submitted data.", readErr)
+ 	}
+ 
+ 	admin, submitErr := form.Submit()
+diff --git a/apis/file_test.go b/apis/file_test.go
+index 1805a95ce..fbc1b90e4 100644
+--- a/apis/file_test.go
++++ b/apis/file_test.go
+@@ -1,13 +1,14 @@
+ package apis_test
+ 
+ import (
+-	"github.com/pocketbase/pocketbase/tests"
+ 	"net/http"
+ 	"os"
+ 	"path"
+ 	"path/filepath"
+ 	"runtime"
+ 	"testing"
++
++	"github.com/pocketbase/pocketbase/tests"
+ )
+ 
+ func TestFileDownload(t *testing.T) {
+diff --git a/apis/logs.go b/apis/logs.go
+index d055047f6..fd286de72 100644
+--- a/apis/logs.go
++++ b/apis/logs.go
+@@ -3,8 +3,8 @@ package apis
+ import (
+ 	"net/http"
+ 
+-	"github.com/pocketbase/dbx"
+ 	"github.com/labstack/echo/v5"
++	"github.com/pocketbase/dbx"
+ 	"github.com/pocketbase/pocketbase/core"
+ 	"github.com/pocketbase/pocketbase/models"
+ 	"github.com/pocketbase/pocketbase/tools/rest"
+diff --git a/apis/realtime.go b/apis/realtime.go
+index b652af6de..b4f6d4258 100644
+--- a/apis/realtime.go
++++ b/apis/realtime.go
+@@ -163,11 +163,12 @@ func (api *realtimeApi) bindEvents() {
+ 		modelTable := data.Model.TableName()
+ 
+ 		var contextKey string
+-		if modelTable == userTable {
++		switch modelTable {
++		case userTable:
+ 			contextKey = ContextUserKey
+-		} else if modelTable == adminTable {
++		case adminTable:
+ 			contextKey = ContextAdminKey
+-		} else {
++		default:
+ 			return nil
+ 		}
+ 
+@@ -186,11 +187,12 @@ func (api *realtimeApi) bindEvents() {
+ 		modelTable := data.Model.TableName()
+ 
+ 		var contextKey string
+-		if modelTable == userTable {
++		switch modelTable {
++		case userTable:
+ 			contextKey = ContextUserKey
+-		} else if modelTable == adminTable {
++		case adminTable:
+ 			contextKey = ContextAdminKey
+-		} else {
++		default:
+ 			return nil
+ 		}
+ 
+diff --git a/apis/record.go b/apis/record.go
+index 1ac3e5088..b6f0da3b7 100644
+--- a/apis/record.go
++++ b/apis/record.go
+@@ -6,8 +6,8 @@ import (
+ 	"net/http"
+ 	"strings"
+ 
+-	"github.com/pocketbase/dbx"
+ 	"github.com/labstack/echo/v5"
++	"github.com/pocketbase/dbx"
+ 	"github.com/pocketbase/pocketbase/core"
+ 	"github.com/pocketbase/pocketbase/daos"
+ 	"github.com/pocketbase/pocketbase/forms"
+diff --git a/apis/settings.go b/apis/settings.go
+index 6cfd31553..bd1b0e8e7 100644
+--- a/apis/settings.go
++++ b/apis/settings.go
+@@ -41,7 +41,7 @@ func (api *settingsApi) list(c echo.Context) error {
+ func (api *settingsApi) set(c echo.Context) error {
+ 	form := forms.NewSettingsUpsert(api.app)
+ 	if err := c.Bind(form); err != nil {
+-		return rest.NewBadRequestError("An error occured while reading the submitted data.", err)
++		return rest.NewBadRequestError("An error occurred while reading the submitted data.", err)
+ 	}
+ 
+ 	event := &core.SettingsUpdateEvent{
+@@ -52,7 +52,7 @@ func (api *settingsApi) set(c echo.Context) error {
+ 
+ 	handlerErr := api.app.OnSettingsBeforeUpdateRequest().Trigger(event, func(e *core.SettingsUpdateEvent) error {
+ 		if err := form.Submit(); err != nil {
+-			return rest.NewBadRequestError("An error occured while submitting the form.", err)
++			return rest.NewBadRequestError("An error occurred while submitting the form.", err)
+ 		}
+ 
+ 		redactedSettings, err := api.app.Settings().RedactClone()
+diff --git a/apis/user.go b/apis/user.go
+index a7bab8d5c..2ee20b9fc 100644
+--- a/apis/user.go
++++ b/apis/user.go
+@@ -152,7 +152,7 @@ func (api *userApi) authMethods(c echo.Context) error {
+ func (api *userApi) oauth2Auth(c echo.Context) error {
+ 	form := forms.NewUserOauth2Login(api.app)
+ 	if readErr := c.Bind(form); readErr != nil {
+-		return rest.NewBadRequestError("An error occured while reading the submitted data.", readErr)
++		return rest.NewBadRequestError("An error occurred while reading the submitted data.", readErr)
+ 	}
+ 
+ 	user, authData, submitErr := form.Submit()
+@@ -170,7 +170,7 @@ func (api *userApi) emailAuth(c echo.Context) error {
+ 
+ 	form := forms.NewUserEmailLogin(api.app)
+ 	if readErr := c.Bind(form); readErr != nil {
+-		return rest.NewBadRequestError("An error occured while reading the submitted data.", readErr)
++		return rest.NewBadRequestError("An error occurred while reading the submitted data.", readErr)
+ 	}
+ 
+ 	user, submitErr := form.Submit()
+@@ -184,11 +184,11 @@ func (api *userApi) emailAuth(c echo.Context) error {
+ func (api *userApi) requestPasswordReset(c echo.Context) error {
+ 	form := forms.NewUserPasswordResetRequest(api.app)
+ 	if err := c.Bind(form); err != nil {
+-		return rest.NewBadRequestError("An error occured while reading the submitted data.", err)
++		return rest.NewBadRequestError("An error occurred while reading the submitted data.", err)
+ 	}
+ 
+ 	if err := form.Validate(); err != nil {
+-		return rest.NewBadRequestError("An error occured while validating the form.", err)
++		return rest.NewBadRequestError("An error occurred while validating the form.", err)
+ 	}
+ 
+ 	// run in background because we don't need to show
+@@ -205,7 +205,7 @@ func (api *userApi) requestPasswordReset(c echo.Context) error {
+ func (api *userApi) confirmPasswordReset(c echo.Context) error {
+ 	form := forms.NewUserPasswordResetConfirm(api.app)
+ 	if readErr := c.Bind(form); readErr != nil {
+-		return rest.NewBadRequestError("An error occured while reading the submitted data.", readErr)
++		return rest.NewBadRequestError("An error occurred while reading the submitted data.", readErr)
+ 	}
+ 
+ 	user, submitErr := form.Submit()
+@@ -224,7 +224,7 @@ func (api *userApi) requestEmailChange(c echo.Context) error {
+ 
+ 	form := forms.NewUserEmailChangeRequest(api.app, loggedUser)
+ 	if err := c.Bind(form); err != nil {
+-		return rest.NewBadRequestError("An error occured while reading the submitted data.", err)
++		return rest.NewBadRequestError("An error occurred while reading the submitted data.", err)
+ 	}
+ 
+ 	if err := form.Submit(); err != nil {
+@@ -237,7 +237,7 @@ func (api *userApi) requestEmailChange(c echo.Context) error {
+ func (api *userApi) confirmEmailChange(c echo.Context) error {
+ 	form := forms.NewUserEmailChangeConfirm(api.app)
+ 	if readErr := c.Bind(form); readErr != nil {
+-		return rest.NewBadRequestError("An error occured while reading the submitted data.", readErr)
++		return rest.NewBadRequestError("An error occurred while reading the submitted data.", readErr)
+ 	}
+ 
+ 	user, submitErr := form.Submit()
+@@ -251,11 +251,11 @@ func (api *userApi) confirmEmailChange(c echo.Context) error {
+ func (api *userApi) requestVerification(c echo.Context) error {
+ 	form := forms.NewUserVerificationRequest(api.app)
+ 	if err := c.Bind(form); err != nil {
+-		return rest.NewBadRequestError("An error occured while reading the submitted data.", err)
++		return rest.NewBadRequestError("An error occurred while reading the submitted data.", err)
+ 	}
+ 
+ 	if err := form.Validate(); err != nil {
+-		return rest.NewBadRequestError("An error occured while validating the form.", err)
++		return rest.NewBadRequestError("An error occurred while validating the form.", err)
+ 	}
+ 
+ 	// run in background because we don't need to show
+@@ -272,12 +272,12 @@ func (api *userApi) requestVerification(c echo.Context) error {
+ func (api *userApi) confirmVerification(c echo.Context) error {
+ 	form := forms.NewUserVerificationConfirm(api.app)
+ 	if readErr := c.Bind(form); readErr != nil {
+-		return rest.NewBadRequestError("An error occured while reading the submitted data.", readErr)
++		return rest.NewBadRequestError("An error occurred while reading the submitted data.", readErr)
+ 	}
+ 
+ 	user, submitErr := form.Submit()
+ 	if submitErr != nil {
+-		return rest.NewBadRequestError("An error occured while submitting the form.", submitErr)
++		return rest.NewBadRequestError("An error occurred while submitting the form.", submitErr)
+ 	}
+ 
+ 	return api.authResponse(c, user, nil)
+diff --git a/cmd/serve.go b/cmd/serve.go
+index 34699b723..15552f226 100644
+--- a/cmd/serve.go
++++ b/cmd/serve.go
+@@ -41,11 +41,11 @@ func NewServeCommand(app core.App, showStartBanner bool) *cobra.Command {
+ 			}
+ 
+ 			// configure cors
+-			router.Use(middleware.CORSWithConfig(middleware.CORSConfig(middleware.CORSConfig{
++			router.Use(middleware.CORSWithConfig(middleware.CORSConfig{
+ 				Skipper:      middleware.DefaultSkipper,
+ 				AllowOrigins: allowedOrigins,
+ 				AllowMethods: []string{http.MethodGet, http.MethodHead, http.MethodPut, http.MethodPatch, http.MethodPost, http.MethodDelete},
+-			})))
++			}))
+ 
+ 			// ensure that the latest migrations are applied before starting the server
+ 			if err := runMigrations(app); err != nil {
+diff --git a/core/app.go b/core/app.go
+index 74990c2b1..f89ad8535 100644
+--- a/core/app.go
++++ b/core/app.go
+@@ -91,7 +91,7 @@ type App interface {
+ 	// entry in the DB, allowing you to modify or validate the stored data.
+ 	OnModelBeforeCreate() *hook.Hook[*ModelEvent]
+ 
+-	// OnModelAfterCreate hook is triggered after successfuly
++	// OnModelAfterCreate hook is triggered after successfully
+ 	// inserting a new entry in the DB.
+ 	OnModelAfterCreate() *hook.Hook[*ModelEvent]
+ 
+@@ -99,7 +99,7 @@ type App interface {
+ 	// entry in the DB, allowing you to modify or validate the stored data.
+ 	OnModelBeforeUpdate() *hook.Hook[*ModelEvent]
+ 
+-	// OnModelAfterUpdate hook is triggered after successfuly updating
++	// OnModelAfterUpdate hook is triggered after successfully updating
+ 	// existing entry in the DB.
+ 	OnModelAfterUpdate() *hook.Hook[*ModelEvent]
+ 
+@@ -107,7 +107,7 @@ type App interface {
+ 	// existing entry from the DB.
+ 	OnModelBeforeDelete() *hook.Hook[*ModelEvent]
+ 
+-	// OnModelAfterDelete is triggered after successfuly deleting an
++	// OnModelAfterDelete is triggered after successfully deleting an
+ 	// existing entry from the DB.
+ 	OnModelAfterDelete() *hook.Hook[*ModelEvent]
+ 
+@@ -123,7 +123,7 @@ type App interface {
+ 	OnMailerBeforeAdminResetPasswordSend() *hook.Hook[*MailerAdminEvent]
+ 
+ 	// OnMailerAfterAdminResetPasswordSend hook is triggered after
+-	// admin password reset email was successfuly sent.
++	// admin password reset email was successfully sent.
+ 	OnMailerAfterAdminResetPasswordSend() *hook.Hook[*MailerAdminEvent]
+ 
+ 	// OnMailerBeforeUserResetPasswordSend hook is triggered right before
+@@ -134,7 +134,7 @@ type App interface {
+ 	OnMailerBeforeUserResetPasswordSend() *hook.Hook[*MailerUserEvent]
+ 
+ 	// OnMailerAfterUserResetPasswordSend hook is triggered after
+-	// a user password reset email was successfuly sent.
++	// a user password reset email was successfully sent.
+ 	OnMailerAfterUserResetPasswordSend() *hook.Hook[*MailerUserEvent]
+ 
+ 	// OnMailerBeforeUserVerificationSend hook is triggered right before
+@@ -145,7 +145,7 @@ type App interface {
+ 	OnMailerBeforeUserVerificationSend() *hook.Hook[*MailerUserEvent]
+ 
+ 	// OnMailerAfterUserVerificationSend hook is triggered after a user
+-	// verification email was successfuly sent.
++	// verification email was successfully sent.
+ 	OnMailerAfterUserVerificationSend() *hook.Hook[*MailerUserEvent]
+ 
+ 	// OnMailerBeforeUserChangeEmailSend hook is triggered right before
+@@ -156,7 +156,7 @@ type App interface {
+ 	OnMailerBeforeUserChangeEmailSend() *hook.Hook[*MailerUserEvent]
+ 
+ 	// OnMailerAfterUserChangeEmailSend hook is triggered after a user
+-	// change address email was successfuly sent.
++	// change address email was successfully sent.
+ 	OnMailerAfterUserChangeEmailSend() *hook.Hook[*MailerUserEvent]
+ 
+ 	// ---------------------------------------------------------------
+@@ -180,7 +180,7 @@ type App interface {
+ 	// Settings API event hooks
+ 	// ---------------------------------------------------------------
+ 
+-	// OnSettingsListRequest hook is triggered on each successfull
++	// OnSettingsListRequest hook is triggered on each successful
+ 	// API Settings list request.
+ 	//
+ 	// Could be used to validate or modify the response before
+diff --git a/core/db_cgo.go b/core/db_cgo.go
+index 4ff773664..10f3241d7 100644
+--- a/core/db_cgo.go
++++ b/core/db_cgo.go
+@@ -5,8 +5,8 @@ package core
+ import (
+ 	"fmt"
+ 
+-	"github.com/pocketbase/dbx"
+ 	_ "github.com/mattn/go-sqlite3"
++	"github.com/pocketbase/dbx"
+ )
+ 
+ func connectDB(dbPath string) (*dbx.DB, error) {
+diff --git a/core/settings.go b/core/settings.go
+index 881e207a1..648664fae 100644
+--- a/core/settings.go
++++ b/core/settings.go
+@@ -360,11 +360,11 @@ func (c AuthProviderConfig) SetupProvider(provider auth.Provider) error {
+ 	}
+ 
+ 	if c.ClientId != "" {
+-		provider.SetClientId(string(c.ClientId))
++		provider.SetClientId(c.ClientId)
+ 	}
+ 
+ 	if c.ClientSecret != "" {
+-		provider.SetClientSecret(string(c.ClientSecret))
++		provider.SetClientSecret(c.ClientSecret)
+ 	}
+ 
+ 	if c.AuthUrl != "" {
+diff --git a/daos/collection_test.go b/daos/collection_test.go
+index 7e039e80b..82a530b4e 100644
+--- a/daos/collection_test.go
++++ b/daos/collection_test.go
+@@ -166,7 +166,6 @@ func TestDeleteCollection(t *testing.T) {
+ 			t.Errorf("(%d) Expected hasErr %v, got %v", i, scenario.expectError, hasErr)
+ 		}
+ 	}
+-
+ }
+ 
+ func TestSaveCollectionCreate(t *testing.T) {
+diff --git a/daos/record.go b/daos/record.go
+index 1ad218674..ee8c850c4 100644
+--- a/daos/record.go
++++ b/daos/record.go
+@@ -309,7 +309,7 @@ func (dao *Dao) SyncRecordTableSchema(newCollection *models.Collection, oldColle
+ 		newSchema := newCollection.Schema
+ 
+ 		// check for renamed table
+-		if strings.ToLower(oldTableName) != strings.ToLower(newTableName) {
++		if !strings.EqualFold(oldTableName, newTableName) {
+ 			_, err := dao.DB().RenameTable(oldTableName, newTableName).Execute()
+ 			if err != nil {
+ 				return err
+diff --git a/daos/record_test.go b/daos/record_test.go
+index 6b3f30f07..024be661b 100644
+--- a/daos/record_test.go
++++ b/daos/record_test.go
+@@ -396,6 +396,9 @@ func TestSyncRecordTableSchema(t *testing.T) {
+ 		t.Fatal(err)
+ 	}
+ 	updatedCollection, err := app.Dao().FindCollectionByNameOrId("demo")
++	if err != nil {
++		t.Fatal(err)
++	}
+ 	updatedCollection.Name = "demo_renamed"
+ 	updatedCollection.Schema.RemoveField(updatedCollection.Schema.GetFieldByName("file").Id)
+ 	updatedCollection.Schema.AddField(
+diff --git a/forms/admin_password_reset_confirm_test.go b/forms/admin_password_reset_confirm_test.go
+index ebdaed788..5f11c2cef 100644
+--- a/forms/admin_password_reset_confirm_test.go
++++ b/forms/admin_password_reset_confirm_test.go
+@@ -107,7 +107,7 @@ func TestAdminPasswordResetConfirmSubmit(t *testing.T) {
+ 		}
+ 
+ 		claims, _ := security.ParseUnverifiedJWT(s.token)
+-		tokenAdminId, _ := claims["id"]
++		tokenAdminId := claims["id"]
+ 
+ 		if admin.Id != tokenAdminId {
+ 			t.Errorf("(%d) Expected admin with id %s to be returned, got %v", i, tokenAdminId, admin)
+diff --git a/forms/collection_upsert.go b/forms/collection_upsert.go
+index 6aaf44bee..9a05ae532 100644
+--- a/forms/collection_upsert.go
++++ b/forms/collection_upsert.go
+@@ -95,7 +95,7 @@ func (form *CollectionUpsert) checkUniqueName(value any) error {
+ 		return validation.NewError("validation_collection_name_exists", "Collection name must be unique (case insensitive).")
+ 	}
+ 
+-	if (form.isCreate || strings.ToLower(v) != strings.ToLower(form.collection.Name)) && form.app.Dao().HasTable(v) {
++	if (form.isCreate || !strings.EqualFold(v, form.collection.Name)) && form.app.Dao().HasTable(v) {
+ 		return validation.NewError("validation_collection_name_table_exists", "The collection name must be also unique table name.")
+ 	}
+ 
+diff --git a/forms/record_upsert.go b/forms/record_upsert.go
+index 053123583..e00b42643 100644
+--- a/forms/record_upsert.go
++++ b/forms/record_upsert.go
+@@ -44,7 +44,6 @@ func NewRecordUpsert(app core.App, record *models.Record) *RecordUpsert {
+ 	form.Data = map[string]any{}
+ 	for _, field := range record.Collection().Schema.Fields() {
+ 		form.Data[field.Name] = record.GetDataValue(field.Name)
+-
+ 	}
+ 
+ 	return form
+@@ -147,7 +146,7 @@ func (form *RecordUpsert) LoadData(r *http.Request) error {
+ 
+ 	for _, field := range form.record.Collection().Schema.Fields() {
+ 		key := field.Name
+-		value, _ := extendedData[key]
++		value := extendedData[key]
+ 		value = field.PrepareValue(value)
+ 
+ 		if field.Type == schema.FieldTypeFile {
+diff --git a/forms/record_upsert_test.go b/forms/record_upsert_test.go
+index a082a9141..b5bffc404 100644
+--- a/forms/record_upsert_test.go
++++ b/forms/record_upsert_test.go
+@@ -29,7 +29,7 @@ func TestNewRecordUpsert(t *testing.T) {
+ 
+ 	form := forms.NewRecordUpsert(app, record)
+ 
+-	val, _ := form.Data["title"]
++	val := form.Data["title"]
+ 	if val != "test_value" {
+ 		t.Errorf("Expected record data to be load, got %v", form.Data)
+ 	}
+diff --git a/forms/user_oauth2_login.go b/forms/user_oauth2_login.go
+index ab8f86c4c..450aa1bd5 100644
+--- a/forms/user_oauth2_login.go
++++ b/forms/user_oauth2_login.go
+@@ -68,7 +68,7 @@ func (form *UserOauth2Login) Submit() (*models.User, *auth.AuthUser, error) {
+ 		return nil, nil, err
+ 	}
+ 
+-	config, _ := form.app.Settings().NamedAuthProviderConfigs()[form.Provider]
++	config := form.app.Settings().NamedAuthProviderConfigs()[form.Provider]
+ 	config.SetupProvider(provider)
+ 
+ 	provider.SetRedirectUrl(form.RedirectUrl)
+diff --git a/forms/user_password_reset_confirm_test.go b/forms/user_password_reset_confirm_test.go
+index 0300e6ed0..4cb8565f1 100644
+--- a/forms/user_password_reset_confirm_test.go
++++ b/forms/user_password_reset_confirm_test.go
+@@ -148,7 +148,7 @@ func TestUserPasswordResetConfirmSubmit(t *testing.T) {
+ 		}
+ 
+ 		claims, _ := security.ParseUnverifiedJWT(form.Token)
+-		tokenUserId, _ := claims["id"]
++		tokenUserId := claims["id"]
+ 
+ 		if user.Id != tokenUserId {
+ 			t.Errorf("(%d) Expected user with id %s, got %v", i, tokenUserId, user)
+diff --git a/forms/user_verification_confirm_test.go b/forms/user_verification_confirm_test.go
+index 5291eba01..14ff5a38e 100644
+--- a/forms/user_verification_confirm_test.go
++++ b/forms/user_verification_confirm_test.go
+@@ -127,7 +127,7 @@ func TestUserVerificationConfirmSubmit(t *testing.T) {
+ 		}
+ 
+ 		claims, _ := security.ParseUnverifiedJWT(form.Token)
+-		tokenUserId, _ := claims["id"]
++		tokenUserId := claims["id"]
+ 
+ 		if user.Id != tokenUserId {
+ 			t.Errorf("(%d) Expected user.Id %q, got %q", i, tokenUserId, user.Id)
+diff --git a/forms/validators/record_data.go b/forms/validators/record_data.go
+index b215bb2b6..10df86e90 100644
+--- a/forms/validators/record_data.go
++++ b/forms/validators/record_data.go
+@@ -6,9 +6,9 @@ import (
+ 	"regexp"
+ 	"strings"
+ 
+-	"github.com/pocketbase/dbx"
+ 	validation "github.com/go-ozzo/ozzo-validation/v4"
+ 	"github.com/go-ozzo/ozzo-validation/v4/is"
++	"github.com/pocketbase/dbx"
+ 	"github.com/pocketbase/pocketbase/daos"
+ 	"github.com/pocketbase/pocketbase/models"
+ 	"github.com/pocketbase/pocketbase/models/schema"
+diff --git a/forms/validators/record_data_test.go b/forms/validators/record_data_test.go
+index daa34a4d6..f119fbbb9 100644
+--- a/forms/validators/record_data_test.go
++++ b/forms/validators/record_data_test.go
+@@ -1189,7 +1189,7 @@ func TestRecordDataValidatorValidateRelation(t *testing.T) {
+ 			Type: schema.FieldTypeRelation,
+ 			Options: &schema.RelationOptions{
+ 				MaxSelect:    3,
+-				CollectionId: "", // missing or nonexisting colleciton id
++				CollectionId: "", // missing or non-existing collection id
+ 			},
+ 		},
+ 	)
+diff --git a/golangci.yml b/golangci.yml
+new file mode 100644
+index 000000000..5ecc1c135
+--- /dev/null
++++ b/golangci.yml
+@@ -0,0 +1,30 @@
++run:
++  go: 1.18
++  concurrency: 4
++  timeout: 10m
++
++linters:
++  disable-all: true
++  enable:
++    - asciicheck
++    - deadcode
++    - depguard
++    - exportloopref
++    - gocritic
++    - gofmt
++    - goimports
++    - gomodguard
++    - goprintffuncname
++    - gosimple
++    - govet
++    - ineffassign
++    - misspell
++    - nakedret
++    - nolintlint
++    - prealloc
++    - staticcheck
++    - typecheck
++    - unconvert
++    - unused
++    - varcheck
++    - whitespace
+diff --git a/models/schema/schema.go b/models/schema/schema.go
+index cae307956..f9f9b31f5 100644
+--- a/models/schema/schema.go
++++ b/models/schema/schema.go
+@@ -134,7 +134,7 @@ func (s *Schema) AddField(newField *SchemaField) {
+ // checks for invalid renamed fields and field name duplications.
+ func (s Schema) Validate() error {
+ 	return validation.Validate(&s.fields, validation.Required, validation.By(func(value any) error {
+-		fields := s.fields // use directly the schema value to avoid unnecesary interface casting
++		fields := s.fields // use directly the schema value to avoid unnecessary interface casting
+ 
+ 		if len(fields) == 0 {
+ 			return validation.NewError("validation_invalid_schema", "Invalid schema format.")
+diff --git a/models/schema/schema_field_test.go b/models/schema/schema_field_test.go
+index c381aa88f..3dcedb74c 100644
+--- a/models/schema/schema_field_test.go
++++ b/models/schema/schema_field_test.go
+@@ -493,9 +493,9 @@ func TestSchemaFieldPrepareValue(t *testing.T) {
+ 		value      any
+ 		expectJson string
+ 	}{
+-		{schema.SchemaField{Type: "unkown"}, "test", `"test"`},
+-		{schema.SchemaField{Type: "unkown"}, 123, "123"},
+-		{schema.SchemaField{Type: "unkown"}, []int{1, 2, 1}, "[1,2,1]"},
++		{schema.SchemaField{Type: "unknown"}, "test", `"test"`},
++		{schema.SchemaField{Type: "unknown"}, 123, "123"},
++		{schema.SchemaField{Type: "unknown"}, []int{1, 2, 1}, "[1,2,1]"},
+ 
+ 		// text
+ 		{schema.SchemaField{Type: schema.FieldTypeText}, nil, `null`},
+@@ -1281,7 +1281,6 @@ func TestFileOptionsValidate(t *testing.T) {
+ }
+ 
+ func TestRelationOptionsValidate(t *testing.T) {
+-
+ 	scenarios := []fieldOptionsScenario{
+ 		{
+ 			"empty",
+diff --git a/tests/api.go b/tests/api.go
+index 5674f2ece..7bccb5fc5 100644
+--- a/tests/api.go
++++ b/tests/api.go
+@@ -109,7 +109,7 @@ func (scenario *ApiScenario) Test(t *testing.T) {
+ 	}
+ 
+ 	for event, expectedCalls := range scenario.ExpectedEvents {
+-		actualCalls, _ := testApp.EventCalls[event]
++		actualCalls := testApp.EventCalls[event]
+ 		if actualCalls != expectedCalls {
+ 			t.Errorf("[%s] Expected event %s to be called %d, got %d", prefix, event, expectedCalls, actualCalls)
+ 		}
+diff --git a/tests/app.go b/tests/app.go
+index 4c64c3a95..435ee1d85 100644
+--- a/tests/app.go
++++ b/tests/app.go
+@@ -1,4 +1,4 @@
+-// Pacakge tests provides common helpers and mocks used in PocketBase application tests.
++// Package tests provides common helpers and mocks used in PocketBase application tests.
+ package tests
+ 
+ import (
+diff --git a/tools/filesystem/filesystem.go b/tools/filesystem/filesystem.go
+index 725076cc8..01f465835 100644
+--- a/tools/filesystem/filesystem.go
++++ b/tools/filesystem/filesystem.go
+@@ -127,7 +127,7 @@ func (s *System) DeletePrefix(prefix string) []error {
+ 		Prefix: prefix,
+ 	}
+ 
+-	// delete all files witht the prefix
++	// delete all files with the prefix
+ 	// ---
+ 	iter := s.bucket.List(&opts)
+ 	for {
+diff --git a/tools/inflector/inflector_test.go b/tools/inflector/inflector_test.go
+index 8777bbe6a..4a09e554b 100644
+--- a/tools/inflector/inflector_test.go
++++ b/tools/inflector/inflector_test.go
+@@ -82,7 +82,7 @@ func TestSanitize(t *testing.T) {
+ 		{" ", ` `, "", false},
+ 		{"", `[A-Z]`, "", false},
+ 		{"abcABC", `[A-Z]`, "abc", false},
+-		{"abcABC", `[A-Z`, "", true}, // invlid pattern
++		{"abcABC", `[A-Z`, "", true}, // invalid pattern
+ 	}
+ 
+ 	for i, scenario := range scenarios {
+diff --git a/tools/search/provider.go b/tools/search/provider.go
+index a9fb91193..97f8ebd26 100644
+--- a/tools/search/provider.go
++++ b/tools/search/provider.go
+@@ -210,7 +210,7 @@ func (s *Provider) Exec(items any) (*Result, error) {
+ 		s.perPage = MaxPerPage
+ 	}
+ 
+-	// normalize page accoring to the total count
++	// normalize page according to the total count
+ 	if s.page <= 0 || totalCount == 0 {
+ 		s.page = 1
+ 	} else if totalPages := int(math.Ceil(float64(totalCount) / float64(s.perPage))); s.page > totalPages {
+diff --git a/tools/security/random_test.go b/tools/security/random_test.go
+index d4c40fb1a..034b3d4dc 100644
+--- a/tools/security/random_test.go
++++ b/tools/security/random_test.go
+@@ -9,6 +9,7 @@ import (
+ 
+ func TestRandomString(t *testing.T) {
+ 	generated := []string{}
++	reg := regexp.MustCompile(`[a-zA-Z0-9]+`)
+ 
+ 	for i := 0; i < 30; i++ {
+ 		length := 5 + i
+@@ -18,7 +19,7 @@ func TestRandomString(t *testing.T) {
+ 			t.Errorf("(%d) Expected the length of the string to be %d, got %d", i, length, len(result))
+ 		}
+ 
+-		if match, _ := regexp.MatchString("[a-zA-Z0-9]+", result); !match {
++		if match := reg.MatchString(result); !match {
+ 			t.Errorf("(%d) The generated strings should have only [a-zA-Z0-9]+ characters, got %q", i, result)
+ 		}
+ 
+diff --git a/tools/types/datetime_test.go b/tools/types/datetime_test.go
+index acddbd357..5d7963aa1 100644
+--- a/tools/types/datetime_test.go
++++ b/tools/types/datetime_test.go
+@@ -1,10 +1,11 @@
+ package types_test
+ 
+ import (
+-	"github.com/pocketbase/pocketbase/tools/types"
+ 	"strings"
+ 	"testing"
+ 	"time"
++
++	"github.com/pocketbase/pocketbase/tools/types"
+ )
+ 
+ func TestNowDateTime(t *testing.T) {
+diff --git a/ui/embed.go b/ui/embed.go
+index e849e3e25..ef22d3d3e 100644
+--- a/ui/embed.go
++++ b/ui/embed.go
+@@ -13,8 +13,8 @@ var distDir embed.FS
+ //go:embed dist/index.html
+ var indexHTML embed.FS
+ 
+-// DistDirFS contains the embeded dist directory files (without the "dist" prefix)
++// DistDirFS contains the embedded dist directory files (without the "dist" prefix)
+ var DistDirFS = echo.MustSubFS(distDir, "dist")
+ 
+-// DistIndexHTML contains the embeded dist/index.html file (without the "dist" prefix)
++// DistIndexHTML contains the embedded dist/index.html file (without the "dist" prefix)
+ var DistIndexHTML = echo.MustSubFS(indexHTML, "dist")

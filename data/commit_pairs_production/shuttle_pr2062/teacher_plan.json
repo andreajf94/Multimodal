@@ -1,0 +1,139 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "api_design",
+      "recommendation": "Added a new RuntimeMacroArgs struct to parse and serialize attribute arguments for the shuttle_runtime macro, enabling structured configuration",
+      "rationale": "The previous implementation didn't support any configuration arguments for the shuttle_runtime macro. By creating a dedicated struct with Parse and Serialize implementations, we can now accept and validate configuration options like instance_size. This provides a clean, type-safe way to extend macro configuration in the future.",
+      "alternatives_considered": [
+        "Using a simple HashMap for key-value pairs",
+        "Embedding configuration directly in the macro expansion without serialization",
+        "Creating a separate configuration file instead of macro arguments"
+      ],
+      "files_affected": [
+        "codegen/src/shuttle_main.rs"
+      ]
+    },
+    {
+      "dimension": "data_modeling",
+      "recommendation": "Added provision_manifest field to BuildArgsRust model and boxed the DeploymentRequestBuildArchive enum variant",
+      "rationale": "The provision_manifest field allows the build system to know which resources need provisioning before deployment. Boxing the DeploymentRequestBuildArchive variant reduces memory usage since this is the most common deployment path and the struct is relatively large. This follows Rust best practices for enum variants with large payloads.",
+      "alternatives_considered": [
+        "Adding provision_manifest as a separate API parameter",
+        "Keeping DeploymentRequestBuildArchive unboxed",
+        "Creating a separate deployment request type for manifest-based deployments"
+      ],
+      "files_affected": [
+        "common/src/models/deployment.rs",
+        "common/types.ts"
+      ]
+    },
+    {
+      "dimension": "build_system_integration",
+      "recommendation": "Automatically generate and write build manifest file (.shuttle/build_manifest.json) during macro expansion",
+      "rationale": "By generating the manifest during compile-time macro expansion, we ensure it's always up-to-date with the code. Writing to .shuttle/build_manifest.json creates a predictable location that the build system can check. The manifest is created in a dedicated .shuttle directory to keep project root clean.",
+      "alternatives_considered": [
+        "Generating manifest at runtime",
+        "Storing manifest in target/ directory",
+        "Requiring manual manifest creation by developers"
+      ],
+      "files_affected": [
+        "codegen/src/shuttle_main.rs"
+      ]
+    },
+    {
+      "dimension": "cli_integration",
+      "recommendation": "Updated CLI to check for build manifest and pass it to deployment API, plus renamed working_directory to project_directory for clarity",
+      "rationale": "The CLI needs to detect the manifest file and include it in deployment requests. Renaming working_directory to project_directory clarifies that this refers to the cargo workspace root, not just any working directory. This improves code readability and aligns with cargo terminology.",
+      "alternatives_considered": [
+        "Making manifest path configurable via CLI flag",
+        "Keeping original naming convention",
+        "Auto-detecting manifest in multiple locations"
+      ],
+      "files_affected": [
+        "cargo-shuttle/src/lib.rs",
+        "cargo-shuttle/src/config.rs"
+      ]
+    },
+    {
+      "dimension": "backward_compatibility",
+      "recommendation": "Made manifest generation optional and maintained existing deployment paths",
+      "rationale": "Existing projects without the shuttle_runtime macro arguments continue to work unchanged. The manifest is only generated when macro arguments are present, and the CLI only passes it when the file exists. This ensures no breaking changes for current users.",
+      "alternatives_considered": [
+        "Requiring manifest for all deployments",
+        "Making manifest generation mandatory",
+        "Creating a migration path for existing projects"
+      ],
+      "files_affected": [
+        "codegen/src/shuttle_main.rs",
+        "cargo-shuttle/src/lib.rs"
+      ]
+    },
+    {
+      "dimension": "user_experience",
+      "recommendation": "Enhanced ComputeTier enum with human-readable string representations",
+      "rationale": "Adding strum annotations with detailed descriptions (e.g., 'Basic (0.25 vCPU / 0.5 GB)') makes CLI output more informative for users. This helps users understand what each tier means in practical terms without needing external documentation.",
+      "alternatives_considered": [
+        "Keeping minimal tier names",
+        "Adding separate description fields",
+        "Moving tier details to documentation only"
+      ],
+      "files_affected": [
+        "common/src/models/project.rs"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Build Manifest Generation in Macro",
+      "description": "Extend shuttle_runtime macro to parse arguments, serialize them to build manifest, and write to .shuttle/build_manifest.json",
+      "files_to_modify": [
+        "codegen/src/shuttle_main.rs",
+        "codegen/Cargo.toml"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-002",
+      "title": "Deployment API Updates",
+      "description": "Update deployment models to support build manifests and optimize memory usage by boxing large enum variant",
+      "files_to_modify": [
+        "common/src/models/deployment.rs",
+        "common/types.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-003",
+      "title": "CLI Integration for Manifest Detection",
+      "description": "Update CLI to detect build manifest file and include it in deployment requests, plus improve naming clarity",
+      "files_to_modify": [
+        "cargo-shuttle/src/lib.rs",
+        "cargo-shuttle/src/config.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-004",
+      "title": "User Experience Improvements",
+      "description": "Enhance ComputeTier display with detailed descriptions and update project response formatting",
+      "files_to_modify": [
+        "common/src/models/project.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation introduces a build manifest generation system that extends Shuttle's macro-based deployment model. The core change is in the shuttle_runtime attribute macro, which now accepts configuration arguments (starting with instance_size) and automatically generates a JSON manifest file at .shuttle/build_manifest.json during compilation. This manifest contains parsed configuration that will later be used for resource provisioning.\n\nThe approach leverages Rust's procedural macro system to generate the manifest at compile time, ensuring it's always synchronized with the code. The manifest is written to a dedicated .shuttle directory to avoid cluttering the project root. The CLI has been updated to detect this manifest file and include its path in deployment requests via a new provision_manifest field in the BuildArgsRust model.\n\nKey design patterns include: 1) Using a dedicated RuntimeMacroArgs struct with Parse and Serialize implementations for clean configuration handling, 2) Boxing the DeploymentRequestBuildArchive enum variant to optimize memory usage since it's the most common deployment path, and 3) Maintaining backward compatibility by making manifest generation optional. The changes integrate seamlessly with the existing codebase, following established patterns for macro expansion and deployment request handling while laying the foundation for future resource provisioning features.",
+  "source_pr": "https://github.com/shuttle-hq/shuttle/pull/2062",
+  "before_sha": "201b61ade5f6b7a7722d79d0e9ad9004f0ab373c",
+  "after_sha": "8c3c1ea102bd754c14f728e24e86636d1ec73d81",
+  "diff_stats": {
+    "additions": 216,
+    "deletions": 36,
+    "files_changed": 8
+  }
+}

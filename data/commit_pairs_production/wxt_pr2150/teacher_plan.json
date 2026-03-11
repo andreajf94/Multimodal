@@ -1,0 +1,87 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "type_safety",
+      "recommendation": "Extended the PublicPath type generation to include CSS entrypoints by adding a new helper function getEntrypointPublicExt() that maps entrypoint types to their correct file extensions",
+      "rationale": "The existing implementation only handled HTML and JS entrypoints, but CSS entrypoints (content-script-style and unlisted-style) were missing from type definitions. This caused TypeScript errors when using browser.runtime.getURL() with CSS assets. The new function centralizes the mapping logic and ensures type safety for all supported entrypoint types.",
+      "alternatives_considered": [
+        "Modifying the existing isHtmlEntrypoint() function to also check for CSS types",
+        "Adding conditional logic directly in the map() call without a helper function",
+        "Creating separate type definitions for CSS assets"
+      ],
+      "files_affected": [
+        "packages/wxt/src/core/generate-wxt-dir.ts"
+      ]
+    },
+    {
+      "dimension": "testing",
+      "recommendation": "Added an end-to-end test to verify CSS entrypoints are correctly included in generated type definitions",
+      "rationale": "E2E testing ensures the type generation works in a real project context, catching integration issues that unit tests might miss. The test creates actual CSS entrypoints and verifies the generated paths.d.ts contains the expected CSS paths. This provides confidence that the fix works for real-world usage.",
+      "alternatives_considered": [
+        "Adding unit tests to the helper function only",
+        "Relying on existing type checking without new tests",
+        "Creating integration tests at a lower level"
+      ],
+      "files_affected": [
+        "packages/wxt/e2e/tests/typescript-project.test.ts"
+      ]
+    },
+    {
+      "dimension": "api_design",
+      "recommendation": "Maintained backward compatibility by extending existing functionality rather than changing the PublicPath type signature",
+      "rationale": "The PublicPath type is generated dynamically based on project entrypoints. By simply adding CSS extensions to the union type, existing code continues to work while new CSS entrypoints gain proper type support. This follows the open-closed principle - extending behavior without modifying existing working code.",
+      "alternatives_considered": [
+        "Creating a separate CSS-specific type",
+        "Changing the PublicPath type to a more generic format",
+        "Requiring explicit type annotations for CSS assets"
+      ],
+      "files_affected": [
+        "packages/wxt/src/core/generate-wxt-dir.ts"
+      ]
+    },
+    {
+      "dimension": "code_organization",
+      "recommendation": "Extracted extension determination logic into a dedicated helper function with clear type annotations",
+      "rationale": "The getEntrypointPublicExt() function provides a single source of truth for mapping entrypoint types to file extensions. The function's return type ('.html' | '.js' | '.css') explicitly documents what extensions are supported. This improves maintainability and makes it easier to add support for new entrypoint types in the future.",
+      "alternatives_considered": [
+        "Keeping the logic inline with the map() call",
+        "Using a configuration object or map instead of a switch statement",
+        "Placing the function in a separate utility module"
+      ],
+      "files_affected": [
+        "packages/wxt/src/core/generate-wxt-dir.ts"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Add CSS entrypoint support to PublicPath type generation",
+      "description": "Update the type generation logic to recognize content-script-style and unlisted-style entrypoints as CSS files in the generated paths.d.ts type definitions",
+      "files_to_modify": [
+        "packages/wxt/src/core/generate-wxt-dir.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-002",
+      "title": "Add E2E test for CSS entrypoint type generation",
+      "description": "Create an end-to-end test that verifies CSS entrypoints are correctly included in the generated browser.runtime.getURL path types",
+      "files_to_modify": [
+        "packages/wxt/e2e/tests/typescript-project.test.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation addresses a gap in the type system where CSS entrypoints (content-script-style and unlisted-style) were not being recognized in the generated PublicPath type definitions. Previously, only HTML and JavaScript entrypoints were included, causing TypeScript errors when developers tried to use browser.runtime.getURL() with CSS assets.\n\nThe core change introduces a new helper function getEntrypointPublicExt() that centralizes the logic for determining the public file extension for each entrypoint type. This function uses a switch statement to map entrypoint types to their appropriate extensions (.html, .js, or .css), with CSS support added for the two style entrypoint types. This function is then used in the path generation logic that creates the paths.d.ts type definitions.\n\nThe approach maintains backward compatibility while extending type safety to cover all supported entrypoint types. The addition of an E2E test ensures the fix works in a real project context, creating actual CSS entrypoints and verifying they appear correctly in the generated type definitions. This follows the existing patterns in the codebase where type generation is tested through integration tests rather than just unit tests.",
+  "source_pr": "https://github.com/wxt-dev/wxt/pull/2150",
+  "before_sha": "68fa36ef2bbe88c8935094fa37360b55eb90af0a",
+  "after_sha": "05e23e70b4bd0fcb07e5c25395c76695d0d1b7c7",
+  "diff_stats": {
+    "additions": 36,
+    "deletions": 1,
+    "files_changed": 2
+  }
+}

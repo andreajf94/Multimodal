@@ -1,0 +1,87 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "type_safety",
+      "recommendation": "Created a custom `WxtScripting` interface with type-safe `executeScript` methods that restrict the `files` option to valid `ScriptPublicPath` union types instead of generic string arrays.",
+      "rationale": "The existing implementation accepted any string array for script paths, leading to runtime errors when non-existent scripts were specified. By leveraging TypeScript's type system, we can catch these errors at compile time, improving developer experience and reducing bugs.",
+      "alternatives_considered": [
+        "Runtime validation with error messages",
+        "Keeping the loose typing and documenting the valid paths",
+        "Creating a separate helper function instead of modifying the type definitions"
+      ],
+      "files_affected": [
+        "packages/wxt/src/browser.ts"
+      ]
+    },
+    {
+      "dimension": "api_design",
+      "recommendation": "Used conditional type mapping with `ScriptInjection` to preserve all other properties of the injection object while only modifying the `files` property type.",
+      "rationale": "This approach maintains backward compatibility for all other properties of the injection object while providing targeted type safety for the `files` option. The `Omit<T, 'files'> & { files: ScriptPublicPath[] }` pattern ensures we don't break existing code that uses other properties.",
+      "alternatives_considered": [
+        "Creating a completely new interface for script injection",
+        "Using function overloads with different parameter types",
+        "Adding runtime validation that logs warnings instead of type errors"
+      ],
+      "files_affected": [
+        "packages/wxt/src/browser.ts"
+      ]
+    },
+    {
+      "dimension": "testing_strategy",
+      "recommendation": "Added a type-checking test in the demo package that uses `@ts-expect-error` to verify TypeScript correctly errors on invalid script paths.",
+      "rationale": "Since this is a type-level change, traditional runtime tests wouldn't catch the intended behavior. The `@ts-expect-error` directive ensures the TypeScript compiler produces errors for invalid paths, validating our type definitions work as intended.",
+      "alternatives_considered": [
+        "Adding runtime tests that would fail if invalid paths were allowed",
+        "Creating a separate TypeScript test file with assertion types",
+        "Relying on existing integration tests without specific type tests"
+      ],
+      "files_affected": [
+        "packages/wxt-demo/src/entrypoints/background.ts"
+      ]
+    },
+    {
+      "dimension": "backward_compatibility",
+      "recommendation": "Acknowledged this as a breaking change in the feature request but implemented it in a way that only affects consumers specifying non-existent scripts.",
+      "rationale": "The change improves type safety but will cause compilation errors for code that was previously passing invalid script paths. This is an acceptable trade-off as it catches real bugs early. Valid script paths continue to work without modification.",
+      "alternatives_considered": [
+        "Making the type change optional via a configuration flag",
+        "Providing a migration path with deprecation warnings",
+        "Keeping the old signature and adding a new type-safe alternative"
+      ],
+      "files_affected": [
+        "packages/wxt/src/browser.ts"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Add type safety to executeScript files option",
+      "description": "Update TypeScript definitions to restrict the `files` option in `browser.scripting.executeScript` to valid script paths using the `ScriptPublicPath` union type, preventing runtime errors from non-existent scripts.",
+      "files_to_modify": [
+        "packages/wxt/src/browser.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-002",
+      "title": "Add type-checking test for executeScript validation",
+      "description": "Create a test case in the demo package that verifies TypeScript correctly errors when invalid script paths are provided to `executeScript`, using `@ts-expect-error` directives.",
+      "files_to_modify": [
+        "packages/wxt-demo/src/entrypoints/background.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation adds type safety to the `browser.scripting.executeScript` API by creating a custom `WxtScripting` interface that overrides the `executeScript` method's type signature. The key innovation is the `ScriptInjection` conditional type, which maps the original injection type but replaces the `files: string[]` property with `files: ScriptPublicPath[]`. This ensures that only valid script paths (those that exist in the project) can be passed to the function, catching errors at compile time rather than runtime.\n\nThe approach maintains the existing API structure while enhancing type safety. The `WxtBrowser` type is extended to include the new `WxtScripting` interface, and the `browser` object is typed accordingly. A test in the demo package uses `@ts-expect-error` to verify that invalid paths trigger TypeScript errors, providing confidence that the type definitions work as intended.\n\nThis change represents a thoughtful balance between improving developer experience through better tooling (IDE autocomplete and compile-time validation) and acknowledging the breaking nature of the change for code that was previously passing invalid paths. The implementation leverages TypeScript's advanced type system features to create a more robust API without modifying runtime behavior.",
+  "source_pr": "https://github.com/wxt-dev/wxt/pull/2142",
+  "before_sha": "636cf1f8415f938659e3213c8c42ddc729f3aa22",
+  "after_sha": "42d65cb10b709a2710fba836470cebdefd3c53e0",
+  "diff_stats": {
+    "additions": 43,
+    "deletions": 1,
+    "files_changed": 2
+  }
+}

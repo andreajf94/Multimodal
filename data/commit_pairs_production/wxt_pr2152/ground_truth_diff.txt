@@ -1,0 +1,465 @@
+diff --git a/.github/workflows/release.yml b/.github/workflows/release.yml
+index d2eef0eeb..ab5bcfef4 100644
+--- a/.github/workflows/release.yml
++++ b/.github/workflows/release.yml
+@@ -10,6 +10,7 @@ on:
+           - analytics
+           - auto-icons
+           - i18n
++          - is-background
+           - module-react
+           - module-solid
+           - module-svelte
+diff --git a/.github/workflows/sync-releases.yml b/.github/workflows/sync-releases.yml
+index b26061bcc..c12a50b36 100644
+--- a/.github/workflows/sync-releases.yml
++++ b/.github/workflows/sync-releases.yml
+@@ -10,6 +10,7 @@ on:
+           - analytics
+           - auto-icons
+           - i18n
++          - is-background
+           - module-react
+           - module-solid
+           - module-svelte
+diff --git a/CONTRIBUTING.md b/CONTRIBUTING.md
+index 38315f909..3bf3adc52 100644
+--- a/CONTRIBUTING.md
++++ b/CONTRIBUTING.md
+@@ -163,13 +163,6 @@ cp -r templates/vanilla templates/<new-template-name>
+ 
+ That's it. Once your template is merged, it will be available inside `wxt init` immediately. You don't need to release a new version of WXT to release a new template.
+ 
+-## Releasing Updates
+-
+-Releases are done with GitHub actions:
+-
+-- Use the [Release workflow](https://github.com/wxt-dev/wxt/actions/workflows/release.yml) to release a single package in the monorepo. This automatically detects the version change with conventional commits, builds and uploads the package to NPM, and creates a GitHub release.
+-- Use the [Sync Releases workflow](https://github.com/wxt-dev/wxt/actions/workflows/sync-releases.yml) to sync the GitHub releases with changes to the changelog. To change a release, update the `CHANGELOG.md` file and run the workflow. It will sync the releases of a single package in the monorepo.
+-
+ ## Upgrading Dependencies
+ 
+ WXT has custom rules around what dependencies can be upgraded. Use the `scripts/upgrade-deps.ts` script to upgrade dependencies and follow these rules.
+diff --git a/MAINTAINERS.md b/MAINTAINERS.md
+index b25d31fb9..2e9bafc05 100644
+--- a/MAINTAINERS.md
++++ b/MAINTAINERS.md
+@@ -47,3 +47,44 @@ Here's an example of how to ask for a reproduction: <https://github.com/wxt-dev/
+ ## Add yourself as a code owner
+ 
+ If you want to be responsible for a specific package or directory, add yourself to the [`.github/CODEOWNERS`](https://github.com/wxt-dev/wxt/blob/main/.github/CODEOWNERS) file to get added as a reviewer to PRs automatically. You can also add yourself to the default list to be added as a reviewer on all PRs.
++
++## Releasing Package Updates
++
++Releases are done with GitHub actions:
++
++- Use the [Release workflow](https://github.com/wxt-dev/wxt/actions/workflows/release.yml) to release a single package in the monorepo. This automatically detects the version change with conventional commits, builds and uploads the package to NPM, and creates a GitHub release.
++- Use the [Sync Releases workflow](https://github.com/wxt-dev/wxt/actions/workflows/sync-releases.yml) to sync the GitHub releases with changes to the changelog. To change a release, update the `CHANGELOG.md` file and run the workflow. It will sync the releases of a single package in the monorepo.
++
++## Creating New Packages
++
++Example PR: <https://github.com/wxt-dev/wxt/pull/2152>
++
++1. Create the package.
++
++2. Update CI workflow inputs.
++
++3. Add docs page and version for "Other Packages" dropdown.
++
++4. Merge the PR.
++
++5. Tag the commit (look at other tags for pattern):
++
++   ```sh
++   git tag <dir-name>-v<version>
++   git push --tags
++   ```
++
++6. Publish the package to NPM:
++
++   ```sh
++   cd packages/<dir-name>
++   pnpm publish --access public
++   ```
++
++7. Create a basic release on GitHub mentioning the new package is available.
++
++A couple of things to note:
++
++- pkg.pr.new will fail on the original PR. It's fine to ignore and merge your PR as long as it fails due to your new package not being published to NPM yet.
++- The regular release workflow DOES NOT WORK for new packages. You have to have at least one `<dir-name>-v<version>` tag created before you can run that workflow for your new package.
++- You don't need to create a CHANGELOG.md file for the package, it will be created automatically after future changes are released via the normal release workflow.
+diff --git a/docs/.vitepress/config.ts b/docs/.vitepress/config.ts
+index cb0e9f599..6b2e9041b 100644
+--- a/docs/.vitepress/config.ts
++++ b/docs/.vitepress/config.ts
+@@ -16,6 +16,7 @@ import { version as unocssVersion } from '../../packages/unocss/package.json';
+ import { version as storageVersion } from '../../packages/storage/package.json';
+ import { version as analyticsVersion } from '../../packages/analytics/package.json';
+ import { version as runnerVersion } from '../../packages/runner/package.json';
++import { version as isBackgroundVersion } from '../../packages/is-background/package.json';
+ import addKnowledge from 'vitepress-knowledge';
+ import {
+   groupIconMdPlugin,
+@@ -44,6 +45,7 @@ const otherPackages = {
+   storage: storageVersion,
+   unocss: unocssVersion,
+   runner: runnerVersion,
++  'is-background': isBackgroundVersion,
+ };
+ 
+ const knowledge = addKnowledge<DefaultTheme.Config>({
+diff --git a/docs/is-background.md b/docs/is-background.md
+new file mode 100644
+index 000000000..8b99821fd
+--- /dev/null
++++ b/docs/is-background.md
+@@ -0,0 +1 @@
++<!--@include: ../packages/is-background/README.md-->
+diff --git a/packages/is-background/README.md b/packages/is-background/README.md
+new file mode 100644
+index 000000000..f1afc0539
+--- /dev/null
++++ b/packages/is-background/README.md
+@@ -0,0 +1,17 @@
++# `@wxt-dev/is-background`
++
++Exports a getter to determine if the current JS context is the background or not.
++
++## Installation
++
++```sh
++pnpm add @wxt-dev/is-background
++```
++
++## Usage
++
++```ts
++import { isBackground } from '@wxt-dev/is-background';
++
++isBackground(); // true | false
++```
+diff --git a/packages/is-background/package.json b/packages/is-background/package.json
+new file mode 100644
+index 000000000..fb1d17a6d
+--- /dev/null
++++ b/packages/is-background/package.json
+@@ -0,0 +1,56 @@
++{
++  "name": "@wxt-dev/is-background",
++  "type": "module",
++  "version": "1.0.0",
++  "description": "Check if the current context is the background or not.",
++  "license": "MIT",
++  "scripts": {
++    "build": "buildc -- tsdown",
++    "check": "pnpm build && check",
++    "test": "buildc --deps-only -- vitest",
++    "test:coverage": "pnpm test run --coverage",
++    "prepack": "pnpm build"
++  },
++  "dependencies": {
++    "@wxt-dev/browser": "workspace:^"
++  },
++  "devDependencies": {
++    "oxlint": "^1.43.0",
++    "publint": "^0.3.17",
++    "typescript": "^5.9.3",
++    "vitest": "^4.0.18"
++  },
++  "repository": {
++    "type": "git",
++    "url": "git+https://github.com/wxt-dev/wxt.git",
++    "directory": "packages/is-background"
++  },
++  "keywords": [
++    "wxt",
++    "chrome",
++    "web",
++    "extension",
++    "is",
++    "background",
++    "script",
++    "page",
++    "service",
++    "worker"
++  ],
++  "author": {
++    "name": "Aaron Klinker",
++    "email": "aaronklinker1+wxt@gmail.com"
++  },
++  "funding": "https://github.com/sponsors/wxt-dev",
++  "files": [
++    "dist"
++  ],
++  "types": "./dist/index.d.mts",
++  "module": "./dist/index.mjs",
++  "exports": {
++    ".": {
++      "types": "./dist/index.d.mts",
++      "default": "./dist/index.mjs"
++    }
++  }
++}
+diff --git a/packages/is-background/src/__tests__/getter.test.ts b/packages/is-background/src/__tests__/getter.test.ts
+new file mode 100644
+index 000000000..65be10076
+--- /dev/null
++++ b/packages/is-background/src/__tests__/getter.test.ts
+@@ -0,0 +1,145 @@
++import { describe, it, vi, expect } from 'vitest';
++import { getIsBackground } from '../getter';
++
++let mockBrowser: any;
++vi.mock('@wxt-dev/browser', () => ({
++  get browser() {
++    return mockBrowser;
++  },
++}));
++
++const backgroundWindow = Symbol('Background');
++const otherWindow = Symbol('Other');
++
++function setupEnv(options: {
++  window: symbol | undefined;
++  hasExtensionApis: boolean;
++  hasGetBackgroundPage: boolean;
++  hasServiceWorkerGlobalScope: boolean;
++}): void {
++  vi.unstubAllGlobals();
++  mockBrowser = undefined;
++
++  if (options.window) {
++    vi.stubGlobal('window', options.window);
++  }
++
++  if (options.hasExtensionApis) {
++    mockBrowser = {
++      runtime: {
++        id: 'test',
++      },
++      ...(options.hasGetBackgroundPage && {
++        extension: {
++          getBackgroundPage: () => backgroundWindow,
++        },
++      }),
++    };
++  }
++
++  if (options.hasServiceWorkerGlobalScope) {
++    class ServiceWorkerGlobalScope {}
++    vi.stubGlobal('ServiceWorkerGlobalScope', ServiceWorkerGlobalScope);
++    vi.stubGlobal('self', new ServiceWorkerGlobalScope());
++  }
++}
++
++describe('isBackground Getter', () => {
++  describe('Non-extension contexts', () => {
++    it('should return false', () => {
++      setupEnv({
++        hasServiceWorkerGlobalScope: false,
++        hasExtensionApis: false,
++        hasGetBackgroundPage: false,
++        window: otherWindow,
++      });
++
++      expect(getIsBackground()).toBe(false);
++    });
++  });
++
++  describe('Chromium & Safari', () => {
++    const hasExtensionApis = true;
++
++    describe('MV2', () => {
++      const hasServiceWorkerGlobalScope = false;
++      const hasGetBackgroundPage = true;
++
++      it('should return true inside the background page', () => {
++        setupEnv({
++          hasServiceWorkerGlobalScope,
++          hasExtensionApis,
++          hasGetBackgroundPage,
++          window: backgroundWindow,
++        });
++
++        expect(getIsBackground()).toBe(true);
++      });
++
++      it('should return false outside the background page', () => {
++        setupEnv({
++          hasServiceWorkerGlobalScope,
++          hasExtensionApis,
++          hasGetBackgroundPage,
++          window: otherWindow,
++        });
++
++        expect(getIsBackground()).toBe(false);
++      });
++    });
++
++    describe('MV3', () => {
++      const hasGetBackgroundPage = false;
++
++      it('should return true inside the service worker', () => {
++        setupEnv({
++          hasServiceWorkerGlobalScope: true,
++          hasExtensionApis,
++          hasGetBackgroundPage,
++          window: undefined,
++        });
++
++        expect(getIsBackground()).toBe(true);
++      });
++
++      it('should return false outside the service worker', () => {
++        setupEnv({
++          hasServiceWorkerGlobalScope: false,
++          hasExtensionApis,
++          hasGetBackgroundPage,
++          window: otherWindow,
++        });
++
++        expect(getIsBackground()).toBe(false);
++      });
++    });
++  });
++
++  describe('Firefox, MV2 & MV3', () => {
++    const hasServiceWorkerGlobalScope = false;
++    const hasExtensionApis = true;
++    const hasGetBackgroundPage = true;
++
++    it('should return true inside the background page', () => {
++      setupEnv({
++        hasServiceWorkerGlobalScope,
++        hasExtensionApis,
++        hasGetBackgroundPage,
++        window: backgroundWindow,
++      });
++
++      expect(getIsBackground()).toBe(true);
++    });
++
++    it('should return false outside the background page', () => {
++      setupEnv({
++        hasServiceWorkerGlobalScope,
++        hasExtensionApis,
++        hasGetBackgroundPage,
++        window: otherWindow,
++      });
++
++      expect(getIsBackground()).toBe(false);
++    });
++  });
++});
+diff --git a/packages/is-background/src/getter.ts b/packages/is-background/src/getter.ts
+new file mode 100644
+index 000000000..700f98bce
+--- /dev/null
++++ b/packages/is-background/src/getter.ts
+@@ -0,0 +1,32 @@
++import { browser } from '@wxt-dev/browser';
++
++declare class ServiceWorkerGlobalScope {}
++
++export function getIsBackground(): boolean {
++  // Are we in an extension context?
++  if (!browser?.runtime?.id) return false;
++
++  // Is this a true MV3 service worker?
++  //
++  // - ✅ Chromium MV3
++  // - ❌ Firefox MV3 - Uses a non-persistent HTML page instead of a service worker.
++  // - ✅ Safari MV3
++  if (
++    typeof ServiceWorkerGlobalScope !== 'undefined' &&
++    self instanceof ServiceWorkerGlobalScope
++  ) {
++    return true;
++  }
++
++  // Is this the background page?
++  //
++  // - ✅ Chromium MV2
++  // - ✅ Firefox MV2
++  // - ✅ Firefox MV3 - Works with the non-persistent HTML page
++  // - ✅ Safari MV2
++  return (
++    typeof window !== 'undefined' &&
++    typeof browser.extension?.getBackgroundPage === 'function' &&
++    browser.extension.getBackgroundPage() === window
++  );
++}
+diff --git a/packages/is-background/src/index.ts b/packages/is-background/src/index.ts
+new file mode 100644
+index 000000000..4b03d4d1e
+--- /dev/null
++++ b/packages/is-background/src/index.ts
+@@ -0,0 +1,27 @@
++/**
++ * This module uses a lazy getter function so the logic isn't ran until it's needed.
++ *
++ * This has a few benefits:
++ * 1. Easier to mock in tests
++ * 2. Safe to import in NodeJS environments (but it should be safe to run just in-case)
++ * 3. Keeps startup fast by waiting to run the slow functions (`instanceof` or `browser.extension.getBackgroundPage`) until needed
++ *
++ * @module @wxt-dev/is-background
++ */
++import { getIsBackground } from './getter';
++
++let cached: boolean | undefined;
++
++/**
++ * Getter that returns if the current context is apart of an extension's
++ * background or not.
++ *
++ * > This function caches the result when called for the first time so it
++ * > doesn't have to recalculate.
++ *
++ * @returns true when in a background page or service worker.
++ */
++export function isBackground(): boolean {
++  if (cached == null) cached = getIsBackground();
++  return cached;
++}
+diff --git a/packages/is-background/tsconfig.json b/packages/is-background/tsconfig.json
+new file mode 100644
+index 000000000..9b2dc061d
+--- /dev/null
++++ b/packages/is-background/tsconfig.json
+@@ -0,0 +1,4 @@
++{
++  "extends": "../../tsconfig.base.json",
++  "exclude": ["node_modules/**", "dist/**"]
++}
+diff --git a/pnpm-lock.yaml b/pnpm-lock.yaml
+index 2068c0d6d..b98e70129 100644
+--- a/pnpm-lock.yaml
++++ b/pnpm-lock.yaml
+@@ -225,6 +225,25 @@ importers:
+         specifier: workspace:*
+         version: link:../wxt
+ 
++  packages/is-background:
++    dependencies:
++      '@wxt-dev/browser':
++        specifier: workspace:^
++        version: link:../browser
++    devDependencies:
++      oxlint:
++        specifier: ^1.43.0
++        version: 1.43.0
++      publint:
++        specifier: ^0.3.17
++        version: 0.3.17
++      typescript:
++        specifier: ^5.9.3
++        version: 5.9.3
++      vitest:
++        specifier: ^4.0.18
++        version: 4.0.18(@types/node@20.19.32)(happy-dom@20.5.0)(jiti@2.6.1)(sass@1.97.3)(tsx@4.21.0)(yaml@2.8.2)
++
+   packages/module-react:
+     dependencies:
+       '@vitejs/plugin-react':

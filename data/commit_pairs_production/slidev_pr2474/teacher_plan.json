@@ -1,0 +1,70 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "dependency_management",
+      "recommendation": "Added vscode-uri as a dependency to the VS Code extension package using the existing catalog system",
+      "rationale": "The vscode-uri package is required for proper URI handling in VS Code extensions but was missing from the dependencies. This is a standard VS Code API utility that provides consistent URI parsing and manipulation across different VS Code versions and platforms. The dependency was added using the existing 'catalog:vscode' pattern to maintain consistency with other VS Code-specific dependencies.",
+      "alternatives_considered": [
+        "Using Node.js built-in URL/Path modules (insufficient for VS Code's URI requirements)",
+        "Implementing custom URI handling (error-prone and would duplicate existing functionality)",
+        "Adding as a devDependency (incorrect since it's needed at runtime)"
+      ],
+      "files_affected": [
+        "packages/vscode/package.json",
+        "pnpm-lock.yaml",
+        "pnpm-workspace.yaml"
+      ]
+    },
+    {
+      "dimension": "workspace_management",
+      "recommendation": "Updated all three package management files in a single atomic change",
+      "rationale": "In a pnpm monorepo, dependencies must be declared in three places: the package's package.json, the workspace-wide catalog (pnpm-workspace.yaml), and the lockfile (pnpm-lock.yaml). This ensures consistent versioning across the workspace and proper installation. The change follows the established pattern where VS Code extension dependencies are managed through a dedicated catalog section.",
+      "alternatives_considered": [
+        "Only updating package.json (would break installation)",
+        "Using different versions across packages (would cause conflicts)",
+        "Adding to root package.json (incorrect scoping for workspace package)"
+      ],
+      "files_affected": [
+        "packages/vscode/package.json",
+        "pnpm-lock.yaml",
+        "pnpm-workspace.yaml"
+      ]
+    },
+    {
+      "dimension": "version_pinning",
+      "recommendation": "Used semantic versioning with caret (^) for flexible but controlled updates",
+      "rationale": "The version specifier '^3.1.0' allows automatic updates to future minor and patch versions while preventing breaking changes from major version updates. This balances stability with the ability to receive bug fixes and improvements. The version was likely chosen based on compatibility with the current VS Code API version used by the extension.",
+      "alternatives_considered": [
+        "Exact version pinning (too restrictive for security patches)",
+        "Wildcard versioning (too risky for production dependencies)",
+        "Version ranges without upper bound (could introduce breaking changes)"
+      ],
+      "files_affected": [
+        "pnpm-workspace.yaml"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Add missing vscode-uri dependency to VS Code extension",
+      "description": "Add the vscode-uri package as a runtime dependency to enable proper URI handling functionality in the VS Code extension. This package is essential for working with VS Code's URI system but was accidentally omitted from the dependencies.",
+      "files_to_modify": [
+        "packages/vscode/package.json",
+        "pnpm-lock.yaml",
+        "pnpm-workspace.yaml"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "This change addresses a missing dependency in the Slidev VS Code extension by adding the vscode-uri package through the established pnpm workspace dependency management system. The implementation follows the existing architectural patterns of the codebase by updating all three required configuration files in a coordinated manner.\n\nThe change is minimal but essential - vscode-uri is a core VS Code API utility that provides consistent URI parsing and manipulation across different VS Code versions. Without this dependency, the extension would likely fail or behave incorrectly when handling file paths, workspace URIs, or other URI-related operations. The dependency is added to the 'catalog:vscode' section, which groups all VS Code-specific dependencies together for better organization.\n\nThis fix demonstrates proper monorepo dependency management in a pnpm workspace, where dependencies must be declared in the package's manifest, the workspace catalog, and the lockfile. The version specifier uses semantic versioning with a caret (^) to allow safe updates while preventing breaking changes. This approach maintains consistency with the existing dependency patterns while fixing a functional gap in the extension.",
+  "source_pr": "https://github.com/slidevjs/slidev/pull/2474",
+  "before_sha": "430bcd1d1792ec756b825d012c694043c2f8d6fb",
+  "after_sha": "34348a1a422289f2307f98da3bcb9fc50d1ee796",
+  "diff_stats": {
+    "additions": 8,
+    "deletions": 0,
+    "files_changed": 3
+  }
+}

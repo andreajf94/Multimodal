@@ -1,0 +1,74 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "trait_resolution",
+      "recommendation": "Used fully qualified syntax (FQS) to explicitly call the correct trait method implementation",
+      "rationale": "When both TypedPath and OptionalFromRequestParts traits are in scope, Rust's trait resolution can become ambiguous. The compiler might call the wrong trait method due to overlapping implementations. By using fully qualified syntax (<Type as Trait>::method), we explicitly specify which trait implementation to use, eliminating any ambiguity.",
+      "alternatives_considered": [
+        "Adding a where clause to constrain trait bounds",
+        "Using turbofish syntax with method calls",
+        "Restructuring the trait hierarchy to avoid conflicts"
+      ],
+      "files_affected": [
+        "axum-macros/src/typed_path.rs"
+      ]
+    },
+    {
+      "dimension": "backward_compatibility",
+      "recommendation": "Maintained the same functional behavior while only changing the method invocation syntax",
+      "rationale": "The change only affects how the trait method is called, not what it does or its signature. This ensures that all existing code using TypedPath continues to work without modification. The generated code still produces the same Path extractor and performs the same error mapping.",
+      "alternatives_considered": [
+        "Changing the trait signatures",
+        "Introducing a new macro variant",
+        "Requiring users to add explicit type annotations"
+      ],
+      "files_affected": [
+        "axum-macros/src/typed_path.rs"
+      ]
+    },
+    {
+      "dimension": "macro_code_generation",
+      "recommendation": "Modified the code generation in the typed_path macro to produce unambiguous trait method calls",
+      "rationale": "The macro generates Rust code that users don't directly see. By fixing the generated code to use fully qualified syntax, we prevent compilation errors for users who have both TypedPath and OptionalFromRequestParts in their projects. This is a proactive fix that handles edge cases in trait resolution.",
+      "alternatives_considered": [
+        "Documenting the conflict and asking users to work around it",
+        "Adding a compiler hint attribute",
+        "Generating different code based on feature flags"
+      ],
+      "files_affected": [
+        "axum-macros/src/typed_path.rs"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Fix trait resolution conflict in TypedPath macro",
+      "description": "Resolve compilation errors when both TypedPath and OptionalFromRequestParts traits are in scope by using fully qualified syntax for trait method calls",
+      "files_to_modify": [
+        "axum-macros/src/typed_path.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-002",
+      "title": "Update changelog for trait conflict fix",
+      "description": "Document the fix in the CHANGELOG to inform users about the resolved compilation issue",
+      "files_to_modify": [
+        "axum-macros/CHANGELOG.md"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The fix addresses a subtle trait resolution conflict in Rust's type system that occurs when both TypedPath and OptionalFromRequestParts traits are implemented on the same type. The issue manifested as a compilation error where the wrong trait method was being invoked due to ambiguous trait resolution.\n\nThe solution uses fully qualified syntax (FQS) to explicitly specify which trait implementation should be used. Instead of calling `::axum::extract::Path::from_request_parts(parts, state)`, which relies on Rust's trait resolution rules, the fix generates `<::axum::extract::Path<#ident> as ::axum::extract::FromRequestParts<S>>::from_request_parts(parts, state)`. This explicitly states that we want the FromRequestParts trait implementation for Path<T>, eliminating any ambiguity with other traits that might have similarly named methods.\n\nThis change is minimal and surgical\u2014it only affects the code generation in the typed_path macro and doesn't change any public APIs or behavior. The fix maintains backward compatibility while resolving the compilation error for users who encounter this specific trait conflict. The approach follows Rust best practices for disambiguating trait methods and ensures the framework remains robust in complex trait scenarios.",
+  "source_pr": "https://github.com/tokio-rs/axum/pull/3645",
+  "before_sha": "e1dfb330ae3f006144d0691882ba66b0d7374283",
+  "after_sha": "c972bcba9609c12581334e15fe4a28b497742fb5",
+  "diff_stats": {
+    "additions": 5,
+    "deletions": 1,
+    "files_changed": 2
+  }
+}

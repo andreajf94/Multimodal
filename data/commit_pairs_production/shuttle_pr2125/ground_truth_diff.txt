@@ -1,0 +1,1215 @@
+diff --git a/cargo-shuttle/src/args.rs b/cargo-shuttle/src/args.rs
+index b8db4a8d5..e12dd7c1f 100644
+--- a/cargo-shuttle/src/args.rs
++++ b/cargo-shuttle/src/args.rs
+@@ -2,10 +2,10 @@ use std::{
+     ffi::OsString,
+     fs::create_dir_all,
+     io::{self, ErrorKind},
+-    path::PathBuf,
++    path::{Path, PathBuf},
+ };
+ 
+-use anyhow::{bail, Context};
++use anyhow::Context;
+ use clap::{
+     builder::{OsStringValueParser, PossibleValue, TypedValueParser},
+     Args, Parser, Subcommand, ValueEnum,
+@@ -83,28 +83,40 @@ pub struct ProjectArgs {
+ }
+ 
+ impl ProjectArgs {
+-    pub fn workspace_path(&self) -> anyhow::Result<PathBuf> {
+-        cargo_metadata(self.working_directory.as_path()).map(|meta| meta.workspace_root.into())
++    pub fn working_directory(&self) -> &Path {
++        self.working_directory.as_path()
+     }
+ 
+-    pub fn project_name(&self) -> anyhow::Result<String> {
+-        let workspace_path = self.workspace_path()?;
+-        // This second call to cargo metadata in the workspace root seems superfluous,
+-        // but it does give a different output if the previous one was run in a workspace member.
+-        let meta = cargo_metadata(workspace_path.as_path())?;
++    pub fn workspace_path(&self) -> PathBuf {
++        self.cargo_workspace_path()
++            .unwrap_or(self.working_directory.clone())
++    }
+ 
+-        let package_name = if let Some(root_package) = meta.root_package() {
+-            root_package.name.to_string()
+-        } else {
+-            workspace_path
+-                .file_name()
+-                .context("failed to get project name from workspace path")?
+-                .to_os_string()
+-                .into_string()
+-                .expect("workspace directory name should be valid unicode")
+-        };
++    fn cargo_workspace_path(&self) -> anyhow::Result<PathBuf> {
++        cargo_metadata(self.working_directory.as_path()).map(|meta| meta.workspace_root.into())
++    }
+ 
+-        Ok(package_name)
++    /// Try to use the workspace root package name if it exists,
++    ///     else the name of the cargo workspace root dir,
++    ///     else the name of the working dir.
++    /// Errors on invalid dir names.
++    pub fn local_project_name(&self) -> anyhow::Result<String> {
++        Ok(
++            if let Some(name) = cargo_metadata(self.working_directory.as_path())
++                .ok()
++                .and_then(|meta| meta.root_package().map(|rp| rp.to_owned()))
++                .map(|rp| rp.name.to_string())
++            {
++                name
++            } else {
++                self.workspace_path()
++                    .file_name()
++                    .context("expected workspace path to have name")?
++                    .to_os_string()
++                    .into_string()
++                    .map_err(|_| anyhow::anyhow!("workspace path name is not valid unicode"))?
++            },
++        )
+     }
+ }
+ 
+@@ -492,9 +504,10 @@ pub struct TemplateLocation {
+ }
+ 
+ impl InitArgs {
++    /// Turns the template arg or git args to a repo+folder, if present.
+     pub fn git_template(&self) -> anyhow::Result<Option<TemplateLocation>> {
+         if self.from.is_some() && self.template.is_some() {
+-            bail!("Template and From args can not be set at the same time.");
++            anyhow::bail!("Template and From args can not be set at the same time.");
+         }
+         Ok(if let Some(from) = self.from.clone() {
+             Some(TemplateLocation {
+@@ -674,7 +687,7 @@ mod tests {
+         };
+ 
+         assert_eq!(
+-            project_args.workspace_path().unwrap(),
++            project_args.workspace_path(),
+             path_from_workspace_root("examples/axum/hello-world/")
+         );
+     }
+@@ -687,10 +700,7 @@ mod tests {
+             id: None,
+         };
+ 
+-        assert_eq!(
+-            project_args.project_name().unwrap().to_string(),
+-            "hello-world"
+-        );
++        assert_eq!(project_args.local_project_name().unwrap(), "hello-world");
+     }
+ 
+     #[test]
+@@ -703,9 +713,17 @@ mod tests {
+             id: None,
+         };
+ 
+-        assert_eq!(
+-            project_args.project_name().unwrap().to_string(),
+-            "workspace"
+-        );
++        assert_eq!(project_args.local_project_name().unwrap(), "workspace");
++    }
++
++    #[test]
++    fn project_name_in_non_rust_dir() {
++        let project_args = ProjectArgs {
++            working_directory: "/home".into(),
++            name: None,
++            id: None,
++        };
++
++        assert_eq!(project_args.local_project_name().unwrap(), "home");
+     }
+ }
+diff --git a/cargo-shuttle/src/config.rs b/cargo-shuttle/src/config.rs
+index b026c42d4..49853e3bb 100644
+--- a/cargo-shuttle/src/config.rs
++++ b/cargo-shuttle/src/config.rs
+@@ -37,9 +37,6 @@ impl ConfigManager for LocalConfigManager {
+ /// Shuttle.toml schema (User-facing project-local config)
+ #[derive(Deserialize, Serialize, Default)]
+ pub struct ProjectConfig {
+-    // unused on new platform, but still used for project names in local runs
+-    // TODO: remove and use the crate/workspace name instead
+-    pub name: Option<String>,
+     /// Deprecated, now [`ProjectDeployConfig::include`]
+     pub assets: Option<Vec<String>>,
+     pub deploy: Option<ProjectDeployConfig>,
+@@ -98,9 +95,7 @@ impl RequestContext {
+     }
+ 
+     pub fn load_local_internal_config(&mut self, project_args: &ProjectArgs) -> Result<()> {
+-        let workspace_path = project_args
+-            .workspace_path()
+-            .unwrap_or(project_args.working_directory.clone());
++        let workspace_path = project_args.workspace_path();
+ 
+         trace!(
+             "looking for .shuttle/config.toml in {}",
+@@ -189,19 +184,15 @@ impl RequestContext {
+     }
+ 
+     /// Load the Shuttle.toml project configuration at the given `working_directory`
+-    pub fn load_local_config(&mut self, project_args: &ProjectArgs) -> Result<()> {
+-        self.project = Some(Self::get_local_config(project_args)?);
++    pub fn load_local_config(&mut self, workspace_path: &Path) -> Result<()> {
++        self.project = Some(Self::get_local_config(workspace_path)?);
+ 
+         Ok(())
+     }
+ 
+     fn get_local_config(
+-        project_args: &ProjectArgs,
++        workspace_path: &Path,
+     ) -> Result<Config<LocalConfigManager, ProjectConfig>> {
+-        let workspace_path = project_args
+-            .workspace_path()
+-            .unwrap_or(project_args.working_directory.clone());
+-
+         trace!("looking for Shuttle.toml in {}", workspace_path.display());
+ 
+         // check that the uppercase file does not exist so a false warning is not printed on case-insensitive file systems
+@@ -221,31 +212,6 @@ impl RequestContext {
+             project.open()?;
+         }
+ 
+-        let config = project.as_mut().unwrap();
+-
+-        // Project names are preferred in this order:
+-        // 1. Name given on command line
+-        // 2. Name from Shuttle.toml file
+-        // 3. Name from Cargo.toml package if it's a crate
+-        // 4. Name from the workspace directory if it's a workspace
+-        match (&project_args.name, &config.name) {
+-            // Command-line name parameter trumps everything
+-            (Some(name_from_args), _) => {
+-                trace!("using command-line project name");
+-                config.name = Some(name_from_args.clone());
+-            }
+-            // If key exists in config then keep it as it is
+-            (None, Some(_)) => {
+-                trace!("using Shuttle.toml project name");
+-            }
+-            // If name key is not in project config, then we infer from crate name
+-            (None, None) => {
+-                trace!("using crate name as project name");
+-                config.name = Some(project_args.project_name()?);
+-            }
+-        };
+-        // now, `config.name` is always Some
+-
+         Ok(project)
+     }
+ 
+@@ -299,22 +265,6 @@ impl RequestContext {
+         self.global.save()
+     }
+ 
+-    /// Get the current project name.
+-    ///
+-    /// # Panics
+-    /// Panics if the project configuration has not been loaded.
+-    pub fn project_name(&self) -> &str {
+-        self.project
+-            .as_ref()
+-            .unwrap()
+-            .as_ref()
+-            .unwrap()
+-            .name
+-            .as_ref()
+-            .unwrap()
+-            .as_str()
+-    }
+-
+     /// # Panics
+     /// Panics if the project configuration has not been loaded.
+     pub fn include(&self) -> Option<&Vec<String>> {
+@@ -376,61 +326,3 @@ impl RequestContext {
+             .as_str()
+     }
+ }
+-
+-#[cfg(test)]
+-mod tests {
+-    use std::path::PathBuf;
+-
+-    use crate::{args::ProjectArgs, config::RequestContext};
+-
+-    use super::{Config, LocalConfigManager, ProjectConfig};
+-
+-    fn path_from_workspace_root(path: &str) -> PathBuf {
+-        PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap())
+-            .join("..")
+-            .join(path)
+-    }
+-
+-    fn unwrap_project_name(config: &Config<LocalConfigManager, ProjectConfig>) -> String {
+-        config.as_ref().unwrap().name.as_ref().unwrap().to_string()
+-    }
+-
+-    #[test]
+-    fn get_local_config_finds_name_in_cargo_toml() {
+-        let project_args = ProjectArgs {
+-            working_directory: path_from_workspace_root("examples/axum/hello-world/"),
+-            name: None,
+-            id: None,
+-        };
+-
+-        let local_config = RequestContext::get_local_config(&project_args).unwrap();
+-
+-        assert_eq!(unwrap_project_name(&local_config), "hello-world");
+-    }
+-
+-    #[test]
+-    fn get_local_config_finds_name_from_workspace_dir() {
+-        let project_args = ProjectArgs {
+-            working_directory: path_from_workspace_root("examples/rocket/workspace/hello-world/"),
+-            name: None,
+-            id: None,
+-        };
+-
+-        let local_config = RequestContext::get_local_config(&project_args).unwrap();
+-
+-        assert_eq!(unwrap_project_name(&local_config), "workspace");
+-    }
+-
+-    #[test]
+-    fn setting_name_overrides_name_in_config() {
+-        let project_args = ProjectArgs {
+-            working_directory: path_from_workspace_root("examples/axum/hello-world/"),
+-            name: Some("my-fancy-project-name".to_owned()),
+-            id: None,
+-        };
+-
+-        let local_config = RequestContext::get_local_config(&project_args).unwrap();
+-
+-        assert_eq!(unwrap_project_name(&local_config), "my-fancy-project-name");
+-    }
+-}
+diff --git a/cargo-shuttle/src/lib.rs b/cargo-shuttle/src/lib.rs
+index d09c9a5bb..af973380c 100644
+--- a/cargo-shuttle/src/lib.rs
++++ b/cargo-shuttle/src/lib.rs
+@@ -273,14 +273,18 @@ impl Shuttle {
+             }
+             Command::Feedback => open_gh_issue().map(|_| CommandOutput::None),
+             Command::Run(run_args) => {
+-                self.ctx.load_local_config(&args.project_args)?;
+-                self.local_run(run_args, args.debug)
++                self.ctx
++                    .load_local_config(&args.project_args.workspace_path())?;
++                self.local_run(&args.project_args, run_args, args.debug)
+                     .await
+                     .map(|_| CommandOutput::None)
+             }
+             Command::Build(build_args) => {
+-                self.ctx.load_local_config(&args.project_args)?;
+-                self.build(&build_args).await.map(|_| CommandOutput::None)
++                self.ctx
++                    .load_local_config(&args.project_args.workspace_path())?;
++                self.build(&args.project_args, &build_args)
++                    .await
++                    .map(|_| CommandOutput::None)
+             }
+             Command::Deploy(deploy_args) => self.deploy(deploy_args).await,
+             Command::Logs(logs_args) => self.logs(logs_args).await.map(|_| CommandOutput::None),
+@@ -383,15 +387,14 @@ impl Shuttle {
+         provided_path_to_init: bool,
+         offline: bool,
+     ) -> Result<()> {
+-        // Turns the template or git args (if present) to a repo+folder.
+         let git_template = args.git_template()?;
+         let no_git = args.no_git;
++        let should_link = project_args.id.is_some();
+ 
+         let needs_name = project_args.name.is_none();
+         let needs_template = git_template.is_none();
+         let needs_path = !provided_path_to_init;
+         let needs_login = self.ctx.api_key().is_err() && args.login_args.api_key.is_none();
+-        let should_link = project_args.id.is_some();
+         let interactive = needs_name || needs_template || needs_path || needs_login;
+ 
+         let theme = ColorfulTheme::default();
+@@ -412,7 +415,7 @@ impl Shuttle {
+             let name: String = if let Some(name) = project_args.name.clone() {
+                 name
+             } else {
+-                // not using `validate_with` due to being blocking.
++                // not using `validate_with` due to being blocking, whereas name validation requests are async
+                 Input::with_theme(&theme)
+                     .with_prompt("Project name")
+                     .interact()?
+@@ -716,7 +719,7 @@ impl Shuttle {
+     ) -> Result<()> {
+         trace!("project arguments: {project_args:?}");
+ 
+-        self.ctx.load_local_config(project_args)?;
++        self.ctx.load_local_config(&project_args.workspace_path())?;
+         // load project id from args if given or from internal config file if present
+         self.ctx.load_local_internal_config(project_args)?;
+ 
+@@ -774,6 +777,7 @@ impl Shuttle {
+             (true, false) => (),
+             // we still don't know the project id, so ask the user interactively
+             (false, _) => {
++                // TODO: ensure linking only happens when working directory is resolved to a valid workspace (rust project)
+                 trace!("no project id found");
+                 self.project_link_interactive().await?;
+             }
+@@ -1392,7 +1396,7 @@ impl Shuttle {
+         Ok(Some(secrets))
+     }
+ 
+-    async fn build(&self, build_args: &BuildArgs) -> Result<()> {
++    async fn build(&self, project_args: &ProjectArgs, build_args: &BuildArgs) -> Result<()> {
+         eprintln!("WARN: The build command is EXPERIMENTAL. Please submit feedback on GitHub or Discord if you encounter issues.");
+         if let Some(path) = build_args.output_archive.as_ref() {
+             let archive = self.make_archive()?;
+@@ -1400,7 +1404,8 @@ impl Shuttle {
+             fs::write(path, archive).context("writing archive")?;
+             Ok(())
+         } else if build_args.inner.docker {
+-            self.local_docker_build(&build_args.inner).await
++            self.local_docker_build(project_args, &build_args.inner)
++                .await
+         } else {
+             self.local_build(&build_args.inner).await.map(|_| ())
+         }
+@@ -1434,8 +1439,13 @@ impl Shuttle {
+         };
+     }
+ 
+-    async fn local_run(&self, mut run_args: RunArgs, debug: bool) -> Result<()> {
+-        let project_name = self.ctx.project_name().to_owned();
++    async fn local_run(
++        &self,
++        project_args: &ProjectArgs,
++        mut run_args: RunArgs,
++        debug: bool,
++    ) -> Result<()> {
++        let project_name = project_args.local_project_name()?;
+         let project_directory = self.ctx.project_directory();
+ 
+         trace!("starting a local run with args: {run_args:?}");
+@@ -1468,7 +1478,8 @@ impl Shuttle {
+ 
+             Some((service, runtime_executable))
+         } else {
+-            self.local_docker_build(&run_args.build_args).await?;
++            self.local_docker_build(project_args, &run_args.build_args)
++                .await?;
+             None
+         };
+ 
+@@ -1708,8 +1719,12 @@ impl Shuttle {
+         Ok(())
+     }
+ 
+-    async fn local_docker_build(&self, build_args: &BuildArgsShared) -> Result<()> {
+-        let project_name = self.ctx.project_name().to_owned();
++    async fn local_docker_build(
++        &self,
++        project_args: &ProjectArgs,
++        build_args: &BuildArgsShared,
++    ) -> Result<()> {
++        let project_name = project_args.local_project_name()?;
+         let project_directory = self.ctx.project_directory();
+ 
+         let metadata = cargo_metadata(project_directory)?;
+@@ -2363,18 +2378,4 @@ mod tests {
+         ];
+         assert_eq!(entries, expected);
+     }
+-
+-    #[tokio::test]
+-    async fn finds_workspace_root() {
+-        let project_args = ProjectArgs {
+-            working_directory: path_from_workspace_root("examples/axum/hello-world/src"),
+-            name: None,
+-            id: None,
+-        };
+-
+-        assert_eq!(
+-            project_args.workspace_path().unwrap(),
+-            path_from_workspace_root("examples/axum/hello-world")
+-        );
+-    }
+ }
+diff --git a/cargo-shuttle/tests/integration/init.rs b/cargo-shuttle/tests/integration/init.rs
+index 26b56ff8e..428bd09e2 100644
+--- a/cargo-shuttle/tests/integration/init.rs
++++ b/cargo-shuttle/tests/integration/init.rs
+@@ -2,39 +2,36 @@ use std::fs::read_to_string;
+ use std::path::Path;
+ use std::process::Command;
+ 
+-use cargo_shuttle::{args::ShuttleArgs, Shuttle};
+-use clap::Parser;
+ use indoc::indoc;
+ use tempfile::Builder;
+ 
+ // quite high timeout since the template is being cloned over network
+ const EXPECT_TIMEOUT_MS: u64 = 10000;
++const TEST_API_KEY: &str = "0000000000000000";
+ 
+ #[tokio::test]
+-async fn non_interactive_basic_init() {
++async fn basic_init() {
+     let temp_dir = Builder::new().prefix("basic-init").tempdir().unwrap();
+     // Sleep to give time for the directory to finish creating
+     tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+     let temp_dir_path = temp_dir.path().to_owned();
+ 
+-    let args = ShuttleArgs::parse_from([
+-        "shuttle",
+-        "init",
+-        "--offline",
+-        "--api-key",
+-        "dh9z58jttoes3qvt",
+-        "--force-name",
+-        "--name",
+-        "my-project",
+-        "--template",
+-        "none",
+-        temp_dir_path.to_str().unwrap(),
+-    ]);
+-    Shuttle::new(cargo_shuttle::Binary::Shuttle, None)
+-        .unwrap()
+-        .run(args, true)
+-        .await
+-        .unwrap();
++    let bin_path = assert_cmd::cargo::cargo_bin("shuttle");
++    let mut command = Command::new(bin_path);
++    command
++        .args([
++            "shuttle",
++            "init",
++            "--offline",
++            "--force-name",
++            "--name",
++            "my-project",
++            "--template",
++            "none",
++            temp_dir_path.to_str().unwrap(),
++        ])
++        .env("SHUTTLE_API_KEY", TEST_API_KEY);
++    assert!(command.spawn().unwrap().wait().unwrap().success());
+ 
+     let cargo_toml = read_to_string(temp_dir_path.join("Cargo.toml")).unwrap();
+     assert!(cargo_toml.contains("name = \"my-project\""));
+@@ -44,30 +41,28 @@ async fn non_interactive_basic_init() {
+ }
+ 
+ #[tokio::test]
+-async fn non_interactive_rocket_init() {
++async fn rocket_init() {
+     let temp_dir = Builder::new().prefix("rocket-init").tempdir().unwrap();
+     // Sleep to give time for the directory to finish creating
+     tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+     let temp_dir_path = temp_dir.path().to_owned();
+ 
+-    let args = ShuttleArgs::parse_from([
+-        "shuttle",
+-        "init",
+-        "--offline",
+-        "--api-key",
+-        "dh9z58jttoes3qvt",
+-        "--force-name",
+-        "--name",
+-        "my-project",
+-        "--template",
+-        "rocket",
+-        temp_dir_path.to_str().unwrap(),
+-    ]);
+-    Shuttle::new(cargo_shuttle::Binary::Shuttle, None)
+-        .unwrap()
+-        .run(args, true)
+-        .await
+-        .unwrap();
++    let bin_path = assert_cmd::cargo::cargo_bin("shuttle");
++    let mut command = Command::new(bin_path);
++    command
++        .args([
++            "shuttle",
++            "init",
++            "--offline",
++            "--force-name",
++            "--name",
++            "my-project",
++            "--template",
++            "rocket",
++            temp_dir_path.to_str().unwrap(),
++        ])
++        .env("SHUTTLE_API_KEY", TEST_API_KEY);
++    assert!(command.spawn().unwrap().wait().unwrap().success());
+ 
+     assert_valid_rocket_project(temp_dir_path.as_path(), "my-project");
+ 
+@@ -75,32 +70,30 @@ async fn non_interactive_rocket_init() {
+ }
+ 
+ #[tokio::test]
+-async fn non_interactive_init_with_from_url() {
++async fn init_with_from_url() {
+     let temp_dir = Builder::new().prefix("basic-init-from").tempdir().unwrap();
+     // Sleep to give time for the directory to finish creating
+     tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+     let temp_dir_path = temp_dir.path().to_owned();
+ 
+-    let args = ShuttleArgs::parse_from([
+-        "shuttle",
+-        "init",
+-        "--offline",
+-        "--api-key",
+-        "dh9z58jttoes3qvt",
+-        "--force-name",
+-        "--name",
+-        "my-project",
+-        "--from",
+-        "https://github.com/shuttle-hq/shuttle-examples",
+-        "--subfolder",
+-        "tower/hello-world",
+-        temp_dir_path.to_str().unwrap(),
+-    ]);
+-    Shuttle::new(cargo_shuttle::Binary::Shuttle, None)
+-        .unwrap()
+-        .run(args, true)
+-        .await
+-        .unwrap();
++    let bin_path = assert_cmd::cargo::cargo_bin("shuttle");
++    let mut command = Command::new(bin_path);
++    command
++        .args([
++            "shuttle",
++            "init",
++            "--offline",
++            "--force-name",
++            "--name",
++            "my-project",
++            "--from",
++            "https://github.com/shuttle-hq/shuttle-examples",
++            "--subfolder",
++            "tower/hello-world",
++            temp_dir_path.to_str().unwrap(),
++        ])
++        .env("SHUTTLE_API_KEY", TEST_API_KEY);
++    assert!(command.spawn().unwrap().wait().unwrap().success());
+ 
+     let cargo_toml = read_to_string(temp_dir_path.join("Cargo.toml")).unwrap();
+     assert!(cargo_toml.contains("name = \"my-project\""));
+@@ -110,32 +103,30 @@ async fn non_interactive_init_with_from_url() {
+ }
+ 
+ #[tokio::test]
+-async fn non_interactive_init_with_from_gh() {
++async fn init_with_from_gh() {
+     let temp_dir = Builder::new().prefix("basic-init-from").tempdir().unwrap();
+     // Sleep to give time for the directory to finish creating
+     tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+     let temp_dir_path = temp_dir.path().to_owned();
+ 
+-    let args = ShuttleArgs::parse_from([
+-        "shuttle",
+-        "init",
+-        "--offline",
+-        "--api-key",
+-        "dh9z58jttoes3qvt",
+-        "--force-name",
+-        "--name",
+-        "my-project",
+-        "--from",
+-        "gh:shuttle-hq/shuttle-examples",
+-        "--subfolder",
+-        "tower/hello-world",
+-        temp_dir_path.to_str().unwrap(),
+-    ]);
+-    Shuttle::new(cargo_shuttle::Binary::Shuttle, None)
+-        .unwrap()
+-        .run(args, true)
+-        .await
+-        .unwrap();
++    let bin_path = assert_cmd::cargo::cargo_bin("shuttle");
++    let mut command = Command::new(bin_path);
++    command
++        .args([
++            "shuttle",
++            "init",
++            "--offline",
++            "--force-name",
++            "--name",
++            "my-project",
++            "--from",
++            "gh:shuttle-hq/shuttle-examples",
++            "--subfolder",
++            "tower/hello-world",
++            temp_dir_path.to_str().unwrap(),
++        ])
++        .env("SHUTTLE_API_KEY", TEST_API_KEY);
++    assert!(command.spawn().unwrap().wait().unwrap().success());
+ 
+     let cargo_toml = read_to_string(temp_dir_path.join("Cargo.toml")).unwrap();
+     assert!(cargo_toml.contains("name = \"my-project\""));
+@@ -145,32 +136,30 @@ async fn non_interactive_init_with_from_gh() {
+ }
+ 
+ #[tokio::test]
+-async fn non_interactive_init_with_from_repo_name() {
++async fn init_with_from_repo_name() {
+     let temp_dir = Builder::new().prefix("basic-init-from").tempdir().unwrap();
+     // Sleep to give time for the directory to finish creating
+     tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+     let temp_dir_path = temp_dir.path().to_owned();
+ 
+-    let args = ShuttleArgs::parse_from([
+-        "shuttle",
+-        "init",
+-        "--offline",
+-        "--api-key",
+-        "dh9z58jttoes3qvt",
+-        "--force-name",
+-        "--name",
+-        "my-project",
+-        "--from",
+-        "shuttle-hq/shuttle-examples",
+-        "--subfolder",
+-        "tower/hello-world",
+-        temp_dir_path.to_str().unwrap(),
+-    ]);
+-    Shuttle::new(cargo_shuttle::Binary::Shuttle, None)
+-        .unwrap()
+-        .run(args, true)
+-        .await
+-        .unwrap();
++    let bin_path = assert_cmd::cargo::cargo_bin("shuttle");
++    let mut command = Command::new(bin_path);
++    command
++        .args([
++            "shuttle",
++            "init",
++            "--offline",
++            "--force-name",
++            "--name",
++            "my-project",
++            "--from",
++            "shuttle-hq/shuttle-examples",
++            "--subfolder",
++            "tower/hello-world",
++            temp_dir_path.to_str().unwrap(),
++        ])
++        .env("SHUTTLE_API_KEY", TEST_API_KEY);
++    assert!(command.spawn().unwrap().wait().unwrap().success());
+ 
+     let cargo_toml = read_to_string(temp_dir_path.join("Cargo.toml")).unwrap();
+     assert!(cargo_toml.contains("name = \"my-project\""));
+@@ -180,32 +169,30 @@ async fn non_interactive_init_with_from_repo_name() {
+ }
+ 
+ #[tokio::test]
+-async fn non_interactive_init_with_from_local_path() {
++async fn init_with_from_local_path() {
+     let temp_dir = Builder::new().prefix("basic-init-from").tempdir().unwrap();
+     // Sleep to give time for the directory to finish creating
+     tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+     let temp_dir_path = temp_dir.path().to_owned();
+ 
+-    let args = ShuttleArgs::parse_from([
+-        "shuttle",
+-        "init",
+-        "--offline",
+-        "--api-key",
+-        "dh9z58jttoes3qvt",
+-        "--force-name",
+-        "--name",
+-        "my-project",
+-        "--from",
+-        "../examples", // cargo runs the test from the cargo-shuttle folder.
+-        "--subfolder",
+-        "tower/hello-world",
+-        temp_dir_path.to_str().unwrap(),
+-    ]);
+-    Shuttle::new(cargo_shuttle::Binary::Shuttle, None)
+-        .unwrap()
+-        .run(args, true)
+-        .await
+-        .unwrap();
++    let bin_path = assert_cmd::cargo::cargo_bin("shuttle");
++    let mut command = Command::new(bin_path);
++    command
++        .args([
++            "shuttle",
++            "init",
++            "--offline",
++            "--force-name",
++            "--name",
++            "my-project",
++            "--from",
++            "../examples", // cargo runs the test from the cargo-shuttle folder.
++            "--subfolder",
++            "tower/hello-world",
++            temp_dir_path.to_str().unwrap(),
++        ])
++        .env("SHUTTLE_API_KEY", TEST_API_KEY);
++    assert!(command.spawn().unwrap().wait().unwrap().success());
+ 
+     let cargo_toml = read_to_string(temp_dir_path.join("Cargo.toml")).unwrap();
+     assert!(cargo_toml.contains("name = \"my-project\""));
+@@ -215,32 +202,30 @@ async fn non_interactive_init_with_from_local_path() {
+ }
+ 
+ #[tokio::test]
+-async fn non_interactive_init_from_local_path_with_workspace() {
++async fn init_from_local_path_with_workspace() {
+     let temp_dir = Builder::new().prefix("basic-init-from").tempdir().unwrap();
+     // Sleep to give time for the directory to finish creating
+     tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+     let temp_dir_path = temp_dir.path().to_owned();
+ 
+-    let args = ShuttleArgs::parse_from([
+-        "shuttle",
+-        "init",
+-        "--offline",
+-        "--api-key",
+-        "dh9z58jttoes3qvt",
+-        "--force-name",
+-        "--name",
+-        "my-project",
+-        "--from",
+-        "../examples", // cargo runs the test from the cargo-shuttle folder.
+-        "--subfolder",
+-        "rocket/workspace",
+-        temp_dir_path.to_str().unwrap(),
+-    ]);
+-    Shuttle::new(cargo_shuttle::Binary::Shuttle, None)
+-        .unwrap()
+-        .run(args, true)
+-        .await
+-        .unwrap();
++    let bin_path = assert_cmd::cargo::cargo_bin("shuttle");
++    let mut command = Command::new(bin_path);
++    command
++        .args([
++            "shuttle",
++            "init",
++            "--offline",
++            "--force-name",
++            "--name",
++            "my-project",
++            "--from",
++            "../examples", // cargo runs the test from the cargo-shuttle folder.
++            "--subfolder",
++            "rocket/workspace",
++            temp_dir_path.to_str().unwrap(),
++        ])
++        .env("SHUTTLE_API_KEY", TEST_API_KEY);
++    assert!(command.spawn().unwrap().wait().unwrap().success());
+ 
+     let cargo_toml = read_to_string(temp_dir_path.join("Cargo.toml")).unwrap();
+     assert!(!cargo_toml.contains("name = "));
+@@ -260,13 +245,9 @@ fn interactive_rocket_init() -> Result<(), Box<dyn std::error::Error>> {
+ 
+     let bin_path = assert_cmd::cargo::cargo_bin("shuttle");
+     let mut command = Command::new(bin_path);
+-    command.args([
+-        "--offline",
+-        "init",
+-        "--force-name",
+-        "--api-key",
+-        "dh9z58jttoes3qvt",
+-    ]);
++    command
++        .args(["--offline", "init", "--force-name"])
++        .env("SHUTTLE_API_KEY", TEST_API_KEY);
+     let mut session = rexpect::session::spawn_command(command, Some(EXPECT_TIMEOUT_MS))?;
+ 
+     session.exp_string("Project name")?;
+@@ -296,13 +277,9 @@ fn interactive_rocket_init_manually_choose_template() -> Result<(), Box<dyn std:
+ 
+     let bin_path = assert_cmd::cargo::cargo_bin("shuttle");
+     let mut command = Command::new(bin_path);
+-    command.args([
+-        "--offline",
+-        "init",
+-        "--force-name",
+-        "--api-key",
+-        "dh9z58jttoes3qvt",
+-    ]);
++    command
++        .args(["--offline", "init", "--force-name"])
++        .env("SHUTTLE_API_KEY", TEST_API_KEY);
+     let mut session = rexpect::session::spawn_command(command, Some(EXPECT_TIMEOUT_MS))?;
+ 
+     session.exp_string("Project name")?;
+@@ -332,15 +309,9 @@ fn interactive_rocket_init_dont_prompt_framework() -> Result<(), Box<dyn std::er
+ 
+     let bin_path = assert_cmd::cargo::cargo_bin("shuttle");
+     let mut command = Command::new(bin_path);
+-    command.args([
+-        "--offline",
+-        "init",
+-        "--force-name",
+-        "--api-key",
+-        "dh9z58jttoes3qvt",
+-        "--template",
+-        "rocket",
+-    ]);
++    command
++        .args(["--offline", "init", "--force-name", "--template", "rocket"])
++        .env("SHUTTLE_API_KEY", TEST_API_KEY);
+     let mut session = rexpect::session::spawn_command(command, Some(EXPECT_TIMEOUT_MS))?;
+ 
+     session.exp_string("Project name")?;
+@@ -368,15 +339,9 @@ fn interactive_rocket_init_dont_prompt_name() -> Result<(), Box<dyn std::error::
+ 
+     let bin_path = assert_cmd::cargo::cargo_bin("shuttle");
+     let mut command = Command::new(bin_path);
+-    command.args([
+-        "--offline",
+-        "init",
+-        "--force-name",
+-        "--api-key",
+-        "dh9z58jttoes3qvt",
+-        "--name",
+-        "my-project",
+-    ]);
++    command
++        .args(["--offline", "init", "--force-name", "--name", "my-project"])
++        .env("SHUTTLE_API_KEY", TEST_API_KEY);
+     let mut session = rexpect::session::spawn_command(command, Some(EXPECT_TIMEOUT_MS))?;
+ 
+     session.exp_string("Where should we create this project?")?;
+@@ -406,17 +371,17 @@ fn interactive_rocket_init_prompt_path_dirty_dir() -> Result<(), Box<dyn std::er
+ 
+     let bin_path = assert_cmd::cargo::cargo_bin("shuttle");
+     let mut command = Command::new(bin_path);
+-    command.args([
+-        "--offline",
+-        "init",
+-        "--api-key",
+-        "dh9z58jttoes3qvt",
+-        "--force-name",
+-        "--name",
+-        "my-project",
+-        "-t",
+-        "rocket",
+-    ]);
++    command
++        .args([
++            "--offline",
++            "init",
++            "--force-name",
++            "--name",
++            "my-project",
++            "-t",
++            "rocket",
++        ])
++        .env("SHUTTLE_API_KEY", TEST_API_KEY);
+     let mut session = rexpect::session::spawn_command(command, Some(EXPECT_TIMEOUT_MS))?;
+ 
+     session.exp_string("Where should we create this project?")?;
+diff --git a/cargo-shuttle/tests/integration/main.rs b/cargo-shuttle/tests/integration/main.rs
+index 5b474d6df..92084671d 100644
+--- a/cargo-shuttle/tests/integration/main.rs
++++ b/cargo-shuttle/tests/integration/main.rs
+@@ -2,54 +2,75 @@ mod builder;
+ mod init;
+ mod run;
+ 
+-use cargo_shuttle::{
+-    args::{Command, ProjectArgs, ShuttleArgs},
+-    Shuttle,
+-};
+-use std::path::Path;
+-
+-/// Creates a CLI instance with some reasonable defaults set
+-async fn shuttle_command(cmd: Command, working_directory: &str) -> anyhow::Result<()> {
+-    let working_directory = Path::new(working_directory).to_path_buf();
+-
+-    Shuttle::new(cargo_shuttle::Binary::Shuttle, None)
+-        .unwrap()
+-        .run(
+-            ShuttleArgs {
+-                api_url: Some("http://shuttle.invalid:80".to_string()),
+-                admin: false,
+-                api_env: None,
+-                project_args: ProjectArgs {
+-                    working_directory,
+-                    name: None,
+-                    id: None,
+-                },
+-                offline: false,
+-                debug: false,
+-                output_mode: Default::default(),
+-                cmd,
+-            },
+-            false,
+-        )
+-        .await
+-        .map(|_| ())
++#[tokio::test]
++async fn fails_if_working_directory_does_not_exist() {
++    let bin_path = assert_cmd::cargo::cargo_bin("shuttle");
++    let mut command = std::process::Command::new(bin_path);
++    command.args(["--wd", "/path_that_does_not_exist", "account"]);
++    let mut session = rexpect::session::spawn_command(command, Some(500)).unwrap();
++
++    session.exp_string("invalid value").unwrap();
++    session.exp_string(
++        "could not turn \"/path_that_does_not_exist\" into a real path: No such file or directory (os error 2)"
++    ).unwrap();
+ }
+ 
+ #[tokio::test]
+-#[should_panic(expected = "failed to start `cargo metadata`: No such file or directory")]
+-async fn fails_if_working_directory_does_not_exist() {
+-    shuttle_command(
+-        Command::Logs(Default::default()),
+-        "/path_that_does_not_exist",
+-    )
+-    .await
+-    .unwrap();
++async fn fails_if_local_project_name_in_root() {
++    let bin_path = assert_cmd::cargo::cargo_bin("shuttle");
++    let mut command = std::process::Command::new(bin_path);
++    command.args(["--wd", "/", "run"]);
++    let mut session = rexpect::session::spawn_command(command, Some(500)).unwrap();
++
++    session
++        .exp_string("expected workspace path to have name")
++        .unwrap();
+ }
+ 
+ #[tokio::test]
+-#[should_panic(expected = "could not find `Cargo.toml` in `/` or any parent directory")]
+-async fn fails_if_working_directory_not_part_of_cargo_workspace() {
+-    shuttle_command(Command::Logs(Default::default()), "/")
+-        .await
++async fn fails_if_no_project_id_found() {
++    let bin_path = assert_cmd::cargo::cargo_bin("shuttle");
++    let mut command = std::process::Command::new(bin_path);
++    command.args(["--api-url", "http://shuttle.invalid", "--wd", "/", "logs"]);
++    let mut session = rexpect::session::spawn_command(command, Some(500)).unwrap();
++
++    session.exp_string("error sending request for url").unwrap();
++}
++
++#[tokio::test]
++async fn requests_explicit_project_id_in_non_cargo_workspace() {
++    let bin_path = assert_cmd::cargo::cargo_bin("shuttle");
++    let mut command = std::process::Command::new(bin_path);
++    command.args([
++        "--api-url",
++        "http://shuttle.invalid",
++        "--wd",
++        "/",
++        "--id",
++        "proj_1",
++        "logs",
++    ]);
++    let mut session = rexpect::session::spawn_command(command, Some(500)).unwrap();
++
++    session.exp_string("error sending request for url (http://shuttle.invalid/projects/proj_1/deployments/current)").unwrap();
++}
++
++#[tokio::test]
++async fn requests_project_list_in_non_cargo_workspace() {
++    let bin_path = assert_cmd::cargo::cargo_bin("shuttle");
++    let mut command = std::process::Command::new(bin_path);
++    command.args([
++        "--api-url",
++        "http://shuttle.invalid",
++        "--wd",
++        "/",
++        "--name",
++        "banana",
++        "logs",
++    ]);
++    let mut session = rexpect::session::spawn_command(command, Some(500)).unwrap();
++
++    session
++        .exp_string("error sending request for url (http://shuttle.invalid/projects)")
+         .unwrap();
+ }
+diff --git a/cargo-shuttle/tests/integration/run.rs b/cargo-shuttle/tests/integration/run.rs
+index f4b380f45..73424e4b8 100644
+--- a/cargo-shuttle/tests/integration/run.rs
++++ b/cargo-shuttle/tests/integration/run.rs
+@@ -1,27 +1,10 @@
+-use std::{fs::canonicalize, process::exit, time::Duration};
++use std::{process::exit, time::Duration};
+ 
+-use cargo_shuttle::{
+-    args::{Command, ProjectArgs, RunArgs, ShuttleArgs},
+-    Shuttle,
+-};
+ use portpicker::pick_unused_port;
+ use tokio::time::sleep;
+ 
+ /// Runs `shuttle run` in specified directory
+-async fn shuttle_run(working_directory: &str, external: bool) -> String {
+-    let working_directory = match canonicalize(working_directory) {
+-        Ok(wd) => wd,
+-        Err(e) => {
+-            // DEBUG CI (no such file): SLEEP AND TRY AGAIN?
+-            println!(
+-                "Did not find directory: {} !!! because {:?}",
+-                working_directory, e
+-            );
+-            sleep(Duration::from_millis(500)).await;
+-            canonicalize(working_directory).unwrap()
+-        }
+-    };
+-
++async fn shuttle_run(working_directory: &str, external: bool) -> (String, std::process::Child) {
+     let port = pick_unused_port().unwrap();
+ 
+     let url = if !external {
+@@ -30,75 +13,62 @@ async fn shuttle_run(working_directory: &str, external: bool) -> String {
+         format!("http://0.0.0.0:{port}")
+     };
+ 
+-    let runner = Shuttle::new(cargo_shuttle::Binary::Shuttle, None)
+-        .unwrap()
+-        .run(
+-            ShuttleArgs {
+-                api_url: Some("http://shuttle.invalid:80".to_string()),
+-                admin: false,
+-                api_env: None,
+-                project_args: ProjectArgs {
+-                    working_directory: working_directory.clone(),
+-                    name: None,
+-                    id: None,
+-                },
+-                offline: false,
+-                debug: false,
+-                output_mode: Default::default(),
+-                cmd: Command::Run(RunArgs {
+-                    port,
+-                    external,
+-                    ..Default::default()
+-                }),
+-            },
+-            false,
+-        );
++    let bin_path = assert_cmd::cargo::cargo_bin("shuttle");
++    let mut command = std::process::Command::new(bin_path);
++    command.args([
++        "shuttle",
++        "--wd",
++        working_directory,
++        "--offline",
++        "run",
++        "--port",
++        &port.to_string(),
++    ]);
++    if external {
++        command.arg("--external");
++    }
++    let mut child = command.spawn().unwrap();
+ 
+     tokio::spawn({
+-        let working_directory = working_directory.clone();
++        let working_directory = working_directory.to_owned();
+         async move {
+             sleep(Duration::from_secs(10 * 60)).await;
+ 
+             println!(
+                 "run test for '{}' took too long. Did it fail to shutdown?",
+-                working_directory.display()
++                working_directory
+             );
+             exit(1);
+         }
+     });
+ 
+-    let runner_handle = tokio::spawn(runner);
+-
+     // Wait for service to be responsive
+     let mut counter = 0;
+     let client = reqwest::Client::new();
+     while client.get(url.clone()).send().await.is_err() {
+-        if runner_handle.is_finished() {
++        if child.try_wait().unwrap().is_some() {
+             println!(
+                 "run test for '{}' exited early. Did it fail to compile/run?",
+-                working_directory.clone().display()
++                working_directory
+             );
+             exit(1);
+         }
+ 
+         // reduce spam
+         if counter == 0 {
+-            println!(
+-                "waiting for '{}' to start up...",
+-                working_directory.display()
+-            );
++            println!("waiting for '{}' to start up...", working_directory);
+         }
+         counter = (counter + 1) % 10;
+ 
+         sleep(Duration::from_millis(500)).await;
+     }
+ 
+-    url
++    (url, child)
+ }
+ 
+ #[tokio::test(flavor = "multi_thread")]
+ async fn axum_hello_world() {
+-    let url = shuttle_run("../examples/axum/hello-world", false).await;
++    let (url, mut child) = shuttle_run("../examples/axum/hello-world", false).await;
+ 
+     let request_text = reqwest::Client::new()
+         .get(url)
+@@ -110,6 +80,8 @@ async fn axum_hello_world() {
+         .unwrap();
+ 
+     assert_eq!(request_text, "Hello, world!");
++
++    child.kill().unwrap();
+ }
+ 
+ #[tokio::test(flavor = "multi_thread")]
+@@ -120,7 +92,7 @@ async fn rocket_secrets() {
+     )
+     .unwrap();
+ 
+-    let url = shuttle_run("../examples/rocket/secrets", false).await;
++    let (url, mut child) = shuttle_run("../examples/rocket/secrets", false).await;
+ 
+     let request_text = reqwest::Client::new()
+         .get(format!("{url}/secret"))
+@@ -132,6 +104,8 @@ async fn rocket_secrets() {
+         .unwrap();
+ 
+     assert_eq!(request_text, "the contents of my API key");
++
++    child.kill().unwrap();
+ }
+ 
+ // These examples use a shared Postgres. Thus local runs should create a docker containers.
+@@ -140,7 +114,7 @@ mod needs_docker {
+ 
+     #[tokio::test(flavor = "multi_thread")]
+     async fn rocket_postgres() {
+-        let url = shuttle_run("../examples/rocket/postgres", false).await;
++        let (url, mut child) = shuttle_run("../examples/rocket/postgres", false).await;
+         let client = reqwest::Client::new();
+ 
+         let post_text = client
+@@ -165,5 +139,7 @@ mod needs_docker {
+             .unwrap();
+ 
+         assert_eq!(request_text, "{\"id\":1,\"note\":\"Deploy to shuttle\"}");
++
++        child.kill().unwrap();
+     }
+ }

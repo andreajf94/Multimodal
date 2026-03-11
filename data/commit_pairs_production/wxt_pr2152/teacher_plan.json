@@ -1,0 +1,151 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "package_structure",
+      "recommendation": "Created a new standalone package `@wxt-dev/is-background` instead of embedding the utility in existing packages",
+      "rationale": "This follows the monorepo's modular architecture pattern where reusable utilities are extracted into independent packages. It enables independent versioning, testing, and usage by other packages without creating circular dependencies. The package structure mirrors existing packages like `@wxt-dev/browser` and `@wxt-dev/storage`.",
+      "alternatives_considered": [
+        "Adding the utility to an existing package like `browser` or `core`",
+        "Creating a shared utilities package that accumulates multiple helpers"
+      ],
+      "files_affected": [
+        "packages/is-background/package.json",
+        "packages/is-background/tsconfig.json",
+        "packages/is-background/src/index.ts"
+      ]
+    },
+    {
+      "dimension": "api_design",
+      "recommendation": "Implemented a lazy getter function with caching instead of a simple function or constant",
+      "rationale": "The lazy getter pattern (function that caches result on first call) provides several benefits: 1) Easier mocking in tests since the actual detection logic isn't executed until called, 2) Safe to import in NodeJS environments without immediately throwing errors, 3) Performance optimization by deferring potentially expensive operations like `instanceof` checks and `getBackgroundPage()` calls until needed. This aligns with the principle of minimizing startup overhead in extension contexts.",
+      "alternatives_considered": [
+        "Exporting a constant that evaluates immediately",
+        "Exporting a simple function without caching",
+        "Using a class with static property"
+      ],
+      "files_affected": [
+        "packages/is-background/src/index.ts",
+        "packages/is-background/src/getter.ts"
+      ]
+    },
+    {
+      "dimension": "cross_browser_compatibility",
+      "recommendation": "Implemented detection logic that handles different browser platforms (Chromium, Firefox, Safari) and manifest versions (MV2, MV3) with specific condition checks",
+      "rationale": "Browser extensions have significant platform differences: Chromium MV3 uses service workers, Firefox MV3 uses non-persistent HTML pages, Safari has its own implementation details. The detection uses multiple heuristics: checking for `ServiceWorkerGlobalScope` for MV3 service workers, and using `browser.extension.getBackgroundPage()` for background pages. This ensures reliable detection across all supported environments.",
+      "alternatives_considered": [
+        "Using a single detection method assuming all browsers behave the same",
+        "Relying on user-agent sniffing",
+        "Requiring manual configuration by developers"
+      ],
+      "files_affected": [
+        "packages/is-background/src/getter.ts",
+        "packages/is-background/src/__tests__/getter.test.ts"
+      ]
+    },
+    {
+      "dimension": "testing_strategy",
+      "recommendation": "Created comprehensive unit tests that mock different browser environments and test all platform/manifest combinations",
+      "rationale": "The test suite systematically tests: 1) Non-extension contexts (should return false), 2) Chromium & Safari MV2/MV3 scenarios, 3) Firefox MV2/MV3 scenarios. Each test configures the global environment (window, browser APIs, ServiceWorkerGlobalScope) to simulate specific contexts. This ensures the detection logic works correctly across all supported configurations and prevents regressions.",
+      "alternatives_considered": [
+        "Integration tests with actual browsers",
+        "Fewer test cases assuming some scenarios are similar",
+        "Manual testing only"
+      ],
+      "files_affected": [
+        "packages/is-background/src/__tests__/getter.test.ts"
+      ]
+    },
+    {
+      "dimension": "ecosystem_integration",
+      "recommendation": "Updated CI/CD workflows, documentation, and package registry to include the new package",
+      "rationale": "For a new package to be usable in the ecosystem, it needs to be: 1) Included in release workflows for automated publishing, 2) Documented in the main documentation site, 3) Properly versioned in the package dropdown. These changes ensure the package is discoverable, maintainable, and follows the same release process as other packages in the monorepo.",
+      "alternatives_considered": [
+        "Manual releases outside CI/CD",
+        "Separate documentation",
+        "Delaying integration until after initial release"
+      ],
+      "files_affected": [
+        ".github/workflows/release.yml",
+        ".github/workflows/sync-releases.yml",
+        "docs/.vitepress/config.ts",
+        "docs/is-background.md",
+        "MAINTAINERS.md"
+      ]
+    },
+    {
+      "dimension": "dependency_management",
+      "recommendation": "Added `@wxt-dev/browser` as the only dependency to access extension APIs in a type-safe way",
+      "rationale": "The `@wxt-dev/browser` package provides type-safe access to browser extension APIs and handles platform differences. By depending on it, the `is-background` package leverages existing type definitions and avoids duplicating browser API detection logic. This keeps the package lightweight while ensuring type safety and compatibility.",
+      "alternatives_considered": [
+        "Using `@types/chrome` or similar",
+        "Accessing browser APIs directly without types",
+        "Creating custom type definitions"
+      ],
+      "files_affected": [
+        "packages/is-background/package.json",
+        "packages/is-background/src/getter.ts"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Create is-background package core implementation",
+      "description": "Implement the background detection logic with support for all browser platforms and manifest versions",
+      "files_to_modify": [],
+      "files_to_create": [
+        "packages/is-background/src/getter.ts",
+        "packages/is-background/src/index.ts",
+        "packages/is-background/tsconfig.json"
+      ],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-002",
+      "title": "Add comprehensive test suite",
+      "description": "Create unit tests covering all browser/platform combinations and edge cases",
+      "files_to_modify": [],
+      "files_to_create": [
+        "packages/is-background/src/__tests__/getter.test.ts"
+      ],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-003",
+      "title": "Package configuration and documentation",
+      "description": "Set up package.json, README, and integration with build system",
+      "files_to_modify": [],
+      "files_to_create": [
+        "packages/is-background/package.json",
+        "packages/is-background/README.md"
+      ],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-004",
+      "title": "Integrate package into ecosystem",
+      "description": "Update CI/CD workflows, documentation site, and maintainer guides",
+      "files_to_modify": [
+        ".github/workflows/release.yml",
+        ".github/workflows/sync-releases.yml",
+        "docs/.vitepress/config.ts",
+        "CONTRIBUTING.md",
+        "MAINTAINERS.md",
+        "pnpm-lock.yaml"
+      ],
+      "files_to_create": [
+        "docs/is-background.md"
+      ],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation creates a new standalone package `@wxt-dev/is-background` that provides a utility function to detect whether code is running in a browser extension's background context. The approach follows the established monorepo architecture pattern where reusable utilities are extracted into independent packages for better modularity and reusability.\n\nThe core detection logic in `getter.ts` uses multiple heuristics to handle different browser platforms (Chromium, Firefox, Safari) and manifest versions (MV2, MV3). For MV3 service workers (Chromium, Safari), it checks for `ServiceWorkerGlobalScope`. For background pages (MV2 and Firefox MV3), it uses `browser.extension.getBackgroundPage()`. The public API in `index.ts` exposes a lazy getter function that caches the result on first call, providing performance benefits and easier testability.\n\nThe implementation integrates seamlessly with the existing ecosystem: it depends on `@wxt-dev/browser` for type-safe API access, includes comprehensive tests that mock different environments, updates CI/CD workflows for automated releases, and adds documentation to the main docs site. The package structure and configuration mirror other packages in the monorepo, ensuring consistency and maintainability. This extraction enables other packages to use this utility without creating circular dependencies and allows independent versioning and testing.",
+  "source_pr": "https://github.com/wxt-dev/wxt/pull/2152",
+  "before_sha": "05e23e70b4bd0fcb07e5c25395c76695d0d1b7c7",
+  "after_sha": "c9205bb08fe98e85ba67dd6488358ddfb9efdec3",
+  "diff_stats": {
+    "additions": 346,
+    "deletions": 7,
+    "files_changed": 13
+  }
+}

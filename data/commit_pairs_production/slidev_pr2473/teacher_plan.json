@@ -1,0 +1,110 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "api_design",
+      "recommendation": "Extended the existing `monacoRunAdditionalDeps` configuration option to work with Monaco Editor's dependency resolution system, rather than creating a new configuration option.",
+      "rationale": "The feature request was to allow users to specify additional dependencies for Monaco Editor's runtime environment. Instead of introducing a new configuration key, we leveraged the existing `monacoRunAdditionalDeps` option that was already documented but not fully implemented. This maintains API consistency and reduces cognitive load for users who are already familiar with this option from the documentation.",
+      "alternatives_considered": [
+        "Creating a new configuration option like `monacoRuntimeDeps`",
+        "Extending the existing `monacoTypesAdditionalPackages` option to also handle runtime dependencies",
+        "Creating a separate configuration section specifically for Monaco runtime dependencies"
+      ],
+      "files_affected": [
+        "packages/slidev/node/virtual/monaco-deps.ts"
+      ]
+    },
+    {
+      "dimension": "data_modeling",
+      "recommendation": "Updated the dependency resolution logic to merge three sources of dependencies: Monaco's detected dependencies, type packages, and user-specified runtime dependencies.",
+      "rationale": "The virtual module template needed to aggregate dependencies from multiple sources: 1) automatically detected dependencies from Monaco usage, 2) type packages for TypeScript support, and 3) user-specified runtime dependencies. Using `uniq()` with spread operators ensures we get a deduplicated list while preserving the order of importance (user-specified deps come last, potentially overriding defaults).",
+      "alternatives_considered": [
+        "Creating separate virtual modules for each dependency type",
+        "Using a Map or Set for deduplication with custom merge logic",
+        "Implementing priority-based dependency resolution where user deps override all others"
+      ],
+      "files_affected": [
+        "packages/slidev/node/virtual/monaco-deps.ts"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Improved the import statement regex pattern by adding a word boundary anchor (`\\b`) to prevent false matches in code.",
+      "rationale": "The original regex `/import\\s*\\((.+)\\)/g` could potentially match strings like 'important' or other code patterns that aren't actual dynamic imports. Adding `\\b` (word boundary) ensures we only match the actual 'import' keyword at the beginning of a word, reducing the risk of incorrectly transforming non-import code.",
+      "alternatives_considered": [
+        "Using a more complex regex with lookbehind assertions",
+        "Using a proper JavaScript parser instead of regex",
+        "Leaving the regex as-is since false positives were unlikely"
+      ],
+      "files_affected": [
+        "packages/client/setup/code-runners.ts"
+      ]
+    },
+    {
+      "dimension": "code_quality",
+      "recommendation": "Renamed `sanitizeJS` to `fixupCode` and `safeJS` to `wrappedCode` for better semantic clarity.",
+      "rationale": "The function `sanitizeJS` wasn't actually sanitizing code for security (which is handled by the VM sandbox), but rather fixing up specific patterns like reflect-metadata imports and empty exports. The new name `fixupCode` more accurately describes its purpose. Similarly, `safeJS` was misleading since safety comes from the Function constructor context, not the string itself.",
+      "alternatives_considered": [
+        "Keeping the original names for backward compatibility",
+        "Creating separate functions for each type of code transformation",
+        "Moving the transformations to a configuration-based system"
+      ],
+      "files_affected": [
+        "packages/client/setup/code-runners.ts"
+      ]
+    },
+    {
+      "dimension": "documentation",
+      "recommendation": "Updated documentation to link to the headmatter section for context about where to place the `monacoRunAdditionalDeps` configuration.",
+      "rationale": "The documentation previously mentioned using `monacoRunAdditionalDeps` in slide frontmatter but didn't provide context about what frontmatter is or where to find it. Adding a link to the headmatter section helps users understand the configuration context better, especially new users who might not be familiar with Slidev's frontmatter system.",
+      "alternatives_considered": [
+        "Creating a separate documentation page for Monaco configuration",
+        "Adding a complete example with frontmatter context",
+        "Leaving the documentation as-is since experienced users would know"
+      ],
+      "files_affected": [
+        "docs/custom/config-code-runners.md"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Implement Monaco Runtime Dependency Configuration",
+      "description": "Update the virtual module system to include user-specified runtime dependencies for Monaco Editor's code execution environment, ensuring they are available alongside automatically detected dependencies.",
+      "files_to_modify": [
+        "packages/slidev/node/virtual/monaco-deps.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-002",
+      "title": "Improve Code Runner Safety and Clarity",
+      "description": "Refactor the JavaScript code runner to use clearer variable names and improve the dynamic import regex pattern to prevent false matches in user code.",
+      "files_to_modify": [
+        "packages/client/setup/code-runners.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-003",
+      "title": "Update Documentation for Dependency Configuration",
+      "description": "Improve the documentation to provide better context about where and how to configure Monaco runtime dependencies, including proper linking to related documentation sections.",
+      "files_to_modify": [
+        "docs/custom/config-code-runners.md"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation addresses the feature request for Monaco Editor dependency configuration through three coordinated changes. First, the virtual module system in `monaco-deps.ts` was updated to merge user-specified runtime dependencies (`monacoRunAdditionalDeps`) with automatically detected dependencies and type packages. This uses a deduplicated array approach that maintains backward compatibility while extending functionality.\n\nSecond, the code runner implementation received quality improvements including better naming (`fixupCode` instead of `sanitizeJS`) and a more precise regex pattern for detecting dynamic imports. The word boundary anchor prevents false matches in user code, improving reliability without changing the core execution model.\n\nThird, the documentation was updated to provide better context about where to place the configuration, linking to the headmatter section for clarity. The changes follow Slidev's existing patterns of configuration through frontmatter and virtual modules, ensuring consistency with the rest of the codebase. The implementation is minimal and focused, avoiding over-engineering while addressing the core requirement of allowing users to specify additional runtime dependencies for Monaco's execution environment.",
+  "source_pr": "https://github.com/slidevjs/slidev/pull/2473",
+  "before_sha": "34348a1a422289f2307f98da3bcb9fc50d1ee796",
+  "after_sha": "7077a0700276f96427f92fa932b15192f5e07366",
+  "diff_stats": {
+    "additions": 11,
+    "deletions": 7,
+    "files_changed": 3
+  }
+}

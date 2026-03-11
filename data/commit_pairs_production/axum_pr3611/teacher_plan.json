@@ -1,0 +1,79 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "error_handling",
+      "recommendation": "Added a helper function `is_body_limit_error` to detect multipart body size limit errors and return a specific error message 'Request payload is too large' instead of generic parsing errors",
+      "rationale": "The multer crate returns different error types for body size limits (FieldSizeExceeded, StreamSizeExceeded) and can nest errors within StreamReadFailed. This approach properly identifies all body limit error cases while maintaining compatibility with existing error handling patterns.",
+      "alternatives_considered": [
+        "Modifying the multer crate itself to return specific error messages",
+        "Creating a new error variant in MultipartError enum",
+        "Using pattern matching directly in body_text() without a helper function"
+      ],
+      "files_affected": [
+        "axum/src/extract/multipart.rs",
+        "axum-extra/src/extract/multipart.rs"
+      ]
+    },
+    {
+      "dimension": "api_design",
+      "recommendation": "Kept the existing status code (413 PAYLOAD_TOO_LARGE) unchanged while only modifying the error message text",
+      "rationale": "The status code was already correct for body size limit errors. Changing only the message maintains backward compatibility for clients that rely on HTTP status codes while improving the human-readable error message for debugging.",
+      "alternatives_considered": [
+        "Creating a new status code for this specific error",
+        "Adding additional headers to indicate the error type"
+      ],
+      "files_affected": [
+        "axum/src/extract/multipart.rs",
+        "axum-extra/src/extract/multipart.rs"
+      ]
+    },
+    {
+      "dimension": "code_organization",
+      "recommendation": "Implemented the same logic in both axum and axum-extra crates to maintain consistency across the framework",
+      "rationale": "Both crates have their own multipart implementations that need to behave identically. Duplicating the logic ensures users get the same experience regardless of which crate they use, maintaining framework consistency.",
+      "alternatives_considered": [
+        "Extracting the logic to axum-core for sharing",
+        "Making axum-extra depend on axum's implementation"
+      ],
+      "files_affected": [
+        "axum/src/extract/multipart.rs",
+        "axum-extra/src/extract/multipart.rs"
+      ]
+    },
+    {
+      "dimension": "testing",
+      "recommendation": "Added assertions to verify the specific error message appears in test responses",
+      "rationale": "The existing tests already verified the 413 status code. Adding message assertions ensures the new behavior is properly tested and prevents regression. Tests now validate both the status code and the specific error message.",
+      "alternatives_considered": [
+        "Creating separate tests for the new behavior",
+        "Using property-based testing for error messages"
+      ],
+      "files_affected": [
+        "axum/src/extract/multipart.rs",
+        "axum-extra/src/extract/multipart.rs"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Improve multipart body limit error messages",
+      "description": "Update multipart extractors to return specific 'Request payload is too large' message when body size limits are exceeded, while maintaining existing 413 status code",
+      "files_to_modify": [
+        "axum/src/extract/multipart.rs",
+        "axum-extra/src/extract/multipart.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation adds a helper function `is_body_limit_error` that recursively examines multer errors to identify body size limit conditions. This function handles three main cases: direct FieldSizeExceeded and StreamSizeExceeded errors from multer, nested multer errors within StreamReadFailed, and LengthLimitError from http_body_util wrapped in axum_core errors. The logic is duplicated in both axum and axum-extra crates to ensure consistent behavior across the framework.\n\nThe `body_text()` method in both MultipartError implementations now checks if the underlying error is a body limit error using this helper function. If it is, it returns the specific message 'Request payload is too large'; otherwise, it falls back to the original error string representation. This approach maintains backward compatibility for non-limit errors while providing clearer messages for size limit violations.\n\nExisting tests were updated to assert both the status code (which remains 413) and the new error message text. The implementation follows Rust's error handling patterns by using downcast_ref to examine nested error sources, allowing it to work with the complex error nesting that can occur in async multipart processing pipelines. This change improves developer experience by providing more actionable error messages without breaking existing API contracts.",
+  "source_pr": "https://github.com/tokio-rs/axum/pull/3611",
+  "before_sha": "783c83dded7ab7a598b25035583c7b5133169ff4",
+  "after_sha": "22f769c7f1812b96a8f1a0539e520b41445ba88f",
+  "diff_stats": {
+    "additions": 44,
+    "deletions": 2,
+    "files_changed": 2
+  }
+}

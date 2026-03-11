@@ -1,0 +1,52 @@
+diff --git a/Cargo.lock b/Cargo.lock
+index 6759ae0df..ffaaa9802 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -4101,11 +4101,12 @@ dependencies = [
+ 
+ [[package]]
+ name = "shuttle-mcp"
+-version = "0.57.1"
++version = "0.57.2"
+ dependencies = [
+  "anyhow",
+  "reqwest",
+  "rmcp",
++ "rmcp-macros",
+  "schemars 1.0.4",
+  "serde",
+  "tokio",
+diff --git a/Cargo.toml b/Cargo.toml
+index f5bca19b0..0d1d3c1b5 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -73,6 +73,8 @@ reqwest-middleware = "0.4.0"
+ rexpect = "0.6.0"
+ # locked due to semver-breaking change in 0.6.4
+ rmcp = { version = "=0.6.3", features = ["server", "transport-io", "macros"] }
++# locked due to semver-breaking change in 0.6.4. Remove this when unlocking `rmcp`
++rmcp-macros = "=0.6.3"
+ schemars = "1"
+ semver = { version = "1.0.17", features = ["serde"] }
+ serde = { version = "1.0.148", default-features = false }
+diff --git a/mcp/Cargo.toml b/mcp/Cargo.toml
+index 30655886f..970a3157d 100644
+--- a/mcp/Cargo.toml
++++ b/mcp/Cargo.toml
+@@ -1,6 +1,6 @@
+ [package]
+ name = "shuttle-mcp"
+-version = "0.57.1"
++version = "0.57.2"
+ edition.workspace = true
+ license.workspace = true
+ repository.workspace = true
+@@ -10,6 +10,8 @@ description = "Shuttle MCP server"
+ anyhow = { workspace = true }
+ reqwest = { workspace = true, features = ["json"] }
+ rmcp = { workspace = true, features = ["server", "transport-io", "macros"] }
++# remove this when unlocking `rmcp`
++rmcp-macros = { workspace = true }
+ schemars = { workspace = true }
+ serde = { workspace = true }
+ tokio = { workspace = true, features = ["full"] }

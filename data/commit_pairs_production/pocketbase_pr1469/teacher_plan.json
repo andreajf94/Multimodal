@@ -1,0 +1,75 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "data_modeling",
+      "recommendation": "Added 'image/webp' to the default MIME type list for image file fields in the database migration",
+      "rationale": "The migration file defines the initial database schema, including default field options. By adding WebP to the default image MIME types array, we ensure that new collections created after this migration will automatically include WebP as a supported format. This approach maintains consistency with existing image formats and ensures the database schema reflects the new capability.",
+      "alternatives_considered": [
+        "Creating a separate migration file for the WebP addition",
+        "Adding WebP only to the UI without updating the database defaults",
+        "Making WebP configurable via settings rather than hardcoded defaults"
+      ],
+      "files_affected": [
+        "migrations/1640988000_init.go"
+      ]
+    },
+    {
+      "dimension": "api_design",
+      "recommendation": "Updated the UI component to include WebP in the image format selector and display label",
+      "rationale": "The FileOptions.svelte component controls how users interact with file field configurations in the admin UI. By adding 'image/webp' to the predefined MIME type array and updating the display label, we provide a consistent user experience where WebP appears alongside other image formats. This ensures users can easily select WebP as an allowed format without manual MIME type entry.",
+      "alternatives_considered": [
+        "Creating a separate UI component for WebP-specific options",
+        "Making WebP a toggleable option rather than adding it to the default image group",
+        "Requiring users to manually type 'image/webp' in custom MIME types"
+      ],
+      "files_affected": [
+        "ui/src/components/collections/schema/FileOptions.svelte"
+      ]
+    },
+    {
+      "dimension": "backward_compatibility",
+      "recommendation": "Maintained existing format order and simply appended WebP to the end of image format lists",
+      "rationale": "By adding WebP at the end of existing arrays rather than reordering or inserting in the middle, we minimize the risk of breaking existing code that might depend on array indices or order. This approach ensures that existing collections and UI behavior remain unchanged while seamlessly integrating the new format.",
+      "alternatives_considered": [
+        "Alphabetically sorting the MIME type lists",
+        "Placing WebP in a different position based on popularity or technical characteristics",
+        "Creating a separate 'modern image formats' group"
+      ],
+      "files_affected": [
+        "migrations/1640988000_init.go",
+        "ui/src/components/collections/schema/FileOptions.svelte"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Add WebP support to database schema defaults",
+      "description": "Update the initial database migration to include WebP as a default supported image format for file fields",
+      "files_to_modify": [
+        "migrations/1640988000_init.go"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-002",
+      "title": "Update UI for WebP image format selection",
+      "description": "Modify the file options UI component to include WebP in the predefined image formats list and update the display label",
+      "files_to_modify": [
+        "ui/src/components/collections/schema/FileOptions.svelte"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The WebP image format support was implemented through two minimal but strategic changes that ensure comprehensive integration throughout the system. First, the database migration file was updated to include 'image/webp' in the default MIME type array for image file fields. This ensures that any new collections created after this migration will automatically support WebP alongside existing formats like JPEG, PNG, SVG, and GIF. The change was made by simply appending to the existing array, maintaining backward compatibility and avoiding any disruption to existing collections.\n\nSecond, the UI component responsible for file field configuration was updated to reflect this change. The predefined MIME type array in the Svelte component now includes 'image/webp', and the display label was updated from 'Images (jpg, png, svg, gif)' to 'Images (jpg, png, svg, gif, webp)'. This provides a consistent user experience where administrators can easily select WebP as an allowed format without needing to manually enter the MIME type.\n\nThe implementation follows the existing patterns in the codebase, leveraging the centralized configuration points for maximum impact with minimal changes. No changes were needed to the image processing logic (likely handled by the 'github.com/disintegration/imaging' dependency which already supports WebP) or validation systems, indicating that the underlying infrastructure was already WebP-capable. This approach demonstrates how to extend system capabilities by updating configuration defaults rather than modifying core logic, resulting in a clean, maintainable implementation.",
+  "source_pr": "https://github.com/pocketbase/pocketbase/pull/1469",
+  "before_sha": "5ef6b3a8be81daf4f5d07c497ab2db6d8dff9bff",
+  "after_sha": "41ba7e12e181ebd0d23f5d8cedf3ff92be5ed300",
+  "diff_stats": {
+    "additions": 3,
+    "deletions": 1,
+    "files_changed": 2
+  }
+}

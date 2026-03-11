@@ -1,0 +1,103 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "dependency_management",
+      "recommendation": "Downgraded OpenTelemetry SDK from v1.40.0 to v1.37.0 (contrib/datadog) and v1.27.0 (contrib/opentelemetry/test) to address CI flakiness issues",
+      "rationale": "The OpenTelemetry v1.40.0 upgrade introduced instability in the CI pipeline, causing test failures that blocked the v1.41.0 release. Reverting to previously stable versions ensures reliable test execution while maintaining observability functionality.",
+      "alternatives_considered": [
+        "Fix tests to work with v1.40.0",
+        "Upgrade to a newer patch version",
+        "Disable flaky tests temporarily"
+      ],
+      "files_affected": [
+        "contrib/datadog/go.mod",
+        "contrib/datadog/go.sum",
+        "contrib/opentelemetry/go.mod",
+        "contrib/opentelemetry/go.sum",
+        "test/go.mod",
+        "test/go.sum"
+      ]
+    },
+    {
+      "dimension": "toolchain_management",
+      "recommendation": "Reverted Go version from 1.24.0 to 1.23.0 and added explicit toolchain specification (go1.23.6) in contrib/opentelemetry and test modules",
+      "rationale": "The OpenTelemetry v1.40.0 upgrade required Go 1.24.0. Reverting dependencies necessitated reverting the Go version as well to maintain compatibility. Explicit toolchain specification ensures consistent builds across environments.",
+      "alternatives_considered": [
+        "Keep Go 1.24.0 with downgraded dependencies",
+        "Use Go 1.23.x without explicit toolchain",
+        "Update all modules to a consistent Go version"
+      ],
+      "files_affected": [
+        "contrib/opentelemetry/go.mod",
+        "test/go.mod"
+      ]
+    },
+    {
+      "dimension": "test_stability",
+      "recommendation": "Removed conditional nil-checking assertions in integration tests and simplified retry logic in worker deployment tests that were added during the v1.40.0 upgrade",
+      "rationale": "The test modifications introduced with v1.40.0 were either unnecessary or contributed to flakiness. Removing conditional assertions (assert.NotNil checks) and complex retry logic reduces test complexity and potential failure points.",
+      "alternatives_considered": [
+        "Keep test modifications but fix underlying issues",
+        "Add more robust error handling",
+        "Increase timeout values"
+      ],
+      "files_affected": [
+        "test/integration_test.go",
+        "test/worker_deployment_test.go"
+      ]
+    },
+    {
+      "dimension": "transitive_dependency_management",
+      "recommendation": "Downgraded related dependencies including go.opentelemetry.io/auto/sdk, golang.org/x/sys, and test dependencies (stretchr/testify, google/go-cmp, uber/goleak) to versions compatible with OpenTelemetry v1.27.0-1.37.0",
+      "rationale": "OpenTelemetry SDK upgrades often require coordinated updates of transitive dependencies. Reverting these ensures a consistent, tested dependency graph that worked reliably before the upgrade.",
+      "alternatives_considered": [
+        "Keep newer versions of transitive dependencies",
+        "Selectively downgrade only direct dependencies",
+        "Use dependency replacement directives"
+      ],
+      "files_affected": [
+        "contrib/datadog/go.mod",
+        "contrib/datadog/go.sum",
+        "contrib/opentelemetry/go.sum",
+        "test/go.sum"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Revert OpenTelemetry SDK dependencies",
+      "description": "Downgrade OpenTelemetry SDK and related dependencies across all modules to stabilize CI pipeline",
+      "files_to_modify": [
+        "contrib/datadog/go.mod",
+        "contrib/datadog/go.sum",
+        "contrib/opentelemetry/go.mod",
+        "contrib/opentelemetry/go.sum",
+        "test/go.mod",
+        "test/go.sum"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-002",
+      "title": "Remove test modifications from v1.40.0 upgrade",
+      "description": "Revert test code changes that were introduced during the OpenTelemetry v1.40.0 upgrade to reduce flakiness",
+      "files_to_modify": [
+        "test/integration_test.go",
+        "test/worker_deployment_test.go"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation focused on stabilizing the CI pipeline by systematically reverting the OpenTelemetry SDK upgrade from v1.40.0 to previously stable versions. This involved coordinated changes across multiple modules: contrib/datadog was downgraded to v1.37.0, while contrib/opentelemetry and test modules were reverted to v1.27.0-1.28.0. The downgrade required reverting Go versions from 1.24.0 to 1.23.0 with explicit toolchain specifications to maintain compatibility.\n\nKey patterns include maintaining dependency consistency across the monorepo - when OpenTelemetry was downgraded, related dependencies like go.opentelemetry.io/auto/sdk, golang.org/x/sys, and test utilities (stretchr/testify, google/go-cmp) were also reverted to versions known to work together. This holistic approach prevents version mismatches that could cause runtime issues.\n\nThe changes integrate with the existing codebase by targeting the specific areas affected by the original upgrade: dependency files (go.mod/go.sum) and test files that were modified during the upgrade. The test modifications removed were identified as potential sources of flakiness - specifically, unnecessary conditional nil checks in integration tests and overly complex retry logic in worker deployment tests. By reverting these, test reliability is improved without sacrificing coverage.\n\nThis rollback strategy prioritizes stability for the upcoming v1.41.0 release while leaving the door open for a more carefully managed OpenTelemetry upgrade in the future. The approach demonstrates pragmatic dependency management where stability trumps being on the latest versions when release timelines are at stake.",
+  "source_pr": "https://github.com/temporalio/sdk-go/pull/2221",
+  "before_sha": "29de23f1083fc4bb5340a18742a4c9835a2c5ad2",
+  "after_sha": "95b504e542531f4e292c06f7cdf901a298101b98",
+  "diff_stats": {
+    "additions": 99,
+    "deletions": 117,
+    "files_changed": 8
+  }
+}

@@ -1,0 +1,88 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "dependency_management",
+      "recommendation": "Updated MongoDB dependency to use explicit feature flags and disable default features to reduce transitive dependencies",
+      "rationale": "The original mongodb crate dependency pulled in many unnecessary transitive dependencies (DNS resolution, caching, Windows registry access) that weren't needed for the example. By disabling default features and enabling only the essential ones, we significantly reduce the dependency tree while maintaining core functionality.",
+      "alternatives_considered": [
+        "Keeping all default features enabled (original approach)",
+        "Switching to a different MongoDB driver",
+        "Removing the MongoDB example entirely"
+      ],
+      "files_affected": [
+        "examples/mongodb/Cargo.toml"
+      ]
+    },
+    {
+      "dimension": "example_simplicity",
+      "recommendation": "Reduced example complexity by removing unnecessary dependencies to make it easier for users to understand and run",
+      "rationale": "Examples should be minimal and focused. The original dependency tree included DNS resolution (hickory-proto, hickory-resolver), caching (moka), Windows-specific utilities (winreg, widestring), and other non-essential crates. These added complexity without demonstrating core Axum-MongoDB integration concepts.",
+      "alternatives_considered": [
+        "Keeping all dependencies but documenting why they're needed",
+        "Creating a separate minimal example",
+        "Using feature flags in the example code itself"
+      ],
+      "files_affected": [
+        "examples/mongodb/Cargo.toml",
+        "examples/Cargo.lock"
+      ]
+    },
+    {
+      "dimension": "security_and_compatibility",
+      "recommendation": "Switched to rustls-tls feature instead of default TLS implementation and maintained bson-3 compatibility",
+      "rationale": "Using rustls-tls is more secure and has better cross-platform compatibility than the default TLS implementation. The bson-3 feature ensures compatibility with the newer BSON library version while compat-3-3-0 maintains API compatibility with the MongoDB driver version.",
+      "alternatives_considered": [
+        "Keeping default TLS implementation",
+        "Using native-tls feature instead",
+        "Dropping TLS support entirely for the example"
+      ],
+      "files_affected": [
+        "examples/mongodb/Cargo.toml"
+      ]
+    },
+    {
+      "dimension": "version_alignment",
+      "recommendation": "Updated BSON dependency from 2.15.0 to 3.1.0 to align with MongoDB driver's preferred version",
+      "rationale": "The MongoDB driver version 3.3.0 works better with BSON 3.x. This update removes redundant dependencies (serde_json, once_cell with atomic features) and adds necessary ones (simdutf8, thiserror) for the newer BSON version.",
+      "alternatives_considered": [
+        "Keeping BSON 2.15.0 with compatibility shims",
+        "Downgrading MongoDB driver to match BSON 2.x",
+        "Using both BSON versions with feature flags"
+      ],
+      "files_affected": [
+        "examples/Cargo.lock"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Minimize MongoDB example dependencies",
+      "description": "Update MongoDB example to use only essential dependencies by disabling default features and explicitly enabling needed ones",
+      "files_to_modify": [
+        "examples/mongodb/Cargo.toml"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-002",
+      "title": "Update dependency lockfile",
+      "description": "Regenerate Cargo.lock to reflect the reduced dependency tree and updated BSON version",
+      "files_to_modify": [
+        "examples/Cargo.lock"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The changes implement a dependency reduction strategy for the MongoDB example by taking advantage of the MongoDB driver's feature flag system. Instead of pulling in all default dependencies, we explicitly disable default features and enable only three essential ones: 'bson-3' for BSON serialization compatibility, 'compat-3-3-0' for API stability, and 'rustls-tls' for secure TLS connections.\n\nThis approach removes approximately 20 unnecessary transitive dependencies from the lockfile, including DNS resolution libraries (hickory-proto, hickory-resolver), caching systems (moka), Windows-specific utilities (winreg, widestring), and various helper crates. The BSON dependency was also updated from 2.15.0 to 3.1.0 to better align with the MongoDB driver's requirements, which simplified its own dependency tree by removing serde_json and updating error handling.\n\nThe key insight was that examples should be minimal and focused on demonstrating the core integration patterns rather than including every possible feature. By reducing the dependency footprint, users can more easily understand what's essential for Axum-MongoDB integration and avoid potential dependency conflicts in their own projects. The functionality remains identical from a user perspective while the implementation becomes cleaner and more maintainable.",
+  "source_pr": "https://github.com/tokio-rs/axum/pull/3673",
+  "before_sha": "3fb52b094ee6eaa9876205b82a06b3be86c310ad",
+  "after_sha": "783c83dded7ab7a598b25035583c7b5133169ff4",
+  "diff_stats": {
+    "additions": 11,
+    "deletions": 143,
+    "files_changed": 2
+  }
+}

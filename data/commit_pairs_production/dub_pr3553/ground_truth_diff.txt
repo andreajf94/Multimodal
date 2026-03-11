@@ -1,0 +1,998 @@
+diff --git a/apps/web/app/(ee)/api/cron/payouts/charge-succeeded/route.ts b/apps/web/app/(ee)/api/cron/payouts/charge-succeeded/route.ts
+index 11744d5b29f..376a8813b7c 100644
+--- a/apps/web/app/(ee)/api/cron/payouts/charge-succeeded/route.ts
++++ b/apps/web/app/(ee)/api/cron/payouts/charge-succeeded/route.ts
+@@ -1,4 +1,5 @@
+ import { handleAndReturnErrorResponse } from "@/lib/api/errors";
++import { MIN_WITHDRAWAL_AMOUNT_CENTS } from "@/lib/constants/payouts";
+ import { verifyQstashSignature } from "@/lib/cron/verify-qstash";
+ import { fundFinancialAccount } from "@/lib/stripe/fund-financial-account";
+ import { prisma } from "@dub/prisma";
+@@ -69,11 +70,17 @@ export async function POST(req: Request) {
+       where: {
+         invoiceId: invoice.id,
+         method: "stablecoin",
++        // only transfer funds for stablecoin payouts >= minimum withdrawal amount
++        // for payouts below the minimum withdrawal amount, we will just mark them as processed
++        // and users can force withdraw them manually later (which triggers another fundFinancialAccount call)
++        amount: {
++          gte: MIN_WITHDRAWAL_AMOUNT_CENTS,
++        },
+       },
+     });
+     const stablecoinFundingAmount = _sum.amount ?? 0;
+ 
+-    // Send money to Dub's Financial Account to handle Stablecoin payouts
++    // Send money to Financial Account to handle stablecoin payouts
+     if (stablecoinFundingAmount > 0) {
+       try {
+         await fundFinancialAccount({
+diff --git a/apps/web/app/(ee)/api/cron/payouts/force-withdrawals/route.ts b/apps/web/app/(ee)/api/cron/payouts/force-withdrawals/route.ts
+new file mode 100644
+index 00000000000..ace70f4bd39
+--- /dev/null
++++ b/apps/web/app/(ee)/api/cron/payouts/force-withdrawals/route.ts
+@@ -0,0 +1,148 @@
++import { forceWithdrawal } from "@/lib/actions/partners/force-withdrawal";
++import { handleAndReturnErrorResponse } from "@/lib/api/errors";
++import { qstash } from "@/lib/cron";
++import { verifyQstashSignature } from "@/lib/cron/verify-qstash";
++import { verifyVercelSignature } from "@/lib/cron/verify-vercel";
++import { prisma } from "@dub/prisma";
++import { ACME_PROGRAM_ID, APP_DOMAIN_WITH_NGROK, log } from "@dub/utils";
++import * as z from "zod/v4";
++import { logAndRespond } from "../../utils";
++
++export const dynamic = "force-dynamic";
++
++const BATCH_SIZE = 20;
++
++const schema = z.object({
++  startingAfter: z.string().optional(),
++});
++
++// This route is used to force withdrawals for partners that haven't withdrew their earnings for than 90 days
++// Runs once a day at 5AM PST (0 12 * * *) + calls itself recursively to process all partners in batches
++// TODO: Add cron to vercel.json starting Mar 9, 2026
++async function handler(req: Request) {
++  try {
++    let rawBody: string | undefined;
++    if (req.method === "GET") {
++      await verifyVercelSignature(req);
++    } else if (req.method === "POST") {
++      rawBody = await req.text();
++      await verifyQstashSignature({
++        req,
++        rawBody,
++      });
++    }
++
++    let startingAfter: string | undefined;
++    try {
++      startingAfter = schema.parse(
++        rawBody ? JSON.parse(rawBody) : {},
++      ).startingAfter;
++    } catch {
++      startingAfter = undefined;
++    }
++
++    // Get batch of partner IDs with processed payouts (cursor-based pagination)
++    const processedPayouts = await prisma.payout.findMany({
++      where: {
++        status: "processed",
++        method: {
++          in: ["stablecoin", "connect"],
++        },
++        programId: {
++          not: ACME_PROGRAM_ID,
++        },
++        paidAt: {
++          lte: new Date(Date.now() - 90 * 24 * 60 * 60 * 1000), // 90 days ago
++        },
++        partner: {
++          payoutsEnabledAt: {
++            not: null,
++          },
++        },
++      },
++      include: {
++        partner: {
++          select: {
++            id: true,
++            defaultPayoutMethod: true,
++          },
++        },
++      },
++      take: BATCH_SIZE,
++      orderBy: {
++        id: "asc",
++      },
++      ...(startingAfter && {
++        skip: 1,
++        cursor: {
++          id: startingAfter,
++        },
++      }),
++    });
++
++    if (!processedPayouts.length) {
++      return logAndRespond(
++        "No processed payouts found. Skipping force withdrawals...",
++      );
++    }
++
++    const hasMoreToProcess = processedPayouts.length === BATCH_SIZE;
++
++    console.log(
++      `Found ${processedPayouts.length} partners to process${hasMoreToProcess ? " (more to process)" : ""}`,
++    );
++
++    await Promise.allSettled(
++      processedPayouts
++        .filter(
++          // filter out duplicate payouts for the same partner
++          (payout, index, self) =>
++            index === self.findIndex((t) => t.partnerId === payout.partnerId),
++        )
++        .map(({ partner }) => forceWithdrawal(partner)),
++    );
++
++    if (hasMoreToProcess) {
++      console.log(
++        "More partners need force withdrawals, scheduling next batch...",
++      );
++
++      const nextStartingAfter =
++        processedPayouts[processedPayouts.length - 1].id;
++
++      const qstashResponse = await qstash.publishJSON({
++        url: `${APP_DOMAIN_WITH_NGROK}/api/cron/payouts/force-withdrawals`,
++        method: "POST",
++        body: {
++          startingAfter: nextStartingAfter,
++        },
++      });
++      if (qstashResponse.messageId) {
++        console.log(
++          `Message sent to Qstash with id ${qstashResponse.messageId}`,
++        );
++      } else {
++        await log({
++          message: `Error sending message to Qstash to schedule next batch of force withdrawals: ${JSON.stringify(qstashResponse)}`,
++          type: "errors",
++          mention: true,
++        });
++      }
++      return logAndRespond(
++        `Finished force withdrawals for current batch. Scheduling next batch (startingAfter: ${nextStartingAfter})...`,
++      );
++    }
++
++    return logAndRespond("Finished force withdrawals for all batches.");
++  } catch (error) {
++    await log({
++      message: `Error force withdrawing: ${error.message}`,
++      type: "errors",
++      mention: true,
++    });
++    return handleAndReturnErrorResponse(error);
++  }
++}
++
++// GET/POST /api/cron/payouts/force-withdrawals
++export { handler as GET, handler as POST };
+diff --git a/apps/web/app/(ee)/partners.dub.co/(dashboard)/payouts/partner-payout-details-sheet.tsx b/apps/web/app/(ee)/partners.dub.co/(dashboard)/payouts/partner-payout-details-sheet.tsx
+index 95246c99b59..00ba3328fc5 100644
+--- a/apps/web/app/(ee)/partners.dub.co/(dashboard)/payouts/partner-payout-details-sheet.tsx
++++ b/apps/web/app/(ee)/partners.dub.co/(dashboard)/payouts/partner-payout-details-sheet.tsx
+@@ -1,5 +1,7 @@
+ import {
++  BELOW_MIN_WITHDRAWAL_FEE_CENTS,
+   INVOICE_AVAILABLE_PAYOUT_STATUSES,
++  MIN_WITHDRAWAL_AMOUNT_CENTS,
+   PAYOUTS_SHEET_ITEMS_LIMIT,
+   STABLECOIN_PAYOUT_FEE_RATE,
+ } from "@/lib/constants/payouts";
+@@ -132,17 +134,35 @@ function PayoutDetailsSheetContent({ payout }: PayoutDetailsSheetProps) {
+         ),
+       },
+ 
+-      ...(payout.method === "stablecoin"
++      ...(payout.method === "stablecoin" ||
++      payout.amount < MIN_WITHDRAWAL_AMOUNT_CENTS
+         ? [
+             {
+               key: "Fee",
+               value: (
+                 <Tooltip
+-                  content={`Stablecoin payouts on Dub are subject to a ${STABLECOIN_PAYOUT_FEE_RATE * 100}% fee. [Learn more](https://dub.co/help/article/receiving-payouts#stablecoin-payouts).`}
++                  content={[
++                    payout.method === "stablecoin" &&
++                      `Stablecoin payouts on Dub are subject to a [${STABLECOIN_PAYOUT_FEE_RATE * 100}% transaction fee](https://dub.co/help/article/receiving-payouts#stablecoin-payouts).`,
++                    payout.amount < MIN_WITHDRAWAL_AMOUNT_CENTS &&
++                      `Since this payout is below the [minimum withdrawal amount](https://dub.co/help/article/receiving-payouts#what-is-the-minimum-withdrawal-amount-and-how-does-it-work) of ${currencyFormatter(MIN_WITHDRAWAL_AMOUNT_CENTS, { trailingZeroDisplay: "stripIfInteger" })}, a ${currencyFormatter(BELOW_MIN_WITHDRAWAL_FEE_CENTS, { trailingZeroDisplay: "stripIfInteger" })} withdrawal fee was applied.`,
++                  ]
++                    .filter(Boolean)
++                    .join(" ")
++                    // a bit hacky, but we want to make the second sentence a bit more natural with "Also, since" if both conditions are met
++                    .replace(
++                      "Since",
++                      payout.method === "stablecoin" ? "Also, since" : "Since",
++                    )}
+                 >
+                   <span className="hover:text-content-emphasis cursor-help underline decoration-dotted underline-offset-2">
+                     {currencyFormatter(
+-                      payout.amount * STABLECOIN_PAYOUT_FEE_RATE,
++                      (payout.method === "stablecoin"
++                        ? payout.amount * STABLECOIN_PAYOUT_FEE_RATE
++                        : 0) +
++                        (payout.amount < MIN_WITHDRAWAL_AMOUNT_CENTS
++                          ? BELOW_MIN_WITHDRAWAL_FEE_CENTS
++                          : 0),
+                     )}
+                   </span>
+                 </Tooltip>
+diff --git a/apps/web/lib/actions/partners/force-withdrawal.ts b/apps/web/lib/actions/partners/force-withdrawal.ts
+index 063c45a44eb..cb42fcb66eb 100644
+--- a/apps/web/lib/actions/partners/force-withdrawal.ts
++++ b/apps/web/lib/actions/partners/force-withdrawal.ts
+@@ -4,6 +4,7 @@ import { throwIfNoPermission } from "@/lib/auth/partner-users/throw-if-no-permis
+ import { createStablecoinPayout } from "@/lib/partners/create-stablecoin-payout";
+ import { createStripeTransfer } from "@/lib/partners/create-stripe-transfer";
+ import { redis } from "@/lib/upstash";
++import { Partner } from "@dub/prisma/client";
+ import { authPartnerActionClient } from "../safe-action";
+ 
+ // Force a withdrawal for a partner (even if the total amount is below the minimum withdrawal amount)
+@@ -28,33 +29,35 @@ export const forceWithdrawalAction = authPartnerActionClient.action(
+       );
+     }
+ 
+-    const lockKey = `force-withdrawal:lock:${partner.id}`;
+-    const acquired = await redis.set(lockKey, "1", { nx: true, ex: 60 });
+-
+-    if (!acquired) {
+-      throw new Error(
+-        "A withdrawal is already in progress. Please wait for it to complete.",
+-      );
+-    }
+-
+-    try {
+-      if (partner.defaultPayoutMethod === "connect") {
+-        await createStripeTransfer({
+-          partnerId: partner.id,
+-          forceWithdrawal: true,
+-        });
+-        return;
+-      }
+-
+-      if (partner.defaultPayoutMethod === "stablecoin") {
+-        await createStablecoinPayout({
+-          partnerId: partner.id,
+-          forceWithdrawal: true,
+-        });
+-        return;
+-      }
+-    } finally {
+-      await redis.del(lockKey);
+-    }
++    await forceWithdrawal(partner);
+   },
+ );
++
++export const forceWithdrawal = async (
++  partner: Pick<Partner, "id" | "defaultPayoutMethod">,
++) => {
++  const lockKey = `force-withdrawal:lock:${partner.id}`;
++  const acquired = await redis.set(lockKey, "1", { nx: true, ex: 60 });
++
++  if (!acquired) {
++    throw new Error(
++      "A withdrawal is already in progress. Please wait for it to complete.",
++    );
++  }
++
++  try {
++    if (partner.defaultPayoutMethod === "stablecoin") {
++      await createStablecoinPayout({
++        partnerId: partner.id,
++        forceWithdrawal: true,
++      });
++    } else if (partner.defaultPayoutMethod === "connect") {
++      await createStripeTransfer({
++        partnerId: partner.id,
++        forceWithdrawal: true,
++      });
++    }
++  } finally {
++    await redis.del(lockKey);
++  }
++};
+diff --git a/apps/web/lib/email/email-templates-map.ts b/apps/web/lib/email/email-templates-map.ts
+index 0987d6bbac4..8fc60e5f8b7 100644
+--- a/apps/web/lib/email/email-templates-map.ts
++++ b/apps/web/lib/email/email-templates-map.ts
+@@ -1,4 +1,5 @@
+ import BountyApproved from "@dub/email/templates/bounty-approved";
++import PayoutAutoWithdrawals from "@dub/email/templates/broadcasts/payout-auto-withdrawals";
+ import StablecoinPayoutsAnnouncement from "@dub/email/templates/broadcasts/stablecoin-payouts-announcement";
+ import ConnectPayoutReminder from "@dub/email/templates/connect-payout-reminder";
+ import ConnectPlatformsReminder from "@dub/email/templates/connect-platforms-reminder";
+@@ -23,6 +24,7 @@ export const EMAIL_TEMPLATES_MAP = {
+   PartnerGroupChanged,
+ 
+   // special promo emails
++  PayoutAutoWithdrawals,
+   StablecoinPayoutsAnnouncement,
+   // ProgramMarketplaceAnnouncement,
+   // DubPartnerRewind,
+diff --git a/apps/web/lib/partners/create-stablecoin-payout.ts b/apps/web/lib/partners/create-stablecoin-payout.ts
+index a2119641263..eb4366992a4 100644
+--- a/apps/web/lib/partners/create-stablecoin-payout.ts
++++ b/apps/web/lib/partners/create-stablecoin-payout.ts
+@@ -1,9 +1,14 @@
+ import { sendEmail } from "@dub/email";
++import PartnerPayoutForceWithdrawal from "@dub/email/templates/partner-payout-force-withdrawal";
+ import PartnerPayoutProcessed from "@dub/email/templates/partner-payout-processed";
+ import { prisma } from "@dub/prisma";
+ import { PartnerPayoutMethod, Prisma } from "@dub/prisma/client";
+ import { currencyFormatter, prettyPrint } from "@dub/utils";
+-import { STABLECOIN_PAYOUT_FEE_RATE } from "../constants/payouts";
++import {
++  BELOW_MIN_WITHDRAWAL_FEE_CENTS,
++  MIN_WITHDRAWAL_AMOUNT_CENTS,
++  STABLECOIN_PAYOUT_FEE_RATE,
++} from "../constants/payouts";
+ import { createPayoutsIdempotencyKey } from "../payouts/create-payouts-idempotency-key";
+ import { markPayoutsAsProcessed } from "../payouts/mark-payouts-as-processed";
+ import { createStripeOutboundPayment } from "../stripe/create-stripe-outbound-payment";
+@@ -113,27 +118,29 @@ export const createStablecoinPayout = async ({
+     0,
+   );
+ 
+-  if (totalTransferableAmount <= 0) {
+-    console.warn(
+-      `Total transferable amount for partner ${partner.email} is less than 0.`,
+-    );
+-    return;
+-  }
++  let withdrawalFee = 0;
+ 
+-  // Stablecoin payouts incur an outbound fee that is passed along to partners.
+-  totalTransferableAmount -=
+-    totalTransferableAmount * STABLECOIN_PAYOUT_FEE_RATE;
++  // If the total transferable amount is less than the minimum withdrawal amount
++  if (totalTransferableAmount < MIN_WITHDRAWAL_AMOUNT_CENTS) {
++    // if we're forcing a withdrawal, we need to charge a withdrawal fee
++    if (forceWithdrawal) {
++      withdrawalFee = BELOW_MIN_WITHDRAWAL_FEE_CENTS;
++      // else, we will just update current invoice payouts to "processed" status
++    } else {
++      await markPayoutsAsProcessed(currentInvoicePayouts);
+ 
+-  // Round down to the nearest integer
+-  totalTransferableAmount = Math.floor(totalTransferableAmount);
++      console.log(
++        `Total processed payouts (${currencyFormatter(totalTransferableAmount)}) for partner ${partner.id} are below ${currencyFormatter(MIN_WITHDRAWAL_AMOUNT_CENTS)}, skipping...`,
++      );
+ 
+-  if (totalTransferableAmount <= 0) {
+-    console.warn(
+-      `Total transferable amount for partner ${partner.email} is less than 0.`,
+-    );
+-    return;
++      return;
++    }
+   }
+ 
++  // remove the stablecoin payout fee (0.5%) and withdrawal fee (if applicable) from the total amount
++  totalTransferableAmount -=
++    totalTransferableAmount * STABLECOIN_PAYOUT_FEE_RATE + withdrawalFee;
++
+   const stripeRecipientAccount = await getStripeRecipientAccount(
+     partner.stripeRecipientId,
+   );
+@@ -150,7 +157,7 @@ export const createStablecoinPayout = async ({
+       },
+     });
+ 
+-    await markPayoutsAsProcessed(allPayouts);
++    await markPayoutsAsProcessed(currentInvoicePayouts);
+ 
+     console.warn(
+       `Stripe recipient account for partner ${partner.email} is closed.`,
+@@ -172,7 +179,7 @@ export const createStablecoinPayout = async ({
+       },
+     });
+ 
+-    await markPayoutsAsProcessed(allPayouts);
++    await markPayoutsAsProcessed(currentInvoicePayouts);
+ 
+     throw new Error(
+       `Stripe recipient account for partner ${partner.email} does not have crypto wallet capabilities.`,
+@@ -183,14 +190,11 @@ export const createStablecoinPayout = async ({
+     ...new Set(allPayouts.map((p) => p.program.name)),
+   ];
+ 
+-  // Find the total amount to transfer to Dub's FA
+-  let amountToTransferToFA = 0;
+-
+-  for (const payout of previouslyProcessedPayouts) {
+-    if (payout.method === "connect") {
+-      amountToTransferToFA += payout.amount;
+-    }
+-  }
++  // Transfer the total of previously processed payouts to Dub's FA
++  const amountToTransferToFA = previouslyProcessedPayouts.reduce(
++    (acc, payout) => acc + payout.amount,
++    0,
++  );
+ 
+   if (amountToTransferToFA > 0) {
+     await fundFinancialAccount({
+@@ -247,17 +251,27 @@ export const createStablecoinPayout = async ({
+     return;
+   }
+ 
+-  const payout = allPayouts[0];
++  const firstPayout = allPayouts[0];
+ 
+   const emailResponse = await sendEmail({
+     variant: "notifications",
+     to: partner.email,
+-    subject: `You've received a ${currencyFormatter(payout.amount)} payout from ${payout.program.name}`,
+-    react: PartnerPayoutProcessed({
+-      email: partner.email,
+-      program: payout.program,
+-      payout,
+-    }),
++    subject: forceWithdrawal
++      ? `A withdrawal of ${currencyFormatter(amountToTransferToFA)} has been initiated from your Dub account`
++      : `You've received a ${currencyFormatter(firstPayout.amount)} payout from ${firstPayout.program.name}`,
++    react: forceWithdrawal
++      ? PartnerPayoutForceWithdrawal({
++          email: partner.email,
++          payout: {
++            amount: amountToTransferToFA,
++            method: "stablecoin",
++          },
++        })
++      : PartnerPayoutProcessed({
++          email: partner.email,
++          program: firstPayout.program,
++          payout: firstPayout,
++        }),
+   });
+ 
+   console.log(
+diff --git a/apps/web/lib/partners/create-stripe-transfer.ts b/apps/web/lib/partners/create-stripe-transfer.ts
+index ac879ba0c34..82b47f2e7a8 100644
+--- a/apps/web/lib/partners/create-stripe-transfer.ts
++++ b/apps/web/lib/partners/create-stripe-transfer.ts
+@@ -5,6 +5,7 @@ import {
+ } from "@/lib/constants/payouts";
+ import { stripe } from "@/lib/stripe";
+ import { sendEmail } from "@dub/email";
++import PartnerPayoutForceWithdrawal from "@dub/email/templates/partner-payout-force-withdrawal";
+ import PartnerPayoutProcessed from "@dub/email/templates/partner-payout-processed";
+ import { prisma } from "@dub/prisma";
+ import { Prisma } from "@dub/prisma/client";
+@@ -225,12 +226,22 @@ export const createStripeTransfer = async ({
+     const emailRes = await sendEmail({
+       variant: "notifications",
+       to: partner.email,
+-      subject: `You've received a ${currencyFormatter(payout.amount)} payout from ${payout.program.name}`,
+-      react: PartnerPayoutProcessed({
+-        email: partner.email,
+-        program: payout.program,
+-        payout,
+-      }),
++      subject: forceWithdrawal
++        ? `A withdrawal of ${currencyFormatter(totalTransferableAmount)} has been initiated from your Dub account`
++        : `You've received a ${currencyFormatter(payout.amount)} payout from ${payout.program.name}`,
++      react: forceWithdrawal
++        ? PartnerPayoutForceWithdrawal({
++            email: partner.email,
++            payout: {
++              amount: totalTransferableAmount,
++              method: "connect",
++            },
++          })
++        : PartnerPayoutProcessed({
++            email: partner.email,
++            program: payout.program,
++            payout,
++          }),
+     });
+ 
+     console.log(`Resend email sent: ${JSON.stringify(emailRes, null, 2)}`);
+diff --git a/apps/web/lib/stripe/fund-financial-account.ts b/apps/web/lib/stripe/fund-financial-account.ts
+index 9349af7acf5..f93d5c7a3fc 100644
+--- a/apps/web/lib/stripe/fund-financial-account.ts
++++ b/apps/web/lib/stripe/fund-financial-account.ts
+@@ -44,6 +44,7 @@ export async function fundFinancialAccount({
+     prettyPrint(data),
+   );
+ 
++  // small delay to make sure the funds are fully available in the financial account
+   await new Promise((resolve) => setTimeout(resolve, 1000));
+ 
+   return data;
+diff --git a/apps/web/scripts/processed-payouts.ts b/apps/web/scripts/processed-payouts.ts
+index b318b7f4d2c..1813150b215 100644
+--- a/apps/web/scripts/processed-payouts.ts
++++ b/apps/web/scripts/processed-payouts.ts
+@@ -1,3 +1,4 @@
++import { MIN_FORCE_WITHDRAWAL_AMOUNT_CENTS } from "@/lib/constants/payouts";
+ import { prisma } from "@dub/prisma";
+ import { Prisma } from "@dub/prisma/client";
+ import { currencyFormatter } from "@dub/utils";
+@@ -7,7 +8,7 @@ async function main() {
+   const where: Prisma.PayoutWhereInput = {
+     status: "processed",
+     amount: {
+-      gt: 0,
++      gte: MIN_FORCE_WITHDRAWAL_AMOUNT_CENTS,
+     },
+     partner: {
+       payoutsEnabledAt: {
+@@ -16,7 +17,7 @@ async function main() {
+     },
+   };
+ 
+-  const processedPayouts = await prisma.payout.aggregate({
++  const totals = await prisma.payout.aggregate({
+     where,
+     _count: {
+       id: true,
+@@ -27,11 +28,11 @@ async function main() {
+   });
+ 
+   console.log({
+-    count: processedPayouts._count.id,
+-    amount: currencyFormatter(processedPayouts._sum.amount ?? 0),
++    totalProcessedPayouts: totals._count.id,
++    totalProcessedPayoutsAmount: currencyFormatter(totals._sum?.amount ?? 0),
+   });
+ 
+-  const listOfPayouts = await prisma.payout.findMany({
++  const processedPayouts = await prisma.payout.findMany({
+     where,
+     include: {
+       partner: {
+@@ -47,7 +48,7 @@ async function main() {
+   });
+ 
+   console.table(
+-    listOfPayouts.map((payout) => ({
++    processedPayouts.map((payout) => ({
+       id: payout.id,
+       partner: payout.partner.email,
+       amount: currencyFormatter(payout.amount),
+diff --git a/packages/email/src/templates/broadcasts/payout-auto-withdrawals.tsx b/packages/email/src/templates/broadcasts/payout-auto-withdrawals.tsx
+new file mode 100644
+index 00000000000..7c2fba83b9e
+--- /dev/null
++++ b/packages/email/src/templates/broadcasts/payout-auto-withdrawals.tsx
+@@ -0,0 +1,85 @@
++import { currencyFormatter } from "@dub/utils";
++import {
++  Body,
++  Container,
++  Heading,
++  Html,
++  Img,
++  Link,
++  Preview,
++  Section,
++  Tailwind,
++  Text,
++} from "@react-email/components";
++import { Footer } from "../../components/footer";
++import { BELOW_MIN_WITHDRAWAL_FEE_CENTS } from "../../types";
++
++export default function PayoutAutoWithdrawals({
++  email = "panic@thedis.co",
++}: {
++  email: string;
++}) {
++  return (
++    <Html>
++      <Preview>You've got money coming your way!</Preview>
++      <Tailwind>
++        <Body className="mx-auto my-auto bg-white font-sans">
++          <Container className="mx-auto my-10 max-w-[600px] rounded border border-solid border-neutral-200 px-10 py-5">
++            <Section className="mt-8">
++              <Img
++                src="https://assets.dub.co/wordmark.png"
++                height="32"
++                alt="Dub wordmark"
++              />
++            </Section>
++
++            <Heading className="mx-0 my-7 p-0 text-lg font-medium text-black">
++              Your payouts will be sent to your bank account soon
++            </Heading>
++
++            <Text className="text-sm leading-6 text-neutral-600">
++              You're receiving this email because you currently have{" "}
++              <code className="rounded bg-indigo-100 px-1.5 py-0.5 text-indigo-600">
++                processed
++              </code>{" "}
++              payouts in your Dub partner account.
++            </Text>
++
++            <Section className="mb-8 mt-6">
++              <Link
++                className="rounded-lg bg-neutral-900 px-4 py-3 text-[12px] font-semibold text-white no-underline"
++                href="https://partners.dub.co/payouts?status=processed"
++              >
++                View your payouts
++              </Link>
++            </Section>
++
++            <Text className="text-sm leading-6 text-neutral-600">
++              For compliance reasons, all{" "}
++              <code className="rounded bg-indigo-100 px-1.5 py-0.5 text-indigo-600">
++                processed
++              </code>{" "}
++              payouts will be automatically withdrawn to your connected bank
++              account after 90 days for a{" "}
++              {currencyFormatter(BELOW_MIN_WITHDRAWAL_FEE_CENTS)} fee.
++            </Text>
++            <Text className="text-sm leading-6 text-neutral-600">
++              If you'd like to receive your payout right away, please{" "}
++              <Link
++                href="https://partners.dub.co/payouts?status=processed"
++                target="_blank"
++                className="font-medium text-black underline decoration-dotted underline-offset-2"
++              >
++                go to your Payouts page
++              </Link>{" "}
++              and select <strong className="text-black">"Pay out now"</strong>{" "}
++              to withdraw your payout for a{" "}
++              {currencyFormatter(BELOW_MIN_WITHDRAWAL_FEE_CENTS)} fee.
++            </Text>
++            <Footer email={email} />
++          </Container>
++        </Body>
++      </Tailwind>
++    </Html>
++  );
++}
+diff --git a/packages/email/src/templates/partner-payout-force-withdrawal.tsx b/packages/email/src/templates/partner-payout-force-withdrawal.tsx
+new file mode 100644
+index 00000000000..17cfe2f35ce
+--- /dev/null
++++ b/packages/email/src/templates/partner-payout-force-withdrawal.tsx
+@@ -0,0 +1,110 @@
++import { currencyFormatter } from "@dub/utils";
++import {
++  Body,
++  Container,
++  Head,
++  Heading,
++  Html,
++  Img,
++  Link,
++  Preview,
++  Section,
++  Tailwind,
++  Text,
++} from "@react-email/components";
++import { Footer } from "../components/footer";
++import { PartnerPayoutMethod } from "../types";
++
++export default function PartnerPayoutForceWithdrawal({
++  email = "panic@thedis.co",
++  payout = {
++    amount: 200,
++    method: "stablecoin",
++  },
++}: {
++  email: string;
++  payout: {
++    amount: number;
++    method: Extract<PartnerPayoutMethod, "stablecoin" | "connect">;
++  };
++}) {
++  const payoutAmountInDollars = currencyFormatter(payout.amount);
++  const STABLECOIN_PAYOUT_FEE_RATE = 0.005;
++  const BELOW_MIN_WITHDRAWAL_FEE_CENTS = 50;
++
++  let statusMessage: string | React.ReactNode = "";
++
++  if (payout.method === "stablecoin") {
++    statusMessage = (
++      <>
++        After a {STABLECOIN_PAYOUT_FEE_RATE * 100}% stablecoin fee + a{" "}
++        {currencyFormatter(BELOW_MIN_WITHDRAWAL_FEE_CENTS)} withdrawal fee,{" "}
++        <strong className="text-black">
++          {currencyFormatter(
++            payout.amount * (1 - STABLECOIN_PAYOUT_FEE_RATE) -
++              BELOW_MIN_WITHDRAWAL_FEE_CENTS,
++          )}
++        </strong>{" "}
++        will be transferred to your connected crypto wallet. You should receive
++        it within minutes.
++      </>
++    );
++  } else {
++    statusMessage = (
++      <>
++        After a {currencyFormatter(BELOW_MIN_WITHDRAWAL_FEE_CENTS)} withdrawal
++        fee,{" "}
++        <strong className="text-black">
++          {currencyFormatter(payout.amount - BELOW_MIN_WITHDRAWAL_FEE_CENTS)}
++        </strong>{" "}
++        will begin transferring to your connected bank account shortly. You will
++        receive another email when the funds are on their way.
++      </>
++    );
++  }
++
++  return (
++    <Html>
++      <Head />
++      <Preview>
++        A withdrawal of {payoutAmountInDollars} has been initiated.
++      </Preview>
++      <Tailwind>
++        <Body className="mx-auto my-auto bg-white font-sans">
++          <Container className="mx-auto my-10 max-w-[600px] rounded border border-solid border-neutral-200 px-10 py-5">
++            <Section className="mt-8">
++              <Img
++                src="https://assets.dub.co/logo.png"
++                height="32"
++                alt="Dub logo"
++              />
++            </Section>
++
++            <Heading className="mx-0 my-7 p-0 text-lg font-medium text-black">
++              You've got money coming your way!
++            </Heading>
++
++            <Text className="text-sm leading-6 text-neutral-600">
++              A withdrawal of {payoutAmountInDollars} has been initiated from
++              your Dub account.
++            </Text>
++
++            <Text className="text-sm leading-6 text-neutral-600">
++              {statusMessage}
++            </Text>
++
++            <Section className="my-8">
++              <Link
++                className="rounded-lg bg-neutral-900 px-4 py-3 text-[12px] font-semibold text-white no-underline"
++                href="https://partners.dub.co/payouts"
++              >
++                View your payouts
++              </Link>
++            </Section>
++            <Footer email={email} />
++          </Container>
++        </Body>
++      </Tailwind>
++    </Html>
++  );
++}
+diff --git a/packages/email/src/templates/partner-payout-processed.tsx b/packages/email/src/templates/partner-payout-processed.tsx
+index c25bdf2cd2f..e93b7c46371 100644
+--- a/packages/email/src/templates/partner-payout-processed.tsx
++++ b/packages/email/src/templates/partner-payout-processed.tsx
+@@ -13,7 +13,12 @@ import {
+   Text,
+ } from "@react-email/components";
+ import { Footer } from "../components/footer";
+-import { PartnerPayoutMethod } from "../types";
++import {
++  BELOW_MIN_WITHDRAWAL_FEE_CENTS,
++  MIN_WITHDRAWAL_AMOUNT_CENTS,
++  PartnerPayoutMethod,
++  STABLECOIN_PAYOUT_FEE_RATE,
++} from "../types";
+ 
+ export default function PartnerPayoutProcessed({
+   email = "panic@thedis.co",
+@@ -23,7 +28,7 @@ export default function PartnerPayoutProcessed({
+   },
+   payout = {
+     id: "po_8VuCr2i7WnG65d4TNgZO19fT",
+-    amount: 12000,
++    amount: 200,
+     periodStart: new Date("2026-02-01"),
+     periodEnd: new Date("2026-02-01"),
+     method: "stablecoin",
+@@ -42,8 +47,9 @@ export default function PartnerPayoutProcessed({
+     method: PartnerPayoutMethod | null;
+   };
+ }) {
++  const isBelowMinimumWithdrawalAmount =
++    payout.amount < MIN_WITHDRAWAL_AMOUNT_CENTS;
+   const payoutAmountInDollars = currencyFormatter(payout.amount);
+-  const STABLECOIN_PAYOUT_FEE_RATE = 0.005;
+ 
+   const startDate = payout.periodStart
+     ? formatDate(payout.periodStart, {
+@@ -63,16 +69,74 @@ export default function PartnerPayoutProcessed({
+       })
+     : null;
+ 
+-  let statusMessage = "";
++  let statusMessage: string | React.ReactNode = "";
+ 
+-  if (payout.method === "connect") {
+-    statusMessage =
+-      payout.amount >= 1000
+-        ? "The funds will begin transferring to your connected bank account shortly. You will receive another email when the funds are on their way."
+-        : "Since this payout is below the minimum withdrawal amount of $10, it will remain in processed status.";
+-  } else if (payout.method === "paypal") {
++  if (payout.method === "paypal") {
+     statusMessage =
+       "Your payout is on its way to your PayPal account. You'll receive an email from PayPal when it's complete.";
++  } else if (isBelowMinimumWithdrawalAmount) {
++    statusMessage = (
++      <>
++        Since this payout is below the{" "}
++        <a
++          href="https://dub.co/help/article/receiving-payouts#what-is-the-minimum-withdrawal-amount-and-how-does-it-work"
++          target="_blank"
++          className="font-medium text-black underline decoration-dotted underline-offset-2"
++        >
++          minimum withdrawal amount
++        </a>{" "}
++        of {currencyFormatter(MIN_WITHDRAWAL_AMOUNT_CENTS)}, it will remain in{" "}
++        <code className="rounded bg-indigo-100 px-1.5 py-0.5 text-indigo-600">
++          processed
++        </code>{" "}
++        status.
++        <br />
++        <br />
++        If you'd like to receive your payout right away, please{" "}
++        <Link
++          href="https://partners.dub.co/payouts"
++          target="_blank"
++          className="font-medium text-black underline decoration-dotted underline-offset-2"
++        >
++          go to your Payouts page
++        </Link>{" "}
++        and select <strong className="text-black">"Pay out now"</strong> to
++        withdraw your payout for a{" "}
++        {currencyFormatter(BELOW_MIN_WITHDRAWAL_FEE_CENTS)} fee.
++        <br />
++        <br />
++        Note:{" "}
++        <code className="rounded bg-indigo-100 px-1.5 py-0.5 text-indigo-600">
++          processed
++        </code>{" "}
++        payouts will remain in your account for up to 90 days, after which it
++        will be automatically withdrawn (for a{" "}
++        {currencyFormatter(BELOW_MIN_WITHDRAWAL_FEE_CENTS)} withdrawal fee).
++      </>
++    );
++  } else if (payout.method === "stablecoin") {
++    statusMessage = (
++      <>
++        After a {STABLECOIN_PAYOUT_FEE_RATE * 100}% stablecoin fee,{" "}
++        <strong className="text-black">
++          {currencyFormatter(
++            payout.amount * (1 - STABLECOIN_PAYOUT_FEE_RATE) -
++              (isBelowMinimumWithdrawalAmount
++                ? BELOW_MIN_WITHDRAWAL_FEE_CENTS
++                : 0),
++          )}
++        </strong>{" "}
++        will be transferred to your connected crypto wallet. You should receive
++        it within minutes.
++      </>
++    );
++  } else {
++    statusMessage = (
++      <>
++        Your funds will begin transferring to your connected bank account
++        shortly. You will receive another email when the funds are on their way.
++      </>
++    );
+   }
+ 
+   return (
+@@ -81,7 +145,11 @@ export default function PartnerPayoutProcessed({
+       <Preview>
+         {program.name} has sent you a {payoutAmountInDollars} payout
+         {startDate && endDate
+-          ? ` for affiliate commissions made from ${startDate} to ${endDate}`
++          ? ` for affiliate commissions made ${
++              startDate === endDate
++                ? `on ${startDate}`
++                : `from ${startDate} to ${endDate}`
++            }`
+           : ""}
+         .
+       </Preview>
+@@ -103,14 +171,20 @@ export default function PartnerPayoutProcessed({
+             <Text className="text-sm leading-6 text-neutral-600">
+               Good news! <strong className="text-black">{program.name}</strong>{" "}
+               has sent you{" "}
+-              <strong className="text-black">{payoutAmountInDollars}</strong>
++              <strong className="text-black">{payoutAmountInDollars}</strong>{" "}
++              for affiliate commissions made via{" "}
++              <Link
++                href="https://partners.dub.co"
++                target="_blank"
++                className="font-medium text-black underline decoration-dotted underline-offset-2"
++              >
++                Dub Partners
++              </Link>
+               {startDate && endDate ? (
+                 <>
+                   {" "}
+-                  for affiliate commissions made
+                   {startDate === endDate ? (
+                     <>
+-                      {" "}
+                       on <strong className="text-black">{startDate}</strong>.
+                     </>
+                   ) : (
+@@ -125,25 +199,7 @@ export default function PartnerPayoutProcessed({
+               )}
+             </Text>
+ 
+-            <Text className="text-sm leading-6 text-neutral-600">
+-              {payout.method === "stablecoin" ? (
+-                <>
+-                  {" "}
+-                  After a {STABLECOIN_PAYOUT_FEE_RATE * 100}% stablecoin fee,{" "}
+-                  <strong className="text-black">
+-                    {currencyFormatter(
+-                      payout.amount * (1 - STABLECOIN_PAYOUT_FEE_RATE),
+-                    )}
+-                  </strong>{" "}
+-                  will be transferred to your connected crypto wallet. You
+-                  should receive it within minutes.
+-                </>
+-              ) : (
+-                statusMessage
+-              )}
+-            </Text>
+-
+-            <Section className="mb-10 mt-8">
++            <Section className="my-8">
+               <Link
+                 className="rounded-lg bg-neutral-900 px-4 py-3 text-[12px] font-semibold text-white no-underline"
+                 href={`https://partners.dub.co/payouts?payoutId=${payout.id}`}
+@@ -152,19 +208,9 @@ export default function PartnerPayoutProcessed({
+               </Link>
+             </Section>
+ 
+-            {payout.method === "connect" && payout.amount < 1000 && (
+-              <Text className="text-sm leading-6 text-neutral-600">
+-                If you'd like to receive your payout right away, please{" "}
+-                <Link
+-                  href="https://partners.dub.co/payouts"
+-                  className="font-medium text-black underline"
+-                >
+-                  go to your Payouts page
+-                </Link>{" "}
+-                and select <strong className="text-black">"Pay out now"</strong>{" "}
+-                to receive your payout with a $0.50 withdrawal fee.
+-              </Text>
+-            )}
++            <Text className="text-sm leading-6 text-neutral-600">
++              {statusMessage}
++            </Text>
+             <Footer email={email} />
+           </Container>
+         </Body>
+diff --git a/packages/email/src/types.ts b/packages/email/src/types.ts
+index 8b198ad61d1..ecf13a99f3b 100644
+--- a/packages/email/src/types.ts
++++ b/packages/email/src/types.ts
+@@ -9,3 +9,8 @@ export type WorkspaceProps = {
+ };
+ 
+ export type PartnerPayoutMethod = "connect" | "stablecoin" | "paypal";
++
++// constants
++export const STABLECOIN_PAYOUT_FEE_RATE = 0.005;
++export const MIN_WITHDRAWAL_AMOUNT_CENTS = 10_00;
++export const BELOW_MIN_WITHDRAWAL_FEE_CENTS = 50;

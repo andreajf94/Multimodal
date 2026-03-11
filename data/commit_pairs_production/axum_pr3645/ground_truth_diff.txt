@@ -1,0 +1,30 @@
+diff --git a/axum-macros/CHANGELOG.md b/axum-macros/CHANGELOG.md
+index 1a425492c2..46ae0e9bf5 100644
+--- a/axum-macros/CHANGELOG.md
++++ b/axum-macros/CHANGELOG.md
+@@ -9,8 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
+ 
+ - **breaking:** `#[from_request(via(Extractor))]` now uses the extractor's
+   rejection type instead of `axum::response::Response` ([#3261])
++- **fixed:** Fix compilation error when deriving `TypedPath` with
++  `OptionalFromRequestParts` being in scope ([#3645])
+ 
+ [#3261]: https://github.com/tokio-rs/axum/pull/3261
++[#3645]: https://github.com/tokio-rs/axum/pull/3645
+ 
+ # 0.5.0
+ 
+diff --git a/axum-macros/src/typed_path.rs b/axum-macros/src/typed_path.rs
+index c0310885ae..0406c559bb 100644
+--- a/axum-macros/src/typed_path.rs
++++ b/axum-macros/src/typed_path.rs
+@@ -149,7 +149,8 @@ fn expand_named_fields(
+                 parts: &mut ::axum::http::request::Parts,
+                 state: &S,
+             ) -> ::std::result::Result<Self, Self::Rejection> {
+-                ::axum::extract::Path::from_request_parts(parts, state)
++                <::axum::extract::Path<#ident> as ::axum::extract::FromRequestParts<S>>
++                    ::from_request_parts(parts, state)
+                     .await
+                     .map(|path| path.0)
+                     #map_err_rejection

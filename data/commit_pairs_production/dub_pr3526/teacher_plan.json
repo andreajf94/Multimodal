@@ -1,0 +1,174 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "api_design",
+      "recommendation": "Added a new file upload endpoint that generates pre-signed URLs for direct uploads to Plain's storage service, avoiding server-side file handling",
+      "rationale": "This approach offloads file storage and processing to a dedicated service (Plain), reducing server load and bandwidth usage. It follows the principle of separation of concerns where file uploads are handled by specialized infrastructure rather than the application server. The endpoint returns upload credentials for client-side direct uploads, which is more scalable than streaming files through the application server.",
+      "alternatives_considered": [
+        "Server-side file handling with Multer/Formidable",
+        "Using existing cloud storage services (S3, Cloudinary) directly",
+        "Storing files in the application database as blobs"
+      ],
+      "files_affected": [
+        "apps/web/app/api/ai/support-chat/upload/route.ts"
+      ]
+    },
+    {
+      "dimension": "data_modeling",
+      "recommendation": "Extended the support chat API to accept attachment IDs and ticket details as optional parameters, maintaining backward compatibility",
+      "rationale": "The existing API contract was preserved while adding new optional fields (attachmentIds, ticketDetails). This allows gradual rollout and doesn't break existing clients. The validation logic ensures data integrity with size limits and type checking before processing.",
+      "alternatives_considered": [
+        "Creating a completely new endpoint for ticket creation with attachments",
+        "Using multipart form data instead of JSON",
+        "Storing attachments as part of the chat message stream"
+      ],
+      "files_affected": [
+        "apps/web/app/api/ai/support-chat/route.ts"
+      ]
+    },
+    {
+      "dimension": "workflow_design",
+      "recommendation": "Implemented a two-step ticket creation flow with requestSupportTicket tool that must be called before createSupportTicket",
+      "rationale": "This enforces a clear workflow where users must first see the upload form before creating a ticket. It prevents accidental ticket creation without attachments and gives users control over what files to include. The AI agent is explicitly instructed to follow this sequence in the system prompt.",
+      "alternatives_considered": [
+        "Single-step ticket creation with optional attachments",
+        "Always showing upload form regardless of context",
+        "Making attachments mandatory for all tickets"
+      ],
+      "files_affected": [
+        "apps/web/lib/ai/build-system-prompt.ts",
+        "apps/web/lib/ai/request-support-ticket.ts",
+        "apps/web/lib/ai/create-support-ticket.ts"
+      ]
+    },
+    {
+      "dimension": "state_management",
+      "recommendation": "Added localStorage persistence for chat sessions with user-specific keys, enabling chat history to survive page refreshes",
+      "rationale": "Users expect support conversations to persist across sessions, especially when uploading files or stepping away. Using localStorage with user-specific keys ensures each user gets their own isolated chat history. The implementation handles serialization of messages, selection state, and ticket submission status.",
+      "alternatives_considered": [
+        "Server-side session storage",
+        "IndexedDB for larger storage",
+        "URL-based state sharing",
+        "No persistence (original approach)"
+      ],
+      "files_affected": [
+        "apps/web/ui/support/chat-interface.tsx"
+      ]
+    },
+    {
+      "dimension": "security",
+      "recommendation": "Implemented comprehensive file validation including size limits, extension whitelisting, and path traversal prevention",
+      "rationale": "File uploads are a common attack vector. The validation prevents malicious files from being uploaded by checking file size (10MB limit), allowed extensions (image and document types), and blocking path traversal attempts. The server validates metadata before generating upload URLs, not after file upload.",
+      "alternatives_considered": [
+        "Client-side only validation",
+        "Post-upload scanning",
+        "Less restrictive file type allowances"
+      ],
+      "files_affected": [
+        "apps/web/app/api/ai/support-chat/upload/route.ts"
+      ]
+    },
+    {
+      "dimension": "user_experience",
+      "recommendation": "Added a confirmation dialog for clearing chat history and improved focus management with textarea auto-focus",
+      "rationale": "Accidental data loss is a common UX problem. The confirmation dialog prevents users from accidentally clearing their chat history. Auto-focusing the input textarea after sending messages improves usability by reducing unnecessary clicks.",
+      "alternatives_considered": [
+        "Undo functionality instead of confirmation",
+        "No confirmation (original approach)",
+        "Toast notifications for actions"
+      ],
+      "files_affected": [
+        "apps/web/ui/support/chat-bubble.tsx",
+        "apps/web/ui/support/clear-chat-button.tsx",
+        "apps/web/ui/support/chat-interface.tsx"
+      ]
+    },
+    {
+      "dimension": "analytics_integration",
+      "recommendation": "Added pageview tracking for documentation articles to prioritize frequently viewed content in search results",
+      "rationale": "By fetching pageview data from Plausible analytics, the system can weight search results based on article popularity. This improves the relevance of documentation suggestions in the support chat. The integration is designed to be optional and fail gracefully.",
+      "alternatives_considered": [
+        "Manual popularity scoring",
+        "No popularity weighting",
+        "Using internal click tracking instead of Plausible"
+      ],
+      "files_affected": [
+        "apps/web/app/api/ai/sync-embeddings/fetch-plausible-pageviews.ts",
+        "apps/web/lib/ai/upsert-docs-embedding.ts",
+        "apps/web/scripts/seed-support-embeddings.ts"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "File Upload Infrastructure",
+      "description": "Implement backend endpoints for secure file uploads with validation and integration with Plain customer support platform",
+      "files_to_modify": [],
+      "files_to_create": [
+        "apps/web/app/api/ai/support-chat/upload/route.ts",
+        "apps/web/app/api/ai/sync-embeddings/fetch-plausible-pageviews.ts"
+      ],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-002",
+      "title": "Two-Step Ticket Creation Flow",
+      "description": "Modify AI agent behavior to require upload form display before ticket creation and update system prompts",
+      "files_to_modify": [
+        "apps/web/app/api/ai/support-chat/route.ts",
+        "apps/web/lib/ai/build-system-prompt.ts",
+        "apps/web/lib/ai/create-support-ticket.ts"
+      ],
+      "files_to_create": [
+        "apps/web/lib/ai/request-support-ticket.ts"
+      ],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-003",
+      "title": "Frontend Upload Component",
+      "description": "Create drag-and-drop file uploader with previews and integrate into chat interface",
+      "files_to_modify": [
+        "apps/web/ui/support/chat-interface.tsx"
+      ],
+      "files_to_create": [
+        "apps/web/ui/support/ticket-upload.tsx",
+        "apps/web/ui/support/clear-chat-button.tsx"
+      ],
+      "estimated_effort": "large"
+    },
+    {
+      "id": "T-004",
+      "title": "Chat Persistence and UX Improvements",
+      "description": "Add localStorage persistence for chat history and improve user interactions with confirmation dialogs and focus management",
+      "files_to_modify": [
+        "apps/web/ui/support/chat-bubble.tsx",
+        "apps/web/ui/support/chat-interface.tsx"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-005",
+      "title": "Documentation Analytics Integration",
+      "description": "Enhance documentation embedding with pageview data for improved search relevance",
+      "files_to_modify": [
+        "apps/web/app/api/ai/sync-embeddings/route.ts",
+        "apps/web/lib/ai/upsert-docs-embedding.ts",
+        "apps/web/scripts/seed-support-embeddings.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation enhances the support chat system with a comprehensive file upload capability while maintaining the existing chat functionality. The core architectural approach uses a two-step workflow: first, the AI agent calls a requestSupportTicket tool to display an upload form, then after user submission, it calls createSupportTicket with the collected data. This separation ensures users have the opportunity to attach relevant files before ticket creation.\n\nKey patterns include the use of pre-signed URLs for direct file uploads to Plain's storage service, which avoids server-side file handling and improves scalability. The frontend implements a drag-and-drop uploader with file previews and individual upload status tracking. Chat persistence is achieved through localStorage with user-specific keys, preserving conversation history across sessions.\n\nThe changes integrate seamlessly with the existing codebase by extending rather than replacing functionality. The API endpoints maintain backward compatibility, and the UI components follow the existing design system. Security considerations are addressed through comprehensive file validation, and user experience is improved with confirmation dialogs and better focus management. The addition of documentation analytics integration enhances the AI's ability to surface relevant help articles based on actual usage patterns.",
+  "source_pr": "https://github.com/dubinc/dub/pull/3526",
+  "before_sha": "aad690d3a94d29f546e07101b4fe91d80c9b1e62",
+  "after_sha": "05483df7507dca93e2aa1474c057c3ad498a05ed",
+  "diff_stats": {
+    "additions": 950,
+    "deletions": 110,
+    "files_changed": 15
+  }
+}

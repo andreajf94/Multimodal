@@ -1,0 +1,114 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "type_system_design",
+      "recommendation": "Added TypeScript declaration merging support for entrypoint options to allow modules to extend type definitions",
+      "rationale": "This enables modules to add custom configuration options to entrypoints while maintaining full TypeScript type safety. By using declaration merging in the 'wxt' module, modules can augment existing interfaces without modifying core types, preserving backward compatibility and enabling IDE autocomplete for custom options.",
+      "alternatives_considered": [
+        "Creating separate configuration objects for each module",
+        "Using a generic key-value store for custom options without type safety",
+        "Requiring modules to define their own entrypoint types entirely"
+      ],
+      "files_affected": [
+        "packages/wxt/src/types.ts",
+        "docs/guide/essentials/wxt-modules.md"
+      ]
+    },
+    {
+      "dimension": "api_design",
+      "recommendation": "Extended HTML meta tag parsing to support both 'manifest.' and 'wxt.' prefixes for entrypoint options",
+      "rationale": "This provides a consistent way for developers to specify entrypoint options in HTML files, whether they're core manifest options or custom module options. The 'wxt.' prefix namespace separates module-specific options from browser manifest options, preventing naming conflicts while using the same familiar meta tag syntax.",
+      "alternatives_considered": [
+        "Creating a separate configuration file for HTML entrypoints",
+        "Using data attributes instead of meta tags",
+        "Only supporting custom options in JavaScript/TypeScript entrypoints"
+      ],
+      "files_affected": [
+        "packages/wxt/src/core/utils/building/find-entrypoints.ts",
+        "packages/wxt/src/core/utils/building/__tests__/find-entrypoints.test.ts"
+      ]
+    },
+    {
+      "dimension": "data_modeling",
+      "recommendation": "Simplified entrypoint option handling by passing all options through resolvePerBrowserOptions and removing manual property extraction",
+      "rationale": "Previously, each entrypoint type manually extracted specific properties from options. Now all options are passed through, allowing custom module options to flow through the system naturally. This reduces code duplication and makes the system more extensible without requiring changes to each entrypoint type handler.",
+      "alternatives_considered": [
+        "Creating a separate pipeline for custom options",
+        "Maintaining the manual property extraction but adding hooks for modules",
+        "Using a plugin system to process options per entrypoint type"
+      ],
+      "files_affected": [
+        "packages/wxt/src/core/utils/building/find-entrypoints.ts"
+      ]
+    },
+    {
+      "dimension": "testing_strategy",
+      "recommendation": "Added comprehensive test for HTML meta tag parsing including custom wxt.* options",
+      "rationale": "The test verifies that both manifest.* and wxt.* meta tags are correctly parsed, JSON values are properly handled, and snake_case is converted to camelCase. This ensures the feature works correctly and prevents regression when developers use custom options in HTML files.",
+      "alternatives_considered": [
+        "Only testing the manifest.* prefix parsing",
+        "Testing at a higher level through integration tests",
+        "Relying on existing tests without adding new ones"
+      ],
+      "files_affected": [
+        "packages/wxt/src/core/utils/building/__tests__/find-entrypoints.test.ts"
+      ]
+    },
+    {
+      "dimension": "documentation",
+      "recommendation": "Added detailed documentation with TypeScript and HTML examples showing how to use custom entrypoint options",
+      "rationale": "Clear documentation is essential for adoption. The examples show both the module author's perspective (how to define custom options) and the developer's perspective (how to use them in both TypeScript and HTML entrypoints). This follows the existing documentation patterns in the codebase.",
+      "alternatives_considered": [
+        "Adding documentation only in TypeScript comments",
+        "Creating a separate documentation page",
+        "Relying on code examples without explanatory text"
+      ],
+      "files_affected": [
+        "docs/guide/essentials/wxt-modules.md"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "TypeScript type augmentation for entrypoint options",
+      "description": "Enable modules to extend entrypoint option interfaces through TypeScript declaration merging, allowing custom configuration options with full type safety",
+      "files_to_modify": [
+        "packages/wxt/src/types.ts",
+        "docs/guide/essentials/wxt-modules.md"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-002",
+      "title": "HTML meta tag parsing for custom options",
+      "description": "Extend HTML entrypoint parsing to support wxt.* meta tags in addition to manifest.* tags, allowing custom module options to be specified directly in HTML files",
+      "files_to_modify": [
+        "packages/wxt/src/core/utils/building/find-entrypoints.ts",
+        "packages/wxt/src/core/utils/building/__tests__/find-entrypoints.test.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-003",
+      "title": "Entrypoint option processing refactor",
+      "description": "Simplify entrypoint option handling by removing manual property extraction and passing all options through resolvePerBrowserOptions, making the system more extensible",
+      "files_to_modify": [
+        "packages/wxt/src/core/utils/building/find-entrypoints.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    }
+  ],
+  "implementation_summary": "The implementation adds support for WXT modules to extend entrypoint configuration options through a combination of TypeScript type augmentation and HTML meta tag parsing. This enables modules to define custom options that integrate seamlessly with WXT's existing entrypoint system.\n\nThe key architectural decision was to leverage TypeScript's declaration merging feature, allowing modules to augment the existing entrypoint option interfaces in the 'wxt' module. This provides full type safety and IDE support without modifying core types. Modules can now add custom properties to BackgroundEntrypointOptions, PopupEntrypointOptions, etc., and access them through the entrypoints:resolved hook.\n\nFor HTML entrypoints, the system was extended to parse both 'manifest.*' and 'wxt.*' meta tags. The 'wxt.' prefix provides a namespace for module-specific options, preventing conflicts with core manifest properties. The parsing logic converts snake_case keys to camelCase and handles JSON parsing for complex values, maintaining consistency with existing manifest option parsing.\n\nSignificant refactoring was done to simplify option processing across all entrypoint types. Previously, each entrypoint handler manually extracted specific properties. Now, all options are passed through resolvePerBrowserOptions, allowing custom module options to flow through the system naturally. This reduces code duplication and makes the architecture more extensible for future module development.",
+  "source_pr": "https://github.com/wxt-dev/wxt/pull/2149",
+  "before_sha": "09eadf6796a79e5b5eecabf0abab834dee3b0207",
+  "after_sha": "182d575205dc0f0cf83bbe4004a860a7f4d8d85d",
+  "diff_stats": {
+    "additions": 111,
+    "deletions": 58,
+    "files_changed": 4
+  }
+}

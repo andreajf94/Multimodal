@@ -1,0 +1,126 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "project_structure",
+      "recommendation": "Removed the 'name' field from ProjectConfig struct in Shuttle.toml and simplified local project name resolution to use workspace/crate names instead of config file.",
+      "rationale": "The 'name' field in Shuttle.toml was redundant with Cargo.toml metadata and caused confusion when they diverged. By removing it, we eliminate a source of inconsistency and simplify the configuration model. The new approach directly uses Rust project metadata or directory names.",
+      "alternatives_considered": [
+        "Keeping the name field but making it optional with fallback logic",
+        "Validating consistency between Shuttle.toml and Cargo.toml names",
+        "Using only directory names without consulting Cargo metadata"
+      ],
+      "files_affected": [
+        "cargo-shuttle/src/config.rs"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Changed workspace_path() to return PathBuf instead of Result<PathBuf> and implemented graceful fallback for non-Rust directories.",
+      "rationale": "Previous implementation assumed a Cargo workspace must exist, causing errors in non-Rust directories. The new approach falls back to working directory when no Cargo.toml is found, making commands work in any directory. This improves user experience for edge cases.",
+      "alternatives_considered": [
+        "Requiring Cargo.toml for all operations",
+        "Providing different error messages for different failure modes",
+        "Creating a dummy Cargo.toml for non-Rust projects"
+      ],
+      "files_affected": [
+        "cargo-shuttle/src/args.rs"
+      ]
+    },
+    {
+      "dimension": "api_design",
+      "recommendation": "Refactored project name resolution into a clear three-tier fallback sequence: workspace package name \u2192 workspace directory name \u2192 working directory name.",
+      "rationale": "This provides predictable behavior and clear documentation of precedence. The implementation uses Option patterns and early returns for readability. The method name 'local_project_name()' clearly indicates its purpose versus the old 'project_name()'.",
+      "alternatives_considered": [
+        "Single method with complex conditional logic",
+        "Separate methods for each resolution strategy",
+        "Configuration-based resolution strategy"
+      ],
+      "files_affected": [
+        "cargo-shuttle/src/args.rs"
+      ]
+    },
+    {
+      "dimension": "testing",
+      "recommendation": "Refactored integration tests to use assert_cmd and process::Command instead of direct Shuttle struct instantiation, eliminating global state side effects.",
+      "rationale": "Previous tests set global API keys which could affect other tests. The new approach spawns separate processes with environment variables, providing better isolation. This also tests the actual CLI interface rather than internal APIs.",
+      "alternatives_considered": [
+        "Mocking the global config state",
+        "Using temporary directories with isolated configs",
+        "Keeping the old approach but resetting state between tests"
+      ],
+      "files_affected": [
+        "cargo-shuttle/tests/integration/init.rs",
+        "cargo-shuttle/tests/integration/main.rs",
+        "cargo-shuttle/tests/integration/run.rs"
+      ]
+    },
+    {
+      "dimension": "code_organization",
+      "recommendation": "Moved project name resolution responsibility from RequestContext to ProjectArgs, making the flow clearer and reducing coupling.",
+      "rationale": "Previously, RequestContext handled both config loading and name resolution, creating tight coupling. Now ProjectArgs handles local name resolution, and RequestContext only loads configs. This follows single responsibility principle and makes testing easier.",
+      "alternatives_considered": [
+        "Keeping all resolution logic in RequestContext",
+        "Creating a separate NameResolver service",
+        "Using trait-based resolution strategies"
+      ],
+      "files_affected": [
+        "cargo-shuttle/src/config.rs",
+        "cargo-shuttle/src/lib.rs",
+        "cargo-shuttle/src/args.rs"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Simplify local project name resolution logic",
+      "description": "Refactor ProjectArgs to provide a clear three-tier fallback for determining local project names without assuming Cargo workspace existence",
+      "files_to_modify": [
+        "cargo-shuttle/src/args.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-002",
+      "title": "Remove Shuttle.toml name field and cleanup config loading",
+      "description": "Remove the deprecated 'name' field from ProjectConfig and simplify config loading to not handle name resolution",
+      "files_to_modify": [
+        "cargo-shuttle/src/config.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-003",
+      "title": "Update command implementations to use new name resolution",
+      "description": "Modify run, build, and other commands to use ProjectArgs for local name resolution instead of RequestContext",
+      "files_to_modify": [
+        "cargo-shuttle/src/lib.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-004",
+      "title": "Refactor integration tests to use process isolation",
+      "description": "Rewrite all CLI integration tests to use assert_cmd and process::Command instead of direct API calls, eliminating global state side effects",
+      "files_to_modify": [
+        "cargo-shuttle/tests/integration/init.rs",
+        "cargo-shuttle/tests/integration/main.rs",
+        "cargo-shuttle/tests/integration/run.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "large"
+    }
+  ],
+  "implementation_summary": "The changes implement a simplified approach to local project name resolution in the cargo-shuttle CLI tool. The core architectural shift moves away from storing project names in Shuttle.toml files and instead uses a three-tier fallback system: first checking for a Cargo workspace package name, then using the workspace directory name, and finally falling back to the working directory name. This eliminates the previous assumption that a Cargo workspace must exist, making the tool work correctly in non-Rust directories.\n\nThe implementation cleanly separates concerns by moving name resolution logic from RequestContext to ProjectArgs, following the single responsibility principle. The RequestContext now focuses solely on config loading, while ProjectArgs handles local environment detection. This decoupling makes the code more testable and maintainable.\n\nSignificant effort was also put into refactoring the integration test suite to use process isolation via assert_cmd, eliminating side effects from global API key settings. This improves test reliability and better simulates real user interactions. The changes maintain backward compatibility for existing projects while providing a more robust experience for edge cases like non-workspace directories or explicitly provided project IDs.",
+  "source_pr": "https://github.com/shuttle-hq/shuttle/pull/2125",
+  "before_sha": "5681bafe581b99eee832f3e5b158826195173971",
+  "after_sha": "90fdf1b5ddbf46dc29aade35528e1e3e414a4b15",
+  "diff_stats": {
+    "additions": 331,
+    "deletions": 458,
+    "files_changed": 6
+  }
+}

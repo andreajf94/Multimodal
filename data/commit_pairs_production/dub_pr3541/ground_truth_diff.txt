@@ -1,0 +1,331 @@
+diff --git a/apps/web/app/(ee)/api/track/click/route.ts b/apps/web/app/(ee)/api/track/click/route.ts
+index 1c4f8420bef..18bef39aa27 100644
+--- a/apps/web/app/(ee)/api/track/click/route.ts
++++ b/apps/web/app/(ee)/api/track/click/route.ts
+@@ -14,7 +14,7 @@ import { getWorkspaceViaEdge } from "@/lib/planetscale";
+ import { getLinkWithPartner } from "@/lib/planetscale/get-link-with-partner";
+ import { recordClick } from "@/lib/tinybird";
+ import { RedisLinkProps } from "@/lib/types";
+-import { formatRedisLink, redis } from "@/lib/upstash";
++import { formatRedisLink, redis, redisUsEast } from "@/lib/upstash";
+ import { DiscountSchema } from "@/lib/zod/schemas/discount";
+ import { PartnerSchema } from "@/lib/zod/schemas/partners";
+ import { isValidUrl, nanoid } from "@dub/utils";
+@@ -60,14 +60,19 @@ export const POST = withAxiom(async (req) => {
+ 
+     const identityHash = await getIdentityHash(req);
+ 
+-    let [cachedClickId, cachedLink, cachedAllowedHostnames] = await redis.mget<
+-      [string, RedisLinkProps, string[]]
+-    >([
+-      recordClickCache._createKey({ domain, key, identityHash }),
+-      linkCache._createKey({ domain, key }),
+-      allowedHostnamesCache._createKey({ domain }),
++    const [cachedClickId, mgetResults] = await Promise.all([
++      redisUsEast.get<string>(
++        recordClickCache._createKey({ domain, key, identityHash }),
++      ),
++
++      redis.mget<[RedisLinkProps, string[]]>([
++        linkCache._createKey({ domain, key }),
++        allowedHostnamesCache._createKey({ domain }),
++      ]),
+     ]);
+ 
++    let [cachedLink, cachedAllowedHostnames] = mgetResults;
++
+     // assign a new clickId if there's no cached clickId
+     // else, reuse the cached clickId
+     const clickId = cachedClickId ?? nanoid(16);
+diff --git a/apps/web/app/(ee)/api/track/open/route.ts b/apps/web/app/(ee)/api/track/open/route.ts
+index 3c805bad32a..2892f169abf 100644
+--- a/apps/web/app/(ee)/api/track/open/route.ts
++++ b/apps/web/app/(ee)/api/track/open/route.ts
+@@ -9,7 +9,7 @@ import { getIdentityHash } from "@/lib/middleware/utils/get-identity-hash";
+ import { getLinkViaEdge } from "@/lib/planetscale";
+ import { recordClick } from "@/lib/tinybird";
+ import { RedisLinkProps } from "@/lib/types";
+-import { formatRedisLink, redis } from "@/lib/upstash";
++import { formatRedisLink, redis, redisUsEast } from "@/lib/upstash";
+ import {
+   trackOpenRequestSchema,
+   trackOpenResponseSchema,
+@@ -70,11 +70,11 @@ export const POST = withAxiom(async (req) => {
+     const domain = deepLink.hostname.replace(/^www\./, "").toLowerCase();
+     const key = deepLink.pathname.slice(1) || "_root"; // Remove leading slash, default to _root if empty
+ 
+-    let [cachedClickId, cachedLink] = await redis.mget<
+-      [string, RedisLinkProps, string[]]
+-    >([
+-      recordClickCache._createKey({ domain, key, identityHash }),
+-      linkCache._createKey({ domain, key }),
++    let [cachedClickId, cachedLink] = await Promise.all([
++      redisUsEast.get<string>(
++        recordClickCache._createKey({ domain, key, identityHash }),
++      ),
++      redis.get<RedisLinkProps>(linkCache._createKey({ domain, key })),
+     ]);
+ 
+     // assign a new clickId if there's no cached clickId
+diff --git a/apps/web/app/(ee)/api/track/visit/route.ts b/apps/web/app/(ee)/api/track/visit/route.ts
+index 51f721f871b..b724fd6a307 100644
+--- a/apps/web/app/(ee)/api/track/visit/route.ts
++++ b/apps/web/app/(ee)/api/track/visit/route.ts
+@@ -9,13 +9,11 @@ import { getIdentityHash } from "@/lib/middleware/utils/get-identity-hash";
+ import { getLinkViaEdge, getWorkspaceViaEdge } from "@/lib/planetscale";
+ import { recordClick } from "@/lib/tinybird";
+ import { RedisLinkProps } from "@/lib/types";
+-import { formatRedisLink, redis } from "@/lib/upstash";
++import { formatRedisLink, redis, redisUsEast } from "@/lib/upstash";
+ import { isValidUrl, nanoid } from "@dub/utils";
+ import { waitUntil } from "@vercel/functions";
+ import { NextResponse } from "next/server";
+ 
+-export const runtime = "edge";
+-
+ // POST /api/track/visit – Track a visit event from the client-side
+ export const POST = withAxiom(async (req) => {
+   try {
+@@ -37,9 +35,11 @@ export const POST = withAxiom(async (req) => {
+ 
+     const identityHash = await getIdentityHash(req);
+ 
+-    let [clickId, cachedLink] = await redis.mget<[string, RedisLinkProps]>([
+-      recordClickCache._createKey({ domain, key, identityHash }),
+-      linkCache._createKey({ domain, key }),
++    let [clickId, cachedLink] = await Promise.all([
++      redisUsEast.get<string>(
++        recordClickCache._createKey({ domain, key, identityHash }),
++      ),
++      redis.get<RedisLinkProps>(linkCache._createKey({ domain, key })),
+     ]);
+ 
+     // if the clickId is already cached in Redis, return it
+diff --git a/apps/web/lib/api/links/cache.ts b/apps/web/lib/api/links/cache.ts
+index 4d44276e28e..1639ec03ab0 100644
+--- a/apps/web/lib/api/links/cache.ts
++++ b/apps/web/lib/api/links/cache.ts
+@@ -1,5 +1,6 @@
+ import { LinkProps, RedisLinkProps } from "@/lib/types";
+ import { formatRedisLink, redis, redisWithTimeout } from "@/lib/upstash";
++import { getCache, waitUntil } from "@vercel/functions";
+ import { LRUCache } from "lru-cache";
+ import { decodeKey, isCaseSensitiveDomain } from "./case-sensitivity";
+ import { ExpandedLink } from "./utils/transform-link";
+@@ -13,12 +14,19 @@ const linkLRUCache = new LRUCache<string, RedisLinkProps>({
+   ttl: 3000, // 3 seconds
+ });
+ 
++/*
++ * When traffic spikes, new Fluid instances are spun up.
++ * Since LRUCache is not shared between Fluid instances,
++ * we fallback to Vercel cache if LRUCache is not available
++ */
++const vercelCache = getCache();
++
+ /*
+  * Link cache expiration is set to 24 hours by default for all links.
+  * Caveat: we don't set expiration for links with webhooks since it's expensive
+  * to fetch and set on-demand inside link middleware.
+  */
+-export const CACHE_EXPIRATION = 60 * 60 * 24;
++const CACHE_EXPIRATION = 60 * 60 * 24;
+ 
+ class LinkCache {
+   async mset(links: ExpandedLink[]) {
+@@ -70,7 +78,7 @@ class LinkCache {
+     // so we should get the original key from the cache
+     const cacheKey = `linkcache:${domain}:${key}`;
+ 
+-    // Check LRU cache first before hitting Redis
++    // Check LRU cache first
+     let cachedLink = linkLRUCache.get(cacheKey) || null;
+ 
+     if (cachedLink) {
+@@ -78,14 +86,37 @@ class LinkCache {
+       return cachedLink;
+     }
+ 
+-    console.log(`[LRU Cache MISS] ${cacheKey} - Checking Redis...`);
++    console.log(`[LRU Cache MISS] ${cacheKey} - Checking Vercel Cache...`);
++
++    try {
++      cachedLink = (await vercelCache.get(cacheKey)) as RedisLinkProps | null;
++    } catch (error) {
++      cachedLink = null;
++    }
++
++    if (cachedLink) {
++      console.log(`[Vercel Cache HIT] ${cacheKey}`);
++      linkLRUCache.set(cacheKey, cachedLink);
++      return cachedLink;
++    }
++
++    console.log(`[Vercel Cache MISS] ${cacheKey} - Checking Redis...`);
++
+     try {
+       // we're using the special redisWithTimeout client in case Redis times out
+       cachedLink = await redisWithTimeout.get<RedisLinkProps>(cacheKey);
+ 
+       if (cachedLink) {
+-        console.log(`[Redis Cache HIT] ${cacheKey} - Populating LRU cache...`);
++        console.log(
++          `[Redis Cache HIT] ${cacheKey} - Populating LRU Cache and Vercel Cache...`,
++        );
++
+         linkLRUCache.set(cacheKey, cachedLink);
++        waitUntil(
++          vercelCache.set(cacheKey, cachedLink, {
++            ttl: 5, // cache for 5 seconds
++          }),
++        );
+       } else {
+         console.log(
+           `[Redis Cache MISS] ${cacheKey} - Not found in LRU or Redis, falling back to MySQL...`,
+diff --git a/apps/web/lib/api/links/record-click-cache.ts b/apps/web/lib/api/links/record-click-cache.ts
+index 609d6ee903c..fb15b1b90f2 100644
+--- a/apps/web/lib/api/links/record-click-cache.ts
++++ b/apps/web/lib/api/links/record-click-cache.ts
+@@ -1,4 +1,4 @@
+-import { redis } from "@/lib/upstash";
++import { redisUsEast } from "@/lib/upstash";
+ 
+ // Cache the click ID in Redis for 1 hour
+ const CACHE_EXPIRATION = 60 * 60;
+@@ -16,7 +16,7 @@ class RecordClickCache {
+     identityHash,
+     clickId,
+   }: KeyProps & { clickId: string }) {
+-    return await redis.set(
++    return await redisUsEast.set(
+       this._createKey({ domain, key, identityHash }),
+       clickId,
+       {
+@@ -26,7 +26,7 @@ class RecordClickCache {
+   }
+ 
+   async get({ domain, key, identityHash }: KeyProps) {
+-    return await redis.get<string>(
++    return await redisUsEast.get<string>(
+       this._createKey({ domain, key, identityHash }),
+     );
+   }
+diff --git a/apps/web/lib/upstash/redis.ts b/apps/web/lib/upstash/redis.ts
+index 44821e5f8d5..3d067baee6a 100644
+--- a/apps/web/lib/upstash/redis.ts
++++ b/apps/web/lib/upstash/redis.ts
+@@ -12,3 +12,17 @@ export const redisWithTimeout = new Redis({
+   token: process.env.UPSTASH_REDIS_REST_TOKEN || "",
+   signal: () => AbortSignal.timeout(1000),
+ });
++
++// This is a separate us-east-1 Redis instance that we use
++// for high-volume ratelimit operations (e.g. recordClick)
++// so that if this redis goes down, it won't impact other endpoints
++export const redisUsEast = new Redis({
++  url:
++    process.env.UPSTASH_US_EAST_REDIS_REST_URL ||
++    process.env.UPSTASH_REDIS_REST_URL ||
++    "",
++  token:
++    process.env.UPSTASH_US_EAST_REDIS_REST_TOKEN ||
++    process.env.UPSTASH_REDIS_REST_TOKEN ||
++    "",
++});
+diff --git a/apps/web/middleware.ts b/apps/web/middleware.ts
+index 2657336396b..6a97cd8e635 100644
+--- a/apps/web/middleware.ts
++++ b/apps/web/middleware.ts
+@@ -19,6 +19,7 @@ import { parse } from "./lib/middleware/utils/parse";
+ import { supportedWellKnownFiles } from "./lib/well-known";
+ 
+ export const config = {
++  runtime: "nodejs",
+   matcher: [
+     /*
+      * Match all paths except for:
+diff --git a/apps/web/package.json b/apps/web/package.json
+index 458fd64da4a..19f0a10355f 100644
+--- a/apps/web/package.json
++++ b/apps/web/package.json
+@@ -59,7 +59,7 @@
+     "@upstash/vector": "^1.2.2",
+     "@upstash/workflow": "^0.2.19",
+     "@vercel/edge-config": "^0.4.1",
+-    "@vercel/functions": "^1.4.2",
++    "@vercel/functions": "^3.4.3",
+     "@vercel/og": "^0.6.5",
+     "@visx/curve": "^3.3.0",
+     "@visx/geo": "^2.10.0",
+diff --git a/apps/web/tests/redirects/index.test.ts b/apps/web/tests/redirects/index.test.ts
+index 54b2606d1fe..0f4849471ac 100644
+--- a/apps/web/tests/redirects/index.test.ts
++++ b/apps/web/tests/redirects/index.test.ts
+@@ -234,7 +234,7 @@ describe.runIf(env.CI)("Link Redirects", async () => {
+   test("unsupported key", async () => {
+     const response = await fetch(`${h.baseUrl}/wp-admin.php`, fetchOptions);
+ 
+-    expect(response.headers.get("location")).toBe("/?dub-no-track=1");
++    expect(response.headers.get("location")).toMatch(/\/\?dub-no-track=1$/);
+     expect(response.headers.get("x-powered-by")).toBe(poweredBy);
+     expect(response.status).toBe(302);
+   });
+diff --git a/pnpm-lock.yaml b/pnpm-lock.yaml
+index 24475f382dd..f8850d217bb 100644
+--- a/pnpm-lock.yaml
++++ b/pnpm-lock.yaml
+@@ -165,8 +165,8 @@ importers:
+         specifier: ^0.4.1
+         version: 0.4.1
+       '@vercel/functions':
+-        specifier: ^1.4.2
+-        version: 1.4.2(@aws-sdk/credential-provider-web-identity@3.817.0)
++        specifier: ^3.4.3
++        version: 3.4.3(@aws-sdk/credential-provider-web-identity@3.817.0)
+       '@vercel/og':
+         specifier: ^0.6.5
+         version: 0.6.5
+@@ -6057,9 +6057,9 @@ packages:
+     engines: {node: '>=14.6'}
+     deprecated: This version is no longer supported. Please upgrade to the latest version.
+ 
+-  '@vercel/functions@1.4.2':
+-    resolution: {integrity: sha512-WLY3g6NT1SVJDAoAqz5pJfJ8uyOmEejZkatZn0q57Dn6qXNrh/pjbeffolQy9npWRYJPcfwjgqw8tUqolTEyuw==}
+-    engines: {node: '>= 16'}
++  '@vercel/functions@3.4.3':
++    resolution: {integrity: sha512-kA14KIUVgAY6VXbhZ5jjY+s0883cV3cZqIU3WhrSRxuJ9KvxatMjtmzl0K23HK59oOUjYl7HaE/eYMmhmqpZzw==}
++    engines: {node: '>= 20'}
+     peerDependencies:
+       '@aws-sdk/credential-provider-web-identity': '*'
+     peerDependenciesMeta:
+@@ -6074,6 +6074,10 @@ packages:
+     resolution: {integrity: sha512-fnYhv671l+eTTp48gB4zEsTW/YtRgRPnkI2nT7x6qw5rkI1Lq2hTmQIpHPgyThI0znLK+vX2n9XxKdXZ7BUbbw==}
+     engines: {node: '>= 20'}
+ 
++  '@vercel/oidc@3.2.0':
++    resolution: {integrity: sha512-UycprH3T6n3jH0k44NHMa7pnFHGu/N05MjojYr+Mc6I7obkoLIJujSWwin1pCvdy/eOxrI/l3uDLQsmcrOb4ug==}
++    engines: {node: '>= 20'}
++
+   '@visx/axis@2.14.0':
+     resolution: {integrity: sha512-/mJuPiAUN/YdatSlXkkXD/8Pb4gVclbucNZkpUk6JVhnrmow0a1x73QiMXKuH2qDO5GDaqQS0C3Ly9lI3qTQ5Q==}
+     peerDependencies:
+@@ -19772,7 +19776,9 @@ snapshots:
+     dependencies:
+       '@vercel/edge-config-fs': 0.1.0
+ 
+-  '@vercel/functions@1.4.2(@aws-sdk/credential-provider-web-identity@3.817.0)':
++  '@vercel/functions@3.4.3(@aws-sdk/credential-provider-web-identity@3.817.0)':
++    dependencies:
++      '@vercel/oidc': 3.2.0
+     optionalDependencies:
+       '@aws-sdk/credential-provider-web-identity': 3.817.0
+ 
+@@ -19784,6 +19790,8 @@ snapshots:
+ 
+   '@vercel/oidc@3.0.5': {}
+ 
++  '@vercel/oidc@3.2.0': {}
++
+   '@visx/axis@2.14.0(react@19.1.3)':
+     dependencies:
+       '@types/react': 19.1.15

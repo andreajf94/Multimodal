@@ -1,0 +1,1635 @@
+diff --git a/.circleci/config.yml b/.circleci/config.yml
+index 3f2aedeb8..8fd5ec6bb 100644
+--- a/.circleci/config.yml
++++ b/.circleci/config.yml
+@@ -409,6 +409,7 @@ workflows:
+           matrix:
+             parameters:
+               crate:
++                - shuttle-builder
+                 - shuttle-codegen
+                 - shuttle-common
+                 - shuttle-ifc
+diff --git a/Cargo.lock b/Cargo.lock
+index 09e63a40c..22bee7753 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -123,6 +123,48 @@ version = "1.7.1"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "69f7f8c3906b62b754cd5326047894316021dcfe5a194c8ea52bdd94934a3457"
+ 
++[[package]]
++name = "askama"
++version = "0.14.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "f75363874b771be265f4ffe307ca705ef6f3baa19011c149da8674a87f1b75c4"
++dependencies = [
++ "askama_derive",
++ "itoa",
++ "percent-encoding",
++ "serde",
++ "serde_json",
++]
++
++[[package]]
++name = "askama_derive"
++version = "0.14.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "129397200fe83088e8a68407a8e2b1f826cf0086b21ccdb866a722c8bcd3a94f"
++dependencies = [
++ "askama_parser",
++ "basic-toml",
++ "memchr",
++ "proc-macro2",
++ "quote",
++ "rustc-hash",
++ "serde",
++ "serde_derive",
++ "syn",
++]
++
++[[package]]
++name = "askama_parser"
++version = "0.14.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "d6ab5630b3d5eaf232620167977f95eb51f3432fc76852328774afbd242d4358"
++dependencies = [
++ "memchr",
++ "serde",
++ "serde_derive",
++ "winnow",
++]
++
+ [[package]]
+ name = "assert_cmd"
+ version = "2.0.17"
+@@ -236,6 +278,15 @@ version = "0.22.1"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
+ 
++[[package]]
++name = "basic-toml"
++version = "0.1.10"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "ba62675e8242a4c4e806d12f11d136e626e6c8361d6b829310732241652a178a"
++dependencies = [
++ "serde",
++]
++
+ [[package]]
+ name = "bitflags"
+ version = "2.9.4"
+@@ -393,6 +444,7 @@ dependencies = [
+  "serde",
+  "serde_json",
+  "shuttle-api-client",
++ "shuttle-builder",
+  "shuttle-common",
+  "shuttle-ifc",
+  "shuttle-mcp",
+@@ -3966,6 +4018,15 @@ dependencies = [
+  "url",
+ ]
+ 
++[[package]]
++name = "shuttle-builder"
++version = "0.56.0"
++dependencies = [
++ "askama",
++ "pretty_assertions",
++ "shuttle-common",
++]
++
+ [[package]]
+ name = "shuttle-codegen"
+ version = "0.56.0"
+diff --git a/Cargo.toml b/Cargo.toml
+index 4356fa4d5..5fbac4dfd 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -3,6 +3,7 @@ resolver = "2"
+ members = [
+   "admin",
+   "api-client",
++  "builder",
+   "cargo-shuttle",
+   "codegen",
+   "common",
+@@ -21,6 +22,7 @@ repository = "https://github.com/shuttle-hq/shuttle"
+ 
+ [workspace.dependencies]
+ shuttle-api-client = { path = "api-client", version = "0.56.1", default-features = false }
++shuttle-builder = { path = "builder", version = "0.56.0" }
+ shuttle-codegen = { path = "codegen", version = "0.56.0" }
+ shuttle-common = { path = "common", version = "0.56.0" }
+ shuttle-ifc = { path = "ifc", version = "0.56.0" }
+@@ -28,6 +30,7 @@ shuttle-mcp = { path = "mcp", version = "0.56.0" }
+ shuttle-service = { path = "service", version = "0.56.0" }
+ 
+ anyhow = "1.0.66"
++askama = "0.14.0"
+ assert_cmd = "2.0.6"
+ async-trait = "0.1.58"
+ axum = { version = "0.8.1", default-features = false }
+diff --git a/builder/Cargo.toml b/builder/Cargo.toml
+new file mode 100644
+index 000000000..664edac7d
+--- /dev/null
++++ b/builder/Cargo.toml
+@@ -0,0 +1,16 @@
++[package]
++name = "shuttle-builder"
++version = "0.56.0"
++edition.workspace = true
++license.workspace = true
++repository.workspace = true
++description = "Docker build recipes for the Shuttle platform (shuttle.dev)"
++homepage = "https://www.shuttle.dev"
++
++[dependencies]
++shuttle-common = { workspace = true, features = ["models"] }
++
++askama = { workspace = true }
++
++[dev-dependencies]
++pretty_assertions = { workspace = true }
+diff --git a/builder/src/lib.rs b/builder/src/lib.rs
+new file mode 100644
+index 000000000..ab2bd39d2
+--- /dev/null
++++ b/builder/src/lib.rs
+@@ -0,0 +1,68 @@
++use askama::Template;
++use shuttle_common::models::deployment::BuildArgsRust;
++
++#[derive(Template)]
++#[template(path = "rust.Dockerfile.jinja2", escape = "none")]
++pub struct RustDockerfile<'a> {
++    /// local or remote image name for the chef image
++    pub chef_image: &'a str,
++    /// content of inlined chef dockerfile
++    pub cargo_chef_dockerfile: Option<&'a str>,
++    /// local or remote image name for the runtime image
++    pub runtime_image: &'a str,
++    /// content of inlined runtime dockerfile
++    pub runtime_base_dockerfile: Option<&'a str>,
++    pub build_args: &'a BuildArgsRust,
++}
++
++pub fn render_rust_dockerfile(build_args: &BuildArgsRust) -> String {
++    RustDockerfile {
++        chef_image: "cargo-chef",
++        cargo_chef_dockerfile: Some(include_str!("../templates/cargo-chef.Dockerfile")),
++        runtime_image: "runtime-base",
++        runtime_base_dockerfile: Some(include_str!("../templates/runtime-base.Dockerfile")),
++        build_args,
++    }
++    .render()
++    .unwrap()
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++    use pretty_assertions::assert_str_eq;
++
++    #[test]
++    fn rust_basic() {
++        let t = RustDockerfile {
++            chef_image: "chef",
++            cargo_chef_dockerfile: Some("foo"),
++            runtime_image: "rt",
++            runtime_base_dockerfile: Some("bar"),
++            build_args: &BuildArgsRust {
++                package_name: Some("hello".into()),
++                features: Some("asdf".into()),
++                ..Default::default()
++            },
++        };
++
++        let s = t.render().unwrap();
++
++        assert!(s.contains("foo\n\n"));
++        assert!(s.contains("bar\n\n"));
++        assert!(s.contains("FROM chef AS chef"));
++        assert!(s.contains("FROM rt AS runtime"));
++        assert!(s.contains("RUN cargo chef cook --release --package hello --features asdf\n"));
++        assert!(s.contains("mv /app/target/release/hello"));
++    }
++
++    #[test]
++    fn rust_full() {
++        let s = render_rust_dockerfile(&BuildArgsRust {
++            package_name: Some("hello".into()),
++            features: Some("asdf".into()),
++            ..Default::default()
++        });
++        assert_str_eq!(s, include_str!("../tests/rust.Dockerfile"));
++    }
++}
+diff --git a/builder/templates/cargo-chef.Dockerfile b/builder/templates/cargo-chef.Dockerfile
+new file mode 100644
+index 000000000..532720195
+--- /dev/null
++++ b/builder/templates/cargo-chef.Dockerfile
+@@ -0,0 +1,45 @@
++FROM lukemathwalker/cargo-chef:latest AS cargo-chef
++
++SHELL ["/bin/bash", "-e", "-o", "pipefail", "-c"]
++
++RUN <<EOT
++# Files and directories used by the Shuttle build process:
++mkdir /build_assets
++mkdir /app
++# Create empty files in place for optional user scripts, etc.
++# Having them empty means we can skip checking for them with [ -f ... ] etc.
++touch /app/Shuttle.toml
++touch /app/shuttle_prebuild.sh
++touch /app/shuttle_postbuild.sh
++touch /app/shuttle_setup_container.sh
++EOT
++
++# Install common build tools for external crates
++# The image should already have these: https://github.com/docker-library/buildpack-deps/blob/fdfe65ea0743aa735b4a5f27cac8e281e43508f5/debian/bookworm/Dockerfile
++RUN <<EOT
++apt-get update
++
++DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
++    clang \
++    cmake \
++    jq \
++    llvm-dev \
++    libclang-dev \
++    mold \
++    protobuf-compiler
++
++apt-get clean
++rm -rf /var/lib/apt/lists/*
++EOT
++
++# Add the wasm32 target for building frontend frameworks
++RUN rustup target add wasm32-unknown-unknown
++
++# cargo binstall
++RUN curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash
++
++# Utility tools for build process
++RUN cargo binstall -y --locked convert2json@1.1.5
++
++# Common cargo build tools (for the user to use)
++RUN cargo binstall -y --locked trunk@0.21.7
+diff --git a/builder/templates/runtime-base.Dockerfile b/builder/templates/runtime-base.Dockerfile
+new file mode 100644
+index 000000000..bc9e87a39
+--- /dev/null
++++ b/builder/templates/runtime-base.Dockerfile
+@@ -0,0 +1,15 @@
++FROM debian:bookworm-slim AS runtime-base
++
++SHELL ["/bin/bash", "-e", "-o", "pipefail", "-c"]
++
++# ca-certificates for native-tls, curl for health check
++RUN <<EOT
++apt-get update
++
++DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
++    ca-certificates \
++    curl
++
++apt-get clean
++rm -rf /var/lib/apt/lists/*
++EOT
+diff --git a/builder/templates/rust.Dockerfile.jinja2 b/builder/templates/rust.Dockerfile.jinja2
+new file mode 100644
+index 000000000..eddcaeccd
+--- /dev/null
++++ b/builder/templates/rust.Dockerfile.jinja2
+@@ -0,0 +1,72 @@
++#syntax=docker/dockerfile:1.4
++
++{% if let Some(s) = cargo_chef_dockerfile %}{{s}}{% endif %}
++
++{% if let Some(s) = runtime_base_dockerfile %}{{s}}{% endif %}
++
++FROM {{ chef_image }} AS chef
++WORKDIR /app
++ENV SHUTTLE=true
++
++
++{% if build_args.cargo_chef %}
++FROM chef AS planner
++COPY . .
++RUN cargo chef prepare
++{% endif %}
++
++
++FROM chef AS builder
++
++COPY shuttle_prebuild.sh .
++RUN bash shuttle_prebuild.sh
++
++{% if build_args.mold %}
++{# TODO: fix #}
++ENV RUSTFLAGS="-C linker=clang -C link-arg=-fuse-ld=/usr/local/bin/mold"
++{% endif %}
++
++{% if build_args.cargo_chef %}
++COPY --from=planner /app/recipe.json recipe.json
++RUN cargo chef cook --release
++    {%- if let Some(s) = build_args.package_name %} --package {{s}}{% endif %}
++    {%- if let Some(s) = build_args.binary_name %} --bin {{s}}{% endif %}
++    {%- if let Some(s) = build_args.features %} --features {{s}}{% endif %}
++    {%- if build_args.no_default_features %} --no-default-features{% endif %}
++{% endif %}
++
++COPY . .
++
++{% if build_args.cargo_build %}
++RUN cargo build --release
++    {%- if let Some(s) = build_args.package_name %} --package {{s}}{% endif %}
++    {%- if let Some(s) = build_args.binary_name %} --bin {{s}}{% endif %}
++    {%- if let Some(s) = build_args.features %} --features {{s}}{% endif %}
++    {%- if build_args.no_default_features %} --no-default-features{% endif %}
++{% endif %}
++
++RUN bash shuttle_postbuild.sh
++
++RUN mv /app/target/release/
++    {%- if let Some(s) = build_args.binary_name -%}
++    {{s}}
++    {%- else if let Some(s) = build_args.package_name -%}
++    {{s}}
++    {%- endif %} /executable
++
++{# Create folders and copy paths of all specified build assets #}
++{# For loop is used so that no find command is run when the array is empty #}
++RUN for path in $(tq -r '.build.assets // .build_assets // [] | join(" ")' Shuttle.toml); do find "$path" -type f -exec echo Copying \{\} \; -exec install -D \{\} /build_assets/\{\} \; ; done
++
++
++FROM {{ runtime_image }} AS runtime
++WORKDIR /app
++
++COPY --from=builder /app/shuttle_setup_container.sh /tmp
++RUN bash /tmp/shuttle_setup_container.sh; rm /tmp/shuttle_setup_container.sh
++
++COPY --from=builder /build_assets /app
++COPY --from=builder /executable /usr/local/bin/runtime
++
++ENTRYPOINT ["/usr/local/bin/runtime"]
++
+diff --git a/builder/tests/rust.Dockerfile b/builder/tests/rust.Dockerfile
+new file mode 100644
+index 000000000..bb19ceac7
+--- /dev/null
++++ b/builder/tests/rust.Dockerfile
+@@ -0,0 +1,115 @@
++#syntax=docker/dockerfile:1.4
++
++FROM lukemathwalker/cargo-chef:latest AS cargo-chef
++
++SHELL ["/bin/bash", "-e", "-o", "pipefail", "-c"]
++
++RUN <<EOT
++# Files and directories used by the Shuttle build process:
++mkdir /build_assets
++mkdir /app
++# Create empty files in place for optional user scripts, etc.
++# Having them empty means we can skip checking for them with [ -f ... ] etc.
++touch /app/Shuttle.toml
++touch /app/shuttle_prebuild.sh
++touch /app/shuttle_postbuild.sh
++touch /app/shuttle_setup_container.sh
++EOT
++
++# Install common build tools for external crates
++# The image should already have these: https://github.com/docker-library/buildpack-deps/blob/fdfe65ea0743aa735b4a5f27cac8e281e43508f5/debian/bookworm/Dockerfile
++RUN <<EOT
++apt-get update
++
++DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
++    clang \
++    cmake \
++    jq \
++    llvm-dev \
++    libclang-dev \
++    mold \
++    protobuf-compiler
++
++apt-get clean
++rm -rf /var/lib/apt/lists/*
++EOT
++
++# Add the wasm32 target for building frontend frameworks
++RUN rustup target add wasm32-unknown-unknown
++
++# cargo binstall
++RUN curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash
++
++# Utility tools for build process
++RUN cargo binstall -y --locked convert2json@1.1.5
++
++# Common cargo build tools (for the user to use)
++RUN cargo binstall -y --locked trunk@0.21.7
++
++
++FROM debian:bookworm-slim AS runtime-base
++
++SHELL ["/bin/bash", "-e", "-o", "pipefail", "-c"]
++
++# ca-certificates for native-tls, curl for health check
++RUN <<EOT
++apt-get update
++
++DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
++    ca-certificates \
++    curl
++
++apt-get clean
++rm -rf /var/lib/apt/lists/*
++EOT
++
++
++FROM cargo-chef AS chef
++WORKDIR /app
++ENV SHUTTLE=true
++
++
++
++FROM chef AS planner
++COPY . .
++RUN cargo chef prepare
++
++
++
++FROM chef AS builder
++
++COPY shuttle_prebuild.sh .
++RUN bash shuttle_prebuild.sh
++
++
++
++
++COPY --from=planner /app/recipe.json recipe.json
++RUN cargo chef cook --release --package hello --features asdf
++
++
++COPY . .
++
++
++RUN cargo build --release --package hello --features asdf
++
++
++RUN bash shuttle_postbuild.sh
++
++RUN mv /app/target/release/hello /executable
++
++
++
++RUN for path in $(tq -r '.build.assets // .build_assets // [] | join(" ")' Shuttle.toml); do find "$path" -type f -exec echo Copying \{\} \; -exec install -D \{\} /build_assets/\{\} \; ; done
++
++
++FROM runtime-base AS runtime
++WORKDIR /app
++
++COPY --from=builder /app/shuttle_setup_container.sh /tmp
++RUN bash /tmp/shuttle_setup_container.sh; rm /tmp/shuttle_setup_container.sh
++
++COPY --from=builder /build_assets /app
++COPY --from=builder /executable /usr/local/bin/runtime
++
++ENTRYPOINT ["/usr/local/bin/runtime"]
+diff --git a/cargo-shuttle/Cargo.toml b/cargo-shuttle/Cargo.toml
+index 340cd0a21..9b28f248a 100644
+--- a/cargo-shuttle/Cargo.toml
++++ b/cargo-shuttle/Cargo.toml
+@@ -10,6 +10,7 @@ default-run = "shuttle"
+ 
+ [dependencies]
+ shuttle-api-client = { workspace = true, default-features = true }
++shuttle-builder = { workspace = true }
+ shuttle-common = { workspace = true, features = ["models", "tables", "config"] }
+ shuttle-ifc = { workspace = true }
+ shuttle-mcp = { workspace = true }
+diff --git a/cargo-shuttle/src/args.rs b/cargo-shuttle/src/args.rs
+index 45c87b075..09c05f180 100644
+--- a/cargo-shuttle/src/args.rs
++++ b/cargo-shuttle/src/args.rs
+@@ -68,13 +68,12 @@ pub enum OutputMode {
+ /// Global project-related options
+ #[derive(Args, Clone, Debug)]
+ pub struct ProjectArgs {
+-    /// Specify the working directory
+     #[arg(global = true, long, visible_alias = "wd", default_value = ".", value_parser = OsStringValueParser::new().try_map(parse_path))]
+     pub working_directory: PathBuf,
+-    /// Specify the name of the project to target or create
++    /// The name of the project to target or create
+     #[arg(global = true, long)]
+     pub name: Option<String>,
+-    /// Specify the id of the project to target
++    /// The id of the project to target
+     #[arg(global = true, long)]
+     pub id: Option<String>,
+ }
+@@ -124,10 +123,16 @@ impl ProjectArgs {
+ #[derive(Subcommand)]
+ pub enum Command {
+     /// Generate a Shuttle project from a template
++    #[command(visible_alias = "i")]
+     Init(InitArgs),
+     /// Run a project locally
++    #[command(visible_alias = "r")]
+     Run(RunArgs),
++    /// Build a project
++    #[command(visible_alias = "b", hide = true)]
++    Build(BuildArgs),
+     /// Deploy a project
++    #[command(visible_alias = "d")]
+     Deploy(DeployArgs),
+     /// Manage deployments
+     #[command(subcommand, visible_alias = "depl")]
+@@ -373,7 +378,7 @@ pub struct DeploymentTrackingArgs {
+     pub raw: bool,
+ }
+ 
+-#[derive(Args, Debug)]
++#[derive(Args, Debug, Default)]
+ pub struct RunArgs {
+     /// Port to start service on
+     #[arg(long, short = 'p', env, default_value = "8000")]
+@@ -381,18 +386,42 @@ pub struct RunArgs {
+     /// Use 0.0.0.0 instead of localhost (for usage with local external devices)
+     #[arg(long)]
+     pub external: bool,
+-    /// Use release mode for building the project
+-    #[arg(long, short = 'r')]
+-    pub release: bool,
+     /// Don't display timestamps and log origin tags
+     #[arg(long)]
+     pub raw: bool,
+-    /// Uses bacon crate to run the project in watch mode
+-    #[arg(long)]
+-    pub bacon: bool,
+ 
+     #[command(flatten)]
+     pub secret_args: SecretsArgs,
++    #[command(flatten)]
++    pub build_args: BuildArgsShared,
++}
++
++#[derive(Args, Debug, Default)]
++pub struct BuildArgs {
++    /// Output the build archive to a file instead of building
++    #[arg(long)]
++    pub output_archive: Option<PathBuf>,
++    #[command(flatten)]
++    pub inner: BuildArgsShared,
++}
++
++/// Arguments shared by build and run commands
++#[derive(Args, Debug, Default)]
++pub struct BuildArgsShared {
++    /// Use release mode for building the project
++    #[arg(long, short = 'r')]
++    pub release: bool,
++    /// Uses bacon crate to build/run the project in watch mode
++    #[arg(long)]
++    pub bacon: bool,
++
++    // Docker-related args
++    /// Build/Run with docker instead of natively
++    #[arg(long, hide = true)]
++    pub docker: bool,
++    /// Additional tag for the docker image
++    #[arg(long, short = 't', requires = "docker", hide = true)]
++    pub tag: Option<String>,
+ }
+ 
+ #[derive(Args, Debug, Default)]
+diff --git a/cargo-shuttle/src/builder.rs b/cargo-shuttle/src/builder.rs
+index a1cb2074b..7a51b4ee3 100644
+--- a/cargo-shuttle/src/builder.rs
++++ b/cargo-shuttle/src/builder.rs
+@@ -1,12 +1,11 @@
+ use std::fs;
+ use std::path::{Path, PathBuf};
+-use std::process::Stdio;
+ 
+ use anyhow::{bail, Context, Result};
+ use cargo_metadata::{Metadata, Package, Target};
++use shuttle_common::models::deployment::BuildArgsRust;
+ use shuttle_ifc::find_runtime_main_fn;
+-use tokio::io::AsyncBufReadExt;
+-use tracing::{error, trace};
++use tracing::{debug, trace};
+ 
+ /// This represents a compiled Shuttle service
+ #[derive(Clone, Debug, Eq, PartialEq)]
+@@ -16,62 +15,6 @@ pub struct BuiltService {
+     pub executable_path: PathBuf,
+ }
+ 
+-/// Builds Shuttle service in given project directory
+-pub async fn build_workspace(
+-    project_path: &Path,
+-    release_mode: bool,
+-    tx: tokio::sync::mpsc::Sender<String>,
+-) -> Result<BuiltService> {
+-    let project_path = project_path.to_owned();
+-    let manifest_path = project_path.join("Cargo.toml");
+-    if !manifest_path.exists() {
+-        bail!("Cargo manifest file not found: {}", manifest_path.display());
+-    }
+-
+-    // Cargo's "Downloading ..." lines are quite verbose.
+-    // Instead, a custom message is printed if the download takes significant time.
+-    // Cargo seems to have similar logic, where it prints nothing if this step takes little time.
+-    let mut command = tokio::process::Command::new("cargo");
+-    command
+-        .arg("fetch")
+-        .arg("--manifest-path")
+-        .arg(&manifest_path)
+-        .arg("--color=always")
+-        .stdout(Stdio::null())
+-        .stderr(Stdio::null());
+-    let notification = tokio::spawn({
+-        let tx = tx.clone();
+-        async move {
+-            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+-            tx.send("      Downloading crates...".into())
+-                .await
+-                .expect("log receiver to exist");
+-        }
+-    });
+-    if !command.status().await?.success() {
+-        tx.send("      Failed to fetch crates".into())
+-            .await
+-            .expect("log receiver to exist");
+-    }
+-    notification.abort();
+-
+-    let metadata = async_cargo_metadata(manifest_path.as_path()).await?;
+-    let (package, target, _) = find_first_shuttle_package(&metadata)?;
+-
+-    let service = cargo_build(
+-        package,
+-        target,
+-        release_mode,
+-        project_path.clone(),
+-        metadata.target_directory.clone(),
+-        tx.clone(),
+-    )
+-    .await?;
+-    trace!("package compiled");
+-
+-    Ok(service)
+-}
+-
+ pub async fn async_cargo_metadata(manifest_path: &Path) -> Result<Metadata> {
+     let metadata = {
+         // Modified implementaion of `cargo_metadata::MetadataCommand::exec` (from v0.15.3).
+@@ -158,19 +101,49 @@ pub fn find_first_shuttle_package(
+     )
+ }
+ 
+-async fn cargo_build(
+-    package: Package,
+-    target: Target,
++pub fn gather_rust_build_args(metadata: &Metadata) -> Result<BuildArgsRust> {
++    let mut rust_build_args = BuildArgsRust::default();
++
++    let (package, target, runtime_version) = find_first_shuttle_package(metadata)?;
++    rust_build_args.package_name = Some(package.name.to_string());
++    rust_build_args.binary_name = Some(target.name.clone());
++    rust_build_args.shuttle_runtime_version = runtime_version;
++
++    // activate shuttle feature if present
++    let (no_default_features, features) = if package.features.contains_key("shuttle") {
++        (true, Some(vec!["shuttle".to_owned()]))
++    } else {
++        (false, None)
++    };
++    rust_build_args.no_default_features = no_default_features;
++    rust_build_args.features = features.map(|v| v.join(","));
++
++    // TODO: have all of the above be configurable in CLI and Shuttle.toml
++
++    debug!("Gathered build args: {:?}", rust_build_args);
++
++    Ok(rust_build_args)
++}
++
++pub async fn cargo_build(
++    project_path: impl Into<PathBuf>,
+     release_mode: bool,
+-    project_path: PathBuf,
+-    target_path: impl Into<PathBuf>,
+-    tx: tokio::sync::mpsc::Sender<String>,
++    quiet: bool,
+ ) -> Result<BuiltService> {
++    let project_path = project_path.into();
+     let manifest_path = project_path.join("Cargo.toml");
+-    if !manifest_path.exists() {
+-        bail!("Cargo manifest file not found: {}", manifest_path.display());
+-    }
+-    let target_path = target_path.into();
++    let metadata = async_cargo_metadata(manifest_path.as_path()).await?;
++    let build_args = gather_rust_build_args(&metadata)?;
++
++    let package_name = build_args
++        .package_name
++        .as_ref()
++        .context("missing package name argument")?;
++    let binary_name = build_args
++        .binary_name
++        .as_ref()
++        .context("missing binary name argument")?;
++    let target_path = metadata.target_directory.into_std_path_buf();
+ 
+     // TODO?: Use https://crates.io/crates/escargot instead
+ 
+@@ -181,11 +154,14 @@ async fn cargo_build(
+         .arg("--color=always") // piping disables auto color, but we want it
+         .current_dir(project_path.as_path());
+ 
+-    if package.features.contains_key("shuttle") {
+-        cmd.arg("--no-default-features").arg("--features=shuttle");
++    if build_args.no_default_features {
++        cmd.arg("--no-default-features");
+     }
+-    cmd.arg("--package").arg(package.name.as_str());
+-    cmd.arg("--bin").arg(target.name.as_str());
++    if let Some(ref f) = build_args.features {
++        cmd.arg("--features").arg(f);
++    }
++    cmd.arg("--package").arg(package_name);
++    cmd.arg("--bin").arg(binary_name);
+ 
+     let profile = if release_mode {
+         cmd.arg("--release");
+@@ -193,38 +169,29 @@ async fn cargo_build(
+     } else {
+         "debug"
+     };
++    if quiet {
++        cmd.arg("--quiet");
++    }
+ 
+-    cmd.stderr(Stdio::piped());
+-    cmd.stdout(Stdio::null());
+-    let mut handle = cmd.spawn()?;
+-    let reader = tokio::io::BufReader::new(handle.stderr.take().unwrap());
+-    tokio::spawn(async move {
+-        let mut lines = reader.lines();
+-        while let Some(line) = lines.next_line().await.unwrap() {
+-            let _ = tx
+-                .send(line)
+-                .await
+-                .map_err(|error| error!(error = &error as &dyn std::error::Error));
+-        }
+-    });
+-    let status = handle.wait().await?;
++    let status = cmd.spawn()?.wait().await?;
+     if !status.success() {
+         bail!("Build failed.");
+     }
++    trace!("package compiled");
+ 
+-    let mut path: PathBuf = [
++    let mut executable_path: PathBuf = [
+         project_path.clone(),
+         target_path.clone(),
+         profile.into(),
+-        target.name.as_str().into(),
++        binary_name.into(),
+     ]
+     .iter()
+     .collect();
+-    path.set_extension(std::env::consts::EXE_EXTENSION);
++    executable_path.set_extension(std::env::consts::EXE_EXTENSION);
+ 
+     Ok(BuiltService {
+-        workspace_path: project_path.clone(),
+-        target_name: target.name,
+-        executable_path: path,
++        workspace_path: project_path,
++        target_name: binary_name.to_owned(),
++        executable_path,
+     })
+ }
+diff --git a/cargo-shuttle/src/lib.rs b/cargo-shuttle/src/lib.rs
+index 44c336746..a5759cb93 100644
+--- a/cargo-shuttle/src/lib.rs
++++ b/cargo-shuttle/src/lib.rs
+@@ -11,9 +11,10 @@ use std::fs;
+ use std::io::{Read, Write};
+ use std::net::{Ipv4Addr, SocketAddr};
+ use std::path::{Path, PathBuf};
++use std::process::Stdio;
+ use std::sync::Arc;
+ 
+-use anyhow::{anyhow, bail, Context, Result};
++use anyhow::{bail, Context, Result};
+ use args::DeploymentTrackingArgs;
+ use chrono::Utc;
+ use clap::{parser::ValueSource, CommandFactory, FromArgMatches};
+@@ -28,6 +29,7 @@ use indicatif::ProgressBar;
+ use indoc::formatdoc;
+ use reqwest::header::HeaderMap;
+ use shuttle_api_client::ShuttleApiClient;
++use shuttle_builder::render_rust_dockerfile;
+ use shuttle_common::{
+     constants::{
+         headers::X_CARGO_SHUTTLE_VERSION, other_env_api_url, EXAMPLES_REPO, SHUTTLE_API_URL,
+@@ -36,9 +38,9 @@ use shuttle_common::{
+     models::{
+         auth::{KeyMessage, TokenMessage},
+         deployment::{
+-            BuildArgs, BuildArgsRust, BuildMeta, DeploymentRequest, DeploymentRequestBuildArchive,
+-            DeploymentRequestImage, DeploymentResponse, DeploymentState, Environment,
+-            GIT_STRINGS_MAX_LENGTH,
++            BuildArgs as CommonBuildArgs, BuildMeta, DeploymentRequest,
++            DeploymentRequestBuildArchive, DeploymentRequestImage, DeploymentResponse,
++            DeploymentState, Environment, GIT_STRINGS_MAX_LENGTH,
+         },
+         error::ApiError,
+         log::LogItem,
+@@ -54,16 +56,19 @@ use tokio::time::{sleep, Duration};
+ use tokio_tungstenite::tungstenite::Message;
+ use tracing::{debug, error, info, trace, warn};
+ use tracing_subscriber::{fmt, prelude::*, registry, EnvFilter};
++use util::cargo_green_eprintln;
+ use zip::write::FileOptions;
+ 
+ use crate::args::{
+-    CertificateCommand, ConfirmationArgs, DeployArgs, DeploymentCommand, GenerateCommand, InitArgs,
+-    LoginArgs, LogoutArgs, LogsArgs, McpCommand, OutputMode, ProjectCommand, ProjectUpdateCommand,
+-    ResourceCommand, SecretsArgs, TableArgs, TemplateLocation,
++    BuildArgs, CertificateCommand, ConfirmationArgs, DeployArgs, DeploymentCommand,
++    GenerateCommand, InitArgs, LoginArgs, LogoutArgs, LogsArgs, McpCommand, OutputMode,
++    ProjectCommand, ProjectUpdateCommand, ResourceCommand, SecretsArgs, TableArgs,
++    TemplateLocation,
+ };
+-pub use crate::args::{Command, ProjectArgs, RunArgs, ShuttleArgs};
++pub use crate::args::{BuildArgsShared, Command, ProjectArgs, RunArgs, ShuttleArgs};
+ use crate::builder::{
+-    async_cargo_metadata, build_workspace, find_first_shuttle_package, BuiltService,
++    async_cargo_metadata, cargo_build, find_first_shuttle_package, gather_rust_build_args,
++    BuiltService,
+ };
+ use crate::config::RequestContext;
+ use crate::provisioner_server::{ProvApiState, ProvisionerServer};
+@@ -220,8 +225,8 @@ impl Shuttle {
+                 )
+                 | Command::Logs { .. }
+         ) {
+-            // Command::Run only uses `load_local_config` (below) instead of `load_project` since it does not target a project in the API
+-            self.load_project(
++            // Command::Run and Command::Build use `load_local_config` (below) instead of `load_project_id` since they don't target a project in the API
++            self.load_project_id(
+                 &args.project_args,
+                 matches!(args.cmd, Command::Project(ProjectCommand::Link)),
+                 // Only 'deploy' should create a project if the provided name is not found in the project list
+@@ -254,6 +259,10 @@ impl Shuttle {
+                 self.ctx.load_local_config(&args.project_args)?;
+                 self.local_run(run_args, args.debug).await
+             }
++            Command::Build(build_args) => {
++                self.ctx.load_local_config(&args.project_args)?;
++                self.build(&build_args).await
++            }
+             Command::Deploy(deploy_args) => self.deploy(deploy_args).await,
+             Command::Logs(logs_args) => self.logs(logs_args).await,
+             Command::Deployment(cmd) => match cmd {
+@@ -267,7 +276,9 @@ impl Shuttle {
+                     deployment_id,
+                     tracking_args,
+                 } => self.deployment_redeploy(deployment_id, tracking_args).await,
+-                DeploymentCommand::Stop { tracking_args } => self.stop(tracking_args).await,
++                DeploymentCommand::Stop { tracking_args } => {
++                    self.deployment_stop(tracking_args).await
++                }
+             },
+             Command::Resource(cmd) => match cmd {
+                 ResourceCommand::List {
+@@ -296,7 +307,7 @@ impl Shuttle {
+                 ProjectCommand::Status => self.project_status().await,
+                 ProjectCommand::List { table, .. } => self.projects_list(table).await,
+                 ProjectCommand::Delete(ConfirmationArgs { yes }) => self.project_delete(yes).await,
+-                ProjectCommand::Link => Ok(()), // logic is done in `load_project` in previous step
++                ProjectCommand::Link => Ok(()), // logic is done in `load_project_id` in previous step
+             },
+             Command::Upgrade { preview } => update_cargo_shuttle(preview).await,
+             Command::Mcp(cmd) => match cmd {
+@@ -395,7 +406,7 @@ impl Shuttle {
+ 
+                 let path = args::create_and_parse_path(OsString::from(directory_str))?;
+ 
+-                if std::fs::read_dir(&path)
++                if fs::read_dir(&path)
+                     .expect("init dir to exist and list entries")
+                     .count()
+                     > 0
+@@ -585,10 +596,10 @@ impl Shuttle {
+ 
+         if should_link || should_create_project {
+             // Set the project working directory path to the init path,
+-            // so `load_project` is ran with the correct project path when linking
++            // so `load_project_id` is ran with the correct project path when linking
+             project_args.working_directory.clone_from(&path);
+ 
+-            self.load_project(&project_args, true, true).await?;
++            self.load_project_id(&project_args, true, true).await?;
+         }
+ 
+         if std::env::current_dir().is_ok_and(|d| d != path) {
+@@ -641,7 +652,7 @@ impl Shuttle {
+ 
+     /// Ensures a project id is known, either by explicit --id/--name args or config file(s)
+     /// or by asking user to link the project folder.
+-    pub async fn load_project(
++    pub async fn load_project_id(
+         &mut self,
+         project_args: &ProjectArgs,
+         do_linking: bool,
+@@ -911,7 +922,7 @@ impl Shuttle {
+         Ok(())
+     }
+ 
+-    async fn stop(&self, tracking_args: DeploymentTrackingArgs) -> Result<()> {
++    async fn deployment_stop(&self, tracking_args: DeploymentTrackingArgs) -> Result<()> {
+         let client = self.client.as_ref().unwrap();
+         let pid = self.ctx.project_id();
+         let res = client.stop_service(pid).await?.into_inner();
+@@ -1322,25 +1333,28 @@ impl Shuttle {
+         Ok(Some(secrets))
+     }
+ 
+-    async fn pre_local_run(&self, run_args: &RunArgs) -> Result<BuiltService> {
+-        trace!("starting a local run with args: {run_args:?}");
+-
+-        let (tx, mut rx) = tokio::sync::mpsc::channel::<String>(256);
+-        tokio::task::spawn(async move {
+-            while let Some(line) = rx.recv().await {
+-                println!("{line}");
+-            }
+-        });
++    async fn build(&self, build_args: &BuildArgs) -> Result<()> {
++        eprintln!("WARN: The build command is EXPERIMENTAL. Please submit feedback on GitHub or Discord if you encounter issues.");
++        if let Some(path) = build_args.output_archive.as_ref() {
++            let archive = self.make_archive()?;
++            eprintln!("Writing archive to {}", path.display());
++            fs::write(path, archive).context("writing archive")?;
++            Ok(())
++        } else if build_args.inner.docker {
++            self.local_docker_build(&build_args.inner).await
++        } else {
++            self.local_build(&build_args.inner).await.map(|_| ())
++        }
++    }
+ 
++    async fn local_build(&self, build_args: &BuildArgsShared) -> Result<BuiltService> {
+         let project_directory = self.ctx.project_directory();
+ 
+-        println!(
+-            "{} {}",
+-            "    Building".bold().green(),
+-            project_directory.display()
+-        );
++        cargo_green_eprintln("Building", project_directory.display());
+ 
+-        build_workspace(project_directory, run_args.release, tx).await
++        // TODO: hook up -q/--quiet flag
++        let quiet = false;
++        cargo_build(project_directory.to_owned(), build_args.release, quiet).await
+     }
+ 
+     fn find_available_port(run_args: &mut RunArgs) {
+@@ -1365,27 +1379,40 @@ impl Shuttle {
+         let project_name = self.ctx.project_name().to_owned();
+         let project_directory = self.ctx.project_directory();
+ 
++        trace!("starting a local run with args: {run_args:?}");
++
+         // Handle bacon mode
+-        if run_args.bacon {
+-            println!(
+-                "\n    {} {} in watch mode using bacon\n",
+-                "Starting".bold().green(),
+-                project_name
++        if run_args.build_args.bacon {
++            cargo_green_eprintln(
++                "Starting",
++                format!("{} in watch mode using bacon", project_name),
+             );
++            eprintln!();
+             return bacon::run_bacon(project_directory).await;
+         }
+ 
+-        let service = self.pre_local_run(&run_args).await?;
+-        trace!(path = ?service.executable_path, "runtime executable");
++        if run_args.build_args.docker {
++            eprintln!("WARN: Local run with --docker is EXPERIMENTAL. Please submit feedback on GitHub or Discord if you encounter issues.");
++        }
+ 
+         let secrets = Shuttle::get_secrets(&run_args.secret_args, project_directory, true)?
+             .unwrap_or_default();
+         Shuttle::find_available_port(&mut run_args);
+-        if let Some(warning) = check_and_warn_runtime_version(&service.executable_path).await? {
+-            eprint!("{}", warning);
+-        }
+ 
+-        let runtime_executable = service.executable_path.clone();
++        let s_re = if !run_args.build_args.docker {
++            let service = self.local_build(&run_args.build_args).await?;
++            trace!(path = ?service.executable_path, "runtime executable");
++            if let Some(warning) = check_and_warn_runtime_version(&service.executable_path).await? {
++                eprint!("{}", warning);
++            }
++            let runtime_executable = service.executable_path.clone();
++
++            Some((service, runtime_executable))
++        } else {
++            self.local_docker_build(&run_args.build_args).await?;
++            None
++        };
++
+         let api_port = portpicker::pick_unused_port()
+             .expect("failed to find available port for local provisioner server");
+         let api_addr = SocketAddr::new(Ipv4Addr::LOCALHOST.into(), api_port);
+@@ -1403,18 +1430,10 @@ impl Shuttle {
+         });
+         tokio::spawn(async move { ProvisionerServer::run(state, &api_addr).await });
+ 
+-        println!(
+-            "\n    {} {} on http://{}:{}\n",
+-            "Starting".bold().green(),
+-            service.target_name,
+-            ip,
+-            run_args.port,
+-        );
+-
+         let mut envs = vec![
+             ("SHUTTLE_BETA", "true".to_owned()),
+             ("SHUTTLE_PROJECT_ID", "proj_LOCAL".to_owned()),
+-            ("SHUTTLE_PROJECT_NAME", project_name),
++            ("SHUTTLE_PROJECT_NAME", project_name.clone()),
+             ("SHUTTLE_ENV", Environment::Local.to_string()),
+             ("SHUTTLE_RUNTIME_IP", ip.to_string()),
+             ("SHUTTLE_RUNTIME_PORT", run_args.port.to_string()),
+@@ -1424,27 +1443,71 @@ impl Shuttle {
+         // Use a nice debugging tracing level if user does not provide their own
+         if debug && std::env::var("RUST_LOG").is_err() {
+             envs.push(("RUST_LOG", "info,shuttle=trace,reqwest=debug".to_owned()));
++        } else if let Ok(v) = std::env::var("RUST_LOG") {
++            // forward the RUST_LOG var into the container if using docker
++            envs.push(("RUST_LOG", v));
+         }
+ 
+-        info!(
+-            path = %runtime_executable.display(),
+-            "Spawning runtime process",
+-        );
+-        let mut runtime = tokio::process::Command::new(
+-            dunce::canonicalize(runtime_executable).context("canonicalize path of executable")?,
+-        )
+-        .current_dir(&service.workspace_path)
+-        .envs(envs)
+-        .stdout(std::process::Stdio::piped())
+-        .stderr(std::process::Stdio::piped())
+-        .kill_on_drop(true)
+-        .spawn()
+-        .context("spawning runtime process")?;
+-
+-        // Start background tasks for reading runtime's stdout and stderr
++        let name = format!("shuttle-run-{project_name}");
++        let mut child = if run_args.build_args.docker {
++            let image = format!("shuttle-build-{project_name}");
++            eprintln!();
++            cargo_green_eprintln(
++                "Starting",
++                format!("{} on http://{}:{}", image, ip, run_args.port),
++            );
++            eprintln!();
++            info!(image, "Spawning 'docker run' process");
++            let mut docker = tokio::process::Command::new("docker");
++            docker
++                .arg("run")
++                // the kill on docker run does not work as well as manual docker stop after quitting,
++                // but this is good to have regardless
++                .arg("--rm")
++                .arg("--network")
++                .arg("host")
++                .arg("--name")
++                .arg(&name);
++            for (k, v) in envs {
++                docker.arg("--env").arg(format!("{k}={v}"));
++            }
++
++            docker
++                .arg(&image)
++                .stdout(std::process::Stdio::piped())
++                .stderr(std::process::Stdio::piped())
++                .kill_on_drop(true)
++                .spawn()
++                .context("spawning 'docker run' process")?
++        } else {
++            let (service, runtime_executable) = s_re.context("developer skill issue")?;
++            eprintln!();
++            cargo_green_eprintln(
++                "Starting",
++                format!("{} on http://{}:{}", service.target_name, ip, run_args.port),
++            );
++            eprintln!();
++            info!(
++                path = %runtime_executable.display(),
++                "Spawning runtime process",
++            );
++            tokio::process::Command::new(
++                dunce::canonicalize(runtime_executable)
++                    .context("canonicalize path of executable")?,
++            )
++            .current_dir(&service.workspace_path)
++            .envs(envs)
++            .stdout(std::process::Stdio::piped())
++            .stderr(std::process::Stdio::piped())
++            .kill_on_drop(true)
++            .spawn()
++            .context("spawning runtime process")?
++        };
++
++        // Start background tasks for reading child's stdout and stderr
+         let raw = run_args.raw;
+         let mut stdout_reader = BufReader::new(
+-            runtime
++            child
+                 .stdout
+                 .take()
+                 .context("child process did not have a handle to stdout")?,
+@@ -1461,7 +1524,7 @@ impl Shuttle {
+             }
+         });
+         let mut stderr_reader = BufReader::new(
+-            runtime
++            child
+                 .stderr
+                 .take()
+                 .context("child process did not have a handle to stderr")?,
+@@ -1500,15 +1563,15 @@ impl Shuttle {
+                 tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())
+                     .expect("Can not get the SIGINT signal receptor");
+             tokio::select! {
+-                exit_result = runtime.wait() => {
++                exit_result = child.wait() => {
+                     Some(exit_result)
+                 }
+                 _ = sigterm_notif.recv() => {
+-                    eprintln!("Received SIGTERM. Killing the runtime...");
++                    eprintln!("Received SIGTERM.");
+                     None
+                 },
+                 _ = sigint_notif.recv() => {
+-                    eprintln!("Received SIGINT. Killing the runtime...");
++                    eprintln!("Received SIGINT.");
+                     None
+                 }
+             }
+@@ -1562,13 +1625,98 @@ impl Shuttle {
+                 bail!("Failed to wait for runtime process to exit: {e}");
+             }
+             None => {
+-                runtime.kill().await?;
++                eprintln!("Stopping runtime.");
++                child.kill().await?;
++                if run_args.build_args.docker {
++                    let status = tokio::process::Command::new("docker")
++                        .arg("stop")
++                        .arg(name)
++                        .kill_on_drop(true)
++                        .stdout(Stdio::null())
++                        .spawn()
++                        .context("spawning 'docker stop'")?
++                        .wait()
++                        .await
++                        .context("waiting for 'docker stop'")?;
++
++                    if !status.success() {
++                        eprintln!("WARN: 'docker stop' failed");
++                    }
++                }
+             }
+         }
+ 
+         Ok(())
+     }
+ 
++    async fn local_docker_build(&self, build_args: &BuildArgsShared) -> Result<()> {
++        let project_name = self.ctx.project_name().to_owned();
++        let project_directory = self.ctx.project_directory();
++        let manifest_path = project_directory.join("Cargo.toml");
++
++        let metadata = async_cargo_metadata(manifest_path.as_path()).await?;
++        let rust_build_args = gather_rust_build_args(&metadata)?;
++
++        cargo_green_eprintln("Building", format!("{} with docker", project_name));
++
++        let tempdir = tempfile::Builder::new()
++            .prefix("shuttle-build-")
++            .tempdir()?
++            .keep();
++        tracing::debug!("Building in {}", tempdir.display());
++
++        let build_files = self.gather_build_files()?;
++        if build_files.is_empty() {
++            error!("No files included in build. Aborting...");
++            bail!("No files included in build");
++        }
++
++        // make sure this file exists
++        tracing::debug!("Creating prebuild script file");
++        fs::write(tempdir.join("shuttle_prebuild.sh"), "")?;
++        for (path, name) in build_files {
++            let dest = tempdir.join(&name);
++            tracing::debug!("Copying {} to tempdir", name.display());
++            fs::create_dir_all(dest.parent().expect("destination to not be the root"))?;
++            fs::copy(path, dest)?;
++        }
++        tracing::debug!("Removing any .dockerignore file");
++        // remove .dockerignore to not interfere
++        let _ = fs::remove_file(tempdir.join(".dockerignore"));
++
++        // TODO?: Support custom shuttle.Dockerfile
++        let dockerfile = tempdir.join("__shuttle.Dockerfile");
++        tracing::debug!("Writing dockerfile to {}", dockerfile.display());
++        fs::write(&dockerfile, render_rust_dockerfile(&rust_build_args))?;
++
++        let mut docker_cmd = tokio::process::Command::new("docker");
++        docker_cmd
++            .arg("buildx")
++            .arg("build")
++            .arg("--file")
++            .arg(dockerfile)
++            .arg("--tag")
++            .arg(format!("shuttle-build-{project_name}"));
++        if let Some(ref tag) = build_args.tag {
++            docker_cmd.arg("--tag").arg(tag);
++        }
++
++        let docker = docker_cmd.arg(tempdir).kill_on_drop(true).spawn();
++
++        let result = docker
++            .context("spawning docker build command")?
++            .wait()
++            .await
++            .context("waiting for docker build to exit")?;
++        if !result.success() {
++            bail!("Docker build error");
++        }
++
++        cargo_green_eprintln("Finished", "building with docker");
++
++        Ok(())
++    }
++
+     async fn deploy(&mut self, args: DeployArgs) -> Result<()> {
+         let client = self.client.as_ref().unwrap();
+         let project_directory = self.ctx.project_directory();
+@@ -1613,30 +1761,13 @@ impl Shuttle {
+             ..Default::default()
+         };
+         let mut build_meta = BuildMeta::default();
+-        let mut rust_build_args = BuildArgsRust::default();
+ 
+         let metadata = async_cargo_metadata(manifest_path.as_path()).await?;
+-        // TODO: support overriding this
+-        let (package, target, runtime_version) = find_first_shuttle_package(&metadata)?;
+-        rust_build_args.package_name = Some(package.name.to_string());
+-        rust_build_args.binary_name = Some(target.name.clone());
+-        rust_build_args.shuttle_runtime_version = runtime_version;
+-
+-        // activate shuttle feature if present
+-        let (no_default_features, features) = if package.features.contains_key("shuttle") {
+-            (true, Some(vec!["shuttle".to_owned()]))
+-        } else {
+-            (false, None)
+-        };
+-        rust_build_args.no_default_features = no_default_features;
+-        rust_build_args.features = features.map(|v| v.join(","));
+-
+-        // TODO: determine which (one) binary to build
+ 
+-        deployment_req.build_args = Some(BuildArgs::Rust(rust_build_args));
+-
+-        // TODO: have all of the above be configurable in CLI and Shuttle.toml
++        let rust_build_args = gather_rust_build_args(&metadata)?;
++        deployment_req.build_args = Some(CommonBuildArgs::Rust(rust_build_args));
+ 
++        let (_, target, _) = find_first_shuttle_package(&metadata)?;
+         deployment_req.infra = parse_infra_from_code(
+             &fs::read_to_string(target.src_path.as_path())
+                 .context("reading target file when extracting infra annotations")?,
+@@ -1674,12 +1805,12 @@ impl Shuttle {
+             }
+         }
+ 
+-        eprintln!("Packing files...");
++        cargo_green_eprintln("Packing", "build files");
+         let archive = self.make_archive()?;
+ 
+         if let Some(path) = args.output_archive {
+             eprintln!("Writing archive to {}", path.display());
+-            std::fs::write(path, archive).context("writing archive")?;
++            fs::write(path, archive).context("writing archive")?;
+ 
+             return Ok(());
+         }
+@@ -1688,12 +1819,12 @@ impl Shuttle {
+ 
+         let pid = self.ctx.project_id();
+ 
+-        eprintln!("Uploading code...");
++        cargo_green_eprintln("Uploading", "build archive");
+         let arch = client.upload_archive(pid, archive).await?.into_inner();
+         deployment_req.archive_version_id = arch.archive_version_id;
+         deployment_req.build_meta = Some(build_meta);
+ 
+-        eprintln!("Creating deployment...");
++        cargo_green_eprintln("Creating", "deployment");
+         let (deployment, raw_json) = client
+             .deploy(
+                 pid,
+@@ -1792,7 +1923,7 @@ impl Shuttle {
+                     println!("{}", r.raw_json);
+                 }
+             }
+-            return Err(anyhow!("Deployment failed"));
++            bail!("Deployment failed");
+         }
+ 
+         Ok(())
+@@ -1941,7 +2072,6 @@ impl Shuttle {
+     /// Find list of all files to include in a build, ready for placing in a zip archive
+     fn gather_build_files(&self) -> Result<BTreeMap<PathBuf, PathBuf>> {
+         let include_patterns = self.ctx.include();
+-
+         let project_directory = self.ctx.project_directory();
+ 
+         //
+@@ -2014,8 +2144,7 @@ impl Shuttle {
+     fn make_archive(&self) -> Result<Vec<u8>> {
+         let archive_files = self.gather_build_files()?;
+         if archive_files.is_empty() {
+-            error!("No files included in upload. Aborting...");
+-            bail!("No files included in upload.");
++            bail!("No files included in build");
+         }
+ 
+         let bytes = {
+@@ -2099,7 +2228,7 @@ mod tests {
+ 
+     use crate::args::ProjectArgs;
+     use crate::Shuttle;
+-    use std::fs::{self, canonicalize};
++    use std::fs;
+     use std::io::Cursor;
+     use std::path::PathBuf;
+ 
+@@ -2114,7 +2243,7 @@ mod tests {
+     async fn get_archive_entries(project_args: ProjectArgs) -> Vec<String> {
+         let mut shuttle = Shuttle::new(crate::Binary::Shuttle, None).unwrap();
+         shuttle
+-            .load_project(&project_args, false, false)
++            .load_project_id(&project_args, false, false)
+             .await
+             .unwrap();
+ 
+@@ -2128,7 +2257,7 @@ mod tests {
+ 
+     #[tokio::test]
+     async fn make_archive_respect_rules() {
+-        let working_directory = canonicalize(path_from_workspace_root(
++        let working_directory = fs::canonicalize(path_from_workspace_root(
+             "cargo-shuttle/tests/resources/archiving",
+         ))
+         .unwrap();
+diff --git a/cargo-shuttle/src/util/mod.rs b/cargo-shuttle/src/util/mod.rs
+index 7edddc2ba..0b8f66ada 100644
+--- a/cargo-shuttle/src/util/mod.rs
++++ b/cargo-shuttle/src/util/mod.rs
+@@ -1,7 +1,7 @@
+ pub mod bacon;
+ 
+ use std::{
+-    fmt::Write,
++    fmt::{Display, Write},
+     fs::File,
+     io::stdout,
+     path::{Path, PathBuf},
+@@ -13,6 +13,7 @@ use anyhow::{bail, Context, Result};
+ use clap::CommandFactory;
+ use clap_complete::{generate, Shell};
+ use clap_mangen::Man;
++use crossterm::style::Stylize;
+ use futures::StreamExt;
+ use git2::{Repository, StatusOptions};
+ use indoc::writedoc;
+@@ -288,3 +289,8 @@ where
+ 
+     Ok(None)
+ }
++
++/// Print a verb + line similar to how cargo does
++pub fn cargo_green_eprintln(verb: impl Display, line: impl Display) {
++    eprintln!("{} {}", format!("{verb:>12}").bold().green(), line);
++}
+diff --git a/cargo-shuttle/tests/integration/builder.rs b/cargo-shuttle/tests/integration/builder.rs
+index 87b296bf4..c35a61132 100644
+--- a/cargo-shuttle/tests/integration/builder.rs
++++ b/cargo-shuttle/tests/integration/builder.rs
+@@ -1,17 +1,18 @@
+-use std::path::{Path, PathBuf};
++use std::path::PathBuf;
+ 
+-use cargo_shuttle::builder::{build_workspace, BuiltService};
++use cargo_shuttle::builder::{cargo_build, BuiltService};
+ 
+ #[tokio::test]
+ #[should_panic(
+     expected = "Expected at least one target that Shuttle can build. Make sure your crate has a binary target that uses a fully qualified `#[shuttle_runtime::main]`."
+ )]
+ async fn not_shuttle() {
+-    let (tx, _) = tokio::sync::mpsc::channel::<String>(256);
+-    let project_path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/resources/not-shuttle");
+-    build_workspace(Path::new(&project_path), false, tx)
+-        .await
+-        .unwrap();
++    let p = PathBuf::from(concat!(
++        env!("CARGO_MANIFEST_DIR"),
++        "/tests/resources/not-shuttle"
++    ));
++
++    cargo_build(p, false, true).await.unwrap();
+ }
+ 
+ #[tokio::test]
+@@ -19,11 +20,12 @@ async fn not_shuttle() {
+     expected = "Expected at least one target that Shuttle can build. Make sure your crate has a binary target that uses a fully qualified `#[shuttle_runtime::main]`."
+ )]
+ async fn not_bin() {
+-    let (tx, _) = tokio::sync::mpsc::channel::<String>(256);
+-    let project_path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/resources/not-bin");
+-    build_workspace(Path::new(&project_path), false, tx)
+-        .await
+-        .unwrap();
++    let p = PathBuf::from(concat!(
++        env!("CARGO_MANIFEST_DIR"),
++        "/tests/resources/not-bin"
++    ));
++
++    cargo_build(p, false, true).await.unwrap();
+ }
+ 
+ #[tokio::test]
+@@ -31,82 +33,73 @@ async fn not_bin() {
+     expected = "Expected at least one target that Shuttle can build. Make sure your crate has a binary target that uses a fully qualified `#[shuttle_runtime::main]`."
+ )]
+ async fn not_full_macro() {
+-    let (tx, _) = tokio::sync::mpsc::channel::<String>(256);
+-    let project_path = concat!(
++    let p = PathBuf::from(concat!(
+         env!("CARGO_MANIFEST_DIR"),
+         "/tests/resources/not-full-macro"
+-    );
+-    build_workspace(Path::new(&project_path), false, tx)
+-        .await
+-        .unwrap();
++    ));
++
++    cargo_build(p, false, true).await.unwrap();
+ }
+ 
+ #[tokio::test]
+ async fn is_bin() {
+-    let (tx, _) = tokio::sync::mpsc::channel::<String>(256);
+-    let project_path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/resources/is-bin");
++    let p = PathBuf::from(concat!(
++        env!("CARGO_MANIFEST_DIR"),
++        "/tests/resources/is-bin"
++    ));
+ 
+     assert_eq!(
+-        build_workspace(Path::new(&project_path), false, tx)
+-            .await
+-            .unwrap(),
++        cargo_build(p.clone(), false, true).await.unwrap(),
+         BuiltService {
+-            workspace_path: PathBuf::from(&project_path),
++            workspace_path: p.clone(),
+             target_name: "is-bin".to_string(),
+-            executable_path: PathBuf::from(&project_path).join("target/debug/is-bin"),
++            executable_path: p.join("target/debug/is-bin"),
+         }
+     );
+ }
+ 
+ #[tokio::test]
+ async fn is_bin2() {
+-    let (tx, _) = tokio::sync::mpsc::channel::<String>(256);
+-    let project_path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/resources/is-bin2");
++    let p = PathBuf::from(concat!(
++        env!("CARGO_MANIFEST_DIR"),
++        "/tests/resources/is-bin2"
++    ));
+ 
+     assert_eq!(
+-        build_workspace(Path::new(&project_path), false, tx)
+-            .await
+-            .unwrap(),
++        cargo_build(p.clone(), false, true).await.unwrap(),
+         BuiltService {
+-            workspace_path: PathBuf::from(&project_path),
++            workspace_path: p.clone(),
+             target_name: "weirdchamp".to_string(),
+-            executable_path: PathBuf::from(&project_path).join("target/debug/weirdchamp"),
++            executable_path: p.join("target/debug/weirdchamp"),
+         }
+     );
+ }
+ 
+ #[tokio::test]
+-#[should_panic(expected = "Cargo manifest file not found")]
+-async fn not_found() {
+-    let (tx, _) = tokio::sync::mpsc::channel::<String>(256);
+-    let project_path = format!(
+-        "{}/tests/resources/non-existing",
++#[should_panic]
++async fn no_existing_folder() {
++    let p = PathBuf::from(format!(
++        "{}/tests/resources/non-existing-folder",
+         env!("CARGO_MANIFEST_DIR")
+-    );
+-    build_workspace(Path::new(&project_path), false, tx)
+-        .await
+-        .unwrap();
++    ));
++
++    cargo_build(p, false, true).await.unwrap();
+ }
+ 
+ // Test that workspace projects are compiled correctly
+ #[tokio::test]
+ async fn workspace() {
+-    let (tx, mut rx) = tokio::sync::mpsc::channel::<String>(256);
+-    tokio::spawn(async move {
+-        while let Some(l) = rx.recv().await {
+-            println!("{l}");
+-        }
+-    });
+-    let project_path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/resources/workspace");
++    let p = PathBuf::from(concat!(
++        env!("CARGO_MANIFEST_DIR"),
++        "/tests/resources/workspace"
++    ));
+ 
+     assert_eq!(
+-        build_workspace(Path::new(&project_path), false, tx)
+-            .await
+-            .unwrap(),
++        cargo_build(p.clone(), false, true).await.unwrap(),
+         BuiltService {
+-            workspace_path: PathBuf::from(&project_path),
++            workspace_path: p.clone(),
+             target_name: "alpha".to_string(),
+-            executable_path: PathBuf::from(&project_path).join("target/debug/alpha"),
++            executable_path: p.join("target/debug/alpha"),
+         }
+     );
+ }
+diff --git a/cargo-shuttle/tests/integration/run.rs b/cargo-shuttle/tests/integration/run.rs
+index 6cd335fb2..d3b298f5b 100644
+--- a/cargo-shuttle/tests/integration/run.rs
++++ b/cargo-shuttle/tests/integration/run.rs
+@@ -45,10 +45,7 @@ async fn shuttle_run(working_directory: &str, external: bool) -> String {
+                 cmd: Command::Run(RunArgs {
+                     port,
+                     external,
+-                    release: false,
+-                    raw: false,
+-                    bacon: false,
+-                    secret_args: Default::default(),
++                    ..Default::default()
+                 }),
+             },
+             false,
+diff --git a/common/src/models/deployment.rs b/common/src/models/deployment.rs
+index b455363c3..1bac09e98 100644
+--- a/common/src/models/deployment.rs
++++ b/common/src/models/deployment.rs
+@@ -163,7 +163,7 @@ pub enum BuildArgs {
+     // No Unknown variant: is a Request type and should only be deserialized on backend
+ }
+ 
+-#[derive(Deserialize, Serialize)]
++#[derive(Debug, Deserialize, Serialize)]
+ #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+ #[typeshare::typeshare]
+ pub struct BuildArgsRust {

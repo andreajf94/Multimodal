@@ -1,0 +1,112 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "dependency_management",
+      "recommendation": "Updated tower-http dependency from 0.6.0 to 0.6.8 to address deprecation warnings while maintaining API compatibility",
+      "rationale": "The update resolves deprecation warnings in the codebase without requiring major architectural changes. Version 0.6.8 maintains backward compatibility with the 0.6.x series while providing fixes for deprecated APIs. This approach minimizes risk and ensures existing functionality continues to work.",
+      "alternatives_considered": [
+        "Upgrading to a major version (e.g., 0.7.x) which might require more extensive changes",
+        "Keeping the old version and suppressing deprecation warnings globally",
+        "Forking tower-http to maintain the deprecated APIs"
+      ],
+      "files_affected": [
+        "Cargo.lock",
+        "axum/Cargo.toml"
+      ]
+    },
+    {
+      "dimension": "api_design",
+      "recommendation": "Replaced deprecated TimeoutLayer::new() with TimeoutLayer::with_status_code() to specify custom timeout status codes",
+      "rationale": "tower-http 0.6.8 deprecated TimeoutLayer::new() in favor of TimeoutLayer::with_status_code() to allow explicit specification of HTTP status codes for timeout responses. This provides better control over timeout behavior and aligns with HTTP semantics where different status codes might be appropriate (REQUEST_TIMEOUT vs SERVICE_UNAVAILABLE).",
+      "alternatives_considered": [
+        "Using the default timeout status code (which might be different)",
+        "Creating a custom timeout layer implementation",
+        "Using a different timeout mechanism entirely"
+      ],
+      "files_affected": [
+        "axum/src/handler/mod.rs",
+        "axum/src/routing/method_routing.rs",
+        "axum/src/routing/tests/merge.rs",
+        "axum/src/routing/tests/mod.rs"
+      ]
+    },
+    {
+      "dimension": "testing_strategy",
+      "recommendation": "Added #[allow(deprecated)] attributes to tests that still use deprecated tower-http APIs for demonstration purposes",
+      "rationale": "Some tests demonstrate usage patterns that include deprecated APIs. Rather than removing these tests entirely, we add #[allow(deprecated)] attributes to suppress warnings while maintaining test coverage. This ensures the tests continue to validate behavior while acknowledging the deprecation.",
+      "alternatives_considered": [
+        "Rewriting all tests to use new APIs (more work, risk of breaking tests)",
+        "Removing tests that use deprecated APIs (loss of test coverage)",
+        "Splitting tests into deprecated and non-deprecated categories"
+      ],
+      "files_affected": [
+        "axum/src/routing/method_routing.rs",
+        "axum/src/routing/tests/merge.rs",
+        "axum/src/routing/tests/mod.rs"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Standardized on StatusCode::REQUEST_TIMEOUT (408) for timeout responses instead of potentially using default status codes",
+      "rationale": "Using REQUEST_TIMEOUT (408) is semantically correct for client-side timeouts and provides consistent behavior across the codebase. This explicit status code choice improves API clarity and helps users understand timeout semantics without having to check tower-http defaults.",
+      "alternatives_considered": [
+        "Using different status codes for different timeout scenarios",
+        "Making the status code configurable per timeout",
+        "Keeping whatever default tower-http provides"
+      ],
+      "files_affected": [
+        "axum/src/handler/mod.rs",
+        "axum/src/routing/method_routing.rs",
+        "axum/src/routing/tests/merge.rs",
+        "axum/src/routing/tests/mod.rs"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Update tower-http dependency to 0.6.8",
+      "description": "Update Cargo.toml and Cargo.lock to use tower-http 0.6.8 to resolve deprecation warnings while maintaining compatibility",
+      "files_to_modify": [
+        "Cargo.lock",
+        "axum/Cargo.toml"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-002",
+      "title": "Migrate from deprecated TimeoutLayer::new() to TimeoutLayer::with_status_code()",
+      "description": "Replace all instances of TimeoutLayer::new() with TimeoutLayer::with_status_code(StatusCode::REQUEST_TIMEOUT, duration) to use the non-deprecated API",
+      "files_to_modify": [
+        "axum/src/handler/mod.rs",
+        "axum/src/routing/method_routing.rs",
+        "axum/src/routing/tests/merge.rs",
+        "axum/src/routing/tests/mod.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-003",
+      "title": "Add deprecation allowances to test code",
+      "description": "Add #[allow(deprecated)] attributes to tests that demonstrate deprecated API usage patterns to suppress warnings while maintaining test coverage",
+      "files_to_modify": [
+        "axum/src/routing/method_routing.rs",
+        "axum/src/routing/tests/merge.rs",
+        "axum/src/routing/tests/mod.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation addresses deprecation warnings in the axum codebase by updating the tower-http dependency from 0.6.0 to 0.6.8. This minor version update provides backward-compatible fixes for deprecated APIs while maintaining existing functionality. The key change involves migrating from the deprecated TimeoutLayer::new() constructor to TimeoutLayer::with_status_code(), which requires specifying an explicit HTTP status code for timeout responses.\n\nAcross four different files, all instances of TimeoutLayer::new() were replaced with TimeoutLayer::with_status_code(StatusCode::REQUEST_TIMEOUT, duration), standardizing on the 408 status code for timeout responses. This change improves API clarity and aligns with HTTP semantics. In test files, #[allow(deprecated)] attributes were added to suppress warnings for tests that demonstrate deprecated usage patterns, preserving test coverage while acknowledging the deprecation.\n\nThe approach demonstrates a balanced strategy for dependency management: updating to a compatible minor version that fixes deprecations without requiring major architectural changes. By explicitly specifying StatusCode::REQUEST_TIMEOUT, the implementation provides consistent timeout behavior across the framework while maintaining backward compatibility for users. The changes are minimal and focused, affecting only the specific APIs that were deprecated in tower-http.",
+  "source_pr": "https://github.com/tokio-rs/axum/pull/3672",
+  "before_sha": "6a03c63f5cf7e2368cebf0e095fb3b035f7f7594",
+  "after_sha": "3fb52b094ee6eaa9876205b82a06b3be86c310ad",
+  "diff_stats": {
+    "additions": 25,
+    "deletions": 9,
+    "files_changed": 6
+  }
+}

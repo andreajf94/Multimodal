@@ -1,0 +1,13 @@
+{
+  "feature_name": "Fallback Routing Error Handling",
+  "description": "Replace the panic-inducing unwrap() in fallback request handling with graceful error handling. When the fallback service is called more than once (violating the internal invariant), the system should return a 500 Internal Server Error response instead of panicking. In debug builds, this violation should trigger a debug assertion to help developers catch issues during development.",
+  "functional_requirements": [
+    "Remove the unwrap() call from the fallback routing path that could cause panics",
+    "Implement graceful error handling that returns a 500 Internal Server Error response when the fallback service is called multiple times",
+    "Add debug_assert! logic that triggers only in debug builds to help developers identify invariant violations during development",
+    "Maintain the existing assumption that the fallback service should only be called once per request",
+    "Update routing tests to verify the new error handling behavior works correctly"
+  ],
+  "project_name": "axum",
+  "source_pr": "https://github.com/tokio-rs/axum/pull/3652"
+}

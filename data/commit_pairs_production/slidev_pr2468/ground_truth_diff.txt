@@ -1,0 +1,431 @@
+diff --git a/docs/custom/config-vite.md b/docs/custom/config-vite.md
+index eeeceeb3da..47e4a833cc 100644
+--- a/docs/custom/config-vite.md
++++ b/docs/custom/config-vite.md
+@@ -23,7 +23,7 @@ To configure the built-in plugins listed above, create a `vite.config.ts` with t
+ 
+ ```ts twoslash [vite.config.ts]
+ /// <reference types="@slidev/types" />
+-import type MarkdownIt from 'markdown-it'
++import type MarkdownExit from 'markdown-exit'
+ 
+ declare const MyPlugin: (md: any) => void
+ // ---cut---
+@@ -35,9 +35,9 @@ export default defineConfig({
+       /* vue options */
+     },
+     markdown: {
+-      /* markdown-it options */
+-      markdownItSetup(md) {
+-        /* custom markdown-it plugins */
++      /* markdown-exit options */
++      markdownSetup(md) {
++        /* custom markdown-exit plugins */
+         md.use(MyPlugin)
+       },
+     },
+diff --git a/docs/package.json b/docs/package.json
+index 690274f8df..169cfeffee 100644
+--- a/docs/package.json
++++ b/docs/package.json
+@@ -32,7 +32,6 @@
+     "@vueuse/core": "catalog:frontend",
+     "fast-glob": "catalog:prod",
+     "gray-matter": "catalog:prod",
+-    "markdown-it": "catalog:prod",
+     "shiki": "catalog:frontend",
+     "typeit": "catalog:docs",
+     "typescript": "catalog:dev",
+diff --git a/package.json b/package.json
+index c5e7c6b208..550f762015 100644
+--- a/package.json
++++ b/package.json
+@@ -40,7 +40,6 @@
+     "@types/file-saver": "catalog:types",
+     "@types/js-yaml": "catalog:types",
+     "@types/katex": "catalog:types",
+-    "@types/markdown-it": "catalog:types",
+     "@types/node": "catalog:types",
+     "@types/prompts": "catalog:types",
+     "@types/recordrtc": "catalog:types",
+diff --git a/packages/slidev/node/commands/shared.ts b/packages/slidev/node/commands/shared.ts
+index 59634d09e6..489c2a38f5 100644
+--- a/packages/slidev/node/commands/shared.ts
++++ b/packages/slidev/node/commands/shared.ts
+@@ -1,13 +1,13 @@
+ import type { ResolvedSlidevOptions, SlidevData, SlidevServerOptions } from '@slidev/types'
+ import type { ConfigEnv, InlineConfig } from 'vite'
+-import MarkdownIt from 'markdown-it'
++import MarkdownExit from 'markdown-exit'
+ import { loadConfigFromFile, mergeConfig } from 'vite'
+ import { resolveSourceFiles } from '../resolver'
+ import markdownItLink from '../syntax/markdown-it/markdown-it-link'
+ import { stringifyMarkdownTokens } from '../utils'
+ import { ViteSlidevPlugin } from '../vite'
+ 
+-export const sharedMd = MarkdownIt({ html: true })
++export const sharedMd = MarkdownExit({ html: true })
+ sharedMd.use(markdownItLink)
+ 
+ export function getSlideTitle(data: SlidevData) {
+diff --git a/packages/slidev/node/setups/indexHtml.ts b/packages/slidev/node/setups/indexHtml.ts
+index bc04c2c84d..61a7a94f77 100644
+--- a/packages/slidev/node/setups/indexHtml.ts
++++ b/packages/slidev/node/setups/indexHtml.ts
+@@ -5,13 +5,21 @@ import { readFile } from 'node:fs/promises'
+ import { join } from 'node:path'
+ import { slash } from '@antfu/utils'
+ import { white, yellow } from 'ansis'
+-import { escapeHtml } from 'markdown-it/lib/common/utils.mjs'
+ import { createHead, extractUnheadInputFromHtml, transformHtmlTemplate } from 'unhead/server'
+ import { version } from '../../package.json'
+ import { getSlideTitle } from '../commands/shared'
+ import { toAtFS } from '../resolver'
+ import { generateCoollabsFontsUrl, generateGoogleFontsUrl } from '../utils'
+ 
++function escapeHtml(str: string): string {
++  return str
++    .replace(/&/g, '&amp;')
++    .replace(/</g, '&lt;')
++    .replace(/>/g, '&gt;')
++    .replace(/"/g, '&quot;')
++    .replace(/'/g, '&#039;')
++}
++
+ function toAttrValue(unsafe: unknown) {
+   return JSON.stringify(escapeHtml(String(unsafe)))
+ }
+diff --git a/packages/slidev/node/syntax/markdown-it/index.ts b/packages/slidev/node/syntax/markdown-it/index.ts
+index a30ddea1fc..77cb15f5dd 100644
+--- a/packages/slidev/node/syntax/markdown-it/index.ts
++++ b/packages/slidev/node/syntax/markdown-it/index.ts
+@@ -1,6 +1,6 @@
+ import type { ResolvedSlidevOptions } from '@slidev/types'
+ import type MagicString from 'magic-string'
+-import type { MarkdownItAsync } from 'markdown-it-async'
++import type MarkdownExit from 'markdown-exit'
+ import { taskLists as MarkdownItTaskList } from '@hedgedoc/markdown-it-plugins'
+ // @ts-expect-error missing types
+ import MarkdownItFootnote from 'markdown-it-footnote'
+@@ -11,10 +11,11 @@ import MarkdownItLink from './markdown-it-link'
+ import MarkdownItShiki from './markdown-it-shiki'
+ import MarkdownItVDrag from './markdown-it-v-drag'
+ 
+-export async function useMarkdownItPlugins(md: MarkdownItAsync, options: ResolvedSlidevOptions, markdownTransformMap: Map<string, MagicString>) {
++export async function useMarkdownItPlugins(md: MarkdownExit, options: ResolvedSlidevOptions, markdownTransformMap: Map<string, MagicString>) {
+   const { data: { features, config }, utils: { katexOptions } } = options
+ 
+   if (config.highlighter === 'shiki') {
++    // @ts-expect-error @shikijs/markdown-it types expect MarkdownItAsync, but MarkdownExit is API-compatible
+     md.use(await MarkdownItShiki(options))
+   }
+ 
+diff --git a/packages/slidev/node/syntax/markdown-it/markdown-it-escape-code.ts b/packages/slidev/node/syntax/markdown-it/markdown-it-escape-code.ts
+index 30f10675b5..5d3cdbb2f5 100644
+--- a/packages/slidev/node/syntax/markdown-it/markdown-it-escape-code.ts
++++ b/packages/slidev/node/syntax/markdown-it/markdown-it-escape-code.ts
+@@ -1,9 +1,9 @@
+-import type MarkdownIt from 'markdown-it'
++import type MarkdownExit from 'markdown-exit'
+ 
+-export default function MarkdownItEscapeInlineCode(md: MarkdownIt) {
++export default function MarkdownItEscapeInlineCode(md: MarkdownExit) {
+   const codeInline = md.renderer.rules.code_inline!
+-  md.renderer.rules.code_inline = (tokens, idx, options, env, self) => {
+-    const result = codeInline(tokens, idx, options, env, self)
++  md.renderer.rules.code_inline = async (tokens, idx, options, env, self) => {
++    const result = await codeInline(tokens, idx, options, env, self)
+     return result.replace(/^<code/, '<code v-pre')
+   }
+ }
+diff --git a/packages/slidev/node/syntax/markdown-it/markdown-it-link.ts b/packages/slidev/node/syntax/markdown-it/markdown-it-link.ts
+index 66cc8acdeb..376383935a 100644
+--- a/packages/slidev/node/syntax/markdown-it/markdown-it-link.ts
++++ b/packages/slidev/node/syntax/markdown-it/markdown-it-link.ts
+@@ -1,6 +1,6 @@
+-import type MarkdownIt from 'markdown-it'
++import type MarkdownExit from 'markdown-exit'
+ 
+-export default function MarkdownItLink(md: MarkdownIt) {
++export default function MarkdownItLink(md: MarkdownExit) {
+   const defaultRender = md.renderer.rules.link_open
+     ?? ((tokens, idx, options, _env, self) => self.renderToken(tokens, idx, options))
+ 
+diff --git a/packages/slidev/node/syntax/markdown-it/markdown-it-v-drag.ts b/packages/slidev/node/syntax/markdown-it/markdown-it-v-drag.ts
+index 5489a5bf64..f6881d7cdf 100644
+--- a/packages/slidev/node/syntax/markdown-it/markdown-it-v-drag.ts
++++ b/packages/slidev/node/syntax/markdown-it/markdown-it-v-drag.ts
+@@ -1,13 +1,13 @@
+ import type MagicString from 'magic-string-stack'
+-import type MarkdownIt from 'markdown-it'
++import type MarkdownExit from 'markdown-exit'
+ import { SourceMapConsumer } from 'source-map-js'
+ 
+-type Token = ReturnType<MarkdownIt['parseInline']>[number]
++type Token = ReturnType<MarkdownExit['parseInline']>[number]
+ 
+ const dragComponentRegex = /<(v-?drag-?\w*)([\s>])/i
+ const dragDirectiveRegex = /(?<![</\w])v-drag(=".*?")?/i
+ 
+-export default function MarkdownItVDrag(md: MarkdownIt, markdownTransformMap: Map<string, MagicString>) {
++export default function MarkdownItVDrag(md: MarkdownExit, markdownTransformMap: Map<string, MagicString>) {
+   const visited = new WeakSet()
+   const sourceMapConsumers = new WeakMap<MagicString, SourceMapConsumer>()
+ 
+diff --git a/packages/slidev/node/utils.ts b/packages/slidev/node/utils.ts
+index 95bbf9ff9c..a38cc31d87 100644
+--- a/packages/slidev/node/utils.ts
++++ b/packages/slidev/node/utils.ts
+@@ -1,5 +1,5 @@
+ import type { ResolvedFontOptions, SourceSlideInfo } from '@slidev/types'
+-import type MarkdownIt from 'markdown-it'
++import type MarkdownExit from 'markdown-exit'
+ import type { Connect, GeneralImportGlobOptions } from 'vite'
+ import { relative } from 'node:path'
+ import { fileURLToPath } from 'node:url'
+@@ -7,7 +7,7 @@ import { slash } from '@antfu/utils'
+ import { createJiti } from 'jiti'
+ import YAML from 'yaml'
+ 
+-type Token = ReturnType<MarkdownIt['parseInline']>[number]
++type Token = ReturnType<MarkdownExit['parseInline']>[number]
+ 
+ type Jiti = ReturnType<typeof createJiti>
+ let jiti: Jiti | undefined
+diff --git a/packages/slidev/node/vite/loaders.ts b/packages/slidev/node/vite/loaders.ts
+index 3a42f910c8..6abc15fefb 100644
+--- a/packages/slidev/node/vite/loaders.ts
++++ b/packages/slidev/node/vite/loaders.ts
+@@ -4,7 +4,7 @@ import type { ModuleNode, Plugin, ViteDevServer } from 'vite'
+ import { notNullish, range } from '@antfu/utils'
+ import * as parser from '@slidev/parser/fs'
+ import equal from 'fast-deep-equal'
+-import MarkdownIt from 'markdown-it'
++import MarkdownExit from 'markdown-exit'
+ import YAML from 'yaml'
+ import { createDataUtils } from '../options'
+ import MarkdownItKatex from '../syntax/markdown-it/markdown-it-katex'
+@@ -24,7 +24,7 @@ export function createSlidesLoader(
+ ): Plugin {
+   const { data, mode, utils, withoutNotes } = options
+ 
+-  const notesMd = MarkdownIt({ html: true })
++  const notesMd = MarkdownExit({ html: true })
+   notesMd.use(markdownItLink)
+   if (data.features.katex)
+     notesMd.use(MarkdownItKatex, utils.katexOptions)
+diff --git a/packages/slidev/node/vite/markdown.ts b/packages/slidev/node/vite/markdown.ts
+index b78b10d1be..298915082f 100644
+--- a/packages/slidev/node/vite/markdown.ts
++++ b/packages/slidev/node/vite/markdown.ts
+@@ -19,17 +19,17 @@ export async function createMarkdownPlugin(
+     headEnabled: false,
+     frontmatter: false,
+     escapeCodeTagInterpolation: false,
+-    markdownItOptions: {
++    markdownOptions: {
+       quotes: '""\'\'',
+       html: true,
+       xhtmlOut: true,
+       linkify: true,
+-      ...mdOptions?.markdownItOptions,
++      ...mdOptions?.markdownOptions,
+     },
+     ...mdOptions,
+-    async markdownItSetup(md) {
++    async markdownSetup(md) {
+       await useMarkdownItPlugins(md, options, markdownTransformMap)
+-      await mdOptions?.markdownItSetup?.(md)
++      await mdOptions?.markdownSetup?.(md)
+     },
+     transforms: {
+       ...mdOptions?.transforms,
+diff --git a/packages/slidev/package.json b/packages/slidev/package.json
+index cc20b08021..4dfd1a19b9 100644
+--- a/packages/slidev/package.json
++++ b/packages/slidev/package.json
+@@ -81,7 +81,7 @@
+     "lz-string": "catalog:frontend",
+     "magic-string": "catalog:prod",
+     "magic-string-stack": "catalog:prod",
+-    "markdown-it": "catalog:prod",
++    "markdown-exit": "catalog:prod",
+     "markdown-it-footnote": "catalog:prod",
+     "markdown-it-mdc": "catalog:prod",
+     "mlly": "catalog:prod",
+diff --git a/pnpm-lock.yaml b/pnpm-lock.yaml
+index 5a8c157b22..a7894e3c24 100644
+--- a/pnpm-lock.yaml
++++ b/pnpm-lock.yaml
+@@ -258,9 +258,9 @@ catalogs:
+     magic-string-stack:
+       specifier: ^1.1.0
+       version: 1.1.0
+-    markdown-it:
+-      specifier: ^14.1.0
+-      version: 14.1.0
++    markdown-exit:
++      specifier: ^1.0.0-beta.8
++      version: 1.0.0-beta.8
+     markdown-it-footnote:
+       specifier: ^4.0.0
+       version: 4.0.0
+@@ -319,8 +319,8 @@ catalogs:
+       specifier: ^31.0.0
+       version: 31.0.0
+     unplugin-vue-markdown:
+-      specifier: ^29.2.0
+-      version: 29.2.0
++      specifier: ^30.0.0
++      version: 30.0.0
+     untun:
+       specifier: ^0.1.3
+       version: 0.1.3
+@@ -368,9 +368,6 @@ catalogs:
+     '@types/katex':
+       specifier: ^0.16.8
+       version: 0.16.8
+-    '@types/markdown-it':
+-      specifier: ^14.1.2
+-      version: 14.1.2
+     '@types/node':
+       specifier: ^25.0.10
+       version: 25.0.10
+@@ -477,9 +474,6 @@ importers:
+       '@types/katex':
+         specifier: catalog:types
+         version: 0.16.8
+-      '@types/markdown-it':
+-        specifier: catalog:types
+-        version: 14.1.2
+       '@types/node':
+         specifier: catalog:types
+         version: 25.0.10
+@@ -684,9 +678,6 @@ importers:
+       gray-matter:
+         specifier: catalog:prod
+         version: 4.0.3
+-      markdown-it:
+-        specifier: catalog:prod
+-        version: 14.1.0
+       shiki:
+         specifier: catalog:frontend
+         version: 3.21.0
+@@ -970,9 +961,9 @@ importers:
+       magic-string-stack:
+         specifier: catalog:prod
+         version: 1.1.0
+-      markdown-it:
++      markdown-exit:
+         specifier: catalog:prod
+-        version: 14.1.0
++        version: 1.0.0-beta.8
+       markdown-it-footnote:
+         specifier: catalog:prod
+         version: 4.0.0
+@@ -1053,7 +1044,7 @@ importers:
+         version: 31.0.0(@nuxt/kit@3.13.0(rollup@4.44.1))(vue@3.5.27(typescript@5.9.3))
+       unplugin-vue-markdown:
+         specifier: catalog:prod
+-        version: 29.2.0(vite@7.3.1(@types/node@25.0.10)(jiti@2.6.1)(lightningcss@1.30.1)(tsx@4.21.0)(yaml@2.8.2))
++        version: 30.0.0(vite@7.3.1(@types/node@25.0.10)(jiti@2.6.1)(lightningcss@1.30.1)(tsx@4.21.0)(yaml@2.8.2))
+       untun:
+         specifier: catalog:prod
+         version: 0.1.3
+@@ -1132,7 +1123,7 @@ importers:
+         version: 23.0.1(@vue/compiler-sfc@3.5.27)
+       unplugin-vue-markdown:
+         specifier: catalog:prod
+-        version: 29.2.0(vite@7.3.1(@types/node@25.0.10)(jiti@2.6.1)(lightningcss@1.30.1)(tsx@4.21.0)(yaml@2.8.2))
++        version: 30.0.0(vite@7.3.1(@types/node@25.0.10)(jiti@2.6.1)(lightningcss@1.30.1)(tsx@4.21.0)(yaml@2.8.2))
+       vite-plugin-inspect:
+         specifier: catalog:prod
+         version: 11.3.3(@nuxt/kit@3.13.0(rollup@4.44.1))(vite@7.3.1(@types/node@25.0.10)(jiti@2.6.1)(lightningcss@1.30.1)(tsx@4.21.0)(yaml@2.8.2))
+@@ -5091,6 +5082,9 @@ packages:
+   mark.js@8.11.1:
+     resolution: {integrity: sha512-1I+1qpDt4idfgLQG+BNWmrqku+7/2bi5nLf4YwF8y8zXvmfiTBY3PV3ZibfrjBueCByROpuBjLLFCajqkgYoLQ==}
+ 
++  markdown-exit@1.0.0-beta.8:
++    resolution: {integrity: sha512-LuwW1iurvRspcUJlgMk/QBC2is+aOqRDwseGQA3wYrUwadVvMYpxazx6ZKxxyIkLuQhV40M/3E4lU4qIavsAlA==}
++
+   markdown-it-async@2.2.0:
+     resolution: {integrity: sha512-sITME+kf799vMeO/ww/CjH6q+c05f6TLpn6VOmmWCGNqPJzSh+uFgZoMB9s0plNtW6afy63qglNAC3MhrhP/gg==}
+ 
+@@ -6562,8 +6556,8 @@ packages:
+       '@nuxt/kit':
+         optional: true
+ 
+-  unplugin-vue-markdown@29.2.0:
+-    resolution: {integrity: sha512-/x2hFgQ6cWN1Kls+yK5mAI9YDmeTofftynVGgOy1llBlDX1ifaXsQBls/bpORaiwn7cxA7HkOo0wn/xKcrXBHA==}
++  unplugin-vue-markdown@30.0.0:
++    resolution: {integrity: sha512-FVdKAb7jmZslfdkOCfm6jxHaUafltBpOXdoLvKY+0I0EeMmhxXTSzeDldwXFJeV0IH8LyIXIiU29E6gv02WJFQ==}
+     engines: {node: '>=20'}
+     peerDependencies:
+       vite: ^7.3.1
+@@ -11243,10 +11237,19 @@ snapshots:
+ 
+   mark.js@8.11.1: {}
+ 
++  markdown-exit@1.0.0-beta.8:
++    dependencies:
++      entities: 7.0.1
++      linkify-it: 5.0.0
++      mdurl: 2.0.0
++      punycode.js: 2.3.1
++      uc.micro: 2.1.0
++
+   markdown-it-async@2.2.0:
+     dependencies:
+       '@types/markdown-it': 14.1.2
+       markdown-it: 14.1.0
++    optional: true
+ 
+   markdown-it-footnote@4.0.0: {}
+ 
+@@ -13034,14 +13037,12 @@ snapshots:
+     optionalDependencies:
+       '@nuxt/kit': 3.13.0(rollup@4.44.1)
+ 
+-  unplugin-vue-markdown@29.2.0(vite@7.3.1(@types/node@25.0.10)(jiti@2.6.1)(lightningcss@1.30.1)(tsx@4.21.0)(yaml@2.8.2)):
++  unplugin-vue-markdown@30.0.0(vite@7.3.1(@types/node@25.0.10)(jiti@2.6.1)(lightningcss@1.30.1)(tsx@4.21.0)(yaml@2.8.2)):
+     dependencies:
+       '@mdit-vue/plugin-component': 3.0.2
+       '@mdit-vue/plugin-frontmatter': 3.0.2
+       '@mdit-vue/types': 3.0.2
+-      '@types/markdown-it': 14.1.2
+-      markdown-it: 14.1.0
+-      markdown-it-async: 2.2.0
++      markdown-exit: 1.0.0-beta.8
+       unplugin: 2.3.11
+       unplugin-utils: 0.3.1
+       vite: 7.3.1(@types/node@25.0.10)(jiti@2.6.1)(lightningcss@1.30.1)(tsx@4.21.0)(yaml@2.8.2)
+diff --git a/pnpm-workspace.yaml b/pnpm-workspace.yaml
+index 9282464db1..474debcb63 100644
+--- a/pnpm-workspace.yaml
++++ b/pnpm-workspace.yaml
+@@ -112,7 +112,7 @@ catalogs:
+     local-pkg: ^1.1.2
+     magic-string: ^0.30.21
+     magic-string-stack: ^1.1.0
+-    markdown-it: ^14.1.0
++    markdown-exit: ^1.0.0-beta.8
+     markdown-it-footnote: ^4.0.0
+     markdown-it-mdc: ^0.2.8
+     minimist: ^1.2.8
+@@ -133,7 +133,7 @@ catalogs:
+     unocss: ^66.6.0
+     unplugin-icons: ^23.0.1
+     unplugin-vue-components: ^31.0.0
+-    unplugin-vue-markdown: ^29.2.0
++    unplugin-vue-markdown: ^30.0.0
+     untun: ^0.1.3
+     uqr: ^0.1.2
+     vite: ^7.3.1
+@@ -152,7 +152,6 @@ catalogs:
+     '@types/file-saver': ^2.0.7
+     '@types/js-yaml': ^4.0.9
+     '@types/katex': ^0.16.8
+-    '@types/markdown-it': ^14.1.2
+     '@types/node': ^25.0.10
+     '@types/picomatch': ^4.0.2
+     '@types/plantuml-encoder': ^1.4.2

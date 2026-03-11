@@ -1,0 +1,496 @@
+diff --git a/Cargo.lock b/Cargo.lock
+index 5e524b494..986d30afa 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -3814,6 +3814,7 @@ dependencies = [
+  "quote",
+  "serde",
+  "serde_json",
++ "shuttle-common",
+  "syn",
+  "tokio",
+  "trybuild",
+diff --git a/cargo-shuttle/src/config.rs b/cargo-shuttle/src/config.rs
+index 8d2e30bf9..505467794 100644
+--- a/cargo-shuttle/src/config.rs
++++ b/cargo-shuttle/src/config.rs
+@@ -11,14 +11,14 @@ use crate::init::create_or_update_ignore_file;
+ 
+ /// An impl of [`ConfigManager`] which is localised to a working directory
+ pub struct LocalConfigManager {
+-    working_directory: PathBuf,
++    directory: PathBuf,
+     file_name: String,
+ }
+ 
+ impl LocalConfigManager {
+-    pub fn new<P: AsRef<Path>>(working_directory: P, file_name: String) -> Self {
++    pub fn new<P: AsRef<Path>>(directory: P, file_name: String) -> Self {
+         Self {
+-            working_directory: working_directory.as_ref().to_path_buf(),
++            directory: directory.as_ref().to_path_buf(),
+             file_name,
+         }
+     }
+@@ -26,7 +26,7 @@ impl LocalConfigManager {
+ 
+ impl ConfigManager for LocalConfigManager {
+     fn directory(&self) -> PathBuf {
+-        self.working_directory.clone()
++        self.directory.clone()
+     }
+ 
+     fn filename(&self) -> PathBuf {
+@@ -159,7 +159,7 @@ impl RequestContext {
+                 .as_ref()
+                 .unwrap()
+                 .manager
+-                .working_directory
++                .directory
+                 .join(".gitignore"),
+         )
+         .context("Failed to create .gitignore file")?;
+@@ -260,17 +260,12 @@ impl RequestContext {
+         }
+     }
+ 
+-    /// Get the current context working directory
++    /// Get the cargo workspace root directory
+     ///
+     /// # Panics
+     /// Panics if project configuration has not been loaded.
+-    pub fn working_directory(&self) -> &Path {
+-        self.project
+-            .as_ref()
+-            .unwrap()
+-            .manager
+-            .working_directory
+-            .as_path()
++    pub fn project_directory(&self) -> &Path {
++        self.project.as_ref().unwrap().manager.directory.as_path()
+     }
+ 
+     /// Set the API key to the global configuration. Will persist the file.
+diff --git a/cargo-shuttle/src/lib.rs b/cargo-shuttle/src/lib.rs
+index 57b95df7f..68e682572 100644
+--- a/cargo-shuttle/src/lib.rs
++++ b/cargo-shuttle/src/lib.rs
+@@ -1305,15 +1305,15 @@ impl Shuttle {
+             }
+         });
+ 
+-        let working_directory = self.ctx.working_directory();
++        let project_directory = self.ctx.project_directory();
+ 
+         println!(
+             "{} {}",
+             "    Building".bold().green(),
+-            working_directory.display()
++            project_directory.display()
+         );
+ 
+-        build_workspace(working_directory, run_args.release, tx).await
++        build_workspace(project_directory, run_args.release, tx).await
+     }
+ 
+     fn find_available_port(run_args: &mut RunArgs) {
+@@ -1336,7 +1336,7 @@ impl Shuttle {
+ 
+     async fn local_run(&self, mut run_args: RunArgs, debug: bool) -> Result<()> {
+         let project_name = self.ctx.project_name().to_owned();
+-        let working_directory = self.ctx.working_directory();
++        let project_directory = self.ctx.project_directory();
+ 
+         // Handle bacon mode
+         if run_args.bacon {
+@@ -1345,13 +1345,13 @@ impl Shuttle {
+                 "Starting".bold().green(),
+                 project_name
+             );
+-            return bacon::run_bacon(working_directory).await;
++            return bacon::run_bacon(project_directory).await;
+         }
+ 
+         let service = self.pre_local_run(&run_args).await?;
+         trace!(path = ?service.executable_path, "runtime executable");
+ 
+-        let secrets = Shuttle::get_secrets(&run_args.secret_args, working_directory, true)?
++        let secrets = Shuttle::get_secrets(&run_args.secret_args, project_directory, true)?
+             .unwrap_or_default();
+         Shuttle::find_available_port(&mut run_args);
+         if let Some(warning) = check_and_warn_runtime_version(&service.executable_path).await? {
+@@ -1544,10 +1544,10 @@ impl Shuttle {
+ 
+     async fn deploy(&mut self, args: DeployArgs) -> Result<()> {
+         let client = self.client.as_ref().unwrap();
+-        let working_directory = self.ctx.working_directory();
+-        let manifest_path = working_directory.join("Cargo.toml");
++        let project_directory = self.ctx.project_directory();
++        let manifest_path = project_directory.join("Cargo.toml");
+ 
+-        let secrets = Shuttle::get_secrets(&args.secret_args, working_directory, false)?;
++        let secrets = Shuttle::get_secrets(&args.secret_args, project_directory, false)?;
+ 
+         // Image deployment mode
+         if let Some(image) = args.image {
+@@ -1603,6 +1603,14 @@ impl Shuttle {
+         rust_build_args.no_default_features = no_default_features;
+         rust_build_args.features = features.map(|v| v.join(","));
+ 
++        // Look for a build manifest file at .shuttle/build_manifest.json which specifies resources
++        // that need to be provisioned for the application
++        let default_manifest = Path::new(".shuttle").join("build_manifest.json");
++        if std::fs::exists(project_directory.join(&default_manifest)).is_ok() {
++            rust_build_args.provision_manifest =
++                default_manifest.into_os_string().into_string().ok();
++        }
++
+         rust_build_args.shuttle_runtime_version = package
+             .dependencies
+             .iter()
+@@ -1620,7 +1628,7 @@ impl Shuttle {
+ 
+         // TODO: have all of the above be configurable in CLI and Shuttle.toml
+ 
+-        if let Ok(repo) = Repository::discover(working_directory) {
++        if let Ok(repo) = Repository::discover(project_directory) {
+             let repo_path = repo
+                 .workdir()
+                 .context("getting working directory of repository")?;
+@@ -1672,7 +1680,10 @@ impl Shuttle {
+ 
+         eprintln!("Creating deployment...");
+         let (deployment, raw_json) = client
+-            .deploy(pid, DeploymentRequest::BuildArchive(deployment_req))
++            .deploy(
++                pid,
++                DeploymentRequest::BuildArchive(Box::new(deployment_req)),
++            )
+             .await?
+             .into_parts();
+ 
+@@ -1891,7 +1902,7 @@ impl Shuttle {
+     fn make_archive(&self, secrets_file: Option<PathBuf>) -> Result<Vec<u8>> {
+         let include_patterns = self.ctx.include();
+ 
+-        let working_directory = self.ctx.working_directory();
++        let project_directory = self.ctx.project_directory();
+ 
+         //
+         // Mixing include and exclude overrides messes up the .ignore and .gitignore etc,
+@@ -1900,7 +1911,7 @@ impl Shuttle {
+         let mut entries = Vec::new();
+ 
+         // Default excludes
+-        let ignore_overrides = OverrideBuilder::new(working_directory)
++        let ignore_overrides = OverrideBuilder::new(project_directory)
+             .add("!.git/")
+             .context("adding override `!.git/`")?
+             .add("!target/")
+@@ -1909,7 +1920,7 @@ impl Shuttle {
+             .context(format!("adding override `!{STORAGE_DIRNAME}/`"))?
+             .build()
+             .context("building archive override rules")?;
+-        for r in WalkBuilder::new(working_directory)
++        for r in WalkBuilder::new(project_directory)
+             .hidden(false)
+             .overrides(ignore_overrides)
+             .build()
+@@ -1935,10 +1946,10 @@ impl Shuttle {
+ 
+         // Find the files
+         let globs = globs.build().context("glob glob")?;
+-        for entry in walkdir::WalkDir::new(working_directory) {
++        for entry in walkdir::WalkDir::new(project_directory) {
+             let path = entry.context("list dir")?.into_path();
+             if globs.is_match(
+-                path.strip_prefix(working_directory)
++                path.strip_prefix(project_directory)
+                     .context("strip prefix of path")?,
+             ) {
+                 entries.push(path);
+@@ -1960,7 +1971,7 @@ impl Shuttle {
+ 
+             // zip file puts all files in root
+             let mut name = path
+-                .strip_prefix(working_directory)
++                .strip_prefix(project_directory)
+                 .context("strip prefix of path")?
+                 .to_owned();
+ 
+diff --git a/codegen/Cargo.toml b/codegen/Cargo.toml
+index add4608e0..7b8ee0263 100644
+--- a/codegen/Cargo.toml
++++ b/codegen/Cargo.toml
+@@ -14,11 +14,13 @@ proc-macro = true
+ proc-macro-error2 = { workspace = true }
+ proc-macro2 = { workspace = true }
+ quote = { workspace = true }
++serde = { workspace = true }
++serde_json = { workspace = true }
++shuttle-common = { workspace = true }
+ syn = { workspace = true, features = ["full", "extra-traits"] }
+ 
+ [dev-dependencies]
+ pretty_assertions = { workspace = true }
+ serde = { workspace = true }
+-serde_json = { workspace = true }
+ trybuild = { workspace = true }
+ tokio = { workspace = true, features = ["full"] }
+diff --git a/codegen/src/shuttle_main.rs b/codegen/src/shuttle_main.rs
+index 8387dd757..8f7993128 100644
+--- a/codegen/src/shuttle_main.rs
++++ b/codegen/src/shuttle_main.rs
+@@ -2,16 +2,167 @@ use proc_macro::TokenStream;
+ use proc_macro2::Span;
+ use proc_macro_error2::emit_error;
+ use quote::{quote, ToTokens};
++use serde::{ser::SerializeStruct, Serialize};
+ use syn::{
+-    parse::Parse, parse_macro_input, parse_quote, punctuated::Punctuated, spanned::Spanned,
+-    Attribute, Expr, ExprLit, FnArg, Ident, ItemFn, Lit, Pat, PatIdent, Path, ReturnType,
+-    Signature, Stmt, Token, Type, TypePath,
++    parse::{Parse, ParseStream},
++    parse_macro_input, parse_quote,
++    punctuated::Punctuated,
++    spanned::Spanned,
++    Attribute, Error, Expr, ExprLit, FnArg, Ident, ItemFn, Lit, LitStr, Pat, PatIdent, Path,
++    ReturnType, Signature, Stmt, Token, Type, TypePath,
+ };
+ 
+-pub(crate) fn tokens(_attr: TokenStream, item: TokenStream) -> TokenStream {
++const BUILD_MANIFEST_FILE: &str = ".shuttle/build_manifest.json";
++
++/// Configuration options for the `shuttle_runtime` macro.
++///
++/// This struct represents the arguments that can be passed to the
++/// `#[shuttle_runtime(...)]` attribute macro. It currently supports:
++///
++/// - `instance_size`: An optional string literal that specifies the size of the
++///   instance to use for deploying the application. For example, "xs" or "m".
++///
++/// Example usage:
++/// ```rust
++/// #[shuttle_runtime(instance_size = "l")]
++/// async fn main() -> ShuttleActix {
++///     // ...
++/// }
++/// ```
++#[derive(Clone, Debug, Default)]
++struct RuntimeMacroArgs {
++    instance_size: Option<LitStr>,
++}
++
++impl Serialize for RuntimeMacroArgs {
++    /// Serializes the RuntimeMacroArgs struct into JSON.
++    ///
++    /// This is used to write configuration to the build manifest file.
++    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
++    where
++        S: serde::Serializer,
++    {
++        let len = self.instance_size.is_some() as usize;
++        let mut state = serializer.serialize_struct("RuntimeMacroArgs", len)?;
++        if let Some(instance_size) = &self.instance_size {
++            state.serialize_field("instance_size", &instance_size.value())?;
++        }
++
++        state.end()
++    }
++}
++
++impl Parse for RuntimeMacroArgs {
++    /// Parses the arguments provided to the `#[shuttle_runtime(...)]` attribute macro.
++    ///
++    /// This implementation accepts key-value pairs separated by commas, where:
++    /// - `instance_size`: The size of the instance to use for the application
++    ///
++    /// Returns a Result containing either the parsed RuntimeMacroArgs or a syntax error.
++    /// If an unrecognized key is provided, it will return an error with a helpful
++    /// message explaining the invalid key.
++    fn parse(input: ParseStream) -> syn::Result<Self> {
++        let mut instance_size = None;
++
++        while !input.is_empty() {
++            let key: Ident = input.parse()?;
++            input.parse::<Token![=]>()?;
++
++            match key.to_string().as_str() {
++                "instance_size" => {
++                    instance_size = Some(input.parse::<LitStr>()?);
++                }
++                unknown_key => {
++                    return Err(syn::Error::new(
++                        key.span(),
++                        format!(
++                            "Invalid `shuttle_runtime` macro attribute key: '{}'",
++                            unknown_key
++                        ),
++                    ))
++                }
++            }
++
++            if !input.is_empty() {
++                input.parse::<Token![,]>()?;
++            }
++        }
++
++        Ok(RuntimeMacroArgs { instance_size })
++    }
++}
++
++/// Entry point for the `#[shuttle_runtime]` attribute macro.
++///
++/// This function processes the attribute arguments and the annotated function,
++/// generating code that:
++///
++/// 1. Serializes the attribute arguments to a build manifest file
++/// 2. Transforms the user's main function to support Shuttle's deployment model
++/// 3. Generates loader and runner functions to handle resource initialization
++///
++/// The generated code will:
++/// - Create a Tokio runtime to run the async code
++/// - Process any resource attributes on function parameters
++/// - Handle secret interpolation in resource configuration strings
++/// - Invoke the Shuttle framework's startup mechanism
++///
++/// # Arguments
++///
++/// * `attr` - The TokenStream representing the attribute arguments
++/// * `item` - The TokenStream representing the annotated function
++///
++pub(crate) fn tokens(attr: TokenStream, item: TokenStream) -> TokenStream {
+     let mut user_main_fn = parse_macro_input!(item as ItemFn);
+     let loader_runner = LoaderAndRunner::from_item_fn(&mut user_main_fn);
+ 
++    // Start write build manifest - to be replaced by a syn parse stage
++    // --
++    let attr_ast = parse_macro_input!(attr as RuntimeMacroArgs);
++
++    let json_str = match serde_json::to_string(&attr_ast).map_err(|err| {
++        Error::new(
++            user_main_fn.span(),
++            format!("failed to serialize build manifest: {:?}", err),
++        )
++    }) {
++        Ok(json) => json,
++        Err(e) => return e.into_compile_error().into(),
++    };
++
++    if let Some(shuttle_dir) = std::path::Path::new(BUILD_MANIFEST_FILE).parent() {
++        if !shuttle_dir.exists() {
++            match std::fs::create_dir_all(shuttle_dir).map_err(|err| {
++                Error::new(
++                    user_main_fn.span(),
++                    format!(
++                        "failed to create shuttle directory: {:?}: {}",
++                        shuttle_dir, err
++                    ),
++                )
++            }) {
++                Ok(_) => (),
++                Err(e) => return e.into_compile_error().into(),
++            };
++        }
++    }
++
++    match std::fs::write(BUILD_MANIFEST_FILE, json_str).map_err(|err| {
++        Error::new(
++            user_main_fn.span(),
++            format!(
++                "failed to write build manifest to '{}': {:?}",
++                BUILD_MANIFEST_FILE, err
++            ),
++        )
++    }) {
++        Ok(_) => (),
++        Err(e) => return e.into_compile_error().into(),
++    };
++
++    // End write build manifest
++    // --
++
+     Into::into(quote! {
+         fn main() {
+             // manual expansion of #[tokio::main]
+diff --git a/common/src/models/deployment.rs b/common/src/models/deployment.rs
+index cce25a464..8adc33839 100644
+--- a/common/src/models/deployment.rs
++++ b/common/src/models/deployment.rs
+@@ -129,7 +129,7 @@ pub struct UploadArchiveResponse {
+ #[typeshare::typeshare]
+ pub enum DeploymentRequest {
+     /// Build an image from the source code in an attached zip archive
+-    BuildArchive(DeploymentRequestBuildArchive),
++    BuildArchive(Box<DeploymentRequestBuildArchive>),
+     // TODO?: Add GitRepo(DeploymentRequestGitRepo)
+     /// Use this image directly. Can be used to skip the build step.
+     Image(DeploymentRequestImage),
+@@ -180,6 +180,9 @@ pub struct BuildArgsRust {
+     pub no_default_features: bool,
+     /// Use the mold linker
+     pub mold: bool,
++    /// Path to the provision manifest file that defines the resources to be provisioned
++    /// for the application.
++    pub provision_manifest: Option<String>,
+ }
+ 
+ impl Default for BuildArgsRust {
+@@ -193,6 +196,7 @@ impl Default for BuildArgsRust {
+             features: Default::default(),
+             no_default_features: Default::default(),
+             mold: Default::default(),
++            provision_manifest: Default::default(),
+         }
+     }
+ }
+diff --git a/common/src/models/project.rs b/common/src/models/project.rs
+index f2a5fab59..729f22aff 100644
+--- a/common/src/models/project.rs
++++ b/common/src/models/project.rs
+@@ -62,6 +62,11 @@ impl ProjectResponse {
+             writeln!(&mut s, "    - {uri}").unwrap();
+         }
+ 
++        // Display compute tier information if configured
++        if let Some(compute_tier) = &self.compute_tier {
++            writeln!(&mut s, "  Instance size: {}", compute_tier).unwrap_or_default();
++        }
++
+         s
+     }
+ }
+@@ -100,11 +105,17 @@ pub struct ProjectUpdateRequest {
+ #[typeshare::typeshare]
+ pub enum ComputeTier {
+     #[default]
++    #[strum(to_string = "Basic (0.25 vCPU / 0.5 GB)")]
+     XS,
++    #[strum(to_string = "Small (0.5 vCPU / 1 GB)")]
+     S,
++    #[strum(to_string = "Medium (1 vCPU / 2 GB)")]
+     M,
++    #[strum(to_string = "Large (2 vCPU / 4 GB)")]
+     L,
++    #[strum(to_string = "X Large (4 vCPU / 8 GB)")]
+     XL,
++    #[strum(to_string = "XX Large (8 vCPU / 16 GB)")]
+     XXL,
+ 
+     /// Forward compatibility
+diff --git a/common/types.ts b/common/types.ts
+index 37173977a..d756c2bd3 100644
+--- a/common/types.ts
++++ b/common/types.ts
+@@ -53,6 +53,11 @@ export interface BuildArgsRust {
+ 	no_default_features: boolean;
+ 	/** Use the mold linker */
+ 	mold: boolean;
++	/**
++	 * Path to the provision manifest file that defines the resources to be provisioned
++	 * for the application.
++	 */
++	provision_manifest?: string;
+ }
+ 
+ export interface BuildMeta {

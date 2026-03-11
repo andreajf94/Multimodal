@@ -1,0 +1,65 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "data_modeling",
+      "recommendation": "Updated the CAST expression regex pattern to support multiline matching by adding the 's' flag to the regex compilation",
+      "rationale": "The original regex pattern `(?i)^cast\\s*\\(.*\\s+as\\s+(\\w+)\\s*\\)$` only matched single-line CAST expressions. The 's' flag (dotAll) makes the '.' character match newline characters, allowing the pattern to match CAST expressions that span multiple lines. This is necessary because SQL views often contain formatted queries with line breaks for readability, especially when using window functions or complex case statements.",
+      "alternatives_considered": [
+        "Manually pre-processing the SQL to remove newlines before regex matching",
+        "Creating a more complex regex that explicitly handles newline characters",
+        "Using a SQL parser library instead of regex for more robust parsing"
+      ],
+      "files_affected": [
+        "core/view.go"
+      ]
+    },
+    {
+      "dimension": "api_design",
+      "recommendation": "Maintained backward compatibility by ensuring the regex modification doesn't break existing single-line CAST expressions",
+      "rationale": "The change only adds the 's' flag to the existing regex pattern, which doesn't affect how single-line expressions are matched. The 'i' flag (case-insensitive) was already present, and the core pattern structure remains unchanged. This ensures that existing views with single-line CAST expressions continue to work without modification.",
+      "alternatives_considered": [
+        "Creating a separate regex pattern for multiline expressions",
+        "Adding a preprocessing step to normalize SQL before parsing",
+        "Creating a versioned parsing system for different SQL formats"
+      ],
+      "files_affected": [
+        "core/view.go"
+      ]
+    },
+    {
+      "dimension": "testing",
+      "recommendation": "Added comprehensive test cases for multiline CAST expressions and edge cases",
+      "rationale": "Added two new test cases: one for a complex multiline CAST expression with a CASE statement and window function, and another for case-insensitive CAST with extra spacing. These tests verify that the regex modification works correctly for real-world SQL formatting patterns and ensures the field type detection (int \u2192 FieldTypeNumber) works properly.",
+      "alternatives_considered": [
+        "Only testing the simplest multiline case",
+        "Adding integration tests instead of unit tests",
+        "Relying on existing tests without adding new ones"
+      ],
+      "files_affected": [
+        "core/view_test.go"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Fix multiline CAST expression parsing in SQL views",
+      "description": "Update the view collection field type detection to properly handle CAST expressions that span multiple lines, ensuring field types are correctly identified for formatted SQL queries.",
+      "files_to_modify": [
+        "core/view.go",
+        "core/view_test.go"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation addresses a specific issue in PocketBase's view parsing logic where multiline CAST expressions in SQL views were not being recognized, causing their field types to be marked as unknown. The fix is minimal and surgical, modifying only the regex pattern used for detecting CAST expressions by adding the 's' (dotAll) flag to enable matching across newline characters.\n\nThe approach maintains the existing architecture's pattern of using regex for SQL parsing in view field detection, which aligns with the codebase's lightweight parsing strategy. The change is backward compatible and doesn't require modifications to the API surface or data models. The added test cases demonstrate real-world SQL formatting patterns, including complex multiline expressions with CASE statements and window functions, ensuring the fix handles practical use cases.\n\nThis solution represents a pragmatic trade-off between robustness and complexity - while a full SQL parser would be more accurate, the regex-based approach is sufficient for the specific CAST expression detection needed for view field type inference and maintains the codebase's simplicity. The implementation integrates seamlessly with the existing view parsing pipeline in the `parseQueryToFields` function, requiring no changes to the surrounding logic or data structures.",
+  "source_pr": "https://github.com/pocketbase/pocketbase/pull/6860",
+  "before_sha": "6e9a9489a73a5f82ea6af8b9bdff8b466e5e4f70",
+  "after_sha": "568c63b29fc177de4c69be089e020e7719e79d3b",
+  "diff_stats": {
+    "additions": 33,
+    "deletions": 1,
+    "files_changed": 2
+  }
+}

@@ -1,0 +1,89 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "ui_consistency",
+      "recommendation": "Standardized filter component widths and spacing across partner program pages to match workspace layouts",
+      "rationale": "The partner program pages had inconsistent styling compared to workspace pages. By removing specific min-width constraints and using consistent width classes, we ensure visual harmony across the application. The `w-full md:w-fit` pattern allows filters to take full width on mobile while fitting content on desktop, matching the workspace implementation.",
+      "alternatives_considered": [
+        "Creating separate styling for partner pages vs workspace pages",
+        "Adding more breakpoint-specific width classes",
+        "Creating a shared filter layout component"
+      ],
+      "files_affected": [
+        "apps/web/app/(ee)/partners.dub.co/(dashboard)/programs/[programSlug]/(enrolled)/earnings/earnings-composite-chart.tsx",
+        "apps/web/ui/analytics/toggle.tsx"
+      ]
+    },
+    {
+      "dimension": "responsive_design",
+      "recommendation": "Simplified responsive breakpoints by removing unnecessary `sm:` and `lg:` prefixes, relying on `md:` as the primary breakpoint",
+      "rationale": "The previous implementation had overly complex breakpoint logic with `sm:min-w-[200px]` and `lg:min-w-[200px]`. By removing these and using only `md:w-fit`, we simplify the responsive behavior while maintaining the intended design: full width on mobile, fitting content on tablet/desktop. This matches the workspace filter pattern.",
+      "alternatives_considered": [
+        "Keeping all breakpoints but making them consistent",
+        "Creating a CSS custom property for filter widths",
+        "Using a grid system instead of flexbox for layout"
+      ],
+      "files_affected": [
+        "apps/web/app/(ee)/partners.dub.co/(dashboard)/programs/[programSlug]/(enrolled)/earnings/earnings-composite-chart.tsx",
+        "apps/web/ui/analytics/toggle.tsx"
+      ]
+    },
+    {
+      "dimension": "layout_alignment",
+      "recommendation": "Added vertical alignment for filter groups on desktop to ensure proper visual hierarchy",
+      "rationale": "On the earnings page, filter components weren't vertically aligned when switching to desktop layout. Adding `md:items-center` ensures the select filter and date picker are properly centered vertically when side-by-side, improving visual polish and matching workspace layouts.",
+      "alternatives_considered": [
+        "Using flexbox gap only without alignment",
+        "Using grid layout with explicit rows",
+        "Adding padding/margin adjustments instead of alignment"
+      ],
+      "files_affected": [
+        "apps/web/app/(ee)/partners.dub.co/(dashboard)/programs/[programSlug]/(enrolled)/earnings/earnings-composite-chart.tsx"
+      ]
+    },
+    {
+      "dimension": "spacing_consistency",
+      "recommendation": "Reduced gap spacing from `gap-3` to `gap-2` for better visual density and consistency",
+      "rationale": "The `gap-3` (0.75rem) created excessive spacing between filter elements on mobile. Changing to `gap-2` (0.5rem) provides better visual density while maintaining clear separation. This matches the spacing used in workspace filter layouts.",
+      "alternatives_considered": [
+        "Keeping gap-3 but adjusting other spacing",
+        "Using padding instead of gap",
+        "Creating a spacing scale variable"
+      ],
+      "files_affected": [
+        "apps/web/app/(ee)/partners.dub.co/(dashboard)/programs/[programSlug]/(enrolled)/earnings/earnings-composite-chart.tsx"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Standardize partner program filter layouts",
+      "description": "Update earnings page filter components to use consistent spacing, widths, and alignment matching workspace implementations",
+      "files_to_modify": [
+        "apps/web/app/(ee)/partners.dub.co/(dashboard)/programs/[programSlug]/(enrolled)/earnings/earnings-composite-chart.tsx"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-002",
+      "title": "Update analytics toggle component styling",
+      "description": "Simplify date range picker width classes to use consistent responsive pattern across all filter components",
+      "files_to_modify": [
+        "apps/web/ui/analytics/toggle.tsx"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The changes implement consistent filter layouts across partner program pages by standardizing Tailwind CSS classes for spacing, width, and alignment. The approach focuses on removing inconsistencies between partner program pages and their workspace counterparts.\n\nKey patterns used include: 1) The `w-full md:w-fit` responsive width pattern that allows components to take full width on mobile while fitting content on larger screens, 2) Simplified breakpoint usage by removing unnecessary `sm:` and `lg:` prefixes in favor of a cleaner `md:`-based approach, and 3) Consistent vertical alignment with `md:items-center` to ensure proper visual hierarchy when filters are side-by-side on desktop.\n\nThe changes integrate with the existing codebase by following established patterns from workspace filter implementations. By modifying only the styling classes in two files, we achieve visual consistency without changing component logic or data flow. This minimal approach reduces risk while delivering the requested UI improvements. The use of existing Tailwind utility classes ensures the changes work within the established design system and maintain responsive behavior across all screen sizes.",
+  "source_pr": "https://github.com/dubinc/dub/pull/3529",
+  "before_sha": "dd14de22d7ac1f94bf21951e828af88ddf6dd771",
+  "after_sha": "bedbd3c9535262a880de2eb870ee769bcfd2c650",
+  "diff_stats": {
+    "additions": 3,
+    "deletions": 6,
+    "files_changed": 2
+  }
+}

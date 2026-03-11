@@ -1,0 +1,142 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "plugin_architecture",
+      "recommendation": "Added a new 'mermaid-renderer' setup module to Slidev's plugin system, allowing users to override the default Mermaid diagram renderer with custom implementations",
+      "rationale": "Slidev already has a well-established setup system for extending functionality. Adding mermaid-renderer as another setup module follows the existing pattern used for shiki, code-runners, monaco, etc. This ensures consistency with the codebase architecture and minimizes learning curve for users familiar with other setup modules.",
+      "alternatives_considered": [
+        "Creating a separate configuration option in the main slidev config",
+        "Modifying the existing mermaid setup to accept custom renderers",
+        "Building a completely separate plugin system just for mermaid rendering"
+      ],
+      "files_affected": [
+        "packages/slidev/node/virtual/setups.ts",
+        "packages/types/src/setups.ts",
+        "packages/types/client.d.ts"
+      ]
+    },
+    {
+      "dimension": "api_design",
+      "recommendation": "Created a new MermaidRendererSetup type and defineMermaidRendererSetup helper function that returns a render function taking (code, options) parameters",
+      "rationale": "The API mirrors the existing mermaid setup pattern while focusing specifically on rendering. The render function signature (code: string, options: Record<string, any>) => Promise<string> matches what the existing renderMermaid function expects, making integration seamless. The async nature supports libraries that may need async initialization.",
+      "alternatives_considered": [
+        "Passing the entire mermaid instance for modification",
+        "Creating a more complex object-oriented interface",
+        "Using a configuration object instead of a function factory"
+      ],
+      "files_affected": [
+        "packages/types/src/setups.ts",
+        "docs/custom/config-mermaid-renderer.md"
+      ]
+    },
+    {
+      "dimension": "runtime_behavior",
+      "recommendation": "Modified the renderMermaid function to check custom renderers first before falling back to default mermaid rendering, with proper caching",
+      "rationale": "Custom renderers should take precedence over the default to ensure users' configurations are respected. The fallback mechanism maintains backward compatibility. The caching logic (using the same cache key) ensures performance isn't degraded regardless of which renderer is used.",
+      "alternatives_considered": [
+        "Making custom renderers completely replace default mermaid (breaking existing functionality)",
+        "Running both renderers and letting the user choose output",
+        "Creating a priority-based system for multiple renderers"
+      ],
+      "files_affected": [
+        "packages/client/modules/mermaid.ts"
+      ]
+    },
+    {
+      "dimension": "testing_strategy",
+      "recommendation": "Added comprehensive unit tests for the new virtual module, verifying registration, content generation, and ordering relative to existing mermaid setup",
+      "rationale": "The tests ensure the virtual module system correctly integrates the new setup. Testing ordering (mermaid-renderer comes after mermaid) is important because setup execution order can affect functionality. The tests mock the plugin context to verify proper content generation.",
+      "alternatives_considered": [
+        "Only testing the end-to-end rendering behavior",
+        "Skipping tests for virtual module registration",
+        "Testing with actual mermaid diagram rendering (more complex and slower)"
+      ],
+      "files_affected": [
+        "test/mermaid-renderer.test.ts"
+      ]
+    },
+    {
+      "dimension": "documentation_and_discoverability",
+      "recommendation": "Added documentation page and navigation entry specifically for mermaid-renderer configuration, with clear example using beautiful-mermaid",
+      "rationale": "Users need clear guidance on how to use the new feature. The documentation follows Slidev's established pattern with Environment type specification and code examples. Adding to the navigation ensures discoverability alongside other configuration options.",
+      "alternatives_considered": [
+        "Adding the documentation to the existing mermaid config page",
+        "Creating a separate section outside the custom configuration docs",
+        "Relying only on TypeScript types for documentation"
+      ],
+      "files_affected": [
+        "docs/.vitepress/customizations.ts",
+        "docs/custom/config-mermaid-renderer.md"
+      ]
+    },
+    {
+      "dimension": "type_safety",
+      "recommendation": "Updated TypeScript declarations in both packages/types directories to ensure proper type checking for the new setup module",
+      "rationale": "TypeScript is central to Slidev's development experience. Adding proper type declarations ensures IDE autocompletion, type checking, and prevents runtime errors. The declarations follow the existing pattern for other setup modules.",
+      "alternatives_considered": [
+        "Using JSDoc comments instead of TypeScript declarations",
+        "Adding types only in one location",
+        "Using any types for flexibility"
+      ],
+      "files_affected": [
+        "packages/types/client.d.ts",
+        "packages/types/src/setups.ts"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Add mermaid-renderer setup module infrastructure",
+      "description": "Create the core infrastructure for the new mermaid-renderer setup module, including virtual module registration, type definitions, and integration with the existing setup system",
+      "files_to_modify": [
+        "packages/slidev/node/virtual/setups.ts",
+        "packages/types/src/setups.ts",
+        "packages/types/client.d.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-002",
+      "title": "Implement custom renderer runtime logic",
+      "description": "Modify the mermaid rendering module to check for custom renderers first, with proper fallback to default mermaid rendering and caching",
+      "files_to_modify": [
+        "packages/client/modules/mermaid.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-003",
+      "title": "Add documentation and navigation",
+      "description": "Create user-facing documentation for the new feature and add it to the documentation navigation",
+      "files_to_modify": [
+        "docs/.vitepress/customizations.ts"
+      ],
+      "files_to_create": [
+        "docs/custom/config-mermaid-renderer.md"
+      ],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-004",
+      "title": "Add comprehensive tests",
+      "description": "Create unit tests for the new virtual module to ensure proper registration and functionality",
+      "files_to_modify": [],
+      "files_to_create": [
+        "test/mermaid-renderer.test.ts"
+      ],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation adds support for custom Mermaid renderer libraries in Slidev by extending the existing setup module system. The approach creates a new 'mermaid-renderer' setup module that follows the same patterns as other setup modules like shiki, code-runners, and monaco. This ensures consistency with Slidev's plugin architecture and minimizes the learning curve for users already familiar with setup modules.\n\nThe key design decision was to make custom renderers take precedence over the default Mermaid renderer while maintaining backward compatibility. The renderMermaid function now first checks for any registered custom renderers before falling back to the default Mermaid library. This allows users to completely replace the rendering engine while ensuring existing presentations continue to work without modification.\n\nThe implementation includes comprehensive TypeScript support with proper type declarations, thorough testing of the virtual module system, and clear documentation with practical examples. The solution integrates seamlessly with Slidev's existing architecture, leveraging the virtual module system for code splitting and the setup pattern for user configuration. This approach demonstrates how to extend Slidev's functionality while maintaining its design principles and developer experience.",
+  "source_pr": "https://github.com/slidevjs/slidev/pull/2465",
+  "before_sha": "6a6c719e0d82cf9e4090be73eb1d4f3f5fb3f7c1",
+  "after_sha": "29b3ed0b1efd9ea0aaaaad627d34a5365ffb2d59",
+  "diff_stats": {
+    "additions": 79,
+    "deletions": 2,
+    "files_changed": 7
+  }
+}

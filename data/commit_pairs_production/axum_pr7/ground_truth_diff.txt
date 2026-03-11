@@ -1,0 +1,1174 @@
+diff --git a/.github/ISSUE_TEMPLATE/bug_report.md b/.github/ISSUE_TEMPLATE/bug_report.md
+new file mode 100644
+index 0000000000..06620891a1
+--- /dev/null
++++ b/.github/ISSUE_TEMPLATE/bug_report.md
+@@ -0,0 +1,53 @@
++---
++name: 🐛 Bug Report
++about: If something isn't working as expected 🤔.
++
++---
++
++## Bug Report
++
++<!--
++Thank you for reporting an issue.
++
++Please fill in as much of the template below as you're able.
++-->
++
++### Version
++
++<!--
++List the versions of all `tower-web` crates you are using. The easiest way to get
++this information is using `cargo tree`:
++
++`cargo tree | grep tower-web`
++-->
++
++### Platform
++
++<!---
++Output of `uname -a` (UNIX), or version and 32 or 64-bit (Windows)
++-->
++
++### Crates
++
++<!--
++If known, please specify the affected tower-web crates. Otherwise, delete this
++section.
++-->
++
++### Description
++
++<!--
++Enter your issue details below this comment.
++
++One way to structure the description:
++
++<short summary of the bug>
++
++I tried this code:
++
++<code sample that causes the bug>
++
++I expected to see this happen: <explanation>
++
++Instead, this happened: <explanation>
++-->
+diff --git a/.github/ISSUE_TEMPLATE/feature_request.md b/.github/ISSUE_TEMPLATE/feature_request.md
+new file mode 100644
+index 0000000000..ba83aa2e2d
+--- /dev/null
++++ b/.github/ISSUE_TEMPLATE/feature_request.md
+@@ -0,0 +1,28 @@
++---
++name: 💡 Feature Request
++about: I have a suggestion (and may want to implement it 🙂)!
++
++---
++
++## Feature Request
++
++### Motivation
++
++<!--
++Please describe the use case(s) or other motivation for the new feature.
++-->
++
++### Proposal
++
++<!--
++How should the new feature be implemented, and why? Add any considered
++drawbacks.
++-->
++
++### Alternatives
++
++<!--
++Are there other ways to solve this problem that you've considered? What are
++their potential drawbacks? Why was the proposed solution chosen over these
++alternatives?
++-->
+diff --git a/.github/PULL_REQUEST_TEMPLATE.md b/.github/PULL_REQUEST_TEMPLATE.md
+new file mode 100644
+index 0000000000..6f6186205b
+--- /dev/null
++++ b/.github/PULL_REQUEST_TEMPLATE.md
+@@ -0,0 +1,23 @@
++<!--
++Thank you for your Pull Request. Please provide a description above and review
++the requirements below.
++
++Bug fixes and new features should include tests.
++
++Contributors guide: https://github.com/davidpdrsn/tower-web/blob/master/CONTRIBUTING.md
++-->
++
++## Motivation
++
++<!--
++Explain the context and why you're making that change. What is the problem
++you're trying to solve? If a new feature is being added, describe the intended
++use case that feature fulfills.
++-->
++
++## Solution
++
++<!--
++Summarize the solution and provide any necessary context needed to understand
++the code change.
++-->
+diff --git a/.github/workflows/CI.yml b/.github/workflows/CI.yml
+new file mode 100644
+index 0000000000..005c0a5484
+--- /dev/null
++++ b/.github/workflows/CI.yml
+@@ -0,0 +1,72 @@
++name: CI
++
++on:
++  push:
++    branches:
++    - master
++  pull_request: {}
++
++jobs:
++  check:
++    # Run `cargo check` first to ensure that the pushed code at least compiles.
++    runs-on: ubuntu-latest
++    strategy:
++      matrix:
++        rust: [stable, 1.40.0]
++    steps:
++    - uses: actions/checkout@master
++    - uses: actions-rs/toolchain@v1
++      with:
++        toolchain: ${{ matrix.rust }}
++        profile: minimal
++    - name: Check
++      uses: actions-rs/cargo@v1
++      with:
++        command: clippy
++        args: --all --all-targets --all-features
++    - name: rustfmt
++      uses: actions-rs/cargo@v1
++      with:
++        command: fmt
++        args: --all -- --check
++
++  cargo-hack:
++    runs-on: ubuntu-latest
++    steps:
++    - uses: actions/checkout@master
++    - uses: actions-rs/toolchain@v1
++      with:
++        toolchain: stable
++        profile: minimal
++    - name: Install cargo-hack
++      run: |
++        curl -LsSf https://github.com/taiki-e/cargo-hack/releases/latest/download/cargo-hack-x86_64-unknown-linux-gnu.tar.gz | tar xzf - -C ~/.cargo/bin
++    - name: cargo hack check
++      working-directory: ${{ matrix.subcrate }}
++      run: cargo hack check --each-feature --no-dev-deps --all
++
++  test-versions:
++    # Test against the stable, beta, and nightly Rust toolchains on ubuntu-latest.
++    needs: check
++    runs-on: ubuntu-latest
++    strategy:
++      matrix:
++        rust: [stable, beta, nightly, 1.40.0]
++    steps:
++    - uses: actions/checkout@master
++    - uses: actions-rs/toolchain@v1
++      with:
++        toolchain: ${{ matrix.rust }}
++        profile: minimal
++    - name: Run tests
++      uses: actions-rs/cargo@v1
++      with:
++        command: test
++        args: --all --all-features
++
++  deny-check:
++    name: cargo-deny check
++    runs-on: ubuntu-latest
++    steps:
++    - uses: actions/checkout@v1
++    - uses: EmbarkStudios/cargo-deny-action@v1
+diff --git a/.github/workflows/patch.toml b/.github/workflows/patch.toml
+new file mode 100644
+index 0000000000..1aafd58ecd
+--- /dev/null
++++ b/.github/workflows/patch.toml
+@@ -0,0 +1,4 @@
++# Patch dependencies to run all tests against versions of the crate in the
++# repository.
++[patch.crates-io]
++tower-web = { path = "tower-web" }
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+new file mode 100644
+index 0000000000..c80a93c534
+--- /dev/null
++++ b/CHANGELOG.md
+@@ -0,0 +1,18 @@
++# Changelog
++
++All notable changes to this project will be documented in this file.
++
++The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
++and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
++
++# Unreleased
++
++None.
++
++## Breaking changes
++
++None.
++
++# 0.1.0 (XX XX, 2021)
++
++TODO
+diff --git a/CONTRIBUTING.md b/CONTRIBUTING.md
+new file mode 100644
+index 0000000000..13ac872f82
+--- /dev/null
++++ b/CONTRIBUTING.md
+@@ -0,0 +1,275 @@
++# Contributing to Tower HTTP
++
++:balloon: Thanks for your help improving the project! We are so happy to have
++you!
++
++There are opportunities to contribute to `tower-web` at any level. It doesn't
++matter if you are just getting started with Rust or are the most weathered
++expert, we can use your help.
++
++**No contribution is too small and all contributions are valued.**
++
++This guide will help you get started. **Do not let this guide intimidate you**.
++It should be considered a map to help you navigate the process.
++
++Don't know where to start? Check [issues labeled with "E-help-wanted"](https://github.com/davidpdrsn/tower-web/issues?q=is%3Aopen+is%3Aissue+label%3AE-help-wanted) or ["E-easy"](https://github.com/davidpdrsn/tower-web/issues?q=is%3Aopen+is%3Aissue+label%3AE-easy).
++
++You may also get help with contributing in the [`tower` Discord
++channel][discord], please join us!
++
++[discord]: https://discord.gg/tokio
++
++## Conduct
++
++The `tower-web` project adheres to the [Rust Code of Conduct][coc]. This
++describes the _minimum_ behavior expected from all contributors.
++
++[coc]: https://github.com/rust-lang/rust/blob/master/CODE_OF_CONDUCT.md
++
++## Contributing in Issues
++
++For any issue, there are fundamentally three ways an individual can contribute:
++
++1. By opening the issue for discussion: For instance, if you believe that you
++   have uncovered a bug in a `tower-web` crate, creating a new issue in the
++   davidpdrsn/tower-web [issue tracker][issues] is the way to report it.
++
++2. By helping to triage the issue: This can be done by providing
++   supporting details (a test case that demonstrates a bug), providing
++   suggestions on how to address the issue, or ensuring that the issue is tagged
++   correctly.
++
++3. By helping to resolve the issue: Typically this is done either in the form of
++   demonstrating that the issue reported is not a problem after all, or more
++   often, by opening a Pull Request that changes some bit of something in
++   tower-web in a concrete and reviewable manner.
++
++**Anybody can participate in any stage of contribution**. We urge you to
++participate in the discussion around bugs and participate in reviewing PRs.
++
++[issues]: https://github.com/davidpdrsn/tower-web/issues
++
++### Asking for General Help
++
++If you have reviewed existing documentation and still have questions or are
++having problems, you can open an issue asking for help.
++
++In exchange for receiving help, we ask that you contribute back a documentation
++PR that helps others avoid the problems that you encountered.
++
++### Submitting a Bug Report
++
++When opening a new issue in the `tower-web` issue tracker, users will
++be presented with a [basic template][template] that should be filled in. If you
++believe that you have uncovered a bug, please fill out this form, following the
++template to the best of your ability. Do not worry if you cannot answer every
++detail, just fill in what you can.
++
++The two most important pieces of information we need in order to properly
++evaluate the report is a description of the behavior you are seeing and a simple
++test case we can use to recreate the problem on our own. If we cannot recreate
++the issue, it becomes harder for us to fix.
++
++See [How to create a Minimal, Complete, and Verifiable example][mcve].
++
++[mcve]: https://stackoverflow.com/help/mcve
++[template]: .github/ISSUE_TEMPLATE/bug_report.md
++
++### Triaging a Bug Report
++
++Once an issue has been opened, it is not uncommon for there to be discussion
++around it. Some contributors may have differing opinions about the issue,
++including whether the behavior being seen is a bug or a feature. This discussion
++is part of the process and should be kept focused, helpful, and professional.
++
++Short, clipped responses—that provide neither additional context nor supporting
++detail—are not helpful or professional. To many, such responses are simply
++annoying and unfriendly.
++
++Contributors are encouraged to help one another make forward progress as much as
++possible, empowering one another to solve issues collaboratively. If you choose
++to comment on an issue that you feel either is not a problem that needs to be
++fixed, or if you encounter information in an issue that you feel is incorrect,
++explain why you feel that way with additional supporting context, and be willing
++to be convinced that you may be wrong. By doing so, we can often reach the
++correct outcome much faster.
++
++### Resolving a Bug Report
++
++In the majority of cases, issues are resolved by opening a Pull Request. The
++process for opening and reviewing a Pull Request is similar to that of opening
++and triaging issues, but carries with it a necessary review and approval
++workflow that ensures that the proposed changes meet the minimal quality.
++
++## Pull Requests
++
++Pull Requests are the way concrete changes are made to the code, documentation,
++and dependencies in the `tower-web` repository.
++
++Even tiny pull requests (e.g., one character pull request fixing a typo in API
++documentation) are greatly appreciated. Before making a large change, it is
++usually a good idea to first open an issue describing the change to solicit
++feedback and guidance. This will increase the likelihood of the PR getting
++merged.
++
++### Tests
++
++If the change being proposed alters code (as opposed to only documentation for
++example), it is either adding new functionality to a crate or it is fixing
++existing, broken functionality. In both of these cases, the pull request should
++include one or more tests to ensure that the crate does not regress in the future.
++
++#### Documentation tests
++
++Ideally, every API has at least one [documentation test] that demonstrates how to
++use the API. Documentation tests are run with `cargo test --doc`. This ensures
++that the example is correct and provides additional test coverage.
++
++The trick to documentation tests is striking a balance between being succinct
++for a reader to understand and actually testing the API.
++
++In Rust documentation, lines that start with `/// #` are removed when the
++documentation is generated. They are only there to get the test to run.
++
++### Commits
++
++It is a recommended best practice to keep your changes as logically grouped as
++possible within individual commits. There is no limit to the number of commits
++any single Pull Request may have, and many contributors find it easier to review
++changes that are split across multiple commits.
++
++Note that multiple commits often get squashed when they are landed (see the
++notes about [commit squashing]).
++
++#### Commit message guidelines
++
++A good commit message should describe what changed and why.
++
++1. The first line should:
++
++  * Contain a short description of the change (preferably 50 characters or less,
++    and no more than 72 characters)
++
++2. Keep the second line blank.
++3. Wrap all other lines at 72 columns (except for long URLs).
++4. If your patch fixes an open issue, you can add a reference to it at the end
++   of the log. Use the `Fixes: #` prefix and the issue number. For other
++   references use `Refs: #`. `Refs` may include multiple issues, separated by a
++   comma.
++
++   Examples:
++
++   - `Fixes: #1337`
++   - `Refs: #1234, #42`
++
++### Opening the Pull Request
++
++From within GitHub, opening a new Pull Request will present you with a
++[template] that should be filled out. Please try to do your best at filling out
++the details, but feel free to skip parts if you're not sure what to put.
++
++[template]: .github/PULL_REQUEST_TEMPLATE.md
++
++### Discuss and update
++
++You will probably get feedback or requests for changes to your Pull Request.
++This is a big part of the submission process so don't be discouraged! Some
++contributors may sign off on the Pull Request right away, others may have
++more detailed comments or feedback. This is a necessary part of the process
++in order to evaluate whether the changes are correct and necessary.
++
++**Any community member can review a PR and you might get conflicting feedback**.
++Keep an eye out for comments from code owners to provide guidance on conflicting
++feedback.
++
++**Once the PR is open, do not rebase the commits**. See [Commit Squashing] for
++more details.
++
++### Commit Squashing
++
++In most cases, **do not squash commits that you add to your Pull Request during
++the review process**. When the commits in your Pull Request land, they may be
++squashed into one commit per logical change. Metadata will be added to the
++commit message (including links to the Pull Request, links to relevant issues,
++and the names of the reviewers). The commit history of your Pull Request,
++however, will stay intact on the Pull Request page.
++
++## Reviewing Pull Requests
++
++**Any Tokio, Hyperium, and Tower community member is welcome to review any pull request**.
++
++All contributors who choose to review and provide feedback on Pull Requests have
++a responsibility to both the project and the individual making the contribution.
++Reviews and feedback must be helpful, insightful, and geared towards improving
++the contribution as opposed to simply blocking it. If there are reasons why you
++feel the PR should not land, explain what those are. Do not expect to be able to
++block a Pull Request from advancing simply because you say "No" without giving
++an explanation. Be open to having your mind changed. Be open to working with the
++contributor to make the Pull Request better.
++
++Reviews that are dismissive or disrespectful of the contributor or any other
++reviewers are strictly counter to the Code of Conduct.
++
++When reviewing a Pull Request, the primary goals are for the codebase to improve
++and for the person submitting the request to succeed. **Even if a Pull Request
++does not land, the submitters should come away from the experience feeling like
++their effort was not wasted or unappreciated**. Every Pull Request from a new
++contributor is an opportunity to grow the community.
++
++### Review a bit at a time.
++
++Do not overwhelm new contributors.
++
++It is tempting to micro-optimize and make everything about relative performance,
++perfect grammar, or exact style matches. Do not succumb to that temptation.
++
++Focus first on the most significant aspects of the change:
++
++1. Does this change make sense for tower-web?
++2. Does this change make tower-web better, even if only incrementally?
++3. Are there clear bugs or larger scale issues that need attending to?
++4. Is the commit message readable and correct? If it contains a breaking change
++   is it clear enough?
++
++Note that only **incremental** improvement is needed to land a PR. This means
++that the PR does not need to be perfect, only better than the status quo. Follow
++up PRs may be opened to continue iterating.
++
++When changes are necessary, *request* them, do not *demand* them, and **do not
++assume that the submitter already knows how to add a test or run a benchmark**.
++
++Specific performance optimization techniques, coding styles and conventions
++change over time. The first impression you give to a new contributor never does.
++
++Nits (requests for small changes that are not essential) are fine, but try to
++avoid stalling the Pull Request. Most nits can typically be fixed by the Tower
++Collaborator landing the Pull Request but they can also be an opportunity for
++the contributor to learn a bit more about the project.
++
++It is always good to clearly indicate nits when you comment: e.g.
++`Nit: change foo() to bar(). But this is not blocking.`
++
++If your comments were addressed but were not folded automatically after new
++commits or if they proved to be mistaken, please, [hide them][hiding-a-comment]
++with the appropriate reason to keep the conversation flow concise and relevant.
++
++### Be aware of the person behind the code
++
++Be aware that *how* you communicate requests and reviews in your feedback can
++have a significant impact on the success of the Pull Request. Yes, we may land a
++particular change that makes `tower-web` better, but the individual might just
++not want to have anything to do with `tower-web` ever again. The goal is not
++just having good code.
++
++### Abandoned or Stalled Pull Requests
++
++If a Pull Request appears to be abandoned or stalled, it is polite to first
++check with the contributor to see if they intend to continue the work before
++checking if they would mind if you took it over (especially if it just has nits
++left). When doing so, it is courteous to give the original contributor credit
++for the work they started (either by preserving their name and email address in
++the commit log, or by using an `Author: ` meta-data tag in the commit.
++
++[hiding-a-comment]: https://help.github.com/articles/managing-disruptive-comments/#hiding-a-comment
++[documentation test]: https://doc.rust-lang.org/rustdoc/documentation-tests.html
++[keep-a-changelog]: https://github.com/olivierlacan/keep-a-changelog/blob/master/CHANGELOG.md
+diff --git a/Cargo.toml b/Cargo.toml
+index c97328cd20..b908b56233 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -1,8 +1,16 @@
+ [package]
+-name = "tower-web"
+-version = "0.1.0"
+ authors = ["David Pedersen <david.pdrsn@gmail.com>"]
++categories = []
++description = "Web framework that focuses on ergonomics and modularity"
++documentation = "https://docs.rs/tower-http/0.1.0"
+ edition = "2018"
++homepage = "https://github.com/davidpdrsn/tower-web"
++keywords = ["http", "web", "framework"]
++license = "MIT"
++name = "tower-web"
++readme = "README.md"
++repository = "https://github.com/davidpdrsn/tower-web"
++version = "0.1.0"
+ 
+ [dependencies]
+ async-trait = "0.1"
+@@ -41,3 +49,10 @@ features = [
+     "redirect",
+     "trace",
+ ]
++
++[package.metadata.docs.rs]
++all-features = true
++rustdoc-args = ["--cfg", "docsrs"]
++
++[package.metadata.playground]
++features = ["ws"]
+diff --git a/LICENSE b/LICENSE
+new file mode 100644
+index 0000000000..b980cacc77
+--- /dev/null
++++ b/LICENSE
+@@ -0,0 +1,25 @@
++Copyright (c) 2019 Tower Contributors
++
++Permission is hereby granted, free of charge, to any
++person obtaining a copy of this software and associated
++documentation files (the "Software"), to deal in the
++Software without restriction, including without
++limitation the rights to use, copy, modify, merge,
++publish, distribute, sublicense, and/or sell copies of
++the Software, and to permit persons to whom the Software
++is furnished to do so, subject to the following
++conditions:
++
++The above copyright notice and this permission notice
++shall be included in all copies or substantial portions
++of the Software.
++
++THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
++ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
++TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
++PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
++SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
++CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
++OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
++IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
++DEALINGS IN THE SOFTWARE.
+diff --git a/README.md b/README.md
+index c6fea0cda6..8dfbbbf8a1 100644
+--- a/README.md
++++ b/README.md
+@@ -1,9 +1,21 @@
+ # tower-web
+ 
++**WARNING:** tower-web is very much still work in progress. Nothing is released
++to crates.io yet and you shouldn't be using this in production.
++
+ tower-web (name pending) is a tiny web application framework that focuses on
+ ergonomics and modularity.
+ 
+-### Goals
++[![Build status](https://github.com/davidpdrsn/tower-web/workflows/CI/badge.svg)](https://github.com/davidpdrsn/tower-web/actions)
++<!--
++[![Crates.io](https://img.shields.io/crates/v/tower-web)](https://crates.io/crates/tower-web)
++[![Documentation](https://docs.rs/tower-web/badge.svg)](https://docs.rs/tower-web)
++[![Crates.io](https://img.shields.io/crates/l/tower-web)](LICENSE)
++-->
++
++More information about this crate can be found in the [crate documentation][docs].
++
++## Goals
+ 
+ - Ease of use. Building web apps in Rust should be as easy as `async fn
+ handle(Request) -> Response`.
+@@ -14,14 +26,7 @@ Tower middleware can handle the rest.
+ - Macro free core. Macro frameworks have their place but tower-web focuses
+ on providing a core that is macro free.
+ 
+-## Compatibility
+-
+-tower-web is designed to work with [tokio] and [hyper]. Runtime and
+-transport layer independence is not a goal, at least for the time being.
+-
+-## Example
+-
+-The "Hello, World!" of tower-web is:
++## Usage example
+ 
+ ```rust
+ use tower_web::prelude::*;
+@@ -43,463 +48,38 @@ async fn main() {
+ }
+ ```
+ 
+-## Routing
+-
+-Routing between handlers looks like this:
+-
+-```rust
+-use tower_web::prelude::*;
+-
+-let app = route("/", get(get_slash).post(post_slash))
+-    .route("/foo", get(get_foo));
+-
+-async fn get_slash() {
+-    // `GET /` called
+-}
+-
+-async fn post_slash() {
+-    // `POST /` called
+-}
+-
+-async fn get_foo() {
+-    // `GET /foo` called
+-}
+-```
+-
+-Routes can also be dynamic like `/users/:id`. See ["Extracting data from
+-requests"](#extracting-data-from-requests) for more details on that.
+-
+-## Responses
+-
+-Anything that implements [`IntoResponse`](response::IntoResponse) can be
+-returned from a handler:
+-
+-```rust
+-use tower_web::{body::Body, response::{Html, Json}, prelude::*};
+-use http::{StatusCode, Response, Uri};
+-use serde_json::{Value, json};
+-
+-// We've already seen returning &'static str
+-async fn plain_text() -> &'static str {
+-    "foo"
+-}
+-
+-// String works too and will get a text/plain content-type
+-async fn plain_text_string(uri: Uri) -> String {
+-    format!("Hi from {}", uri.path())
+-}
+-
+-// Bytes will get a `application/octet-stream` content-type
+-async fn bytes() -> Vec<u8> {
+-    vec![1, 2, 3, 4]
+-}
+-
+-// `()` gives an empty response
+-async fn empty() {}
+-
+-// `StatusCode` gives an empty response with that status code
+-async fn empty_with_status() -> StatusCode {
+-    StatusCode::NOT_FOUND
+-}
+-
+-// A tuple of `StatusCode` and something that implements `IntoResponse` can
+-// be used to override the status code
+-async fn with_status() -> (StatusCode, &'static str) {
+-    (StatusCode::INTERNAL_SERVER_ERROR, "Something went wrong")
+-}
+-
+-// `Html` gives a content-type of `text/html`
+-async fn html() -> Html<&'static str> {
+-    Html("<h1>Hello, World!</h1>")
+-}
+-
+-// `Json` gives a content-type of `application/json` and works with any type
+-// that implements `serde::Serialize`
+-async fn json() -> Json<Value> {
+-    Json(json!({ "data": 42 }))
+-}
+-
+-// `Result<T, E>` where `T` and `E` implement `IntoResponse` is useful for
+-// returning errors
+-async fn result() -> Result<&'static str, StatusCode> {
+-    Ok("all good")
+-}
+-
+-// `Response` gives full control
+-async fn response() -> Response<Body> {
+-    Response::builder().body(Body::empty()).unwrap()
+-}
+-
+-let app = route("/plain_text", get(plain_text))
+-    .route("/plain_text_string", get(plain_text_string))
+-    .route("/bytes", get(bytes))
+-    .route("/empty", get(empty))
+-    .route("/empty_with_status", get(empty_with_status))
+-    .route("/with_status", get(with_status))
+-    .route("/html", get(html))
+-    .route("/json", get(json))
+-    .route("/result", get(result))
+-    .route("/response", get(response));
+-```
+-
+-See the [`response`] module for more details.
+-
+-## Extracting data from requests
+-
+-A handler function is an async function take takes any number of
+-"extractors" as arguments. An extractor is a type that implements
+-[`FromRequest`](crate::extract::FromRequest).
+-
+-For example, [`extract::Json`] is an extractor that consumes the request
+-body and deserializes it as JSON into some target type:
+-
+-```rust
+-use tower_web::prelude::*;
+-use serde::Deserialize;
+-
+-let app = route("/users", post(create_user));
+-
+-#[derive(Deserialize)]
+-struct CreateUser {
+-    email: String,
+-    password: String,
+-}
+-
+-async fn create_user(payload: extract::Json<CreateUser>) {
+-    let payload: CreateUser = payload.0;
+-
+-    // ...
+-}
+-```
+-
+-[`extract::UrlParams`] can be used to extract params from a dynamic URL. It
+-is compatible with any type that implements [`std::str::FromStr`], such as
+-[`Uuid`]:
+-
+-```rust
+-use tower_web::prelude::*;
+-use uuid::Uuid;
+-
+-let app = route("/users/:id", post(create_user));
+-
+-async fn create_user(params: extract::UrlParams<(Uuid,)>) {
+-    let user_id: Uuid = (params.0).0;
+-
+-    // ...
+-}
+-```
+-
+-There is also [`UrlParamsMap`](extract::UrlParamsMap) which provide a map
+-like API for extracting URL params.
+-
+-You can also apply multiple extractors:
+-
+-```rust
+-use tower_web::prelude::*;
+-use uuid::Uuid;
+-use serde::Deserialize;
+-
+-let app = route("/users/:id/things", get(get_user_things));
+-
+-#[derive(Deserialize)]
+-struct Pagination {
+-    page: usize,
+-    per_page: usize,
+-}
+-
+-impl Default for Pagination {
+-    fn default() -> Self {
+-        Self { page: 1, per_page: 30 }
+-    }
+-}
+-
+-async fn get_user_things(
+-    params: extract::UrlParams<(Uuid,)>,
+-    pagination: Option<extract::Query<Pagination>>,
+-) {
+-    let user_id: Uuid = (params.0).0;
+-    let pagination: Pagination = pagination.unwrap_or_default().0;
+-
+-    // ...
+-}
+-```
+-
+-Additionally `Request<Body>` is itself an extractor:
++## Examples
+ 
+-```rust
+-use tower_web::prelude::*;
+-
+-let app = route("/users/:id", post(handler));
+-
+-async fn handler(req: Request<Body>) {
+-    // ...
+-}
+-```
+-
+-However it cannot be combined with other extractors since it consumes the
+-entire request.
+-
+-See the [`extract`] module for more details.
+-
+-[`Uuid`]: https://docs.rs/uuid/latest/uuid/
+-
+-## Applying middleware
+-
+-tower-web is designed to take full advantage of the tower and tower-http
+-ecosystem of middleware:
+-
+-### Applying middleware to individual handlers
+-
+-A middleware can be applied to a single handler like so:
+-
+-```rust
+-use tower_web::prelude::*;
+-use tower::limit::ConcurrencyLimitLayer;
+-
+-let app = route(
+-    "/",
+-    get(handler.layer(ConcurrencyLimitLayer::new(100))),
+-);
+-
+-async fn handler() {}
+-```
+-
+-### Applying middleware to groups of routes
+-
+-Middleware can also be applied to a group of routes like so:
+-
+-```rust
+-use tower_web::prelude::*;
+-use tower::limit::ConcurrencyLimitLayer;
+-
+-let app = route("/", get(get_slash))
+-    .route("/foo", post(post_foo))
+-    .layer(ConcurrencyLimitLayer::new(100));
+-
+-async fn get_slash() {}
+-
+-async fn post_foo() {}
+-```
+-
+-### Error handling
+-
+-tower-web requires all errors to be handled. That is done by using
+-[`std::convert::Infallible`] as the error type in all its [`Service`]
+-implementations.
+-
+-For handlers created from async functions this is works automatically since
+-handlers must return something that implements
+-[`IntoResponse`](response::IntoResponse), even if its a `Result`.
+-
+-However middleware might add new failure cases that has to be handled. For
+-that tower-web provides a [`handle_error`](handler::Layered::handle_error)
+-combinator:
+-
+-```rust
+-use tower_web::prelude::*;
+-use tower::{
+-    BoxError, timeout::{TimeoutLayer, error::Elapsed},
+-};
+-use std::{borrow::Cow, time::Duration};
+-use http::StatusCode;
+-
+-let app = route(
+-    "/",
+-    get(handle
+-        .layer(TimeoutLayer::new(Duration::from_secs(30)))
+-        // `Timeout` uses `BoxError` as the error type
+-        .handle_error(|error: BoxError| {
+-            // Check if the actual error type is `Elapsed` which
+-            // `Timeout` returns
+-            if error.is::<Elapsed>() {
+-                return (StatusCode::REQUEST_TIMEOUT, "Request took too long".into());
+-            }
+-
+-            // If we encounter some error we don't handle return a generic
+-            // error
+-            return (
+-                StatusCode::INTERNAL_SERVER_ERROR,
+-                // `Cow` lets us return either `&str` or `String`
+-                Cow::from(format!("Unhandled internal error: {}", error)),
+-            );
+-        })),
+-);
+-
+-async fn handle() {}
+-```
+-
+-The closure passed to [`handle_error`](handler::Layered::handle_error) must
+-return something that implements [`IntoResponse`](response::IntoResponse).
+-
+-[`handle_error`](routing::Layered::handle_error) is also available on a
+-group of routes with middleware applied:
++The [examples] folder contains various examples of how to use tower-web. The
++[docs] also have lots of examples
+ 
+-```rust
+-use tower_web::prelude::*;
+-use tower::{BoxError, timeout::TimeoutLayer};
+-use std::time::Duration;
+-
+-let app = route("/", get(handle))
+-    .route("/foo", post(other_handle))
+-    .layer(TimeoutLayer::new(Duration::from_secs(30)))
+-    .handle_error(|error: BoxError| {
+-        // ...
+-    });
++## Getting Help
+ 
+-async fn handle() {}
++If you're new to tower its [guides] might help. In the tower-web repo we also
++have a [number of examples][examples] showing how to put everything together.
++You're also welcome to ask in the [`#tower` Discord channel][chat] or open an
++[issue] with your question.
+ 
+-async fn other_handle() {}
+-```
++## Contributing
+ 
+-### Applying multiple middleware
++:balloon: Thanks for your help improving the project! We are so happy to have
++you! We have a [contributing guide][guide] to help you get involved in the
++tower-web project.
+ 
+-[`tower::ServiceBuilder`] can be used to combine multiple middleware:
++## License
+ 
+-```rust
+-use tower_web::prelude::*;
+-use tower::{
+-    ServiceBuilder, BoxError,
+-    load_shed::error::Overloaded,
+-    timeout::error::Elapsed,
+-};
+-use tower_http::compression::CompressionLayer;
+-use std::{borrow::Cow, time::Duration};
+-use http::StatusCode;
+-
+-let middleware_stack = ServiceBuilder::new()
+-    // Return an error after 30 seconds
+-    .timeout(Duration::from_secs(30))
+-    // Shed load if we're receiving too many requests
+-    .load_shed()
+-    // Process at most 100 requests concurrently
+-    .concurrency_limit(100)
+-    // Compress response bodies
+-    .layer(CompressionLayer::new())
+-    .into_inner();
+-
+-let app = route("/", get(|_: Request<Body>| async { /* ... */ }))
+-    .layer(middleware_stack)
+-    .handle_error(|error: BoxError| {
+-        if error.is::<Overloaded>() {
+-            return (
+-                StatusCode::SERVICE_UNAVAILABLE,
+-                "Try again later".into(),
+-            );
+-        }
+-
+-        if error.is::<Elapsed>() {
+-            return (
+-                StatusCode::REQUEST_TIMEOUT,
+-                "Request took too long".into(),
+-            );
+-        };
+-
+-        return (
+-            StatusCode::INTERNAL_SERVER_ERROR,
+-            Cow::from(format!("Unhandled internal error: {}", error)),
+-        );
+-    });
+-```
++This project is licensed under the [MIT license](LICENSE).
+ 
+-## Sharing state with handlers
++### Contribution
+ 
+-It is common to share some state between handlers for example to share a
+-pool of database connections or clients to other services. That can be done
+-using the [`AddExtension`] middleware (applied with [`AddExtensionLayer`])
+-and the [`extract::Extension`] extractor:
+-
+-```rust
+-use tower_web::{AddExtensionLayer, prelude::*};
+-use std::sync::Arc;
+-
+-struct State {
+-    // ...
+-}
+-
+-let shared_state = Arc::new(State { /* ... */ });
+-
+-let app = route("/", get(handler)).layer(AddExtensionLayer::new(shared_state));
+-
+-async fn handler(
+-    state: extract::Extension<Arc<State>>,
+-) {
+-    let state: Arc<State> = state.0;
+-
+-    // ...
+-}
+-```
+-
+-## Routing to any [`Service`]
+-
+-tower-web also supports routing to general [`Service`]s:
+-
+-```rust
+-use tower_web::{
+-    // `ServiceExt` adds `handle_error` to any `Service`
+-    service::{self, ServiceExt}, prelude::*,
+-};
+-use tower_http::services::ServeFile;
+-use http::Response;
+-use std::convert::Infallible;
+-use tower::{service_fn, BoxError};
+-
+-let app = route(
+-    // Any request to `/` goes to a service
+-    "/",
+-    service_fn(|_: Request<Body>| async {
+-        let res = Response::new(Body::from("Hi from `GET /`"));
+-        Ok::<_, Infallible>(res)
+-    })
+-).route(
+-    // GET `/static/Cargo.toml` goes to a service from tower-http
+-    "/static/Cargo.toml",
+-    service::get(
+-        ServeFile::new("Cargo.toml")
+-            // Errors must be handled
+-            .handle_error(|error: std::io::Error| { /* ... */ })
+-    )
+-);
+-```
+-
+-Routing to arbitrary services in this way has complications for backpressure
+-([`Service::poll_ready`]). See the [`service`] module for more details.
+-
+-## Nesting applications
+-
+-Applications can be nested by calling [`nest`](routing::nest):
+-
+-```rust
+-use tower_web::{prelude::*, routing::BoxRoute, body::BoxBody};
+-use tower_http::services::ServeFile;
+-use http::Response;
+-use std::convert::Infallible;
+-
+-fn api_routes() -> BoxRoute<BoxBody> {
+-    route("/users", get(|_: Request<Body>| async { /* ... */ })).boxed()
+-}
+-
+-let app = route("/", get(|_: Request<Body>| async { /* ... */ }))
+-    .nest("/api", api_routes());
+-```
+-
+-[`nest`](routing::nest) can also be used to serve static files from a directory:
+-
+-```rust
+-use tower_web::{prelude::*, service::ServiceExt, routing::nest};
+-use tower_http::services::ServeDir;
+-use http::Response;
+-use std::convert::Infallible;
+-use tower::{service_fn, BoxError};
+-
+-let app = nest(
+-    "/images",
+-    ServeDir::new("public/images").handle_error(|error: std::io::Error| {
+-        // ...
+-    })
+-);
+-```
++Unless you explicitly state otherwise, any contribution intentionally submitted
++for inclusion in tower-web by you, shall be licensed as MIT, without any
++additional terms or conditions.
+ 
++[examples]: https://github.com/davidpdrsn/tower-web/tree/master/examples
++[docs]: https://docs.rs/tower-http/0.1.0
+ [tower]: https://crates.io/crates/tower
+ [tower-http]: https://crates.io/crates/tower-http
+-[tokio]: http://crates.io/crates/tokio
+-[hyper]: http://crates.io/crates/hyper
++[guide]: CONTRIBUTING.md
++[chat]: https://discord.gg/tokio
++[issue]: https://github.com/davidpdrsn/tower-web/issues/new
+diff --git a/deny.toml b/deny.toml
+new file mode 100644
+index 0000000000..1e976877c2
+--- /dev/null
++++ b/deny.toml
+@@ -0,0 +1,24 @@
++[advisories]
++vulnerability = "deny"
++unmaintained = "warn"
++notice = "warn"
++ignore = []
++
++[licenses]
++unlicensed = "deny"
++allow = []
++deny = []
++copyleft = "warn"
++allow-osi-fsf-free = "either"
++confidence-threshold = 0.8
++
++[bans]
++multiple-versions = "deny"
++highlight = "all"
++skip-tree = []
++skip = []
++
++[sources]
++unknown-registry = "warn"
++unknown-git = "warn"
++allow-git = []
+diff --git a/src/extract/mod.rs b/src/extract/mod.rs
+index d0ccc76ad5..75401d7a5a 100644
+--- a/src/extract/mod.rs
++++ b/src/extract/mod.rs
+@@ -133,14 +133,14 @@
+ use crate::{body::Body, response::IntoResponse};
+ use async_trait::async_trait;
+ use bytes::Bytes;
+-use http::{HeaderMap, Method, Request, Response, Uri, Version, header};
++use http::{header, HeaderMap, Method, Request, Response, Uri, Version};
+ use rejection::{
+     BodyAlreadyExtracted, FailedToBufferBody, InvalidJsonBody, InvalidUrlParam, InvalidUtf8,
+     LengthRequired, MissingExtension, MissingJsonContentType, MissingRouteParams, PayloadTooLarge,
+     QueryStringMissing, RequestAlreadyExtracted, UrlParamsAlreadyExtracted,
+ };
+ use serde::de::DeserializeOwned;
+-use std::{collections::HashMap, mem, convert::Infallible, str::FromStr};
++use std::{collections::HashMap, convert::Infallible, mem, str::FromStr};
+ 
+ pub mod rejection;
+ 
+diff --git a/src/lib.rs b/src/lib.rs
+index 28b0b638e1..ccf9c2fb49 100644
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -547,7 +547,7 @@
+ //! [tokio]: http://crates.io/crates/tokio
+ //! [hyper]: http://crates.io/crates/hyper
+ 
+-// #![doc(html_root_url = "https://docs.rs/tower-http/0.1.0")]
++#![doc(html_root_url = "https://docs.rs/tower-http/0.1.0")]
+ #![warn(
+     clippy::all,
+     clippy::dbg_macro,

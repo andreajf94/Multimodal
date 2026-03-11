@@ -1,0 +1,80 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "api_design",
+      "recommendation": "Added 'image/webp' to the imageContentTypes list to recognize WebP files as valid image formats for thumbnail generation",
+      "rationale": "The system needs to identify WebP files as images to trigger the thumbnail generation pipeline. This minimal change ensures WebP files are processed through the same thumbnail generation logic as other image formats without modifying the API contract or endpoint behavior.",
+      "alternatives_considered": [
+        "Creating a separate WebP-specific endpoint or parameter",
+        "Adding a new configuration option for supported image formats",
+        "Using file extension detection instead of content type"
+      ],
+      "files_affected": [
+        "apis/file.go"
+      ]
+    },
+    {
+      "dimension": "dependency_management",
+      "recommendation": "Added golang.org/x/image as a direct dependency and imported the WebP decoder package",
+      "rationale": "The existing imaging library (github.com/disintegration/imaging) doesn't support WebP decoding. The official Go WebP decoder from golang.org/x/image/webp provides reliable WebP support and integrates with Go's standard image decoding interface. Making it a direct dependency ensures the package is available at compile time.",
+      "alternatives_considered": [
+        "Forking or patching the imaging library to add WebP support",
+        "Using a third-party WebP library",
+        "Implementing custom WebP decoding logic"
+      ],
+      "files_affected": [
+        "go.mod",
+        "tools/filesystem/filesystem.go"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Leveraged existing fallback behavior where failed thumbnail generation uses the original full-size image",
+      "rationale": "The system already had robust error handling where thumbnail generation failures fall back to using the original image. By using the standard Go image decoding interface, WebP decoding errors will naturally trigger this existing fallback mechanism without requiring new error handling code.",
+      "alternatives_considered": [
+        "Adding WebP-specific error handling",
+        "Creating separate fallback logic for WebP files",
+        "Returning error responses instead of falling back"
+      ],
+      "files_affected": [
+        "tools/filesystem/filesystem.go"
+      ]
+    },
+    {
+      "dimension": "backward_compatibility",
+      "recommendation": "Maintained PNG format for thumbnails generated from WebP images",
+      "rationale": "The imaging library doesn't support WebP output, and PNG is a widely supported format that maintains transparency and quality. This ensures consistency with existing thumbnails and avoids introducing a new output format that might not be supported by all clients.",
+      "alternatives_considered": [
+        "Adding WebP output support to the imaging library",
+        "Outputting thumbnails in WebP format when the source is WebP",
+        "Adding configuration for thumbnail output format"
+      ],
+      "files_affected": [
+        "tools/filesystem/filesystem.go"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Add WebP support to image processing pipeline",
+      "description": "Enable the system to recognize WebP files as images and generate thumbnails from them using the official Go WebP decoder",
+      "files_to_modify": [
+        "apis/file.go",
+        "go.mod",
+        "tools/filesystem/filesystem.go"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation adds WebP thumbnail generation support through three minimal, focused changes that integrate seamlessly with the existing architecture. First, WebP is added to the recognized image content types in the API layer, ensuring WebP files trigger the thumbnail generation pipeline. Second, the official Go WebP decoder is imported as a dependency, providing reliable WebP decoding without modifying the core imaging library. Third, the WebP decoder is registered via a blank import, allowing it to automatically integrate with Go's image.Decode function.\n\nThe approach leverages the existing error handling and fallback mechanisms\u2014if WebP decoding fails, the system naturally falls back to using the original image, maintaining robustness. Thumbnails are generated in PNG format since the imaging library doesn't support WebP output, ensuring compatibility with existing clients. This solution is minimal, maintainable, and follows Go's idiomatic pattern of using standard library interfaces for image processing.\n\nThe changes are backward compatible and don't require modifications to the API contract, file storage, or thumbnail generation logic. The WebP decoder integrates transparently with the existing image processing pipeline, demonstrating good separation of concerns where the file type detection, decoding, and thumbnail generation remain distinct responsibilities.",
+  "source_pr": "https://github.com/pocketbase/pocketbase/pull/6744",
+  "before_sha": "a2b89d73444fe7775812bcb35b5cad3b741e1b29",
+  "after_sha": "5d46fb054ecd811b9f803df5a9d963c13d89726e",
+  "diff_stats": {
+    "additions": 5,
+    "deletions": 2,
+    "files_changed": 3
+  }
+}

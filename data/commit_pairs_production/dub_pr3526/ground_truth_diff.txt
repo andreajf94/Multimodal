@@ -1,0 +1,1481 @@
+diff --git a/apps/web/app/api/ai/support-chat/route.ts b/apps/web/app/api/ai/support-chat/route.ts
+index 0213ea3209a..b16da66b197 100644
+--- a/apps/web/app/api/ai/support-chat/route.ts
++++ b/apps/web/app/api/ai/support-chat/route.ts
+@@ -6,17 +6,47 @@ import { createSupportTicketTool } from "@/lib/ai/create-support-ticket";
+ import { findRelevantDocsTool } from "@/lib/ai/find-relevant-docs";
+ import { getProgramPerformanceTool } from "@/lib/ai/get-program-performance";
+ import { getWorkspaceDetailsTool } from "@/lib/ai/get-workspace-details";
++import { requestSupportTicketTool } from "@/lib/ai/request-support-ticket";
+ import { withSession } from "@/lib/auth";
+ import { ratelimit } from "@/lib/upstash/ratelimit";
+ import { anthropic } from "@ai-sdk/anthropic";
+ import { convertToModelMessages, stepCountIs, streamText, UIMessage } from "ai";
+ 
+ export const POST = withSession(async ({ req, session }) => {
+-  const { messages, globalContext } = (await req.json()) as {
++  const body = await req.json();
++  const { messages, globalContext } = body as {
+     messages: UIMessage[];
+     globalContext?: GlobalChatContext;
+   };
+ 
++  const MAX_ATTACHMENTS = 5;
++  const MAX_ATTACHMENT_ID_LENGTH = 128;
++  const rawAttachmentIds = body.attachmentIds;
++  if (rawAttachmentIds !== undefined) {
++    if (
++      !Array.isArray(rawAttachmentIds) ||
++      rawAttachmentIds.length > MAX_ATTACHMENTS ||
++      rawAttachmentIds.some(
++        (id) => typeof id !== "string" || id.length > MAX_ATTACHMENT_ID_LENGTH,
++      )
++    ) {
++      return new Response("Invalid attachmentIds", { status: 400 });
++    }
++  }
++  const attachmentIds: string[] | undefined = rawAttachmentIds;
++
++  const MAX_TICKET_DETAILS_LENGTH = 2000;
++  const rawTicketDetails = body.ticketDetails;
++  if (rawTicketDetails !== undefined) {
++    if (
++      typeof rawTicketDetails !== "string" ||
++      rawTicketDetails.length > MAX_TICKET_DETAILS_LENGTH
++    ) {
++      return new Response("Invalid ticketDetails", { status: 400 });
++    }
++  }
++  const ticketDetails: string | undefined = rawTicketDetails;
++
+   const { success } = await ratelimit(5, "30 s").limit(
+     `support-chat:${session.user.id}`,
+   );
+@@ -33,6 +63,7 @@ export const POST = withSession(async ({ req, session }) => {
+       findRelevantDocs: findRelevantDocsTool,
+       getProgramPerformance: getProgramPerformanceTool,
+       getWorkspaceDetails: getWorkspaceDetailsTool,
++      requestSupportTicket: requestSupportTicketTool,
+       createSupportTicket: createSupportTicketTool({
+         session,
+         messages: messages.map((msg) => ({
+@@ -40,6 +71,8 @@ export const POST = withSession(async ({ req, session }) => {
+           parts: "parts" in msg ? msg.parts : [],
+         })),
+         globalContext: globalContext || {},
++        attachmentIds,
++        ticketDetails,
+       }),
+     },
+   });
+diff --git a/apps/web/app/api/ai/support-chat/upload/route.ts b/apps/web/app/api/ai/support-chat/upload/route.ts
+new file mode 100644
+index 00000000000..3561b8cd22c
+--- /dev/null
++++ b/apps/web/app/api/ai/support-chat/upload/route.ts
+@@ -0,0 +1,101 @@
++import { withSession } from "@/lib/auth";
++import { plain } from "@/lib/plain/client";
++import { upsertPlainCustomer } from "@/lib/plain/upsert-plain-customer";
++import { AttachmentType } from "@team-plain/typescript-sdk";
++
++const MAX_UPLOAD_SIZE_BYTES = 10 * 1024 * 1024;
++const MAX_FILE_NAME_LENGTH = 255;
++
++const ACCEPTED_EXTENSIONS = new Set([
++  ".png",
++  ".jpg",
++  ".jpeg",
++  ".gif",
++  ".webp",
++  ".pdf",
++  ".txt",
++  ".csv",
++]);
++
++// POST /api/ai/support-chat/upload
++// Generates a Plain attachment upload URL for the authenticated user.
++// The client uses the returned URL + form fields to POST the file directly
++// to Plain's storage (no file data passes through this server).
++export const POST = withSession(async ({ req, session }) => {
++  if (!session.user.email) {
++    return new Response("User email is required", { status: 400 });
++  }
++
++  let fileName: string;
++  let fileSizeBytes: number;
++  try {
++    ({ fileName, fileSizeBytes } = await req.json());
++  } catch {
++    return new Response("Invalid JSON body", { status: 400 });
++  }
++
++  if (
++    !fileName ||
++    typeof fileName !== "string" ||
++    fileName.length > MAX_FILE_NAME_LENGTH ||
++    // Reject path traversal and null bytes
++    fileName.includes("..") ||
++    fileName.includes("/") ||
++    fileName.includes("\0")
++  ) {
++    return new Response("Invalid fileName", { status: 400 });
++  }
++
++  if (
++    typeof fileSizeBytes !== "number" ||
++    fileSizeBytes <= 0 ||
++    fileSizeBytes > MAX_UPLOAD_SIZE_BYTES
++  ) {
++    return new Response(
++      `Invalid fileSizeBytes: must be between 1 and ${MAX_UPLOAD_SIZE_BYTES} bytes`,
++      { status: 400 },
++    );
++  }
++
++  const ext = fileName.slice(fileName.lastIndexOf(".")).toLowerCase();
++  if (!ext || !ACCEPTED_EXTENSIONS.has(ext)) {
++    return new Response(
++      `Unsupported file type. Accepted: ${[...ACCEPTED_EXTENSIONS].join(", ")}`,
++      { status: 400 },
++    );
++  }
++
++  // Ensure the Plain customer exists and get their Plain-scoped ID
++  const { data: customerData, error: customerError } =
++    await upsertPlainCustomer({
++      id: session.user.id,
++      name: session.user.name ?? "",
++      email: session.user.email,
++    });
++
++  if (customerError || !customerData) {
++    console.error("Failed to upsert Plain customer:", customerError);
++    return new Response("Failed to resolve support customer", { status: 500 });
++  }
++
++  const { data, error } = await plain.createAttachmentUploadUrl({
++    attachmentType: AttachmentType.CustomTimelineEntry,
++    customerId: customerData.customer.id,
++    fileName,
++    fileSizeBytes,
++  });
++
++  if (error || !data) {
++    console.error("Failed to create Plain attachment upload URL:", error);
++    return new Response("Failed to create upload URL", { status: 500 });
++  }
++
++  const { attachment, uploadFormUrl, uploadFormData } = data;
++
++  return Response.json({
++    attachmentId: attachment.id,
++    uploadFormUrl,
++    // Key-value pairs the client appends to the multipart FormData before POSTing
++    uploadFormData,
++  });
++});
+diff --git a/apps/web/app/api/ai/sync-embeddings/fetch-plausible-pageviews.ts b/apps/web/app/api/ai/sync-embeddings/fetch-plausible-pageviews.ts
+new file mode 100644
+index 00000000000..6c3773f5430
+--- /dev/null
++++ b/apps/web/app/api/ai/sync-embeddings/fetch-plausible-pageviews.ts
+@@ -0,0 +1,55 @@
++/**
++ * Fetch per-page pageview counts from Plausible for the last 12 months.
++ * Returns a map of pathname → pageview count.
++ */
++export async function fetchPlausiblePageviews(): Promise<Map<string, number>> {
++  const apiKey = process.env.PLAUSIBLE_API_KEY;
++  if (!apiKey) {
++    console.warn("PLAUSIBLE_API_KEY not set - pageviews will be stored as 0");
++    return new Map();
++  }
++
++  try {
++    const res = await fetch("https://plausible.io/api/v2/query", {
++      method: "POST",
++      headers: {
++        Authorization: `Bearer ${apiKey}`,
++        "Content-Type": "application/json",
++      },
++      body: JSON.stringify({
++        site_id: "dub.co",
++        metrics: ["pageviews"],
++        date_range: "12mo",
++        dimensions: ["event:page"],
++        filters: [
++          ["or", [
++            ["contains", "event:page", ["/docs"]],
++            ["contains", "event:page", ["/help"]],
++          ]],
++        ],
++      }),
++    });
++
++    if (!res.ok) {
++      console.warn(`Plausible API error ${res.status}: ${await res.text()}`);
++      return new Map();
++    }
++
++    const data = await res.json();
++    const map = new Map<string, number>();
++
++    for (const row of data.results ?? []) {
++      const page: string = row.dimensions?.[0];
++      const pageviews: number = row.metrics?.[0];
++
++      if (typeof page === "string" && typeof pageviews === "number") {
++        map.set(page, pageviews);
++      }
++    }
++
++    return map;
++  } catch (err) {
++    console.warn("Failed to fetch Plausible pageviews:", err);
++    return new Map();
++  }
++}
+diff --git a/apps/web/app/api/ai/sync-embeddings/route.ts b/apps/web/app/api/ai/sync-embeddings/route.ts
+index 6a922c78f12..da026779d9c 100644
+--- a/apps/web/app/api/ai/sync-embeddings/route.ts
++++ b/apps/web/app/api/ai/sync-embeddings/route.ts
+@@ -47,7 +47,11 @@ export const POST = async (req: Request) => {
+   const normalizedUrl = parsedUrl.toString();
+ 
+   try {
+-    const result = await upsertDocsEmbeddings(normalizedUrl);
++    // const pageviewsMap = await fetchPlausiblePageviews();
++    const result = await upsertDocsEmbeddings(
++      normalizedUrl,
++      // pageviewsMap // TODO: add pageviewsMap back in once we support it
++    );
+     return Response.json({ success: true, url: normalizedUrl, ...result });
+   } catch (err) {
+     console.error("Failed to seed URL:", normalizedUrl, err);
+diff --git a/apps/web/lib/ai/build-system-prompt.ts b/apps/web/lib/ai/build-system-prompt.ts
+index c3549721dad..c1ef51965ac 100644
+--- a/apps/web/lib/ai/build-system-prompt.ts
++++ b/apps/web/lib/ai/build-system-prompt.ts
+@@ -11,16 +11,16 @@ export type GlobalChatContext = {
+ const CONTEXT_SYSTEM_PROMPTS: Record<SupportChatContext, string> = {
+   app: `You are a helpful Dub support assistant helping users manage their Dub workspaces and links.
+   Focus on: link shortening, custom domains, analytics, click tracking, API usage, workspace management, billing, and integrations.
+-  When a user has a billing issue, account access problem, or a bug that can't be resolved through documentation, use the createSupportTicket tool.`,
++  When a user has a billing issue, account access problem, or a bug that can't be resolved through documentation, first call requestSupportTicket (to show them an upload form), then after the user confirms, call createSupportTicket.`,
+ 
+   partners: `You are a helpful Dub Partners support assistant helping affiliate partners with their programs.
+   Focus on: payouts, referral tracking, commission structure, partner links, bank account setup, payout countries, program enrollment, and affiliate performance.
+-  When a user has a payout dispute, tax compliance issue, or a problem that can't be resolved through documentation, use the createSupportTicket tool.
++  When a user has a payout dispute, tax compliance issue, or a problem that can't be resolved through documentation, first call requestSupportTicket (to show them an upload form), then after the user confirms, call createSupportTicket.
+   Always try to provide the program's support email for program-specific issues.`,
+ 
+   docs: `You are a helpful Dub developer support assistant helping developers integrate Dub into their applications.
+   Focus on: SDK installation and usage, webhooks, conversion tracking, rate limits, API authentication, link creation, analytics API, and integration guides.
+-  When a user has a complex integration issue that can't be resolved through documentation, use the createSupportTicket tool.`,
++  When a user has a complex integration issue that can't be resolved through documentation, first call requestSupportTicket (to show them an upload form), then after the user confirms, call createSupportTicket.`,
+ };
+ 
+ const BASE_SYSTEM_PROMPT = `
+@@ -31,6 +31,7 @@ const BASE_SYSTEM_PROMPT = `
+   If you find a relevant article, include a link to it in your response.
+   If findRelevantDocs returns no useful results, acknowledge it and offer to create a support ticket.
+   Never make up information — if unsure, say so and offer to escalate.
++  To create a support ticket: ALWAYS call requestSupportTicket first (never createSupportTicket directly). After the user submits the upload form and confirms, call createSupportTicket.
+   `.trim();
+ 
+ function buildAccountSpecificPrompt(context: GlobalChatContext): string[] {
+diff --git a/apps/web/lib/ai/create-support-ticket.ts b/apps/web/lib/ai/create-support-ticket.ts
+index b53b549a7a6..1243ac260b5 100644
+--- a/apps/web/lib/ai/create-support-ticket.ts
++++ b/apps/web/lib/ai/create-support-ticket.ts
+@@ -14,10 +14,13 @@ export type CreateSupportTicketOptions = {
+     parts: Array<{ type: string; text?: string }>;
+   }>;
+   globalContext: GlobalChatContext;
++  attachmentIds?: string[];
++  ticketDetails?: string;
+ };
+ 
+ export function createSupportTicketTool(options: CreateSupportTicketOptions) {
+-  const { globalContext, session, messages } = options;
++  const { globalContext, session, messages, attachmentIds, ticketDetails } =
++    options;
+ 
+   return tool({
+     description:
+@@ -44,7 +47,29 @@ export function createSupportTicketTool(options: CreateSupportTicketOptions) {
+         session.user.id,
+       );
+ 
++      const DETAILS_LIMIT = 1000;
++      const rawDetails = ticketDetails?.trim();
++      const boundedDetails = rawDetails
++        ? rawDetails.length > DETAILS_LIMIT
++          ? `${rawDetails.slice(0, DETAILS_LIMIT)}… (truncated)`
++          : rawDetails
++        : undefined;
++
+       const components: Array<Record<string, unknown>> = [
++        ...(boundedDetails
++          ? [
++              {
++                componentText: {
++                  text: `User description: ${boundedDetails}`,
++                },
++              },
++              {
++                componentDivider: {
++                  dividerSpacingSize: ComponentDividerSpacingSize.M,
++                },
++              },
++            ]
++          : []),
+         {
+           componentText: {
+             text: chatHistory.slice(0, 5000),
+@@ -84,6 +109,7 @@ export function createSupportTicketTool(options: CreateSupportTicketOptions) {
+           },
+           priority,
+           components,
++          ...(attachmentIds?.length ? { attachmentIds } : {}),
+         });
+ 
+         return {
+diff --git a/apps/web/lib/ai/request-support-ticket.ts b/apps/web/lib/ai/request-support-ticket.ts
+new file mode 100644
+index 00000000000..2f418e7c13a
+--- /dev/null
++++ b/apps/web/lib/ai/request-support-ticket.ts
+@@ -0,0 +1,9 @@
++import { tool } from "ai";
++import { z } from "zod";
++
++export const requestSupportTicketTool = tool({
++  description:
++    "Shows a file upload form inside the chat so the user can optionally attach screenshots or files before a support ticket is created. ALWAYS call this tool first when the user asks to create a support ticket or speak with a human — never call createSupportTicket directly. IMPORTANT: After calling this tool, do NOT write any additional text — the form is self-explanatory and appears automatically in the chat. After the user clicks 'Submit ticket' in the form (they will send a follow-up confirmation message), call createSupportTicket to finalize the ticket.",
++  inputSchema: z.object({}),
++  execute: async () => ({ status: "ready" as const }),
++});
+diff --git a/apps/web/lib/ai/upsert-docs-embedding.ts b/apps/web/lib/ai/upsert-docs-embedding.ts
+index 6f4ccab6560..8efe1c7ee33 100644
+--- a/apps/web/lib/ai/upsert-docs-embedding.ts
++++ b/apps/web/lib/ai/upsert-docs-embedding.ts
+@@ -4,10 +4,18 @@ import { PAYOUT_SUPPORTED_COUNTRIES } from "../constants/payouts-supported-count
+  * Clean raw MDX fetched from Mintlify's .md endpoint.
+  * Strips frontmatter, imports, images, JSX components.
+  * Replaces <PayoutSupportedCountries /> with the actual country list.
++ * Returns the cleaned content and the article title extracted from the H1 heading.
+  */
+-export async function cleanMdx(raw: string): Promise<string> {
++async function cleanMdx(
++  raw: string,
++): Promise<{ content: string; title: string }> {
+   let content = raw;
+ 
++  content = content.replace(/^> ## Documentation Index\n(?:> [^\n]*\n)*/m, "");
++
++  const h1Match = content.match(/^# (.+)$/m);
++  const title = h1Match ? h1Match[1].trim() : "";
++
+   content = content.replace(/^---[\s\S]*?---\s*/m, "");
+   content = content.replace(/^import\s+.*from\s+['"][^'"]*['"]\s*;?\s*$/gm, "");
+   content = content.replace(/!\[.*?\]\(.*?\)/g, "");
+@@ -51,7 +59,7 @@ export async function cleanMdx(raw: string): Promise<string> {
+   content = content.replace(/<img[^>]*>/g, "");
+   content = content.replace(/\n{3,}/g, "\n\n");
+ 
+-  return content.trim();
++  return { content: content.trim(), title };
+ }
+ 
+ type ArticleChunk = {
+@@ -59,6 +67,7 @@ type ArticleChunk = {
+   content: string;
+   url: string;
+   heading: string;
++  title: string;
+   type: "docs" | "help";
+ };
+ 
+@@ -66,7 +75,11 @@ type ArticleChunk = {
+  * Split cleaned markdown into chunks at H2/H3 heading boundaries.
+  * Each chunk carries the section URL + heading as metadata.
+  */
+-export function chunkByHeadings(content: string, url: string): ArticleChunk[] {
++function chunkByHeadings(
++  content: string,
++  url: string,
++  title: string,
++): ArticleChunk[] {
+   const lines = content.split("\n");
+   const chunks: ArticleChunk[] = [];
+   let currentHeading = "Introduction";
+@@ -97,6 +110,7 @@ export function chunkByHeadings(content: string, url: string): ArticleChunk[] {
+       content: `## ${currentHeading}\n\n${text}`,
+       url: `${url}#${slug}`,
+       heading: currentHeading,
++      title,
+       type,
+     });
+     currentLines = [];
+@@ -126,6 +140,7 @@ export function chunkByHeadings(content: string, url: string): ArticleChunk[] {
+       content,
+       url: `${url}#${slug}`,
+       heading: "Overview",
++      title,
+       type,
+     });
+   }
+@@ -159,9 +174,14 @@ function sanitizePathname(pathname: string): string {
+  * Fetch, clean, chunk, and upsert a single article URL into Upstash Vector.
+  * Uses heading-level chunks directly — no sentence-level fragmentation.
+  * Validates URL to restrict fetches to dub.co docs/help (SSRF guard).
++ *
++ * @param pageviewsMap
++ *
++ *
+  */
+ export async function upsertDocsEmbeddings(
+   url: string,
++  pageviewsMap?: Map<string, number>,
+ ): Promise<{ chunks: number; skipped?: boolean }> {
+   let parsedUrl: URL;
+   try {
+@@ -174,9 +194,8 @@ export async function upsertDocsEmbeddings(
+   if (
+     parsedUrl.protocol !== "https:" ||
+     !ALLOWED_HOSTNAMES.includes(parsedUrl.hostname) ||
+-    (!ALLOWED_HOSTNAMES.includes(parsedUrl.pathname) &&
+-      !ALLOWED_PATH_PREFIXES.some((p) => parsedUrl.pathname.startsWith(p))) ||
+-    parsedUrl.pathname.includes("..")
++    parsedUrl.pathname.includes("..") ||
++    !ALLOWED_PATH_PREFIXES.some((p) => parsedUrl.pathname.startsWith(p))
+   ) {
+     console.warn(`Skipping (disallowed URL): ${url}`);
+     return { chunks: 0, skipped: true };
+@@ -197,8 +216,12 @@ export async function upsertDocsEmbeddings(
+   }
+ 
+   const raw = await res.text();
+-  const cleaned = await cleanMdx(raw);
+-  const chunks = chunkByHeadings(cleaned, normalizedUrl);
++  const { content: cleaned, title } = await cleanMdx(raw);
++  const chunks = chunkByHeadings(cleaned, normalizedUrl, title);
++
++  // Look up pageviews for this article (keyed by pathname, not full URL)
++  const pathname = new URL(normalizedUrl).pathname;
++  const pageviews = pageviewsMap?.get(pathname) ?? 0;
+ 
+   // Upstash Vector has a 48KB metadata size limit per vector.
+   const MAX_METADATA_CONTENT = 4000;
+@@ -212,7 +235,9 @@ export async function upsertDocsEmbeddings(
+           metadata: {
+             url: chunk.url,
+             heading: chunk.heading,
++            title: chunk.title || chunk.heading,
+             type: chunk.type,
++            pageviews,
+             content: chunk.content.slice(0, MAX_METADATA_CONTENT),
+           },
+         },
+diff --git a/apps/web/scripts/seed-support-embeddings.ts b/apps/web/scripts/seed-support-embeddings.ts
+index bca52a2ae35..45d3d579c20 100644
+--- a/apps/web/scripts/seed-support-embeddings.ts
++++ b/apps/web/scripts/seed-support-embeddings.ts
+@@ -7,6 +7,7 @@
+  *   pnpm tsx scripts/seed-support-embeddings.ts --url <url>  # re-seed a single article
+  */
+ 
++import { fetchPlausiblePageviews } from "app/api/ai/sync-embeddings/fetch-plausible-pageviews";
+ import "dotenv-flow/config";
+ import { upsertDocsEmbeddings } from "../lib/ai/upsert-docs-embedding";
+ 
+@@ -58,7 +59,8 @@ async function main() {
+       process.exit(1);
+     }
+     console.log(`Seeding single article: ${url}`);
+-    const result = await upsertDocsEmbeddings(url);
++    const pageviewsMap = await fetchPlausiblePageviews();
++    const result = await upsertDocsEmbeddings(url, pageviewsMap);
+     console.log(
+       `  → ${result.chunks} chunks${result.skipped ? " (skipped)" : ""}`,
+     );
+@@ -70,6 +72,10 @@ async function main() {
+   const urls = await fetchArticleUrls();
+   console.log(`Found ${urls.length} articles to embed.\n`);
+ 
++  console.log("Fetching pageviews from Plausible...");
++  const pageviewsMap = await fetchPlausiblePageviews();
++  console.log(`Loaded pageviews for ${pageviewsMap.size} pages.\n`);
++
+   let success = 0;
+   let skipped = 0;
+   let failed = 0;
+@@ -77,7 +83,7 @@ async function main() {
+   for (const url of urls) {
+     try {
+       process.stdout.write(`Processing: ${url} ... `);
+-      const result = await upsertDocsEmbeddings(url);
++      const result = await upsertDocsEmbeddings(url, pageviewsMap);
+       if (result.skipped) {
+         process.stdout.write(`skipped\n`);
+         skipped++;
+diff --git a/apps/web/ui/support/chat-bubble.tsx b/apps/web/ui/support/chat-bubble.tsx
+index 0d61b73f74d..d31403ad99a 100644
+--- a/apps/web/ui/support/chat-bubble.tsx
++++ b/apps/web/ui/support/chat-bubble.tsx
+@@ -1,19 +1,29 @@
+ "use client";
+ 
+ import { Tooltip } from "@dub/ui";
+-import { MsgsFill, Trash, Xmark } from "@dub/ui/icons";
++import { MsgsFill, Xmark } from "@dub/ui/icons";
+ import { AnimatePresence, motion } from "motion/react";
++import { useSession } from "next-auth/react";
+ import { useEffect, useRef, useState } from "react";
+ import { ChatInterface } from "./chat-interface";
++import { ClearChatButton } from "./clear-chat-button";
+ 
+ export function SupportChatBubble() {
++  const { data: session } = useSession();
+   const [isOpen, setIsOpen] = useState(false);
+   const [resetKey, setResetKey] = useState(0);
+   const panelRef = useRef<HTMLDivElement>(null);
+ 
+   const handleClose = () => setIsOpen(false);
+   const handleOpen = () => setIsOpen(true);
+-  const handleReset = () => setResetKey((k) => k + 1);
++  const handleReset = () => {
++    if (session?.user?.["id"]) {
++      try {
++        localStorage.removeItem(`dub-support-chat:${session.user["id"]}`);
++      } catch { }
++    }
++    setResetKey((k) => k + 1);
++  };
+ 
+   useEffect(() => {
+     if (window.parent === window) return;
+@@ -46,16 +56,11 @@ export function SupportChatBubble() {
+               </div>
+ 
+               <div className="flex items-center gap-0.5">
+-                <Tooltip content="Clear chat">
+-                  <button
+-                    type="button"
+-                    onClick={handleReset}
+-                    className="flex size-7 items-center justify-center rounded-lg text-neutral-400 transition-colors hover:bg-white/10 hover:text-white"
+-                    aria-label="Clear chat"
+-                  >
+-                    <Trash className="size-3.5" />
+-                  </button>
+-                </Tooltip>
++                <ClearChatButton
++                  onConfirm={handleReset}
++                  triggerClassName="size-7 text-neutral-400 hover:bg-white/10 hover:text-white"
++                  iconClassName="size-3.5"
++                />
+                 <Tooltip content="Close">
+                   <button
+                     type="button"
+diff --git a/apps/web/ui/support/chat-interface.tsx b/apps/web/ui/support/chat-interface.tsx
+index 1954f1217d4..1f087eb475e 100644
+--- a/apps/web/ui/support/chat-interface.tsx
++++ b/apps/web/ui/support/chat-interface.tsx
+@@ -20,6 +20,7 @@ import { ProgramCombobox, ProgramSummary } from "./program-combobox";
+ import { extractSources, SourceCitations } from "./source-citations";
+ import { StarterQuestions } from "./starter-questions";
+ import { StatusIndicator } from "./status-indicator";
++import { TicketUpload } from "./ticket-upload";
+ import { WorkspaceCombobox, WorkspaceSummary } from "./workspace-combobox";
+ 
+ type AccountType = "workspace" | "partner";
+@@ -35,10 +36,16 @@ export function ChatInterface({
+ }) {
+   const { data: session, status: sessionStatus } = useSession();
+   const scrollContainerRef = useRef<HTMLDivElement>(null);
++  const textareaRef = useRef<HTMLTextAreaElement>(null);
+   const [input, setInput] = useState("");
+   const [ticketSubmitted, setTicketSubmitted] = useState(false);
+   const [selection, setSelection] = useState<GlobalChatContext>({});
+ 
++  const storageKey = session?.user?.["id"]
++    ? `dub-support-chat:${session.user["id"]}`
++    : null;
++  const restoredRef = useRef(false);
++
+   const effectiveAccountType = selection.accountType;
+ 
+   const { data: workspaces } = useSWR<WorkspaceSummary[]>(
+@@ -75,6 +82,61 @@ export function ChatInterface({
+     container.scrollTo({ top: container.scrollHeight, behavior: "smooth" });
+   }, [messages, status, embedded]);
+ 
++  useEffect(() => {
++    if (status === "ready") {
++      textareaRef.current?.focus();
++    }
++  }, [status]);
++
++  useEffect(() => {
++    if (!storageKey || restoredRef.current) return;
++    restoredRef.current = true;
++
++    try {
++      const raw = localStorage.getItem(storageKey);
++      if (!raw) return;
++
++      const stored = JSON.parse(raw);
++      if (stored.selection) setSelection(stored.selection);
++      if (stored.messages?.length) setMessages(stored.messages);
++      if (stored.ticketSubmitted) setTicketSubmitted(true);
++    } catch { }
++  }, [storageKey, setMessages]);
++
++  useEffect(() => {
++    if (!storageKey || !restoredRef.current) return;
++
++    try {
++      const raw = localStorage.getItem(storageKey);
++      const stored = raw ? JSON.parse(raw) : {};
++      localStorage.setItem(
++        storageKey,
++        JSON.stringify({ ...stored, selection }),
++      );
++    } catch { }
++  }, [selection, storageKey]);
++
++  useEffect(() => {
++    if (!storageKey || !restoredRef.current || status === "streaming") return;
++
++    try {
++      const raw = localStorage.getItem(storageKey);
++      const stored = raw ? JSON.parse(raw) : {};
++      localStorage.setItem(
++        storageKey,
++        JSON.stringify({ ...stored, messages, ticketSubmitted }),
++      );
++    } catch { }
++  }, [messages, ticketSubmitted, status, storageKey]);
++
++  const clearPersistedSession = () => {
++    if (storageKey) {
++      try {
++        localStorage.removeItem(storageKey);
++      } catch { }
++    }
++  };
++
+   const handleSend = (text?: string) => {
+     const messageText = text ?? input;
+     if (!messageText.trim() || status === "streaming" || !canChat) return;
+@@ -92,13 +154,15 @@ export function ChatInterface({
+       },
+     );
+     setInput("");
++    textareaRef.current?.focus();
+   };
+ 
+-  const handleEscalate = () => {
++  const handleEscalateViaForm = (
++    attachmentIds: string[] = [],
++    details: string = "",
++  ) => {
+     sendMessage(
+-      {
+-        text: "I'd like to speak with a human support agent and create a support ticket.",
+-      },
++      { text: "Please create my support ticket now." },
+       {
+         body: {
+           globalContext: {
+@@ -107,6 +171,8 @@ export function ChatInterface({
+               effectiveAccountType === "partner" ? "partners" : "app",
+             accountType: effectiveAccountType,
+           },
++          ...(attachmentIds.length ? { attachmentIds } : {}),
++          ...(details ? { ticketDetails: details } : {}),
+         },
+       },
+     );
+@@ -161,8 +227,15 @@ export function ChatInterface({
+     ? "https://assets.dub.co/misc/dub-avatar.svg"
+     : undefined;
+   const showStarterQuestions = canChat && messages.length === 0;
++  const hasRequestedTicket = messages.some((m) =>
++    m.parts?.some((p: any) => p.type === "tool-requestSupportTicket"),
++  );
+   const canEscalate =
+-    canChat && messages.length >= 2 && status === "ready" && !ticketSubmitted;
++    canChat &&
++    messages.length >= 2 &&
++    status === "ready" &&
++    !ticketSubmitted &&
++    !hasRequestedTicket;
+ 
+   if (isLoadingSession) {
+     return (
+@@ -331,36 +404,59 @@ export function ChatInterface({
+         {canChat &&
+           messages.map((message, index) => {
+             const isUser = message.role === "user";
+-            const textContent = message.parts
+-              .filter((p) => p.type === "text")
+-              .map((p) => (p as { type: "text"; text: string }).text)
+-              .join("\n\n");
+ 
++            if (isUser) {
++              const textContent = message.parts
++                .filter((p) => p.type === "text")
++                .map((p) => (p as { type: "text"; text: string }).text)
++                .join("\n\n");
++              if (!textContent) return null;
++              return (
++                <SupportMessage
++                  key={message.id}
++                  avatar={userAvatar}
++                  isUser
++                  animate
++                >
++                  <p className="text-sm">{textContent}</p>
++                </SupportMessage>
++              );
++            }
++
++            // --- Assistant message ---
+             const isCurrentlyStreaming =
+               status === "streaming" && index === messages.length - 1;
+-            const sources =
+-              !isUser && !isCurrentlyStreaming
+-                ? extractSources(
+-                    message.parts as { type: string; [key: string]: unknown }[],
+-                  )
+-                : [];
++            const sources = !isCurrentlyStreaming
++              ? extractSources(
++                message.parts as { type: string;[key: string]: unknown }[],
++              )
++              : [];
++
++            const hasTextPart = message.parts?.some(
++              (p: any) => p.type === "text" && p.text,
++            );
++            const hasTicketForm = message.parts?.some(
++              (p: any) =>
++                p.type === "tool-requestSupportTicket" &&
++                p.state === "output-available",
++            );
++            const hasVisibleContent = hasTextPart || hasTicketForm;
+ 
+-            // Skip user messages with no text, but keep assistant messages
+-            // visible during tool calls (they temporarily have no text parts)
+-            if (isUser && !textContent) return null;
+-            if (!isUser && !textContent && !message.parts?.length) return null;
++            if (!hasVisibleContent && !message.parts?.length) return null;
+ 
+             return (
+               <SupportMessage
+                 key={message.id}
+-                avatar={isUser ? userAvatar : assistantAvatar}
+-                isUser={isUser}
++                avatar={assistantAvatar}
+                 animate
+               >
+-                {isUser ? (
+-                  <p className="text-sm">{textContent}</p>
+-                ) : !textContent ? (
++                {!hasVisibleContent ? (
+                   (() => {
++                    const isCreatingTicket = message.parts?.some(
++                      (p: any) =>
++                        p.type === "tool-createSupportTicket" &&
++                        p.state === "input-available",
++                    );
+                     const isSearching = message.parts?.some(
+                       (p: any) =>
+                         p.type === "tool-findRelevantDocs" &&
+@@ -369,53 +465,84 @@ export function ChatInterface({
+                     return (
+                       <StatusIndicator
+                         label={
+-                          isSearching ? "Searching docs..." : "Thinking..."
++                          isCreatingTicket
++                            ? "Creating your ticket..."
++                            : isSearching
++                              ? "Searching docs..."
++                              : "Thinking..."
+                         }
+                         className="py-0.5"
+                       />
+                     );
+                   })()
+                 ) : (
+-                  <>
+-                    <Streamdown
+-                      key={index}
+-                      isAnimating={status === "streaming"}
+-                      className="text-content-emphasis"
+-                      controls={false}
+-                      components={{
+-                        h1: () => null,
+-                        h2: () => null,
+-                        h3: () => null,
+-                        h4: () => null,
+-                        h5: () => null,
+-                        h6: () => null,
+-                        a: ({ children, href }) => (
+-                          <a
+-                            href={href}
+-                            target="_blank"
+-                            rel="noopener noreferrer"
+-                            className="cursor-help font-medium text-neutral-900 underline decoration-dotted underline-offset-2 hover:text-neutral-600"
++                  <div className="flex flex-col gap-3">
++                    {message.parts?.map((part: any, partIndex: number) => {
++                      if (part.type === "text" && part.text) {
++                        return (
++                          <Streamdown
++                            key={partIndex}
++                            isAnimating={isCurrentlyStreaming}
++                            className="text-content-emphasis"
++                            controls={false}
++                            components={{
++                              h1: () => null,
++                              h2: () => null,
++                              h3: () => null,
++                              h4: () => null,
++                              h5: () => null,
++                              h6: () => null,
++                              a: ({ children, href }) => (
++                                <a
++                                  href={href}
++                                  target="_blank"
++                                  rel="noopener noreferrer"
++                                  className="cursor-help font-medium text-neutral-900 underline decoration-dotted underline-offset-2 hover:text-neutral-600"
++                                >
++                                  {children}
++                                </a>
++                              ),
++                              ul: ({ children }) => (
++                                <ul className="list-outside list-disc pl-6">
++                                  {children}
++                                </ul>
++                              ),
++                              ol: ({ children }) => (
++                                <ol className="list-outside list-decimal pl-6">
++                                  {children}
++                                </ol>
++                              ),
++                              code: MarkdownCodeBlock,
++                            }}
+                           >
+-                            {children}
+-                          </a>
+-                        ),
+-                        ul: ({ children }) => (
+-                          <ul className="list-outside list-disc pl-6">
+-                            {children}
+-                          </ul>
+-                        ),
+-                        ol: ({ children }) => (
+-                          <ol className="list-outside list-decimal pl-6">
+-                            {children}
+-                          </ol>
+-                        ),
+-                        code: MarkdownCodeBlock,
+-                      }}
+-                    >
+-                      {textContent}
+-                    </Streamdown>
++                            {part.text}
++                          </Streamdown>
++                        );
++                      }
++
++                      if (
++                        part.type === "tool-requestSupportTicket" &&
++                        part.state === "output-available"
++                      ) {
++                        return (
++                          <div
++                            key={partIndex}
++                            className="rounded-xl border border-neutral-200 pt-3"
++                          >
++                            <TicketUpload
++                              onSubmit={(ids, details) =>
++                                handleEscalateViaForm(ids, details)
++                              }
++                              submitted={ticketSubmitted}
++                            />
++                          </div>
++                        );
++                      }
++
++                      return null;
++                    })}
+                     <SourceCitations sources={sources} />
+-                  </>
++                  </div>
+                 )}
+               </SupportMessage>
+             );
+@@ -439,16 +566,20 @@ export function ChatInterface({
+           </p>
+           <button
+             type="button"
+-            onClick={onReset ?? (() => window.location.reload())}
++            onClick={() => {
++              clearPersistedSession();
++              (onReset ?? (() => window.location.reload()))();
++            }}
+             className="mt-3 rounded-lg bg-neutral-900 px-4 py-1.5 text-xs font-medium text-white transition-colors hover:bg-neutral-700"
+           >
+             Start new session
+           </button>
+         </div>
+-      ) : (
++      ) : hasRequestedTicket ? null : (
+         <div className="shrink-0 border-t border-neutral-100 bg-white p-3">
+           <div className="relative">
+             <TextareaAutosize
++              ref={textareaRef}
+               minRows={3}
+               maxRows={6}
+               placeholder={
+@@ -464,7 +595,7 @@ export function ChatInterface({
+               }
+               onChange={(e) => setInput(e.target.value)}
+               onKeyDown={(e) => {
+-                if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
++                if (e.key === "Enter" && !e.shiftKey) {
+                   e.preventDefault();
+                   handleSend();
+                 }
+@@ -502,7 +633,11 @@ export function ChatInterface({
+             {canEscalate && (
+               <button
+                 type="button"
+-                onClick={handleEscalate}
++                onClick={() =>
++                  handleSend(
++                    "I'd like to create a support ticket and speak with a human agent.",
++                  )
++                }
+                 className="text-xs font-medium text-neutral-500 underline decoration-dotted underline-offset-2 hover:text-neutral-700"
+               >
+                 Convert to support ticket →
+diff --git a/apps/web/ui/support/clear-chat-button.tsx b/apps/web/ui/support/clear-chat-button.tsx
+new file mode 100644
+index 00000000000..81138dfe6b3
+--- /dev/null
++++ b/apps/web/ui/support/clear-chat-button.tsx
+@@ -0,0 +1,68 @@
++"use client";
++
++import { Popover } from "@dub/ui";
++import { Trash } from "@dub/ui/icons";
++import { cn } from "@dub/utils";
++import { useState } from "react";
++
++export function ClearChatButton({
++  onConfirm,
++  triggerClassName,
++  iconClassName,
++}: {
++  onConfirm: () => void;
++  triggerClassName?: string;
++  iconClassName?: string;
++}) {
++  const [open, setOpen] = useState(false);
++
++  return (
++    <Popover
++      openPopover={open}
++      setOpenPopover={setOpen}
++      side="bottom"
++      align="end"
++      forceDropdown
++      content={
++        <div className="p-3">
++          <p className="text-sm font-medium text-neutral-800">
++            Start a new conversation?
++          </p>
++          <p className="mt-0.5 text-xs text-neutral-500">
++            Your current messages and selections will be cleared.
++          </p>
++          <div className="mt-3 flex items-center justify-end gap-2">
++            <button
++              type="button"
++              onClick={() => setOpen(false)}
++              className="rounded-md px-2.5 py-1.5 text-xs font-medium text-neutral-600 transition-colors hover:bg-neutral-100"
++            >
++              Cancel
++            </button>
++            <button
++              type="button"
++              onClick={() => {
++                setOpen(false);
++                onConfirm();
++              }}
++              className="rounded-md bg-red-600 px-2.5 py-1.5 text-xs font-medium text-white transition-colors hover:bg-red-700"
++            >
++              Clear
++            </button>
++          </div>
++        </div>
++      }
++    >
++      <button
++        type="button"
++        className={cn(
++          "flex items-center justify-center rounded-lg transition-colors",
++          triggerClassName,
++        )}
++        aria-label="Clear chat"
++      >
++        <Trash className={cn("shrink-0", iconClassName)} />
++      </button>
++    </Popover>
++  );
++}
+diff --git a/apps/web/ui/support/code-block.tsx b/apps/web/ui/support/code-block.tsx
+index 59e2acc9ddf..b42dac19022 100644
+--- a/apps/web/ui/support/code-block.tsx
++++ b/apps/web/ui/support/code-block.tsx
+@@ -80,8 +80,19 @@ function CopyButton({ code }: { code: string }) {
+   );
+ 
+   const handleCopy = useCallback(async () => {
+-    if (copied || !navigator?.clipboard?.writeText) return;
+-    await navigator.clipboard.writeText(code);
++    if (copied) return;
++    try {
++      await navigator.clipboard.writeText(code);
++    } catch {
++      // Fallback for iframe contexts where clipboard API is restricted
++      const ta = document.createElement("textarea");
++      ta.value = code;
++      ta.style.cssText = "position:fixed;opacity:0;pointer-events:none";
++      document.body.appendChild(ta);
++      ta.select();
++      document.execCommand("copy");
++      document.body.removeChild(ta);
++    }
+     setCopied(true);
+     timerRef.current = setTimeout(() => setCopied(false), 2000);
+   }, [code, copied]);
+diff --git a/apps/web/ui/support/embedded-chat.tsx b/apps/web/ui/support/embedded-chat.tsx
+index ce12e345e28..32ffb72b2bd 100644
+--- a/apps/web/ui/support/embedded-chat.tsx
++++ b/apps/web/ui/support/embedded-chat.tsx
+@@ -1,13 +1,21 @@
+ "use client";
+ 
+-import { Tooltip } from "@dub/ui";
+-import { Trash } from "@dub/ui/icons";
++import { useSession } from "next-auth/react";
+ import { useState } from "react";
+ import { ChatInterface } from "./chat-interface";
++import { ClearChatButton } from "./clear-chat-button";
+ 
+ export function EmbeddedSupportChat() {
++  const { data: session } = useSession();
+   const [resetKey, setResetKey] = useState(0);
+-  const handleReset = () => setResetKey((k) => k + 1);
++  const handleReset = () => {
++    if (session?.user?.["id"]) {
++      try {
++        localStorage.removeItem(`dub-support-chat:${session.user["id"]}`);
++      } catch {}
++    }
++    setResetKey((k) => k + 1);
++  };
+ 
+   return (
+     <div className="flex min-h-[500px] flex-col overflow-hidden rounded-xl border border-neutral-200 bg-white shadow-sm">
+@@ -29,16 +37,11 @@ export function EmbeddedSupportChat() {
+           </div>
+         </div>
+ 
+-        <Tooltip content="Clear chat">
+-          <button
+-            type="button"
+-            onClick={handleReset}
+-            className="flex size-8 items-center justify-center rounded-lg text-neutral-400 transition-colors hover:bg-neutral-100 hover:text-neutral-700"
+-            aria-label="Clear chat"
+-          >
+-            <Trash className="size-4" />
+-          </button>
+-        </Tooltip>
++        <ClearChatButton
++          onConfirm={handleReset}
++          triggerClassName="size-8 text-neutral-400 hover:bg-neutral-100 hover:text-neutral-700"
++          iconClassName="size-4"
++        />
+       </div>
+ 
+       <ChatInterface
+diff --git a/apps/web/ui/support/ticket-upload.tsx b/apps/web/ui/support/ticket-upload.tsx
+new file mode 100644
+index 00000000000..85ed7cef67d
+--- /dev/null
++++ b/apps/web/ui/support/ticket-upload.tsx
+@@ -0,0 +1,358 @@
++"use client";
++
++import { FileContent, Xmark } from "@dub/ui/icons";
++import { cn } from "@dub/utils";
++import { useCallback, useEffect, useRef, useState } from "react";
++
++const ACCEPTED_TYPES = [
++  "image/png",
++  "image/jpeg",
++  "image/gif",
++  "image/webp",
++  "application/pdf",
++  "text/plain",
++  "text/csv",
++];
++const MAX_FILE_SIZE_MB = 10;
++const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
++const MAX_FILES = 5;
++
++type FileStatus = "pending" | "uploading" | "done" | "error";
++
++type FileEntry = {
++  id: string;
++  file: File;
++  status: FileStatus;
++  attachmentId?: string;
++  errorMessage?: string;
++};
++
++async function uploadToPlain(
++  file: File,
++): Promise<{ attachmentId: string } | { error: string }> {
++  const res = await fetch("/api/ai/support-chat/upload", {
++    method: "POST",
++    headers: { "Content-Type": "application/json" },
++    body: JSON.stringify({ fileName: file.name, fileSizeBytes: file.size }),
++  });
++
++  if (!res.ok) {
++    return { error: "Failed to get upload URL" };
++  }
++
++  const {
++    attachmentId,
++    uploadFormUrl,
++    uploadFormData,
++  }: {
++    attachmentId: string;
++    uploadFormUrl: string;
++    uploadFormData: { key: string; value: string }[];
++  } = await res.json();
++
++  const formData = new FormData();
++  for (const { key, value } of uploadFormData) {
++    formData.append(key, value);
++  }
++  formData.append("file", file);
++
++  const uploadRes = await fetch(uploadFormUrl, {
++    method: "POST",
++    body: formData,
++  });
++
++  if (!uploadRes.ok) {
++    return { error: "Upload failed" };
++  }
++
++  return { attachmentId };
++}
++
++export function TicketUpload({
++  onSubmit,
++  onCancel,
++  submitted = false,
++}: {
++  onSubmit: (attachmentIds: string[], details: string) => void;
++  onCancel?: () => void;
++  submitted?: boolean;
++}) {
++  const [files, setFiles] = useState<FileEntry[]>([]);
++  const [isDragging, setIsDragging] = useState(false);
++  const [details, setDetails] = useState("");
++  const fileInputRef = useRef<HTMLInputElement>(null);
++
++  const isUploading = files.some((f) => f.status === "uploading");
++  const canSubmit = !isUploading;
++
++  const addFiles = useCallback((incoming: File[]) => {
++    const valid = incoming
++      .filter((f) => {
++        if (!ACCEPTED_TYPES.includes(f.type)) return false;
++        if (f.size > MAX_FILE_SIZE_BYTES) return false;
++        return true;
++      })
++      .slice(0, MAX_FILES);
++
++    if (valid.length === 0) return;
++
++    const entries: FileEntry[] = valid.map((file) => ({
++      id: `${file.name}-${file.size}-${Date.now()}-${Math.random()}`,
++      file,
++      status: "uploading",
++    }));
++
++    let allowedEntries: FileEntry[] = [];
++    setFiles((prev) => {
++      const combined = [...prev, ...entries].slice(0, MAX_FILES);
++      allowedEntries = combined.slice(prev.length);
++      return combined;
++    });
++
++    allowedEntries.forEach((entry) => {
++      uploadToPlain(entry.file).then((result) => {
++        setFiles((prev) =>
++          prev.map((f) =>
++            f.id === entry.id
++              ? "error" in result
++                ? { ...f, status: "error", errorMessage: result.error }
++                : { ...f, status: "done", attachmentId: result.attachmentId }
++              : f,
++          ),
++        );
++      });
++    });
++  }, []);
++
++  const removeFile = (id: string) => {
++    setFiles((prev) => prev.filter((f) => f.id !== id));
++  };
++
++  const handleDrop = (e: React.DragEvent) => {
++    e.preventDefault();
++    setIsDragging(false);
++    addFiles(Array.from(e.dataTransfer.files));
++  };
++
++  const handleSubmit = () => {
++    const attachmentIds = files
++      .filter((f) => f.status === "done" && f.attachmentId)
++      .map((f) => f.attachmentId!);
++    onSubmit(attachmentIds, details.trim());
++  };
++
++  if (submitted) {
++    return (
++      <div className="flex items-center gap-3 pb-3 px-3">
++        <div className="flex size-6 shrink-0 items-center justify-center rounded-full bg-green-100 text-xs font-bold text-green-600">
++          ✓
++        </div>
++        <div>
++          <p className="text-sm font-medium text-neutral-700">
++            Ticket submitted
++          </p>
++          <p className="text-xs text-neutral-500">
++            Our support team will be in touch soon.
++          </p>
++        </div>
++      </div>
++    );
++  }
++
++  return (
++    <div className="flex flex-col gap-3 p-3 pt-0">
++      <div>
++        <p className="text-sm font-medium text-neutral-700">
++          Create a support ticket
++        </p>
++        <p className="mt-0.5 text-xs text-neutral-500">
++          Our team will review your request and get back to you shortly.
++        </p>
++      </div>
++
++      <div className="flex flex-col gap-1.5">
++        <p className="text-xs font-medium text-neutral-500">
++          What can we help with?
++        </p>
++        <textarea
++          value={details}
++          onChange={(e) => setDetails(e.target.value)}
++          placeholder="Describe your issue in more detail..."
++          rows={3}
++          className="w-full resize-none rounded-lg border border-neutral-200 px-3 py-2 text-sm text-neutral-900 placeholder-neutral-400 focus:border-neutral-400 focus:outline-none focus:ring-2 focus:ring-neutral-200"
++        />
++      </div>
++
++      <div className="flex items-center justify-between">
++        <p className="text-xs font-medium text-neutral-500">
++          Attachments
++        </p>
++        <p className="text-xs text-neutral-400">
++          Images, PDF · max {MAX_FILE_SIZE_MB}MB · up to {MAX_FILES} files
++        </p>
++      </div>
++
++      {files.length < MAX_FILES && (
++        <div
++          role="button"
++          tabIndex={0}
++          onDragOver={(e) => {
++            e.preventDefault();
++            setIsDragging(true);
++          }}
++          onDragLeave={() => setIsDragging(false)}
++          onDrop={handleDrop}
++          onClick={() => fileInputRef.current?.click()}
++          onKeyDown={(e) => {
++            if (e.key === "Enter" || e.key === " ") {
++              e.preventDefault();
++              fileInputRef.current?.click();
++            }
++          }}
++          className={cn(
++            "flex cursor-pointer flex-col items-center justify-center gap-1.5 rounded-xl border-2 border-dashed py-5 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-neutral-400",
++            isDragging
++              ? "border-neutral-400 bg-neutral-50"
++              : "border-neutral-200 hover:border-neutral-300 hover:bg-neutral-50",
++          )}
++        >
++          <p className="text-xs font-medium text-neutral-500">
++            Drag & drop or{" "}
++            <span className="text-neutral-700 underline underline-offset-2">
++              browse
++            </span>
++          </p>
++          <input
++            ref={fileInputRef}
++            type="file"
++            multiple
++            accept={ACCEPTED_TYPES.join(",")}
++            className="hidden"
++            onChange={(e) => addFiles(Array.from(e.target.files ?? []))}
++          />
++        </div>
++      )}
++
++      {files.length > 0 && (
++        <div className="flex flex-wrap gap-2">
++          {files.map((entry) => (
++            <FilePreview
++              key={entry.id}
++              entry={entry}
++              onRemove={() => removeFile(entry.id)}
++            />
++          ))}
++        </div>
++      )}
++
++      <div className="flex items-center justify-between gap-2 border-t border-neutral-100 pt-2">
++        {onCancel && (
++          <button
++            type="button"
++            onClick={onCancel}
++            className="rounded-md px-3 py-1.5 text-xs font-medium text-neutral-500 transition-colors hover:text-neutral-700"
++          >
++            Cancel
++          </button>
++        )}
++        <button
++          type="button"
++          onClick={handleSubmit}
++          disabled={!canSubmit}
++          className={cn(
++            "rounded-lg px-4 py-1.5 text-xs font-medium transition-colors",
++            canSubmit
++              ? "bg-neutral-900 text-white hover:bg-neutral-700"
++              : "cursor-not-allowed bg-neutral-200 text-neutral-400",
++          )}
++        >
++          {isUploading ? "Uploading..." : "Submit ticket"}
++        </button>
++      </div>
++    </div>
++  );
++}
++
++function FilePreview({
++  entry,
++  onRemove,
++}: {
++  entry: FileEntry;
++  onRemove: () => void;
++}) {
++  const isImage = entry.file.type.startsWith("image/");
++  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
++
++  useEffect(() => {
++    if (!isImage) return;
++    const url = URL.createObjectURL(entry.file);
++    setPreviewUrl(url);
++    return () => URL.revokeObjectURL(url);
++  }, [entry.file, isImage]);
++
++  const removeBtn = (
++    <button
++      type="button"
++      onClick={onRemove}
++      aria-label="Remove file"
++      className="absolute -right-1.5 -top-1.5 flex size-5 items-center justify-center rounded-full bg-neutral-900 text-white shadow transition-colors hover:bg-neutral-700"
++    >
++      <Xmark className="size-2.5" />
++    </button>
++  );
++
++  if (isImage && previewUrl) {
++    return (
++      <div className="relative size-16 shrink-0">
++        <img
++          src={previewUrl}
++          alt={entry.file.name}
++          className={cn(
++            "size-full rounded-lg object-cover",
++            entry.status === "uploading" && "opacity-50",
++            entry.status === "error" && "opacity-50 ring-2 ring-red-400",
++          )}
++        />
++        {entry.status === "uploading" && (
++          <div className="absolute inset-0 flex items-center justify-center rounded-lg bg-black/20">
++            <div className="size-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
++          </div>
++        )}
++        {removeBtn}
++      </div>
++    );
++  }
++
++  const fileTypeLabel =
++    entry.status === "uploading"
++      ? "Uploading…"
++      : entry.status === "error"
++        ? "Failed"
++        : entry.file.type === "application/pdf"
++          ? "PDF"
++          : entry.file.type === "text/csv"
++            ? "CSV"
++            : "File";
++
++  return (
++    <div className="relative flex shrink-0 items-center gap-2 rounded-xl border border-neutral-200 bg-white py-2 pl-2.5 pr-8">
++      <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-neutral-100">
++        <FileContent className="size-4 text-neutral-400" />
++      </div>
++      <div className="max-w-[112px]">
++        <p className="truncate text-xs font-medium text-neutral-700">
++          {entry.file.name}
++        </p>
++        <p
++          className={cn(
++            "text-[10px]",
++            entry.status === "error" ? "text-red-500" : "text-neutral-400",
++          )}
++        >
++          {fileTypeLabel}
++        </p>
++      </div>
++      {removeBtn}
++    </div>
++  );
++}

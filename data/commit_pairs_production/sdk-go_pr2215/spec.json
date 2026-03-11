@@ -1,0 +1,12 @@
+{
+  "feature_name": "Worker Heartbeat Context Cancellation",
+  "description": "Implement a mechanism to properly cancel in-flight heartbeat gRPC calls when a worker stops. Currently, heartbeats can hang during worker shutdown because they use a non-cancellable context. We need to propagate a cancellable context that gets canceled during worker teardown to ensure clean shutdown.",
+  "functional_requirements": [
+    "Create a dedicated cancellable context for heartbeat operations in the worker lifecycle",
+    "Use this cancellable context instead of context.Background() for all RecordWorkerHeartbeat gRPC calls",
+    "Ensure the heartbeat context is canceled before other shutdown signals are sent during worker.Stop()",
+    "Add test coverage to verify that stop() returns promptly even when heartbeat RPCs are blocked"
+  ],
+  "project_name": "sdk-go",
+  "source_pr": "https://github.com/temporalio/sdk-go/pull/2215"
+}

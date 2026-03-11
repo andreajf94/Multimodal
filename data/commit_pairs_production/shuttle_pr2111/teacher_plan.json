@@ -1,0 +1,150 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "api_design",
+      "recommendation": "Made the args module public to expose CLI argument parsing functionality to library consumers",
+      "rationale": "External consumers need access to the argument parsing logic to properly construct commands when using the library programmatically. By making the module public, we enable library users to reuse the same argument structures and parsing logic that the CLI uses, ensuring consistency.",
+      "alternatives_considered": [
+        "Keep args module private and create separate public types",
+        "Expose only specific types via re-exports"
+      ],
+      "files_affected": [
+        "cargo-shuttle/src/lib.rs",
+        "cargo-shuttle/src/args.rs"
+      ]
+    },
+    {
+      "dimension": "api_design",
+      "recommendation": "Introduced CommandOutput enum to provide typed return values for different command executions",
+      "rationale": "Different commands produce different types of output (deployments, projects, etc.). A single Result<()> return type loses type information. The CommandOutput enum preserves this information while maintaining a unified return type for the run() method. This allows library consumers to pattern match on the result and handle different command outputs appropriately.",
+      "alternatives_considered": [
+        "Generic return types for each command",
+        "Returning a trait object like Box<dyn Any>",
+        "Keeping Result<()> and requiring consumers to parse stdout"
+      ],
+      "files_affected": [
+        "cargo-shuttle/src/lib.rs"
+      ]
+    },
+    {
+      "dimension": "api_design",
+      "recommendation": "Updated all command handlers to return CommandOutput instead of Result<()>",
+      "rationale": "To maintain consistency and ensure the library API properly communicates what type of output each command produces. Commands that don't produce structured output return CommandOutput::None, while commands like deployment status and deploy return CommandOutput::Deployment. This creates a clear contract for library consumers.",
+      "alternatives_considered": [
+        "Only update commands that produce structured output",
+        "Use Option<Box<dyn Any>> instead of enum"
+      ],
+      "files_affected": [
+        "cargo-shuttle/src/lib.rs"
+      ]
+    },
+    {
+      "dimension": "backward_compatibility",
+      "recommendation": "Added map(|_| ()) to binary entry points to maintain compatibility with existing CLI usage",
+      "rationale": "The CLI binaries (cargo-shuttle and shuttle) expect a Result<()> return type from main(). Since the library's run() method now returns Result<CommandOutput>, we need to map the successful CommandOutput to () to maintain the existing function signature. This ensures the CLI continues to work without changes to the binary code.",
+      "alternatives_considered": [
+        "Change binary entry points to handle CommandOutput",
+        "Create a separate library API with different return types"
+      ],
+      "files_affected": [
+        "cargo-shuttle/src/bin/cargo-shuttle.rs",
+        "cargo-shuttle/src/bin/shuttle.rs"
+      ]
+    },
+    {
+      "dimension": "data_modeling",
+      "recommendation": "Added optional _build_meta field to DeployArgs for programmatic control over build metadata",
+      "rationale": "When using the library programmatically, consumers may want to provide custom build metadata instead of relying on automatic Git discovery. This field is marked with #[arg(skip)] to hide it from CLI users while making it available to library consumers. This follows the pattern of separating CLI concerns from library concerns.",
+      "alternatives_considered": [
+        "Separate struct for programmatic deployment",
+        "Add a builder pattern for DeployArgs"
+      ],
+      "files_affected": [
+        "cargo-shuttle/src/args.rs"
+      ]
+    },
+    {
+      "dimension": "testing",
+      "recommendation": "Updated integration tests to use the new public args module imports",
+      "rationale": "Tests that were previously using internal imports needed to be updated to use the now-public API surface. This validates that the public API is actually usable by external consumers and helps prevent accidental breaking changes in the future.",
+      "alternatives_considered": [
+        "Keep tests using internal imports via #[cfg(test)]",
+        "Create separate test-only re-exports"
+      ],
+      "files_affected": [
+        "cargo-shuttle/tests/integration/init.rs",
+        "cargo-shuttle/tests/integration/main.rs",
+        "cargo-shuttle/tests/integration/run.rs"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Maintained existing error handling while adapting to new return types",
+      "rationale": "The change preserves all existing error handling logic. The Result<CommandOutput> type still propagates errors through the ? operator, and successful results are wrapped in the appropriate CommandOutput variant. This ensures that error handling remains consistent while adding type information to successful results.",
+      "alternatives_considered": [
+        "Create custom error type for library API",
+        "Separate error and success types"
+      ],
+      "files_affected": [
+        "cargo-shuttle/src/lib.rs"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Public Library API Surface",
+      "description": "Expose the args module and related types to make them accessible to external library consumers. This includes making the module public and updating imports throughout the codebase.",
+      "files_to_modify": [
+        "cargo-shuttle/src/lib.rs",
+        "cargo-shuttle/src/args.rs",
+        "cargo-shuttle/tests/integration/init.rs",
+        "cargo-shuttle/tests/integration/main.rs",
+        "cargo-shuttle/tests/integration/run.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-002",
+      "title": "Command Output Type System",
+      "description": "Design and implement a type system for command outputs. Create CommandOutput enum to represent different types of command results and update all command handlers to return appropriate variants.",
+      "files_to_modify": [
+        "cargo-shuttle/src/lib.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-003",
+      "title": "Binary Entry Point Compatibility",
+      "description": "Update binary entry points to maintain compatibility with the new library API. Add map operations to convert CommandOutput to () for CLI usage.",
+      "files_to_modify": [
+        "cargo-shuttle/src/bin/cargo-shuttle.rs",
+        "cargo-shuttle/src/bin/shuttle.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-004",
+      "title": "Programmatic Build Metadata Support",
+      "description": "Add support for programmatically providing build metadata in DeployArgs. This enables library consumers to control build information instead of relying on automatic Git discovery.",
+      "files_to_modify": [
+        "cargo-shuttle/src/args.rs",
+        "cargo-shuttle/src/lib.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The changes implement an enhanced library API for cargo-shuttle by exposing the argument parsing module publicly and introducing a typed return system for command outputs. The core architectural decision was to transform the library from a CLI-focused implementation to a proper library API while maintaining backward compatibility for existing CLI usage.\n\nThe implementation follows a clear separation of concerns: the args module is now public, allowing external consumers to use the same argument structures as the CLI. A new CommandOutput enum provides typed returns for different commands, with deployment-related commands returning CommandOutput::Deployment and other commands returning CommandOutput::None. This preserves type information while maintaining a unified API surface.\n\nImportantly, the changes maintain backward compatibility by updating binary entry points to map CommandOutput results to the expected Result<()> return type. The integration tests were updated to use the new public imports, validating that the API is usable. Additionally, the DeployArgs struct was extended with an optional _build_meta field (hidden from CLI) to support programmatic control over build metadata, demonstrating thoughtful API design that serves both CLI and library consumers.",
+  "source_pr": "https://github.com/shuttle-hq/shuttle/pull/2111",
+  "before_sha": "8b84c4a84d5570e3e6c3462de24a62736ee71963",
+  "after_sha": "0781c0da4953d4dc51ec55d1a00f9ff27359393b",
+  "diff_stats": {
+    "additions": 145,
+    "deletions": 62,
+    "files_changed": 7
+  }
+}

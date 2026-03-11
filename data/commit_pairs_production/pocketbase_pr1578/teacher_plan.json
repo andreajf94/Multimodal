@@ -1,0 +1,89 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "api_design",
+      "recommendation": "Added a public GetFile method to the FileSystem interface that returns an io.ReadCloser for direct file access",
+      "rationale": "The existing FileSystem interface only provided HTTP serving capabilities via the Serve method. This new method enables programmatic file access when PocketBase is used in embedded mode, allowing developers to read file content without making HTTP requests. The method signature follows Go conventions by returning an io.ReadCloser, which is a standard interface for readable streams that must be closed.",
+      "alternatives_considered": [
+        "Adding a method that returns []byte (would load entire file into memory, inefficient for large files)",
+        "Creating a separate interface for embedded access (would increase complexity)",
+        "Exposing the underlying bucket directly (would break encapsulation)"
+      ],
+      "files_affected": [
+        "tools/filesystem/filesystem.go"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Propagated the underlying bucket.NewReader error directly to the caller",
+      "rationale": "The implementation delegates error handling to the underlying storage system (bucket.NewReader), which already handles cases like file not found, permission errors, and network issues. This maintains consistency with the existing Serve method's error handling approach and avoids reinventing error types.",
+      "alternatives_considered": [
+        "Wrapping the error with additional context (would add complexity without clear benefit)",
+        "Creating custom error types for different failure modes (would require maintaining parallel error hierarchies)"
+      ],
+      "files_affected": [
+        "tools/filesystem/filesystem.go"
+      ]
+    },
+    {
+      "dimension": "testing",
+      "recommendation": "Added a simple integration test that verifies GetFile works with the local filesystem implementation",
+      "rationale": "The test follows the existing pattern in the test file: creates a test directory, initializes a local filesystem, calls GetFile, and verifies a non-nil reader is returned. This ensures the method works correctly with the most commonly used filesystem implementation. The test also demonstrates proper resource cleanup with defer f.Close().",
+      "alternatives_considered": [
+        "Mock-based unit tests (would test the interface but not actual integration)",
+        "Testing with multiple filesystem backends (S3, etc.) (would increase test complexity significantly)",
+        "No testing (would risk regression)"
+      ],
+      "files_affected": [
+        "tools/filesystem/filesystem_test.go"
+      ]
+    },
+    {
+      "dimension": "resource_management",
+      "recommendation": "Added clear documentation that callers must close the returned reader",
+      "rationale": "The io.ReadCloser interface requires callers to close resources to prevent memory leaks and file descriptor exhaustion. The comment 'NB! Make sure to call `Close()` after you are done working with it.' follows Go conventions for methods that return resources requiring cleanup. This is consistent with how Go's standard library handles similar cases (os.Open, etc.).",
+      "alternatives_considered": [
+        "Using finalizers or runtime.SetFinalizer (unreliable and non-idiomatic)",
+        "Returning a custom struct with automatic cleanup (would complicate the API)",
+        "Not documenting the requirement (would lead to resource leaks in user code)"
+      ],
+      "files_affected": [
+        "tools/filesystem/filesystem.go"
+      ]
+    },
+    {
+      "dimension": "backward_compatibility",
+      "recommendation": "Added the method without modifying existing public interfaces or breaking changes",
+      "rationale": "The change is purely additive - it adds a new method to the System struct without modifying any existing method signatures or behavior. This ensures that existing code using the FileSystem interface continues to work unchanged. The implementation reuses the same underlying bucket.NewReader call as the Serve method, ensuring consistent behavior.",
+      "alternatives_considered": [
+        "Modifying the FileSystem interface (would break all implementations)",
+        "Creating a new interface (would require refactoring existing code)"
+      ],
+      "files_affected": [
+        "tools/filesystem/filesystem.go"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Add GetFile method to FileSystem for embedded access",
+      "description": "Implement a public method that returns a readable stream for file content, enabling direct file access when PocketBase is used in embedded mode without requiring HTTP requests",
+      "files_to_modify": [
+        "tools/filesystem/filesystem.go",
+        "tools/filesystem/filesystem_test.go"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation adds a simple but crucial method to the FileSystem interface that enables programmatic file access in embedded scenarios. The GetFile method follows Go's idiomatic patterns by returning an io.ReadCloser, requiring callers to properly close the resource, and propagating errors from the underlying storage system.\n\nThe change is minimal and focused: it adds only 10 lines of implementation code and 19 lines of test code. The implementation leverages the existing bucket.NewReader infrastructure already used by the Serve method, ensuring consistency and reducing maintenance overhead. This approach allows the same code path to handle both HTTP serving and direct file access.\n\nBy placing this method in the tools/filesystem package, it becomes available to any component that imports the package, not just the HTTP API layer. This is particularly valuable for plugin developers and those using PocketBase as a library rather than a standalone server. The addition maintains full backward compatibility while addressing a clear use case for embedded usage patterns.",
+  "source_pr": "https://github.com/pocketbase/pocketbase/pull/1578",
+  "before_sha": "59e4939e1d4b78161483f41e82a7e22421949ead",
+  "after_sha": "a5ceee33df67a9b9409f16e916f38b9a4c3cfd5e",
+  "diff_stats": {
+    "additions": 28,
+    "deletions": 0,
+    "files_changed": 2
+  }
+}

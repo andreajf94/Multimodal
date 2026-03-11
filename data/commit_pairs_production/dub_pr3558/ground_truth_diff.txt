@@ -1,0 +1,800 @@
+diff --git a/apps/web/app/app.dub.co/(dashboard)/[slug]/(ee)/program/resources/program-brand-assets/add-file-modal.tsx b/apps/web/app/app.dub.co/(dashboard)/[slug]/(ee)/program/resources/program-brand-assets/add-file-modal.tsx
+index b9efcf45560..d62ebce1f9c 100644
+--- a/apps/web/app/app.dub.co/(dashboard)/[slug]/(ee)/program/resources/program-brand-assets/add-file-modal.tsx
++++ b/apps/web/app/app.dub.co/(dashboard)/[slug]/(ee)/program/resources/program-brand-assets/add-file-modal.tsx
+@@ -13,11 +13,13 @@ import {
+   SetStateAction,
+   useCallback,
+   useMemo,
++  useRef,
+   useState,
+ } from "react";
+ import { Controller, useForm } from "react-hook-form";
+ import { toast } from "sonner";
+ import * as z from "zod/v4";
++import { useUploadProgramResource } from "./use-upload-program-resource";
+ 
+ type FileModalProps = {
+   showFileModal: boolean;
+@@ -25,10 +27,9 @@ type FileModalProps = {
+   existingResource?: ProgramResourceFile;
+ };
+ 
+-// Define the form schema
+ const fileFormSchema = z.object({
+   name: z.string().min(1, "Name is required"),
+-  file: z.string().optional(),
++  hasFile: z.boolean().optional(),
+   extension: z.string().nullish(),
+ });
+ 
+@@ -53,6 +54,10 @@ function FileModalInner({
+   const { mutate } = useProgramResources();
+   const isEditing = Boolean(existingResource);
+ 
++  const rawFileRef = useRef<File | null>(null);
++  const [fileName, setFileName] = useState(existingResource?.name || "");
++  const [hasNewFile, setHasNewFile] = useState(false);
++
+   const {
+     register,
+     handleSubmit,
+@@ -64,12 +69,11 @@ function FileModalInner({
+   } = useForm<FileFormData>({
+     defaultValues: {
+       name: existingResource?.name || "",
+-      file: "",
++      hasFile: false,
+     },
+   });
+ 
+-  const [fileName, setFileName] = useState(existingResource?.name || "");
+-  const [hasNewFile, setHasNewFile] = useState(false);
++  const { upload } = useUploadProgramResource(workspaceId!);
+ 
+   const { executeAsync: executeAdd } = useAction(addProgramResourceAction, {
+     onSuccess: () => {
+@@ -120,28 +124,56 @@ function FileModalInner({
+ 
+       <form
+         onSubmit={handleSubmit(async (data: FileFormData) => {
+-          if (isEditing && existingResource) {
+-            await executeUpdate({
+-              workspaceId: workspaceId!,
+-              resourceId: existingResource.id,
+-              resourceType: "file",
+-              name: data.name,
+-              ...(hasNewFile && data.file
+-                ? { file: data.file, extension: data.extension }
+-                : {}),
+-            });
+-          } else {
+-            if (!data.file) {
+-              setError("file", { message: "File is required" });
+-              return;
++          try {
++            if (isEditing && existingResource) {
++              let uploadedKey: string | undefined;
++              let uploadedFileSize: number | undefined;
++
++              if (hasNewFile && rawFileRef.current) {
++                const { key, fileSize } = await upload({
++                  file: rawFileRef.current,
++                  resourceType: "file",
++                  name: data.name,
++                  extension: data.extension ?? undefined,
++                });
++                uploadedKey = key;
++                uploadedFileSize = fileSize;
++              }
++
++              await executeUpdate({
++                workspaceId: workspaceId!,
++                resourceId: existingResource.id,
++                resourceType: "file",
++                name: data.name,
++                ...(uploadedKey
++                  ? { key: uploadedKey, fileSize: uploadedFileSize }
++                  : {}),
++              });
++            } else {
++              if (!rawFileRef.current) {
++                setError("hasFile", { message: "File is required" });
++                return;
++              }
++
++              const { key, fileSize } = await upload({
++                file: rawFileRef.current,
++                resourceType: "file",
++                name: data.name,
++                extension: data.extension ?? undefined,
++              });
++
++              await executeAdd({
++                workspaceId: workspaceId!,
++                name: data.name,
++                resourceType: "file",
++                key,
++                fileSize,
++              });
+             }
+-            await executeAdd({
+-              workspaceId: workspaceId!,
+-              name: data.name,
+-              resourceType: "file",
+-              file: data.file,
+-              extension: data.extension,
+-            });
++          } catch (err) {
++            const message =
++              err instanceof Error ? err.message : "Something went wrong";
++            toast.error(message);
+           }
+         })}
+       >
+@@ -156,25 +188,28 @@ function FileModalInner({
+               </label>
+               <Controller
+                 control={control}
+-                name="file"
+-                rules={{ required: !isEditing ? "File is required" : false }}
++                name="hasFile"
++                rules={{
++                  validate: (v) =>
++                    !isEditing && !v ? "File is required" : true,
++                }}
+                 render={({ field }) => (
+                   <FileUpload
+                     accept="programResourceFiles"
+                     className={cn(
+                       "aspect-[4.2] w-full rounded-md border border-neutral-300",
+-                      errors.file && "border-red-300 ring-1 ring-red-500",
++                      errors.hasFile && "border-red-300 ring-1 ring-red-500",
+                     )}
+                     iconClassName="size-5"
+                     variant="plain"
+                     readFile
+                     onChange={({ file, src }) => {
++                      rawFileRef.current = file;
+                       setFileName(file.name);
+-                      field.onChange(src);
++                      field.onChange(true);
+                       setValue("extension", file.name.split(".").pop());
+                       setHasNewFile(true);
+ 
+-                      // Set the file name to the file name without extension if no name is provided
+                       const currentName = getValues("name");
+                       if (!currentName && file.name) {
+                         const nameWithoutExtension = file.name
+@@ -196,9 +231,9 @@ function FileModalInner({
+                   />
+                 )}
+               />
+-              {errors.file && (
++              {errors.hasFile && (
+                 <p className="mt-1 text-xs text-red-600">
+-                  {errors.file.message}
++                  {errors.hasFile.message}
+                 </p>
+               )}
+             </div>
+diff --git a/apps/web/app/app.dub.co/(dashboard)/[slug]/(ee)/program/resources/program-brand-assets/add-logo-modal.tsx b/apps/web/app/app.dub.co/(dashboard)/[slug]/(ee)/program/resources/program-brand-assets/add-logo-modal.tsx
+index cc923ac7254..1c385511150 100644
+--- a/apps/web/app/app.dub.co/(dashboard)/[slug]/(ee)/program/resources/program-brand-assets/add-logo-modal.tsx
++++ b/apps/web/app/app.dub.co/(dashboard)/[slug]/(ee)/program/resources/program-brand-assets/add-logo-modal.tsx
+@@ -13,11 +13,13 @@ import {
+   SetStateAction,
+   useCallback,
+   useMemo,
++  useRef,
+   useState,
+ } from "react";
+ import { Controller, useForm } from "react-hook-form";
+ import { toast } from "sonner";
+ import * as z from "zod/v4";
++import { useUploadProgramResource } from "./use-upload-program-resource";
+ 
+ type LogoModalProps = {
+   showLogoModal: boolean;
+@@ -25,10 +27,10 @@ type LogoModalProps = {
+   existingResource?: ProgramResourceFile;
+ };
+ 
+-// Define the form schema
+ const logoFormSchema = z.object({
+   name: z.string(),
+-  file: z.string().optional(),
++  previewSrc: z.string().optional(),
++  hasFile: z.boolean().optional(),
+   extension: z.string().nullish(),
+ });
+ 
+@@ -53,6 +55,9 @@ function LogoModalInner({
+   const { mutate } = useProgramResources();
+   const isEditing = Boolean(existingResource);
+ 
++  const rawFileRef = useRef<File | null>(null);
++  const [hasNewFile, setHasNewFile] = useState(false);
++
+   const {
+     register,
+     handleSubmit,
+@@ -64,12 +69,12 @@ function LogoModalInner({
+   } = useForm<LogoFormData>({
+     defaultValues: {
+       name: existingResource?.name || "",
+-      file: "",
++      previewSrc: "",
++      hasFile: false,
+     },
+   });
+ 
+-  // Track if user has selected a new file
+-  const [hasNewFile, setHasNewFile] = useState(false);
++  const { upload } = useUploadProgramResource(workspaceId!);
+ 
+   const { executeAsync: executeAdd } = useAction(addProgramResourceAction, {
+     onSuccess: () => {
+@@ -120,28 +125,56 @@ function LogoModalInner({
+ 
+       <form
+         onSubmit={handleSubmit(async (data: LogoFormData) => {
+-          if (isEditing && existingResource) {
+-            await executeUpdate({
+-              workspaceId: workspaceId!,
+-              resourceId: existingResource.id,
+-              resourceType: "logo",
+-              name: data.name,
+-              ...(hasNewFile && data.file
+-                ? { file: data.file, extension: data.extension }
+-                : {}),
+-            });
+-          } else {
+-            if (!data.file) {
+-              setError("file", { message: "Logo file is required" });
+-              return;
++          try {
++            if (isEditing && existingResource) {
++              let uploadedKey: string | undefined;
++              let uploadedFileSize: number | undefined;
++
++              if (hasNewFile && rawFileRef.current) {
++                const { key, fileSize } = await upload({
++                  file: rawFileRef.current,
++                  resourceType: "logo",
++                  name: data.name,
++                  extension: data.extension ?? undefined,
++                });
++                uploadedKey = key;
++                uploadedFileSize = fileSize;
++              }
++
++              await executeUpdate({
++                workspaceId: workspaceId!,
++                resourceId: existingResource.id,
++                resourceType: "logo",
++                name: data.name,
++                ...(uploadedKey
++                  ? { key: uploadedKey, fileSize: uploadedFileSize }
++                  : {}),
++              });
++            } else {
++              if (!rawFileRef.current) {
++                setError("hasFile", { message: "Logo file is required" });
++                return;
++              }
++
++              const { key, fileSize } = await upload({
++                file: rawFileRef.current,
++                resourceType: "logo",
++                name: data.name,
++                extension: data.extension ?? undefined,
++              });
++
++              await executeAdd({
++                workspaceId: workspaceId!,
++                name: data.name,
++                resourceType: "logo",
++                key,
++                fileSize,
++              });
+             }
+-            await executeAdd({
+-              workspaceId: workspaceId!,
+-              name: data.name,
+-              resourceType: "logo",
+-              file: data.file,
+-              extension: data.extension,
+-            });
++          } catch (err) {
++            const message =
++              err instanceof Error ? err.message : "Something went wrong";
++            toast.error(message);
+           }
+         })}
+       >
+@@ -156,16 +189,19 @@ function LogoModalInner({
+               </label>
+               <Controller
+                 control={control}
+-                name="file"
++                name="previewSrc"
+                 rules={{
+-                  required: !isEditing ? "Logo file is required" : false,
++                  validate: (_, formValues) =>
++                    !isEditing && !formValues.hasFile
++                      ? "Logo file is required"
++                      : true,
+                 }}
+                 render={({ field }) => (
+                   <FileUpload
+                     accept="programResourceImages"
+                     className={cn(
+                       "aspect-[4.2] w-full rounded-md border border-neutral-300",
+-                      errors.file && "border-red-300 ring-1 ring-red-500",
++                      errors.previewSrc && "border-red-300 ring-1 ring-red-500",
+                     )}
+                     iconClassName="size-5"
+                     previewClassName="object-contain"
+@@ -173,11 +209,12 @@ function LogoModalInner({
+                     imageSrc={field.value || existingResource?.url}
+                     readFile
+                     onChange={({ file, src }) => {
++                      rawFileRef.current = file;
+                       field.onChange(src);
++                      setValue("hasFile", true);
+                       setValue("extension", file.name.split(".").pop());
+                       setHasNewFile(true);
+ 
+-                      // Set the logo name to the file name without extension if no name is provided
+                       const currentName = getValues("name");
+                       if (!currentName && file.name) {
+                         const nameWithoutExtension = file.name
+@@ -196,9 +233,9 @@ function LogoModalInner({
+                   />
+                 )}
+               />
+-              {errors.file && (
++              {errors.previewSrc && (
+                 <p className="mt-1 text-xs text-red-600">
+-                  {errors.file.message}
++                  {errors.previewSrc.message}
+                 </p>
+               )}
+             </div>
+@@ -274,5 +311,4 @@ export function useLogoModal({
+   );
+ }
+ 
+-// Keep backwards compatibility alias
+ export const useAddLogoModal = useLogoModal;
+diff --git a/apps/web/app/app.dub.co/(dashboard)/[slug]/(ee)/program/resources/program-brand-assets/use-upload-program-resource.ts b/apps/web/app/app.dub.co/(dashboard)/[slug]/(ee)/program/resources/program-brand-assets/use-upload-program-resource.ts
+new file mode 100644
+index 00000000000..d1bc9457ecc
+--- /dev/null
++++ b/apps/web/app/app.dub.co/(dashboard)/[slug]/(ee)/program/resources/program-brand-assets/use-upload-program-resource.ts
+@@ -0,0 +1,46 @@
++"use client";
++
++import { getProgramResourceUploadUrlAction } from "@/lib/actions/partners/program-resources/get-program-resource-upload-url";
++import { useAction } from "next-safe-action/hooks";
++
++export function useUploadProgramResource(workspaceId: string) {
++  const { executeAsync: getUploadUrl } = useAction(
++    getProgramResourceUploadUrlAction,
++  );
++
++  const upload = async (opts: {
++    file: File;
++    name: string;
++    resourceType: "logo" | "file";
++    extension?: string;
++  }) => {
++    const result = await getUploadUrl({
++      workspaceId,
++      resourceType: opts.resourceType,
++      name: opts.name,
++      extension: opts.extension,
++      fileSize: opts.file.size,
++    });
++
++    if (!result?.data) throw new Error("Failed to get upload URL");
++
++    const { signedUrl, key, fileSize } = result.data;
++
++    const headers: Record<string, string> = {};
++    if (opts.resourceType === "logo" && opts.extension === "svg") {
++      headers["Content-Type"] = "image/svg+xml";
++    }
++
++    const response = await fetch(signedUrl, {
++      method: "PUT",
++      headers,
++      body: opts.file,
++    });
++
++    if (!response.ok) throw new Error(`Failed to upload ${opts.resourceType}`);
++
++    return { key, fileSize };
++  };
++
++  return { upload };
++}
+diff --git a/apps/web/lib/actions/partners/program-resources/add-program-resource.ts b/apps/web/lib/actions/partners/program-resources/add-program-resource.ts
+index d241ed4bd1f..b910fb59359 100644
+--- a/apps/web/lib/actions/partners/program-resources/add-program-resource.ts
++++ b/apps/web/lib/actions/partners/program-resources/add-program-resource.ts
+@@ -2,19 +2,17 @@
+ 
+ import { createId } from "@/lib/api/create-id";
+ import { getDefaultProgramIdOrThrow } from "@/lib/api/programs/get-default-program-id-or-throw";
+-import { storage } from "@/lib/storage";
+-import { uploadedImageAllowSVGSchema } from "@/lib/zod/schemas/misc";
+ import {
+   programResourceColorSchema,
+   programResourceFileSchema,
+   programResourceLinkSchema,
+ } from "@/lib/zod/schemas/program-resources";
+ import { prisma } from "@dub/prisma";
+-import { nanoid } from "@dub/utils";
+-import slugify from "@sindresorhus/slugify";
++import { R2_URL } from "@dub/utils";
+ import * as z from "zod/v4";
+ import { authActionClient } from "../../safe-action";
+ import { throwIfNoPermission } from "../../throw-if-no-permission";
++import { MAX_PROGRAM_RESOURCE_FILE_SIZE_BYTES } from "./constants";
+ 
+ // Base schema for all resource types
+ const baseResourceSchema = z.object({
+@@ -25,15 +23,15 @@ const baseResourceSchema = z.object({
+ // Schema for logo resources
+ const logoResourceSchema = baseResourceSchema.extend({
+   resourceType: z.literal("logo"),
+-  file: uploadedImageAllowSVGSchema,
+-  extension: z.string().nullish(),
++  key: z.string(),
++  fileSize: z.number().int().positive(),
+ });
+ 
+ // Schema for file resources
+ const fileResourceSchema = baseResourceSchema.extend({
+   resourceType: z.literal("file"),
+-  file: z.string(),
+-  extension: z.string().nullish(),
++  key: z.string(),
++  fileSize: z.number().int().positive(),
+ });
+ 
+ // Schema for color resources
+@@ -93,46 +91,25 @@ export const addProgramResourceAction = authActionClient
+     const updatedResources = { ...currentResources };
+ 
+     if (resourceType === "logo" || resourceType === "file") {
+-      const { file, extension } = parsedInput;
++      const { key, fileSize } = parsedInput;
+ 
+-      if (!file) {
+-        throw new Error("File is required.");
++      if (!key.startsWith(`programs/${program.id}/`)) {
++        throw new Error("Invalid resource key");
+       }
+ 
+-      // Upload the file to storage
+-      const fileKey = `programs/${program.id}/${resourceType}s/${slugify(name || resourceType)}-${nanoid(4)}${extension ? `.${extension}` : ""}`;
+-      const uploadResult = await storage.upload({
+-        key: fileKey,
+-        body: file,
+-        opts:
+-          resourceType === "logo"
+-            ? {
+-                headers: {
+-                  "Content-Disposition": "attachment",
+-                  ...(extension === "svg" && {
+-                    "Content-Type": "image/svg+xml",
+-                  }),
+-                },
+-              }
+-            : undefined,
+-      });
+-
+-      if (!uploadResult || !uploadResult.url) {
+-        throw new Error(`Failed to upload ${resourceType}`);
++      if (fileSize > MAX_PROGRAM_RESOURCE_FILE_SIZE_BYTES) {
++        throw new Error(
++          `File size exceeds the maximum allowed size of ${MAX_PROGRAM_RESOURCE_FILE_SIZE_BYTES / 1024 / 1024}MB`,
++        );
+       }
+ 
+-      // Extract file size from base64 string
+-      const base64Data = file.replace(/^data:.+;base64,/, "");
+-      const fileSize = Math.ceil((base64Data.length * 3) / 4);
+-
+-      if (fileSize / 1024 / 1024 > 10)
+-        throw new Error("File size is too large");
++      const url = `${R2_URL}/${key}`;
+ 
+       const newResource = programResourceFileSchema.parse({
+         id: createId({ prefix: "pgr_" }),
+         name,
+         size: fileSize,
+-        url: uploadResult.url,
++        url,
+       });
+ 
+       // Update the appropriate array in the resources object
+diff --git a/apps/web/lib/actions/partners/program-resources/constants.ts b/apps/web/lib/actions/partners/program-resources/constants.ts
+new file mode 100644
+index 00000000000..ae75b78fb0c
+--- /dev/null
++++ b/apps/web/lib/actions/partners/program-resources/constants.ts
+@@ -0,0 +1 @@
++export const MAX_PROGRAM_RESOURCE_FILE_SIZE_BYTES = 10 * 1024 * 1024;
+diff --git a/apps/web/lib/actions/partners/program-resources/get-program-resource-upload-url.ts b/apps/web/lib/actions/partners/program-resources/get-program-resource-upload-url.ts
+new file mode 100644
+index 00000000000..d808faf385c
+--- /dev/null
++++ b/apps/web/lib/actions/partners/program-resources/get-program-resource-upload-url.ts
+@@ -0,0 +1,75 @@
++"use server";
++
++import { createId } from "@/lib/api/create-id";
++import { getDefaultProgramIdOrThrow } from "@/lib/api/programs/get-default-program-id-or-throw";
++import { storage } from "@/lib/storage";
++import { prisma } from "@dub/prisma";
++import { nanoid, R2_URL } from "@dub/utils";
++import slugify from "@sindresorhus/slugify";
++import * as z from "zod/v4";
++import { authActionClient } from "../../safe-action";
++import { throwIfNoPermission } from "../../throw-if-no-permission";
++import { MAX_PROGRAM_RESOURCE_FILE_SIZE_BYTES } from "./constants";
++
++const schema = z.object({
++  workspaceId: z.string(),
++  resourceType: z.enum(["logo", "file"]),
++  name: z.string().min(1, "Name is required"),
++  extension: z
++    .string()
++    .regex(/^[a-zA-Z0-9_-]+$/, "Invalid file extension")
++    .nullish(),
++  fileSize: z.number().int().positive(),
++});
++
++export const getProgramResourceUploadUrlAction = authActionClient
++  .inputSchema(schema)
++  .action(async ({ ctx, parsedInput }) => {
++    const { workspace } = ctx;
++    const { resourceType, name, extension, fileSize } = parsedInput;
++
++    throwIfNoPermission({
++      role: workspace.role,
++      requiredRoles: ["owner", "member"],
++    });
++
++    if (fileSize > MAX_PROGRAM_RESOURCE_FILE_SIZE_BYTES) {
++      throw new Error(
++        `File size exceeds the maximum allowed size of ${MAX_PROGRAM_RESOURCE_FILE_SIZE_BYTES / 1024 / 1024}MB`,
++      );
++    }
++
++    const programId = getDefaultProgramIdOrThrow(workspace);
++
++    const program = await prisma.program.findUnique({
++      where: {
++        id: programId,
++        workspaceId: workspace.id,
++      },
++      select: {
++        id: true,
++      },
++    });
++
++    if (!program) throw new Error("Program not found");
++
++    const resourceId = createId({ prefix: "pgr_" });
++    const sanitizedExtension = extension
++      ? extension.replace(/^\.+/, "").replace(/[^a-zA-Z0-9_-]/g, "")
++      : null;
++    const key = `programs/${program.id}/${resourceType}s/${slugify(name || resourceType)}-${nanoid(4)}${sanitizedExtension ? `.${sanitizedExtension}` : ""}`;
++
++    const signedUrl = await storage.getSignedUploadUrl({
++      key,
++      expiresIn: 300,
++      contentLength: fileSize,
++    });
++
++    return {
++      signedUrl,
++      destinationUrl: `${R2_URL}/${key}`,
++      resourceId,
++      key,
++      fileSize,
++    };
++  });
+diff --git a/apps/web/lib/actions/partners/program-resources/update-program-resource.ts b/apps/web/lib/actions/partners/program-resources/update-program-resource.ts
+index 4be70c9a49f..6acaa2fdc55 100644
+--- a/apps/web/lib/actions/partners/program-resources/update-program-resource.ts
++++ b/apps/web/lib/actions/partners/program-resources/update-program-resource.ts
+@@ -2,7 +2,6 @@
+ 
+ import { getDefaultProgramIdOrThrow } from "@/lib/api/programs/get-default-program-id-or-throw";
+ import { storage } from "@/lib/storage";
+-import { uploadedImageAllowSVGSchema } from "@/lib/zod/schemas/misc";
+ import {
+   programResourceColorSchema,
+   programResourceFileSchema,
+@@ -10,11 +9,11 @@ import {
+   programResourcesSchema,
+ } from "@/lib/zod/schemas/program-resources";
+ import { prisma } from "@dub/prisma";
+-import { nanoid, R2_URL } from "@dub/utils";
+-import slugify from "@sindresorhus/slugify";
++import { R2_URL } from "@dub/utils";
+ import * as z from "zod/v4";
+ import { authActionClient } from "../../safe-action";
+ import { throwIfNoPermission } from "../../throw-if-no-permission";
++import { MAX_PROGRAM_RESOURCE_FILE_SIZE_BYTES } from "./constants";
+ 
+ // Base schema for all resource types
+ const baseUpdateSchema = z.object({
+@@ -26,16 +25,16 @@ const baseUpdateSchema = z.object({
+ const updateLogoSchema = baseUpdateSchema.extend({
+   resourceType: z.literal("logo"),
+   name: z.string().min(1).optional(),
+-  file: uploadedImageAllowSVGSchema.optional(),
+-  extension: z.string().nullish(),
++  key: z.string().optional(),
++  fileSize: z.number().int().positive().optional(),
+ });
+ 
+ // Schema for file resources
+ const updateFileSchema = baseUpdateSchema.extend({
+   resourceType: z.literal("file"),
+   name: z.string().min(1).optional(),
+-  file: z.string().optional(),
+-  extension: z.string().nullish(),
++  key: z.string().optional(),
++  fileSize: z.number().int().positive().optional(),
+ });
+ 
+ // Schema for color resources
+@@ -102,60 +101,33 @@ export const updateProgramResourceAction = authActionClient
+ 
+     const existingResource = resourceArray[resourceIndex];
+ 
++    // Capture old URL before any mutation so we can delete it after a successful DB write
++    let oldFileUrl: string | null = null;
++
+     if (resourceType === "logo" || resourceType === "file") {
+-      const { name, file, extension } = parsedInput;
++      const { name, key, fileSize } = parsedInput;
+ 
+       let newUrl = existingResource.url;
+       let newSize = existingResource.size;
+ 
+-      // If a new file is provided, upload it and delete the old one
+-      if (file) {
+-        // Validate file size before upload
+-        const base64Data = file.replace(/^data:.+;base64,/, "");
+-        const fileSize = Math.ceil((base64Data.length * 3) / 4);
+-
+-        if (fileSize / 1024 / 1024 > 10) {
+-          throw new Error("File size is too large");
++      // If a new file was uploaded, validate ownership and derive URL server-side
++      if (key) {
++        if (!key.startsWith(`programs/${program.id}/`)) {
++          throw new Error("Invalid resource key");
+         }
+ 
+-        // Upload the new file
+-        const fileName = name || existingResource.name;
+-        const fileKey = `programs/${program.id}/${resourceType}s/${slugify(fileName || resourceType)}-${nanoid(4)}${extension ? `.${extension}` : ""}`;
+-        const uploadResult = await storage.upload({
+-          key: fileKey,
+-          body: file,
+-          opts:
+-            resourceType === "logo"
+-              ? {
+-                  headers: {
+-                    "Content-Disposition": "attachment",
+-                    ...(extension === "svg" && {
+-                      "Content-Type": "image/svg+xml",
+-                    }),
+-                  },
+-                }
+-              : undefined,
+-        });
+-
+-        if (!uploadResult || !uploadResult.url) {
+-          throw new Error(`Failed to upload ${resourceType}`);
++        if (fileSize && fileSize > MAX_PROGRAM_RESOURCE_FILE_SIZE_BYTES) {
++          throw new Error(
++            `File size exceeds the maximum allowed size of ${MAX_PROGRAM_RESOURCE_FILE_SIZE_BYTES / 1024 / 1024}MB`,
++          );
+         }
+ 
+-        newUrl = uploadResult.url;
+-        newSize = fileSize;
++        newUrl = `${R2_URL}/${key}`;
++        newSize = fileSize ?? existingResource.size;
+ 
+-        // Delete old file from storage (best-effort, after successful upload)
++        // Remember the old URL — we'll delete it after the DB update succeeds
+         if (existingResource.url) {
+-          try {
+-            await storage.delete({
+-              key: existingResource.url.replace(`${R2_URL}/`, ""),
+-            });
+-          } catch (error) {
+-            console.error(
+-              "Failed to delete old program resource file from storage:",
+-              error,
+-            );
+-          }
++          oldFileUrl = existingResource.url;
+         }
+       }
+ 
+@@ -203,6 +175,20 @@ export const updateProgramResourceAction = authActionClient
+       },
+     });
+ 
++    // Delete the old file from storage only after the DB update succeeds (best-effort)
++    if (oldFileUrl) {
++      try {
++        await storage.delete({
++          key: oldFileUrl.replace(`${R2_URL}/`, ""),
++        });
++      } catch (error) {
++        console.error(
++          "Failed to delete old program resource file from storage:",
++          error,
++        );
++      }
++    }
++
+     return {
+       success: true,
+     };
+diff --git a/apps/web/lib/storage.ts b/apps/web/lib/storage.ts
+index 21a111b2c07..aa7591d6908 100644
+--- a/apps/web/lib/storage.ts
++++ b/apps/web/lib/storage.ts
+@@ -107,11 +107,13 @@ class StorageClient {
+     method,
+     expiresIn,
+     bucket,
++    headers,
+   }: {
+     key: string;
+     method: "PUT" | "GET";
+     bucket: BucketType;
+     expiresIn: number;
++    headers?: Record<string, string>;
+   }) {
+     const url = new URL(
+       `${process.env.STORAGE_ENDPOINT}/${this._getBucketName(bucket)}/${key}`,
+@@ -122,6 +124,7 @@ class StorageClient {
+     try {
+       const response = await this.client.sign(url, {
+         method,
++        headers,
+         aws: {
+           signQuery: true,
+           allHeaders: true,
+@@ -139,12 +142,16 @@ class StorageClient {
+     key: string;
+     bucket?: BucketType;
+     expiresIn?: number;
++    contentLength?: number;
+   }) {
+     return await this.getSignedUrl({
+       key: opts.key,
+       method: "PUT",
+       bucket: opts.bucket || "public",
+       expiresIn: opts.expiresIn || 600,
++      headers: opts.contentLength
++        ? { "Content-Length": String(opts.contentLength) }
++        : undefined,
+     });
+   }
+ 

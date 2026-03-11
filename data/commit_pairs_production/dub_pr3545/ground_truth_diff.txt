@@ -1,0 +1,282 @@
+diff --git a/apps/web/app/(ee)/api/cron/streams/update-partner-stats/route.ts b/apps/web/app/(ee)/api/cron/streams/update-partner-stats/route.ts
+index b68463feb4d..afb0998ec38 100644
+--- a/apps/web/app/(ee)/api/cron/streams/update-partner-stats/route.ts
++++ b/apps/web/app/(ee)/api/cron/streams/update-partner-stats/route.ts
+@@ -194,7 +194,7 @@ const processPartnerActivityStreamBatch = () =>
+           enrollment.leadToConversionRate = totalConversions / totalLeads;
+         }
+ 
+-        // Calculate return on AdSpend (totalSaleAmount / totalCommissions)
++        // Calculate return on ad spend (totalSaleAmount / totalCommissions)
+         if (totalSaleAmountNum !== undefined && totalCommissionsNum) {
+           enrollment.returnOnAdSpend = totalSaleAmountNum / totalCommissionsNum;
+         }
+diff --git a/apps/web/app/(ee)/api/embed/referrals/earnings/route.ts b/apps/web/app/(ee)/api/embed/referrals/earnings/route.ts
+index 60de3b37972..819d4a6bb8f 100644
+--- a/apps/web/app/(ee)/api/embed/referrals/earnings/route.ts
++++ b/apps/web/app/(ee)/api/embed/referrals/earnings/route.ts
+@@ -1,6 +1,6 @@
++import { obfuscateCustomerEmail } from "@/lib/api/partner-profile/obfuscate-customer-email";
+ import { REFERRALS_EMBED_EARNINGS_LIMIT } from "@/lib/constants/misc";
+ import { withReferralsEmbedToken } from "@/lib/embed/referrals/auth";
+-import { obfuscateCustomerEmail } from "@/lib/api/partner-profile/obfuscate-customer-email";
+ import { generateRandomName } from "@/lib/names";
+ import { PartnerEarningsSchema } from "@/lib/zod/schemas/partner-profile";
+ import { prisma } from "@dub/prisma";
+diff --git a/apps/web/app/(ee)/api/partner-profile/programs/[programId]/analytics/export/route.ts b/apps/web/app/(ee)/api/partner-profile/programs/[programId]/analytics/export/route.ts
+index b257880c6fd..fdab58d685f 100644
+--- a/apps/web/app/(ee)/api/partner-profile/programs/[programId]/analytics/export/route.ts
++++ b/apps/web/app/(ee)/api/partner-profile/programs/[programId]/analytics/export/route.ts
+@@ -29,7 +29,8 @@ export const GET = withPartnerProfile(
+ 
+     if (
+       LARGE_PROGRAM_IDS.includes(program.id) &&
+-      toCentsNumber(totalCommissions) < LARGE_PROGRAM_MIN_TOTAL_COMMISSIONS_CENTS
++      toCentsNumber(totalCommissions) <
++        LARGE_PROGRAM_MIN_TOTAL_COMMISSIONS_CENTS
+     ) {
+       throw new DubApiError({
+         code: "forbidden",
+diff --git a/apps/web/app/(ee)/api/partner-profile/programs/[programId]/analytics/route.ts b/apps/web/app/(ee)/api/partner-profile/programs/[programId]/analytics/route.ts
+index 0c77e45a4ce..442fe0c2baa 100644
+--- a/apps/web/app/(ee)/api/partner-profile/programs/[programId]/analytics/route.ts
++++ b/apps/web/app/(ee)/api/partner-profile/programs/[programId]/analytics/route.ts
+@@ -83,7 +83,8 @@ export const GET = withPartnerProfile(
+ 
+     const response = await getAnalytics({
+       ...(LARGE_PROGRAM_IDS.includes(program.id) &&
+-      toCentsNumber(totalCommissions) < LARGE_PROGRAM_MIN_TOTAL_COMMISSIONS_CENTS
++      toCentsNumber(totalCommissions) <
++        LARGE_PROGRAM_MIN_TOTAL_COMMISSIONS_CENTS
+         ? { event: parsedParams.event, groupBy: "count", interval: "all" }
+         : parsedParams),
+       workspaceId: program.workspaceId,
+diff --git a/apps/web/app/(ee)/api/partner-profile/programs/[programId]/customers/count/route.ts b/apps/web/app/(ee)/api/partner-profile/programs/[programId]/customers/count/route.ts
+index 0b0ec2cb930..7a9160e81b9 100644
+--- a/apps/web/app/(ee)/api/partner-profile/programs/[programId]/customers/count/route.ts
++++ b/apps/web/app/(ee)/api/partner-profile/programs/[programId]/customers/count/route.ts
+@@ -29,7 +29,8 @@ export const GET = withPartnerProfile(
+ 
+     if (
+       LARGE_PROGRAM_IDS.includes(program.id) &&
+-      toCentsNumber(totalCommissions) < LARGE_PROGRAM_MIN_TOTAL_COMMISSIONS_CENTS
++      toCentsNumber(totalCommissions) <
++        LARGE_PROGRAM_MIN_TOTAL_COMMISSIONS_CENTS
+     ) {
+       throw new DubApiError({
+         code: "forbidden",
+diff --git a/apps/web/app/(ee)/api/partner-profile/programs/[programId]/customers/route.ts b/apps/web/app/(ee)/api/partner-profile/programs/[programId]/customers/route.ts
+index c26e17bd0ba..7f9f3f9e2b1 100644
+--- a/apps/web/app/(ee)/api/partner-profile/programs/[programId]/customers/route.ts
++++ b/apps/web/app/(ee)/api/partner-profile/programs/[programId]/customers/route.ts
+@@ -36,7 +36,8 @@ export const GET = withPartnerProfile(
+ 
+     if (
+       LARGE_PROGRAM_IDS.includes(program.id) &&
+-      toCentsNumber(totalCommissions) < LARGE_PROGRAM_MIN_TOTAL_COMMISSIONS_CENTS
++      toCentsNumber(totalCommissions) <
++        LARGE_PROGRAM_MIN_TOTAL_COMMISSIONS_CENTS
+     ) {
+       throw new DubApiError({
+         code: "forbidden",
+diff --git a/apps/web/app/(ee)/api/partner-profile/programs/[programId]/events/export/route.ts b/apps/web/app/(ee)/api/partner-profile/programs/[programId]/events/export/route.ts
+index 2e91ccee65c..0442e7fa823 100644
+--- a/apps/web/app/(ee)/api/partner-profile/programs/[programId]/events/export/route.ts
++++ b/apps/web/app/(ee)/api/partner-profile/programs/[programId]/events/export/route.ts
+@@ -47,7 +47,8 @@ export const GET = withPartnerProfile(
+ 
+     if (
+       LARGE_PROGRAM_IDS.includes(program.id) &&
+-      toCentsNumber(totalCommissions) < LARGE_PROGRAM_MIN_TOTAL_COMMISSIONS_CENTS
++      toCentsNumber(totalCommissions) <
++        LARGE_PROGRAM_MIN_TOTAL_COMMISSIONS_CENTS
+     ) {
+       throw new DubApiError({
+         code: "forbidden",
+diff --git a/apps/web/app/(ee)/api/partner-profile/programs/[programId]/events/route.ts b/apps/web/app/(ee)/api/partner-profile/programs/[programId]/events/route.ts
+index cee13d255bd..dc4a42c8b71 100644
+--- a/apps/web/app/(ee)/api/partner-profile/programs/[programId]/events/route.ts
++++ b/apps/web/app/(ee)/api/partner-profile/programs/[programId]/events/route.ts
+@@ -33,7 +33,8 @@ export const GET = withPartnerProfile(
+ 
+     if (
+       LARGE_PROGRAM_IDS.includes(program.id) &&
+-      toCentsNumber(totalCommissions) < LARGE_PROGRAM_MIN_TOTAL_COMMISSIONS_CENTS
++      toCentsNumber(totalCommissions) <
++        LARGE_PROGRAM_MIN_TOTAL_COMMISSIONS_CENTS
+     ) {
+       throw new DubApiError({
+         code: "forbidden",
+diff --git a/apps/web/app/(ee)/api/partner-profile/programs/[programId]/links/[linkId]/route.ts b/apps/web/app/(ee)/api/partner-profile/programs/[programId]/links/[linkId]/route.ts
+index 683031749e3..3eebfcc2586 100644
+--- a/apps/web/app/(ee)/api/partner-profile/programs/[programId]/links/[linkId]/route.ts
++++ b/apps/web/app/(ee)/api/partner-profile/programs/[programId]/links/[linkId]/route.ts
+@@ -192,11 +192,7 @@ export const DELETE = withPartnerProfile(async ({ partner, params }) => {
+   }
+ 
+   // Check if link has any clicks, leads, or sales
+-  if (
+-    link.clicks > 0 ||
+-    link.leads > 0 ||
+-    toCentsNumber(link.saleAmount) > 0
+-  ) {
++  if (link.clicks > 0 || link.leads > 0 || toCentsNumber(link.saleAmount) > 0) {
+     throw new DubApiError({
+       code: "bad_request",
+       message:
+diff --git a/apps/web/app/api/ai/support-chat/route.ts b/apps/web/app/api/ai/support-chat/route.ts
+index 5f20a6a9616..a86aff0fd29 100644
+--- a/apps/web/app/api/ai/support-chat/route.ts
++++ b/apps/web/app/api/ai/support-chat/route.ts
+@@ -35,7 +35,10 @@ export const POST = withSession(async ({ req, session }) => {
+   }
+   const attachmentIds: string[] | undefined = rawAttachmentIds;
+ 
+-  if (body.ticketDetails !== undefined && typeof body.ticketDetails !== "string") {
++  if (
++    body.ticketDetails !== undefined &&
++    typeof body.ticketDetails !== "string"
++  ) {
+     return new Response("Invalid ticketDetails", { status: 400 });
+   }
+   const ticketDetails: string | undefined = body.ticketDetails?.slice(0, 4982);
+diff --git a/apps/web/app/api/user/referrals-token/route.ts b/apps/web/app/api/user/referrals-token/route.ts
+index 0f3ee3e0b2d..fedc96b1168 100644
+--- a/apps/web/app/api/user/referrals-token/route.ts
++++ b/apps/web/app/api/user/referrals-token/route.ts
+@@ -47,8 +47,7 @@ export const GET = withSession(async ({ session }) => {
+       !(
+         partnerHasEarnedCommissions(
+           programEnrollments as ProgramEnrollmentsForDiscoverability,
+-        ) &&
+-        partnerIsNotBanned(programEnrollments)
++        ) && partnerIsNotBanned(programEnrollments)
+       )
+     ) {
+       return NextResponse.json({ publicToken: null });
+diff --git a/apps/web/lib/ai/build-system-prompt.ts b/apps/web/lib/ai/build-system-prompt.ts
+index f722d749e0f..8d4c25e8519 100644
+--- a/apps/web/lib/ai/build-system-prompt.ts
++++ b/apps/web/lib/ai/build-system-prompt.ts
+@@ -19,7 +19,6 @@ const CONTEXT_SYSTEM_PROMPTS: Record<SupportChatContext, string> = {
+   When the user asks about their specific program data — such as earnings, commissions, payouts, minimum payout amount, holding period, or payout history — call getProgramPerformance with the program's ID before answering. Use this real data in your response instead of guessing or citing generic documentation.
+   When a user has a payout dispute, tax compliance issue, or a problem that can't be resolved through documentation, first call requestSupportTicket (to show them an upload form), then after the user confirms, call createSupportTicket.
+   Always try to provide the program's support email for program-specific issues.`,
+-
+ };
+ 
+ const BASE_SYSTEM_PROMPT = `
+diff --git a/apps/web/lib/api/links/utils/transform-link.ts b/apps/web/lib/api/links/utils/transform-link.ts
+index e884e6284de..30e54405bf9 100644
+--- a/apps/web/lib/api/links/utils/transform-link.ts
++++ b/apps/web/lib/api/links/utils/transform-link.ts
+@@ -4,9 +4,9 @@ import {
+   ProgramEnrollmentProps,
+ } from "@/lib/types";
+ import { Dashboard, Link, Tag } from "@dub/prisma/client";
++import { toCentsNumber } from "@dub/utils";
+ import { prefixWorkspaceId } from "../../workspaces/workspace-id";
+ import { decodeLinkIfCaseSensitive } from "../case-sensitivity";
+-import { toCentsNumber } from "@dub/utils";
+ 
+ // used in API (e.g. transformLink)
+ // TODO: standardize this with ExpandedLinkProps
+diff --git a/apps/web/lib/api/partner-profile/obfuscate-customer-email.ts b/apps/web/lib/api/partner-profile/obfuscate-customer-email.ts
+index f9e0456a219..9a28aa030b6 100644
+--- a/apps/web/lib/api/partner-profile/obfuscate-customer-email.ts
++++ b/apps/web/lib/api/partner-profile/obfuscate-customer-email.ts
+@@ -17,8 +17,12 @@ export function obfuscateCustomerEmail(email: string): string {
+   const dotIndex = domain.indexOf(".");
+   const domainName = dotIndex >= 0 ? domain.slice(0, dotIndex) : domain;
+   const tld = dotIndex >= 0 ? domain.slice(dotIndex) : "";
+-  const localAsterisks = approximateAsteriskCount(local.charCodeAt(0) + local.length);
+-  const domainAsterisks = approximateAsteriskCount(domainName.charCodeAt(0) + domainName.length);
++  const localAsterisks = approximateAsteriskCount(
++    local.charCodeAt(0) + local.length,
++  );
++  const domainAsterisks = approximateAsteriskCount(
++    domainName.charCodeAt(0) + domainName.length,
++  );
+   return (
+     local[0] +
+     "*".repeat(localAsterisks) +
+diff --git a/apps/web/lib/api/partners/get-partners.ts b/apps/web/lib/api/partners/get-partners.ts
+index e43dbc14391..eb946ab5aa8 100644
+--- a/apps/web/lib/api/partners/get-partners.ts
++++ b/apps/web/lib/api/partners/get-partners.ts
+@@ -74,6 +74,8 @@ export async function getPartners(filters: PartnerFilters) {
+     id: partner.id,
+     createdAt: new Date(programEnrollment.createdAt),
+     links,
+-    netRevenue: toCentsNumber(programEnrollment.totalSaleAmount ?? 0) - toCentsNumber(programEnrollment.totalCommissions ?? 0),
++    netRevenue:
++      toCentsNumber(programEnrollment.totalSaleAmount ?? 0) -
++      toCentsNumber(programEnrollment.totalCommissions ?? 0),
+   }));
+ }
+diff --git a/apps/web/lib/network/get-discoverability-requirements.ts b/apps/web/lib/network/get-discoverability-requirements.ts
+index e4fc98e0d44..d37b54446af 100644
+--- a/apps/web/lib/network/get-discoverability-requirements.ts
++++ b/apps/web/lib/network/get-discoverability-requirements.ts
+@@ -1,10 +1,10 @@
++import { toCentsNumber } from "@dub/utils";
+ import {
+   EXCLUDED_PROGRAM_IDS,
+   PARTNER_NETWORK_MIN_COMMISSIONS_CENTS,
+ } from "../constants/partner-profile";
+ import { PARTNER_PLATFORM_FIELDS } from "../partners/partner-platforms";
+ import { EnrolledPartnerProps, PartnerProps } from "../types";
+-import { toCentsNumber } from "@dub/utils";
+ 
+ /** Program enrollments with totalCommissions as number | bigint (Prisma returns bigint). */
+ export type ProgramEnrollmentsForDiscoverability = (Pick<
+@@ -20,7 +20,8 @@ export const partnerHasEarnedCommissions = (
+       (pe) =>
+         !EXCLUDED_PROGRAM_IDS.includes(pe.programId) &&
+         pe.status === "approved" &&
+-        toCentsNumber(pe.totalCommissions) >= PARTNER_NETWORK_MIN_COMMISSIONS_CENTS,
++        toCentsNumber(pe.totalCommissions) >=
++          PARTNER_NETWORK_MIN_COMMISSIONS_CENTS,
+     ).length >= 1
+   );
+ };
+diff --git a/apps/web/lib/partners/aggregate-partner-links-stats.ts b/apps/web/lib/partners/aggregate-partner-links-stats.ts
+index 93e09af8d2b..db79bdd0b7a 100644
+--- a/apps/web/lib/partners/aggregate-partner-links-stats.ts
++++ b/apps/web/lib/partners/aggregate-partner-links-stats.ts
+@@ -1,12 +1,11 @@
+-import { LinkProps } from "../types";
+ import { toCentsNumber } from "@dub/utils";
++import { LinkProps } from "../types";
+ 
+ export function aggregatePartnerLinksStats(
+   links?:
+-    | (Pick<
+-        LinkProps,
+-        "clicks" | "leads" | "conversions" | "sales"
+-      > & { saleAmount: number | bigint })[]
++    | (Pick<LinkProps, "clicks" | "leads" | "conversions" | "sales"> & {
++        saleAmount: number | bigint;
++      })[]
+     | null,
+ ) {
+   if (!links || links.length === 0) {
+diff --git a/apps/web/lib/partners/create-partner-commission.ts b/apps/web/lib/partners/create-partner-commission.ts
+index 882f409f79f..b742dc181e5 100644
+--- a/apps/web/lib/partners/create-partner-commission.ts
++++ b/apps/web/lib/partners/create-partner-commission.ts
+@@ -47,9 +47,12 @@ export type CreatePartnerCommissionProps = {
+ 
+ const constructWebhookPartner = (
+   programEnrollment: ProgramEnrollment & { partner: Partner; links: Link[] },
+-  { totalCommissions: totalCommissionsParam }: { totalCommissions?: number } = {},
++  {
++    totalCommissions: totalCommissionsParam,
++  }: { totalCommissions?: number } = {},
+ ) => {
+-  const totalCommissions = totalCommissionsParam ?? toCentsNumber(programEnrollment.totalCommissions);
++  const totalCommissions =
++    totalCommissionsParam ?? toCentsNumber(programEnrollment.totalCommissions);
+   return {
+     ...programEnrollment.partner,
+     groupId: programEnrollment.groupId,

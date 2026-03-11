@@ -1,0 +1,256 @@
+diff --git a/examples/anyhow-error-response/src/main.rs b/examples/anyhow-error-response/src/main.rs
+index 0c22d85e73..886c7bd119 100644
+--- a/examples/anyhow-error-response/src/main.rs
++++ b/examples/anyhow-error-response/src/main.rs
+@@ -70,7 +70,7 @@ mod tests {
+     #[tokio::test]
+     async fn test_main_page() {
+         let response = app()
+-            .oneshot(Request::builder().uri("/").body(Body::empty()).unwrap())
++            .oneshot(Request::get("/").body(Body::empty()).unwrap())
+             .await
+             .unwrap();
+ 
+diff --git a/examples/form/src/main.rs b/examples/form/src/main.rs
+index 2929b39241..9eec5b6735 100644
+--- a/examples/form/src/main.rs
++++ b/examples/form/src/main.rs
+@@ -89,7 +89,7 @@ mod tests {
+         let app = app();
+ 
+         let response = app
+-            .oneshot(Request::builder().uri("/").body(Body::empty()).unwrap())
++            .oneshot(Request::get("/").body(Body::empty()).unwrap())
+             .await
+             .unwrap();
+ 
+@@ -107,9 +107,7 @@ mod tests {
+ 
+         let response = app
+             .oneshot(
+-                Request::builder()
+-                    .method(http::Method::POST)
+-                    .uri("/")
++                Request::post("/")
+                     .header(
+                         http::header::CONTENT_TYPE,
+                         mime::APPLICATION_WWW_FORM_URLENCODED.as_ref(),
+diff --git a/examples/simple-router-wasm/src/main.rs b/examples/simple-router-wasm/src/main.rs
+index d5c9b3bd71..7a29ced8da 100644
+--- a/examples/simple-router-wasm/src/main.rs
++++ b/examples/simple-router-wasm/src/main.rs
+@@ -29,8 +29,7 @@ use http::Request;
+ use tower_service::Service;
+ 
+ fn main() {
+-    let request: Request<String> = Request::builder()
+-        .uri("https://serverless.example/api/")
++    let request: Request<String> = Request::get("https://serverless.example/api/")
+         .body("Some Body Data".into())
+         .unwrap();
+ 
+diff --git a/examples/templates/src/main.rs b/examples/templates/src/main.rs
+index 7271a3ad9c..13c586c3b6 100644
+--- a/examples/templates/src/main.rs
++++ b/examples/templates/src/main.rs
+@@ -81,12 +81,7 @@ mod tests {
+     #[tokio::test]
+     async fn test_main() {
+         let response = app()
+-            .oneshot(
+-                Request::builder()
+-                    .uri("/greet/Foo")
+-                    .body(Body::empty())
+-                    .unwrap(),
+-            )
++            .oneshot(Request::get("/greet/Foo").body(Body::empty()).unwrap())
+             .await
+             .unwrap();
+         assert_eq!(response.status(), StatusCode::OK);
+diff --git a/examples/testing/src/main.rs b/examples/testing/src/main.rs
+index c44ec36e3e..09164c784a 100644
+--- a/examples/testing/src/main.rs
++++ b/examples/testing/src/main.rs
+@@ -71,7 +71,7 @@ mod tests {
+         // `Router` implements `tower::Service<Request<Body>>` so we can
+         // call it like any tower service, no need to run an HTTP server.
+         let response = app
+-            .oneshot(Request::builder().uri("/").body(Body::empty()).unwrap())
++            .oneshot(Request::get("/").body(Body::empty()).unwrap())
+             .await
+             .unwrap();
+ 
+@@ -87,9 +87,7 @@ mod tests {
+ 
+         let response = app
+             .oneshot(
+-                Request::builder()
+-                    .method(http::Method::POST)
+-                    .uri("/json")
++                Request::post("/json")
+                     .header(http::header::CONTENT_TYPE, mime::APPLICATION_JSON.as_ref())
+                     .body(Body::from(
+                         serde_json::to_vec(&json!([1, 2, 3, 4])).unwrap(),
+@@ -111,12 +109,7 @@ mod tests {
+         let app = app();
+ 
+         let response = app
+-            .oneshot(
+-                Request::builder()
+-                    .uri("/does-not-exist")
+-                    .body(Body::empty())
+-                    .unwrap(),
+-            )
++            .oneshot(Request::get("/does-not-exist").body(Body::empty()).unwrap())
+             .await
+             .unwrap();
+ 
+@@ -141,8 +134,7 @@ mod tests {
+ 
+         let response = client
+             .request(
+-                Request::builder()
+-                    .uri(format!("http://{addr}"))
++                Request::get(format!("http://{addr}"))
+                     .header("Host", "localhost")
+                     .body(Body::empty())
+                     .unwrap(),
+@@ -160,7 +152,7 @@ mod tests {
+     async fn multiple_request() {
+         let mut app = app().into_service();
+ 
+-        let request = Request::builder().uri("/").body(Body::empty()).unwrap();
++        let request = Request::get("/").body(Body::empty()).unwrap();
+         let response = ServiceExt::<Request<Body>>::ready(&mut app)
+             .await
+             .unwrap()
+@@ -169,7 +161,7 @@ mod tests {
+             .unwrap();
+         assert_eq!(response.status(), StatusCode::OK);
+ 
+-        let request = Request::builder().uri("/").body(Body::empty()).unwrap();
++        let request = Request::get("/").body(Body::empty()).unwrap();
+         let response = ServiceExt::<Request<Body>>::ready(&mut app)
+             .await
+             .unwrap()
+@@ -190,8 +182,7 @@ mod tests {
+             .layer(MockConnectInfo(SocketAddr::from(([0, 0, 0, 0], 3000))))
+             .into_service();
+ 
+-        let request = Request::builder()
+-            .uri("/requires-connect-info")
++        let request = Request::get("/requires-connect-info")
+             .body(Body::empty())
+             .unwrap();
+         let response = app.ready().await.unwrap().call(request).await.unwrap();
+diff --git a/examples/unix-domain-socket/src/main.rs b/examples/unix-domain-socket/src/main.rs
+index 611896dcce..783a56aa2f 100644
+--- a/examples/unix-domain-socket/src/main.rs
++++ b/examples/unix-domain-socket/src/main.rs
+@@ -19,7 +19,7 @@ mod unix {
+     use axum::{
+         body::Body,
+         extract::connect_info::{self, ConnectInfo},
+-        http::{Method, Request, StatusCode},
++        http::{Request, StatusCode},
+         routing::get,
+         serve::IncomingStream,
+         Router,
+@@ -63,9 +63,7 @@ mod unix {
+             }
+         });
+ 
+-        let request = Request::builder()
+-            .method(Method::GET)
+-            .uri("http://uri-doesnt-matter.com")
++        let request = Request::get("http://uri-doesnt-matter.com")
+             .body(Body::empty())
+             .unwrap();
+ 
+diff --git a/examples/validator/src/main.rs b/examples/validator/src/main.rs
+index 3f7c1641cf..849069bd53 100644
+--- a/examples/validator/src/main.rs
++++ b/examples/validator/src/main.rs
+@@ -115,7 +115,7 @@ mod tests {
+     #[tokio::test]
+     async fn test_no_param() {
+         let response = app()
+-            .oneshot(Request::builder().uri("/").body(Body::empty()).unwrap())
++            .oneshot(Request::get("/").body(Body::empty()).unwrap())
+             .await
+             .unwrap();
+ 
+@@ -127,12 +127,7 @@ mod tests {
+     #[tokio::test]
+     async fn test_with_param_without_value() {
+         let response = app()
+-            .oneshot(
+-                Request::builder()
+-                    .uri("/?name=")
+-                    .body(Body::empty())
+-                    .unwrap(),
+-            )
++            .oneshot(Request::get("/?name=").body(Body::empty()).unwrap())
+             .await
+             .unwrap();
+ 
+@@ -144,12 +139,7 @@ mod tests {
+     #[tokio::test]
+     async fn test_with_param_with_short_value() {
+         let response = app()
+-            .oneshot(
+-                Request::builder()
+-                    .uri("/?name=X")
+-                    .body(Body::empty())
+-                    .unwrap(),
+-            )
++            .oneshot(Request::get("/?name=X").body(Body::empty()).unwrap())
+             .await
+             .unwrap();
+ 
+@@ -161,12 +151,7 @@ mod tests {
+     #[tokio::test]
+     async fn test_with_param_and_value() {
+         let response = app()
+-            .oneshot(
+-                Request::builder()
+-                    .uri("/?name=LT")
+-                    .body(Body::empty())
+-                    .unwrap(),
+-            )
++            .oneshot(Request::get("/?name=LT").body(Body::empty()).unwrap())
+             .await
+             .unwrap();
+ 
+diff --git a/examples/versioning/src/main.rs b/examples/versioning/src/main.rs
+index 63ca32b938..71d4a061c3 100644
+--- a/examples/versioning/src/main.rs
++++ b/examples/versioning/src/main.rs
+@@ -83,12 +83,7 @@ mod tests {
+     #[tokio::test]
+     async fn test_v1() {
+         let response = app()
+-            .oneshot(
+-                Request::builder()
+-                    .uri("/v1/foo")
+-                    .body(Body::empty())
+-                    .unwrap(),
+-            )
++            .oneshot(Request::get("/v1/foo").body(Body::empty()).unwrap())
+             .await
+             .unwrap();
+ 
+@@ -103,12 +98,7 @@ mod tests {
+     #[tokio::test]
+     async fn test_v4() {
+         let response = app()
+-            .oneshot(
+-                Request::builder()
+-                    .uri("/v4/foo")
+-                    .body(Body::empty())
+-                    .unwrap(),
+-            )
++            .oneshot(Request::get("/v4/foo").body(Body::empty()).unwrap())
+             .await
+             .unwrap();
+ 

@@ -1,0 +1,84 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "build_constraints",
+      "recommendation": "Created build-constrained files to separate syscall-dependent code from the main codebase using Go's build tag system",
+      "rationale": "The syscall package is not available in WASM environments, causing compilation failures. By using build constraints (`//go:build`), we can conditionally compile different implementations for different target architectures while maintaining a clean API surface.",
+      "alternatives_considered": [
+        "Using runtime checks with build tags in the same file",
+        "Creating a separate package for platform-specific code",
+        "Using interface-based abstraction with platform-specific implementations"
+      ],
+      "files_affected": [
+        "core/syscall.go",
+        "core/syscall_wasm.go"
+      ]
+    },
+    {
+      "dimension": "api_design",
+      "recommendation": "Extracted the syscall.Exec call into a wrapper function with consistent signature across platforms",
+      "rationale": "This approach maintains a clean separation between the core application logic and platform-specific implementations. The wrapper function provides a uniform interface that can be called from BaseApp.Restart() without conditional logic, improving code readability and maintainability.",
+      "alternatives_considered": [
+        "Using conditional compilation directives within the same function",
+        "Creating a platform abstraction interface",
+        "Using function pointers initialized based on build tags"
+      ],
+      "files_affected": [
+        "core/base.go",
+        "core/syscall.go",
+        "core/syscall_wasm.go"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Returned errors.ErrUnsupported for the WASM implementation to clearly indicate the operation is not available",
+      "rationale": "In WASM environments, process execution is fundamentally impossible due to security constraints. Returning a clear, standard error (errors.ErrUnsupported) communicates this limitation explicitly rather than trying to fake functionality or return a generic error.",
+      "alternatives_considered": [
+        "Returning nil and logging a warning",
+        "Panicking with a descriptive message",
+        "Creating a custom error type for WASM-specific limitations"
+      ],
+      "files_affected": [
+        "core/syscall_wasm.go"
+      ]
+    },
+    {
+      "dimension": "dependency_management",
+      "recommendation": "Removed the direct syscall import from base.go and made it conditional through build-constrained files",
+      "rationale": "Direct imports of platform-specific packages in shared code prevent cross-compilation. By moving the import to build-constrained files, we eliminate the unconditional dependency while preserving functionality for supported platforms.",
+      "alternatives_considered": [
+        "Using blank imports with build constraints",
+        "Creating a separate package with platform-specific implementations",
+        "Using reflection to dynamically load the syscall package"
+      ],
+      "files_affected": [
+        "core/base.go",
+        "core/syscall.go"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "WASM Build Compatibility - Syscall Abstraction",
+      "description": "Create platform-specific implementations for syscall.Exec to enable WASM compilation",
+      "files_to_modify": [
+        "core/base.go"
+      ],
+      "files_to_create": [
+        "core/syscall.go",
+        "core/syscall_wasm.go"
+      ],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation addresses WASM compilation compatibility by abstracting the platform-specific syscall.Exec functionality behind build constraints. The key change was removing the direct syscall import from core/base.go and replacing the syscall.Exec call with a wrapper function 'exec'. This wrapper is then implemented in two separate files with Go build tags: syscall.go for standard builds (excluding WASM) and syscall_wasm.go for WASM builds.\n\nThis approach follows the Go idiom of using build constraints for platform-specific code while maintaining a clean API. The standard implementation delegates to the actual syscall.Exec, preserving the original restart functionality for native builds. The WASM implementation returns errors.ErrUnsupported, acknowledging the fundamental limitation of process execution in browser environments.\n\nThe pattern used here is minimal and idiomatic - it doesn't introduce unnecessary abstraction layers but provides just enough separation to enable cross-compilation. This change integrates seamlessly with the existing codebase because it only affects the single point where syscall was used, and the function signature remains identical across implementations, ensuring backward compatibility for all non-WASM builds.",
+  "source_pr": "https://github.com/pocketbase/pocketbase/pull/7116",
+  "before_sha": "b8f18bd97d0404c16db068904bc9e339af356b40",
+  "after_sha": "3ca6321907486708f0bc677f6d5a26413076e44c",
+  "diff_stats": {
+    "additions": 19,
+    "deletions": 2,
+    "files_changed": 3
+  }
+}

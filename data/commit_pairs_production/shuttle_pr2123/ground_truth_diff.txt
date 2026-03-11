@@ -1,0 +1,218 @@
+diff --git a/mcp/src/mcp.rs b/mcp/src/mcp.rs
+index bfde04f2e..95b9663b3 100644
+--- a/mcp/src/mcp.rs
++++ b/mcp/src/mcp.rs
+@@ -68,6 +68,15 @@ impl ShuttleMcpServer {
+         run_tool(project_list()).await
+     }
+ 
++    #[instrument(skip(self))]
++    #[tool(description = "Create a project on Shuttle")]
++    async fn project_create(
++        &self,
++        Parameters(args): Parameters<ProjectCreateArgs>,
++    ) -> Result<String, String> {
++        run_tool(project_create(args)).await
++    }
++
+     #[instrument(skip(self))]
+     #[tool(description = "Search Shuttle documentation")]
+     async fn search_docs(
+diff --git a/mcp/src/tools/deployment.rs b/mcp/src/tools/deployment.rs
+index 6950f3d7b..7ed6847c5 100644
+--- a/mcp/src/tools/deployment.rs
++++ b/mcp/src/tools/deployment.rs
+@@ -6,10 +6,10 @@ pub struct DeployArgs {
+     cwd: String,
+     #[schemars(description = "Use this secrets file instead")]
+     secrets_file: Option<String>,
+-    #[schemars(description = "Specify the name of the project")]
+-    name: Option<String>,
+-    #[schemars(description = "Specify the id of the project")]
+-    project_id: Option<String>,
++    #[schemars(
++        description = "Specify the id of the project. Get the project ID by running the project_list tool or create a new project with project_create if none exists"
++    )]
++    project_id: String,
+ }
+ 
+ #[derive(Debug, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
+@@ -20,10 +20,10 @@ pub struct DeploymentListArgs {
+     page: Option<u32>,
+     #[schemars(description = "How many deployments per page to display")]
+     limit: Option<u32>,
+-    #[schemars(description = "Specify the name of the project")]
+-    name: Option<String>,
+-    #[schemars(description = "Specify the id of the project")]
+-    project_id: Option<String>,
++    #[schemars(
++        description = "Specify the id of the project. Get the project ID by running the project_list tool or create a new project with project_create if none exists"
++    )]
++    project_id: String,
+ }
+ 
+ #[derive(Debug, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
+@@ -32,10 +32,10 @@ pub struct DeploymentStatusArgs {
+     cwd: String,
+     #[schemars(description = "ID of deployment to get status for")]
+     deployment_id: Option<String>,
+-    #[schemars(description = "Specify the name of the project")]
+-    name: Option<String>,
+-    #[schemars(description = "Specify the id of the project")]
+-    project_id: Option<String>,
++    #[schemars(
++        description = "Specify the id of the project. Get the project ID by running the project_list tool or create a new project with project_create if none exists"
++    )]
++    project_id: String,
+ }
+ 
+ pub async fn deploy(params: DeployArgs) -> Result<String, String> {
+@@ -46,15 +46,8 @@ pub async fn deploy(params: DeployArgs) -> Result<String, String> {
+         args.push(secrets);
+     }
+ 
+-    if let Some(name) = params.name {
+-        args.push("--name".to_string());
+-        args.push(name);
+-    }
+-
+-    if let Some(id) = params.project_id {
+-        args.push("--id".to_string());
+-        args.push(id);
+-    }
++    args.push("--id".to_string());
++    args.push(params.project_id);
+ 
+     execute_command("shuttle", args, &params.cwd).await
+ }
+@@ -72,15 +65,8 @@ pub async fn deployment_list(params: DeploymentListArgs) -> Result<String, Strin
+         args.push(limit.to_string());
+     }
+ 
+-    if let Some(name) = params.name {
+-        args.push("--name".to_string());
+-        args.push(name);
+-    }
+-
+-    if let Some(id) = params.project_id {
+-        args.push("--id".to_string());
+-        args.push(id);
+-    }
++    args.push("--id".to_string());
++    args.push(params.project_id);
+ 
+     execute_command("shuttle", args, &params.cwd).await
+ }
+@@ -92,15 +78,8 @@ pub async fn deployment_status(params: DeploymentStatusArgs) -> Result<String, S
+         args.push(id);
+     }
+ 
+-    if let Some(name) = params.name {
+-        args.push("--name".to_string());
+-        args.push(name);
+-    }
+-
+-    if let Some(id) = params.project_id {
+-        args.push("--id".to_string());
+-        args.push(id);
+-    }
++    args.push("--id".to_string());
++    args.push(params.project_id);
+ 
+     execute_command("shuttle", args, &params.cwd).await
+ }
+diff --git a/mcp/src/tools/logs.rs b/mcp/src/tools/logs.rs
+index d8c2d61d1..72c5bc3ac 100644
+--- a/mcp/src/tools/logs.rs
++++ b/mcp/src/tools/logs.rs
+@@ -19,10 +19,10 @@ pub struct LogsArgs {
+     deployment_id: Option<String>,
+     #[schemars(description = "View logs from the most recent deployment")]
+     latest: Option<bool>,
+-    #[schemars(description = "Specify the name of the project")]
+-    name: Option<String>,
+-    #[schemars(description = "Specify the id of the project")]
+-    project_id: Option<String>,
++    #[schemars(
++        description = "Specify the id of the project. Get the project ID by running the project_list tool or create a new project with project_create if none exists"
++    )]
++    project_id: String,
+     #[schemars(description = "Maximum number of lines to return")]
+     lines: Option<u32>,
+ }
+@@ -38,15 +38,8 @@ pub async fn logs(params: LogsArgs) -> Result<String, String> {
+         args.push("--latest".to_string());
+     }
+ 
+-    if let Some(name) = params.name {
+-        args.push("--name".to_string());
+-        args.push(name);
+-    }
+-
+-    if let Some(id) = params.project_id {
+-        args.push("--id".to_string());
+-        args.push(id);
+-    }
++    args.push("--id".to_string());
++    args.push(params.project_id);
+ 
+     let output = execute_command("shuttle", args, &params.cwd).await?;
+ 
+diff --git a/mcp/src/tools/project.rs b/mcp/src/tools/project.rs
+index d1e390a42..991f9e639 100644
+--- a/mcp/src/tools/project.rs
++++ b/mcp/src/tools/project.rs
+@@ -4,24 +4,17 @@ use crate::utils::execute_command;
+ pub struct ProjectStatusArgs {
+     #[schemars(description = "Specify the working directory")]
+     cwd: String,
+-    #[schemars(description = "Specify the name of the project")]
+-    name: Option<String>,
+-    #[schemars(description = "Specify the id of the project")]
+-    project_id: Option<String>,
++    #[schemars(
++        description = "Specify the id of the project. Get the project ID by running the project_list tool or create a new project with project_create if none exists"
++    )]
++    project_id: String,
+ }
+ 
+ pub async fn project_status(params: ProjectStatusArgs) -> Result<String, String> {
+     let mut args = vec!["project".to_string(), "status".to_string()];
+ 
+-    if let Some(name) = params.name {
+-        args.push("--name".to_string());
+-        args.push(name);
+-    }
+-
+-    if let Some(id) = params.project_id {
+-        args.push("--id".to_string());
+-        args.push(id);
+-    }
++    args.push("--id".to_string());
++    args.push(params.project_id);
+ 
+     execute_command("shuttle", args, &params.cwd).await
+ }
+@@ -31,3 +24,22 @@ pub async fn project_list() -> Result<String, String> {
+ 
+     execute_command("shuttle", args, ".").await
+ }
++
++#[derive(Debug, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
++pub struct ProjectCreateArgs {
++    #[schemars(description = "Specify the working directory")]
++    cwd: String,
++    #[schemars(description = "The name of the project to create")]
++    name: String,
++}
++
++pub async fn project_create(params: ProjectCreateArgs) -> Result<String, String> {
++    let args = vec![
++        "project".to_string(),
++        "create".to_string(),
++        "--name".to_string(),
++        params.name,
++    ];
++
++    execute_command("shuttle", args, &params.cwd).await
++}

@@ -1,0 +1,86 @@
+diff --git a/admin/src/args.rs b/admin/src/args.rs
+index 640f93962..26ffd0bdc 100644
+--- a/admin/src/args.rs
++++ b/admin/src/args.rs
+@@ -110,6 +110,11 @@ pub enum Command {
+         user_id: String,
+     },
+ 
++    /// Suspend a user
++    SuspendUser {
++        user_id: String,
++    },
++
+     SetAccountTier {
+         user_id: String,
+         tier: AccountTier,
+diff --git a/admin/src/client.rs b/admin/src/client.rs
+index 84f85c87f..6e115dce3 100644
+--- a/admin/src/client.rs
++++ b/admin/src/client.rs
+@@ -173,6 +173,14 @@ impl Client {
+             .await
+     }
+ 
++    pub async fn suspend_user(&self, user_id: &str) -> Result<()> {
++        self.inner
++            .put(format!("/admin/users/{user_id}"), Option::<()>::None)
++            .await?
++            .to_empty()
++            .await
++    }
++
+     pub async fn set_user_tier(&self, user_id: &str, account_tier: AccountTier) -> Result<()> {
+         self.inner
+             .put(
+diff --git a/admin/src/lib.rs b/admin/src/lib.rs
+index 37dd5bd53..6fbccb400 100644
+--- a/admin/src/lib.rs
++++ b/admin/src/lib.rs
+@@ -154,6 +154,12 @@ pub async fn run(args: Args) {
+             let msg = client.delete_user(&user_id).await.unwrap();
+             println!("{msg}");
+         }
++        Command::SuspendUser { user_id } => {
++            eprintln!("Suspending user {} in 3 seconds...", user_id);
++            tokio::time::sleep(tokio::time::Duration::from_millis(3000)).await;
++            client.suspend_user(&user_id).await.unwrap();
++            println!("User {user_id} suspended");
++        }
+         Command::SetAccountTier { user_id, tier } => {
+             client.set_user_tier(&user_id, tier.clone()).await.unwrap();
+             println!("Set {user_id} to {tier}");
+diff --git a/common/src/models/user.rs b/common/src/models/user.rs
+index 89653bab9..3f03496b8 100644
+--- a/common/src/models/user.rs
++++ b/common/src/models/user.rs
+@@ -23,6 +23,7 @@ pub struct UserResponse {
+     pub account_tier: AccountTier,
+     pub subscriptions: Option<Vec<Subscription>>,
+     pub flags: Option<Vec<String>>,
++    pub suspended_at: Option<DateTime<Utc>>,
+ }
+ 
+ impl UserResponse {
+@@ -37,6 +38,9 @@ impl UserResponse {
+             self.account_tier.to_string_fancy()
+         )
+         .unwrap();
++        if let Some(suspended_at) = self.suspended_at.as_ref() {
++            writeln!(&mut s, "  Suspended at: {}", suspended_at).unwrap();
++        }
+         if let Some(subs) = self.subscriptions.as_ref() {
+             if !subs.is_empty() {
+                 writeln!(&mut s, "  Subscriptions:").unwrap();
+diff --git a/common/types.ts b/common/types.ts
+index 5d07c6fcd..3fc6714ad 100644
+--- a/common/types.ts
++++ b/common/types.ts
+@@ -599,6 +599,7 @@ export interface UserResponse {
+ 	account_tier: AccountTier;
+ 	subscriptions?: Subscription[];
+ 	flags?: string[];
++	suspended_at?: string;
+ }
+ 
+ /** Response for the /user/me/usage backend endpoint */

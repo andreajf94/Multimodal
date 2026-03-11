@@ -1,0 +1,97 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "api_design",
+      "recommendation": "Extended the ContextMenuOption type to include an optional 'show' boolean field to control conditional rendering of menu items",
+      "rationale": "This approach maintains backward compatibility by making the field optional (defaults to true). It follows the existing pattern of optional fields like 'disabled' and 'small', ensuring consistency with the type system. The optional nature means existing code doesn't need to be updated.",
+      "alternatives_considered": [
+        "Adding a separate 'visible' or 'hidden' field with different semantics",
+        "Using a function-based approach like 'shouldShow: () => boolean' for dynamic evaluation",
+        "Creating a separate type for conditional menu items"
+      ],
+      "files_affected": [
+        "packages/types/src/context-menu.ts"
+      ]
+    },
+    {
+      "dimension": "conditional_rendering",
+      "recommendation": "Used Vue's v-if directive with nullish coalescing (??) operator to conditionally render menu items based on the 'show' field",
+      "rationale": "The v-if directive completely removes elements from the DOM when false, which is more performant than v-show for conditional menus. The nullish coalescing operator (??) provides a clean default of true when 'show' is undefined, maintaining backward compatibility. This approach centralizes the conditional logic in the template rather than spreading it across multiple places.",
+      "alternatives_considered": [
+        "Using v-show instead of v-if for simpler CSS-based toggling",
+        "Filtering the items array before rendering to reduce template complexity",
+        "Creating a computed property to filter visible items"
+      ],
+      "files_affected": [
+        "packages/client/internals/ContextMenu.vue"
+      ]
+    },
+    {
+      "dimension": "development_experience",
+      "recommendation": "Used the __DEV__ flag to conditionally show the editor button only in development mode",
+      "rationale": "__DEV__ is a Vite/rollup constant that gets replaced at build time, allowing dead code elimination in production builds. This aligns with existing patterns in the codebase where development-only features are gated. It ensures the editor button disappears completely in production builds, preventing user confusion from non-functional UI elements.",
+      "alternatives_considered": [
+        "Using process.env.NODE_ENV === 'development'",
+        "Creating a separate configuration option for editor visibility",
+        "Detecting if the presentation is running locally vs hosted"
+      ],
+      "files_affected": [
+        "packages/client/setup/context-menu.ts"
+      ]
+    },
+    {
+      "dimension": "template_structure",
+      "recommendation": "Wrapped the menu item rendering logic in a <template v-else-if=\"item.show ?? true\"> block to apply the conditional to both small and regular menu items",
+      "rationale": "This approach minimizes code duplication by applying the conditional once to cover both menu item variants (small and regular). The template wrapper ensures consistent behavior across all menu item types while maintaining the existing separation between small and regular item rendering logic. It's more maintainable than duplicating the conditional check in both rendering branches.",
+      "alternatives_considered": [
+        "Adding the v-if=\"item.show ?? true\" condition to both the small and regular div elements separately",
+        "Creating a separate component for menu items with the conditional logic",
+        "Using a render function instead of template syntax"
+      ],
+      "files_affected": [
+        "packages/client/internals/ContextMenu.vue"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Extend Context Menu Type System for Conditional Visibility",
+      "description": "Add optional 'show' field to ContextMenuOption type definition to support conditional rendering of menu items",
+      "files_to_modify": [
+        "packages/types/src/context-menu.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-002",
+      "title": "Implement Conditional Rendering in Context Menu Component",
+      "description": "Update the ContextMenu.vue component to respect the 'show' field and conditionally render menu items using v-if",
+      "files_to_modify": [
+        "packages/client/internals/ContextMenu.vue"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-003",
+      "title": "Configure Editor Button for Development-Only Visibility",
+      "description": "Update the context menu configuration to set the editor button's visibility based on the __DEV__ flag",
+      "files_to_modify": [
+        "packages/client/setup/context-menu.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation addresses the issue where the editor button in the context menu remained visible but non-functional in production builds. The solution follows a three-part approach that maintains backward compatibility while adding the requested conditional behavior.\n\nFirst, the type system was extended with an optional 'show' field in the ContextMenuOption interface. This optional approach ensures existing code continues to work without modification, as the field defaults to true when undefined. This pattern aligns with other optional fields like 'disabled' and 'small' in the same interface.\n\nSecond, the context menu component was updated to conditionally render items based on the 'show' field using Vue's v-if directive with nullish coalescing. The implementation cleverly wraps both small and regular menu item rendering logic within a single conditional template block, avoiding code duplication. The use of v-if rather than v-show ensures complete removal from the DOM when hidden, which is appropriate for development-only features.\n\nThird, the editor button configuration was updated to use the __DEV__ flag, a build-time constant that enables dead code elimination. This aligns with existing development-only feature patterns in the codebase and ensures the editor button disappears completely in production builds. The changes integrate seamlessly with the existing architecture, requiring minimal modifications while providing a clean, type-safe solution for conditional menu item visibility.",
+  "source_pr": "https://github.com/slidevjs/slidev/pull/2237",
+  "before_sha": "806580e15a9640aa720b62de8a07e462532b1201",
+  "after_sha": "e713f8dcc17b07ccc6d2097bf5ede7e44353a8db",
+  "diff_stats": {
+    "additions": 25,
+    "deletions": 21,
+    "files_changed": 3
+  }
+}

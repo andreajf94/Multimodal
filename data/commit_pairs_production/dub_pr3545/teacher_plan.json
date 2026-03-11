@@ -1,0 +1,136 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "code_style_and_formatting",
+      "recommendation": "Applied consistent code formatting rules across all modified files, including line breaks for long expressions and standardized import ordering",
+      "rationale": "Maintaining consistent code style improves readability, reduces cognitive load during code reviews, and prevents formatting-related merge conflicts. The changes enforce a uniform style guide across the codebase, particularly for complex conditional expressions and import statements.",
+      "alternatives_considered": [
+        "Using automated tools like Prettier with custom configuration",
+        "Creating separate style guides for different file types",
+        "Leaving formatting as-is to avoid large diffs"
+      ],
+      "files_affected": [
+        "apps/web/app/(ee)/api/partner-profile/programs/[programId]/analytics/export/route.ts",
+        "apps/web/app/(ee)/api/partner-profile/programs/[programId]/analytics/route.ts",
+        "apps/web/app/(ee)/api/partner-profile/programs/[programId]/customers/count/route.ts",
+        "apps/web/app/(ee)/api/partner-profile/programs/[programId]/customers/route.ts",
+        "apps/web/app/(ee)/api/partner-profile/programs/[programId]/events/export/route.ts",
+        "apps/web/app/(ee)/api/partner-profile/programs/[programId]/events/route.ts",
+        "apps/web/app/api/ai/support-chat/route.ts",
+        "apps/web/lib/api/partner-profile/obfuscate-customer-email.ts",
+        "apps/web/lib/api/partners/get-partners.ts",
+        "apps/web/lib/partners/create-partner-commission.ts"
+      ]
+    },
+    {
+      "dimension": "import_optimization",
+      "recommendation": "Removed duplicate imports and reorganized import statements to follow a consistent pattern (local imports first, then external dependencies)",
+      "rationale": "Clean import statements reduce bundle size, improve build times, and make dependencies more transparent. The pattern of grouping local imports before external dependencies helps developers quickly identify what's coming from within the project vs external packages.",
+      "alternatives_considered": [
+        "Using import aliases consistently",
+        "Implementing automatic import sorting in CI/CD",
+        "Creating import grouping rules in ESLint"
+      ],
+      "files_affected": [
+        "apps/web/app/(ee)/api/embed/referrals/earnings/route.ts",
+        "apps/web/lib/api/links/utils/transform-link.ts",
+        "apps/web/lib/network/get-discoverability-requirements.ts",
+        "apps/web/lib/partners/aggregate-partner-links-stats.ts"
+      ]
+    },
+    {
+      "dimension": "logic_simplification",
+      "recommendation": "Simplified complex conditional expressions and removed redundant checks while preserving the same business logic",
+      "rationale": "Simpler conditional logic is easier to test, debug, and maintain. The changes reduce cognitive complexity while keeping the same functional behavior, making edge cases more explicit and the code more resilient to future modifications.",
+      "alternatives_considered": [
+        "Extracting complex conditions into separate helper functions",
+        "Using early returns to reduce nesting",
+        "Adding more comprehensive type guards"
+      ],
+      "files_affected": [
+        "apps/web/app/(ee)/api/partner-profile/programs/[programId]/links/[linkId]/route.ts",
+        "apps/web/app/api/user/referrals-token/route.ts",
+        "apps/web/lib/ai/build-system-prompt.ts"
+      ]
+    },
+    {
+      "dimension": "naming_conventions",
+      "recommendation": "Standardized naming conventions for comments and variable descriptions to follow consistent casing patterns",
+      "rationale": "Consistent naming in comments and documentation improves code discoverability and makes the codebase more approachable for new developers. The change from 'AdSpend' to 'ad spend' follows a more conventional lowercase pattern for descriptive terms.",
+      "alternatives_considered": [
+        "Creating a formal documentation style guide",
+        "Using automated documentation generators",
+        "Adding inline JSDoc comments for all functions"
+      ],
+      "files_affected": [
+        "apps/web/app/(ee)/api/cron/streams/update-partner-stats/route.ts"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Partner API Route Formatting Standardization",
+      "description": "Apply consistent code formatting to all partner-related API routes, particularly focusing on long conditional expressions and import organization",
+      "files_to_modify": [
+        "apps/web/app/(ee)/api/partner-profile/programs/[programId]/analytics/export/route.ts",
+        "apps/web/app/(ee)/api/partner-profile/programs/[programId]/analytics/route.ts",
+        "apps/web/app/(ee)/api/partner-profile/programs/[programId]/customers/count/route.ts",
+        "apps/web/app/(ee)/api/partner-profile/programs/[programId]/customers/route.ts",
+        "apps/web/app/(ee)/api/partner-profile/programs/[programId]/events/export/route.ts",
+        "apps/web/app/(ee)/api/partner-profile/programs/[programId]/events/route.ts",
+        "apps/web/app/(ee)/api/partner-profile/programs/[programId]/links/[linkId]/route.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-002",
+      "title": "Import Cleanup and Reorganization",
+      "description": "Remove duplicate imports and establish consistent import ordering patterns across utility and library files",
+      "files_to_modify": [
+        "apps/web/app/(ee)/api/embed/referrals/earnings/route.ts",
+        "apps/web/lib/api/links/utils/transform-link.ts",
+        "apps/web/lib/network/get-discoverability-requirements.ts",
+        "apps/web/lib/partners/aggregate-partner-links-stats.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-003",
+      "title": "Logic Simplification and Bug Prevention",
+      "description": "Simplify complex conditional expressions and fix potential logical errors in referral token eligibility and link deletion logic",
+      "files_to_modify": [
+        "apps/web/app/api/user/referrals-token/route.ts",
+        "apps/web/app/(ee)/api/partner-profile/programs/[programId]/links/[linkId]/route.ts",
+        "apps/web/app/api/ai/support-chat/route.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-004",
+      "title": "Utility Function Consistency Improvements",
+      "description": "Apply consistent formatting to utility functions and calculations, particularly for financial computations and email obfuscation",
+      "files_to_modify": [
+        "apps/web/lib/api/partner-profile/obfuscate-customer-email.ts",
+        "apps/web/lib/api/partners/get-partners.ts",
+        "apps/web/lib/partners/create-partner-commission.ts",
+        "apps/web/app/(ee)/api/cron/streams/update-partner-stats/route.ts",
+        "apps/web/lib/ai/build-system-prompt.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "This change implements a comprehensive codebase style standardization across partner and API route files in the Dub application. The approach focuses on three main areas: consistent code formatting, import optimization, and logic simplification.\n\nFor formatting, the changes enforce line breaks for long conditional expressions (particularly those checking large program commission thresholds), making complex business rules more readable. This is especially important in partner-related API routes where financial calculations and eligibility checks are common. The standardization of import ordering follows a clear pattern where local imports come before external dependencies, improving dependency transparency and reducing bundle size.\n\nThe logic simplifications are particularly noteworthy. In the referral token eligibility check, the code was refactored to use a more straightforward logical expression that maintains the same business rule (partners must have earned commissions AND not be banned) but in a cleaner format. Similarly, the link deletion logic was simplified by removing redundant parentheses while preserving the same validation check for links with engagement metrics.\n\nThese changes integrate well with the existing codebase by following established patterns while addressing technical debt. The modifications are surgical and focused, avoiding large-scale refactoring that could introduce bugs. The approach demonstrates a balance between code quality improvements and risk management, making incremental changes that collectively improve maintainability without disrupting core functionality.",
+  "source_pr": "https://github.com/dubinc/dub/pull/3545",
+  "before_sha": "9132d52f0d3e954e65dc5ad9ac3542d111d66769",
+  "after_sha": "b04db0242bf6591a1cf4c0a757bfd012b393b5a7",
+  "diff_stats": {
+    "additions": 42,
+    "deletions": 30,
+    "files_changed": 18
+  }
+}

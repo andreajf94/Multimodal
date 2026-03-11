@@ -1,0 +1,105 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "api_design",
+      "recommendation": "Added a new `project_create` tool method to the MCP server with a clean parameter interface using `ProjectCreateArgs` struct",
+      "rationale": "Follows the existing pattern of MCP tool methods where each tool has a dedicated async method with proper instrumentation and error handling. The method signature matches other tools like `project_list` and `search_docs`, maintaining consistency across the API surface.",
+      "alternatives_considered": [
+        "Creating a separate module for project operations",
+        "Adding project creation as a subcommand of an existing tool"
+      ],
+      "files_affected": [
+        "mcp/src/mcp.rs",
+        "mcp/src/tools/project.rs"
+      ]
+    },
+    {
+      "dimension": "data_modeling",
+      "recommendation": "Created a new `ProjectCreateArgs` struct with `cwd` and `name` fields, and made `project_id` required in all existing project/deployment/logs tools",
+      "rationale": "The `ProjectCreateArgs` struct follows the same pattern as other argument structs in the codebase (e.g., `DeployArgs`, `LogsArgs`). Making `project_id` required simplifies the CLI command construction and provides clearer guidance to users about project identification requirements.",
+      "alternatives_considered": [
+        "Keeping optional project_id with fallback logic",
+        "Using project name as primary identifier instead of ID"
+      ],
+      "files_affected": [
+        "mcp/src/tools/deployment.rs",
+        "mcp/src/tools/logs.rs",
+        "mcp/src/tools/project.rs"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Used the existing `execute_command` utility function and `Result<String, String>` return type for consistent error handling",
+      "rationale": "Leverages the established error handling pattern where tools return `Result<String, String>` and use `run_tool()` wrapper. This ensures uniform error reporting and integration with the MCP server's error handling infrastructure.",
+      "alternatives_considered": [
+        "Creating custom error types for project creation",
+        "Adding more detailed error context specific to project creation"
+      ],
+      "files_affected": [
+        "mcp/src/tools/project.rs"
+      ]
+    },
+    {
+      "dimension": "cli_integration",
+      "recommendation": "Changed all existing tools to require `project_id` instead of accepting optional `name` or `project_id`, and updated documentation to guide users to use `project_list` or `project_create`",
+      "rationale": "Simplifies the implementation by removing conditional logic for `--name` vs `--id` flags. This creates a clearer workflow: users must first identify or create a project before performing operations on it. The updated descriptions guide users through the correct workflow.",
+      "alternatives_considered": [
+        "Keeping both name and ID options with priority logic",
+        "Adding automatic project creation when none exists"
+      ],
+      "files_affected": [
+        "mcp/src/tools/deployment.rs",
+        "mcp/src/tools/logs.rs",
+        "mcp/src/tools/project.rs"
+      ]
+    },
+    {
+      "dimension": "tool_discoverability",
+      "recommendation": "Updated tool descriptions to explicitly mention using `project_list` to get IDs or `project_create` to create new projects",
+      "rationale": "Improves user experience by providing clear guidance within the tool descriptions themselves. This helps users understand the workflow without needing external documentation and creates a self-documenting system.",
+      "alternatives_considered": [
+        "Relying on external documentation only",
+        "Creating a separate help tool for workflow guidance"
+      ],
+      "files_affected": [
+        "mcp/src/tools/deployment.rs",
+        "mcp/src/tools/logs.rs",
+        "mcp/src/tools/project.rs"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Implement project_create MCP tool",
+      "description": "Add a new tool to create Shuttle projects via the MCP interface, following the existing tool patterns and integrating with the shuttle CLI",
+      "files_to_modify": [
+        "mcp/src/mcp.rs",
+        "mcp/src/tools/project.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-002",
+      "title": "Standardize project identification across MCP tools",
+      "description": "Update all existing deployment, logs, and project tools to require project_id instead of accepting optional name/project_id, and improve documentation",
+      "files_to_modify": [
+        "mcp/src/tools/deployment.rs",
+        "mcp/src/tools/logs.rs",
+        "mcp/src/tools/project.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation adds a new `project_create` tool to the MCP server while simultaneously refining the project identification approach across all existing tools. The new tool follows the established architectural pattern: it's registered in the main MCP server struct with proper instrumentation, uses a dedicated argument struct (`ProjectCreateArgs`), and leverages the existing `execute_command` utility to interact with the shuttle CLI.\n\nA key design decision was making `project_id` required in all tools instead of accepting optional `name` or `project_id`. This simplifies the implementation by removing conditional flag logic and creates a clearer user workflow: users must first identify projects (via `project_list`) or create them (via `project_create`) before performing operations. The updated tool descriptions explicitly guide users through this workflow, making the system more self-documenting.\n\nThe changes integrate seamlessly with the existing codebase by following the same patterns used for other MCP tools. The `project_create` tool uses the same `Result<String, String>` error handling, the same `#[tool]` attribute for registration, and the same `execute_command` infrastructure. This consistency ensures maintainability and reduces cognitive load for developers working with the MCP server.",
+  "source_pr": "https://github.com/shuttle-hq/shuttle/pull/2123",
+  "before_sha": "c97d553f636c00985f30fce569c0ea9e2972212e",
+  "after_sha": "78945dd8c0792a362cd3ae6517ff41e697b18d50",
+  "diff_stats": {
+    "additions": 58,
+    "deletions": 65,
+    "files_changed": 4
+  }
+}

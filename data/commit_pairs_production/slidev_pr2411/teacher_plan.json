@@ -1,0 +1,68 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "ui_ux_consistency",
+      "recommendation": "Reordered conditional checks in timer color logic to prioritize overdue state (percentage > 100) over warning state (percentage > 80)",
+      "rationale": "The previous logic would incorrectly show yellow warning styling for timers exceeding 100% completion when they should always show red overdue styling. By checking for percentage > 100 first, we ensure visual consistency where overdue timers take precedence over warning states, which matches user expectations for timer behavior.",
+      "alternatives_considered": [
+        "Adding a separate 'overdue' flag to the timer state",
+        "Using nested conditionals to handle the edge case",
+        "Creating a color priority mapping object"
+      ],
+      "files_affected": [
+        "packages/client/internals/TimerBar.vue",
+        "packages/client/internals/TimerInlined.vue"
+      ]
+    },
+    {
+      "dimension": "component_design",
+      "recommendation": "Applied identical logic changes to both TimerBar and TimerInlined components to maintain consistency",
+      "rationale": "Both components share the same timer color semantics but use different CSS classes (bg-* vs text-*). Changing both ensures users see consistent color behavior regardless of which timer display component is used. This prevents confusion where one component might show red while another shows yellow for the same timer state.",
+      "alternatives_considered": [
+        "Extracting the color logic to a shared composable",
+        "Creating a timer color utility function",
+        "Using a single timer component with display variants"
+      ],
+      "files_affected": [
+        "packages/client/internals/TimerBar.vue",
+        "packages/client/internals/TimerInlined.vue"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Maintained existing state handling for paused timers (blue) and normal operation (green)",
+      "rationale": "The paused state check remains first in the conditional chain, preserving the existing behavior where paused timers always show blue regardless of percentage. This maintains the visual distinction between active and paused timers while fixing only the overdue/warning priority issue.",
+      "alternatives_considered": [
+        "Making paused timers also respect overdue/warning states",
+        "Adding separate styling for paused+overdue timers",
+        "Changing the paused color based on timer progress"
+      ],
+      "files_affected": [
+        "packages/client/internals/TimerBar.vue",
+        "packages/client/internals/TimerInlined.vue"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Fix timer color priority for overdue states",
+      "description": "Update timer components to ensure timers exceeding 100% completion always display with red styling, taking precedence over warning states",
+      "files_to_modify": [
+        "packages/client/internals/TimerBar.vue",
+        "packages/client/internals/TimerInlined.vue"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The change addresses a logical bug in the timer color priority system where overdue timers (exceeding 100% completion) were incorrectly displaying warning colors instead of error colors. The fix involved reordering conditional checks in both TimerBar and TimerInlined Vue components to evaluate the overdue state (percentage > 100) before the warning state (percentage > 80).\n\nThis minimal change leverages the existing component architecture and color system, maintaining all other timer states (paused, normal, warning) while fixing the priority issue. Both components use computed properties with identical logic patterns, ensuring consistency across different timer display formats. The solution is elegant in its simplicity\u2014changing only the order of conditionals rather than adding new state flags or complex logic.\n\nThe implementation follows the existing design patterns in Slidev's Vue 3 composition API structure, where computed properties handle reactive styling based on timer state. By fixing both components simultaneously, we ensure users experience consistent visual feedback regardless of which timer display they use, which is crucial for presentation tools where timing accuracy and clear visual indicators are important.",
+  "source_pr": "https://github.com/slidevjs/slidev/pull/2411",
+  "before_sha": "9f91897f69955545c18e2765515880f32b342f1f",
+  "after_sha": "ca2c527a84c787c1ea5ab458159ce937b7b4a526",
+  "diff_stats": {
+    "additions": 6,
+    "deletions": 6,
+    "files_changed": 2
+  }
+}

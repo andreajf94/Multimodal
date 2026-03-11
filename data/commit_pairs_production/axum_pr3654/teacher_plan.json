@@ -1,0 +1,54 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "dependency_management",
+      "recommendation": "Disabled default features and removed unused transitive dependencies from reqwest in example projects",
+      "rationale": "The examples only use reqwest's streaming capabilities, not its full HTTP client functionality. By disabling default features, we eliminate unnecessary dependencies like TLS implementations, mime handling, and platform-specific configuration libraries that aren't needed for simple example code. This reduces compilation time and binary size for users studying the examples.",
+      "alternatives_considered": [
+        "Keeping all default features enabled for simplicity",
+        "Creating custom feature sets for each example",
+        "Switching to a lighter HTTP client library"
+      ],
+      "files_affected": [
+        "examples/reqwest-response/Cargo.toml",
+        "examples/sse/Cargo.toml"
+      ]
+    },
+    {
+      "dimension": "example_optimization",
+      "recommendation": "Minimized example dependencies to demonstrate best practices for production applications",
+      "rationale": "Examples should demonstrate not just functionality but also good practices. By showing how to trim unnecessary dependencies, we teach users about dependency management and optimization. The examples still function correctly with only the 'stream' feature enabled, proving that the full reqwest feature set isn't required for these use cases.",
+      "alternatives_considered": [
+        "Leaving examples with full dependencies for maximum compatibility",
+        "Adding comments explaining optimization opportunities",
+        "Creating separate optimized vs unoptimized examples"
+      ],
+      "files_affected": [
+        "examples/reqwest-response/Cargo.toml",
+        "examples/sse/Cargo.toml"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Optimize reqwest dependencies in examples",
+      "description": "Update example projects to disable unused reqwest features, reducing compilation time and binary size while maintaining functionality",
+      "files_to_modify": [
+        "examples/reqwest-response/Cargo.toml",
+        "examples/sse/Cargo.toml"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The changes optimize two example projects (reqwest-response and sse) by disabling unused reqwest features. Both examples only require the 'stream' feature of reqwest for their functionality\u2014the reqwest-response example streams HTTP responses, while the sse example uses reqwest for Server-Sent Events. By adding `default-features = false` to the reqwest dependency declarations, we prevent the inclusion of unnecessary default features like TLS support, mime handling, and various HTTP protocol implementations.\n\nThe Cargo.lock changes reflect the elimination of transitive dependencies that were only needed for the now-disabled features. Removed dependencies include hyper-tls, system-configuration, windows-registry, encoding_rs, h2, mime, native-tls, and tokio-native-tls. This demonstrates how careful feature selection can significantly reduce dependency graphs in Rust projects.\n\nThis optimization follows Rust best practices for dependency management and serves as an educational example for framework users. The examples remain fully functional while demonstrating how to minimize compile times and binary sizes in production applications. The changes are minimal and focused, affecting only the example configurations without touching any framework code, ensuring the core library remains unchanged and stable.",
+  "source_pr": "https://github.com/tokio-rs/axum/pull/3654",
+  "before_sha": "3f8956dcd007070be5449dd23102b7ee7f2e1b05",
+  "after_sha": "74638ec273fac67d0f4bf5c2c541dd281aba2510",
+  "diff_stats": {
+    "additions": 2,
+    "deletions": 58,
+    "files_changed": 3
+  }
+}

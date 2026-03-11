@@ -1,0 +1,143 @@
+diff --git a/Cargo.lock b/Cargo.lock
+index d83c36b54e..0b355e72d7 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -1828,9 +1828,9 @@ dependencies = [
+ 
+ [[package]]
+ name = "tower-http"
+-version = "0.6.6"
++version = "0.6.8"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "adc82fd73de2a9722ac5da747f12383d2bfdb93591ee6c58486e0097890f05f2"
++checksum = "d4e6559d53cc268e5031cd8429d05415bc4cb4aefc4aa5d6cc35fbf5b924a1f8"
+ dependencies = [
+  "async-compression",
+  "base64",
+diff --git a/axum/Cargo.toml b/axum/Cargo.toml
+index f807384ebe..81daa39777 100644
+--- a/axum/Cargo.toml
++++ b/axum/Cargo.toml
+@@ -143,7 +143,7 @@ tracing = { version = "0.1", default-features = false, optional = true }
+ serde = { version = "1.0.211", optional = true }
+ 
+ [dependencies.tower-http]
+-version = "0.6.0"
++version = "0.6.8"
+ optional = true
+ features = [
+     # all tower-http features except (de)?compression-zstd which doesn't
+@@ -208,7 +208,7 @@ features = [
+ ]
+ 
+ [dev-dependencies.tower-http]
+-version = "0.6.0"
++version = "0.6.8"
+ features = [
+     # all tower-http features except (de)?compression-zstd which doesn't
+     # build on `--target armv5te-unknown-linux-musleabi`
+diff --git a/axum/src/handler/mod.rs b/axum/src/handler/mod.rs
+index 36c06b8ded..135891f7a3 100644
+--- a/axum/src/handler/mod.rs
++++ b/axum/src/handler/mod.rs
+@@ -431,7 +431,10 @@ mod tests {
+         let svc = handle
+             .layer((
+                 RequestBodyLimitLayer::new(1024),
+-                TimeoutLayer::new(Duration::from_secs(10)),
++                TimeoutLayer::with_status_code(
++                    StatusCode::REQUEST_TIMEOUT,
++                    Duration::from_secs(10),
++                ),
+                 MapResponseBodyLayer::new(Body::new),
+             ))
+             .layer(MapRequestBodyLayer::new(Body::new))
+diff --git a/axum/src/routing/method_routing.rs b/axum/src/routing/method_routing.rs
+index 13ec322123..5c58291e69 100644
+--- a/axum/src/routing/method_routing.rs
++++ b/axum/src/routing/method_routing.rs
+@@ -1457,6 +1457,7 @@ mod tests {
+         assert_eq!(status, StatusCode::OK);
+     }
+ 
++    #[allow(deprecated)]
+     #[crate::test]
+     async fn layer() {
+         let mut svc = MethodRouter::new()
+@@ -1472,6 +1473,7 @@ mod tests {
+         assert_eq!(status, StatusCode::UNAUTHORIZED);
+     }
+ 
++    #[allow(deprecated)]
+     #[crate::test]
+     async fn route_layer() {
+         let mut svc = MethodRouter::new()
+@@ -1487,7 +1489,7 @@ mod tests {
+         assert_eq!(status, StatusCode::METHOD_NOT_ALLOWED);
+     }
+ 
+-    #[allow(dead_code)]
++    #[allow(dead_code, deprecated)]
+     async fn building_complex_router() {
+         let app = crate::Router::new().route(
+             "/",
+@@ -1498,7 +1500,10 @@ mod tests {
+                 .merge(delete_service(ServeDir::new(".")))
+                 .fallback(|| async { StatusCode::NOT_FOUND })
+                 .put(ok)
+-                .layer(TimeoutLayer::new(Duration::from_secs(10))),
++                .layer(TimeoutLayer::with_status_code(
++                    StatusCode::REQUEST_TIMEOUT,
++                    Duration::from_secs(10),
++                )),
+         );
+ 
+         let listener = tokio::net::TcpListener::bind("0.0.0.0:0").await.unwrap();
+diff --git a/axum/src/routing/tests/merge.rs b/axum/src/routing/tests/merge.rs
+index b760184f54..206eb8e9bc 100644
+--- a/axum/src/routing/tests/merge.rs
++++ b/axum/src/routing/tests/merge.rs
+@@ -127,7 +127,10 @@ async fn layer_and_handle_error() {
+     let one = Router::new().route("/foo", get(|| async {}));
+     let two = Router::new()
+         .route("/timeout", get(std::future::pending::<()>))
+-        .layer(TimeoutLayer::new(Duration::from_millis(10)));
++        .layer(TimeoutLayer::with_status_code(
++            StatusCode::REQUEST_TIMEOUT,
++            Duration::from_millis(10),
++        ));
+     let app = one.merge(two);
+ 
+     let client = TestClient::new(app);
+@@ -364,6 +367,7 @@ async fn nesting_and_seeing_the_right_uri_ors_with_multi_segment_uris() {
+     );
+ }
+ 
++#[allow(deprecated)]
+ #[crate::test]
+ async fn middleware_that_return_early() {
+     let private = Router::new()
+diff --git a/axum/src/routing/tests/mod.rs b/axum/src/routing/tests/mod.rs
+index e4450b3617..aae2cb615c 100644
+--- a/axum/src/routing/tests/mod.rs
++++ b/axum/src/routing/tests/mod.rs
+@@ -330,7 +330,10 @@ async fn wildcard_sees_whole_url() {
+ async fn middleware_applies_to_routes_above() {
+     let app = Router::new()
+         .route("/one", get(std::future::pending::<()>))
+-        .layer(TimeoutLayer::new(Duration::ZERO))
++        .layer(TimeoutLayer::with_status_code(
++            StatusCode::REQUEST_TIMEOUT,
++            Duration::ZERO,
++        ))
+         .route("/two", get(|| async {}));
+ 
+     let client = TestClient::new(app);
+@@ -586,6 +589,7 @@ async fn routing_to_router_panics() {
+     TestClient::new(Router::new().route_service("/", Router::new()));
+ }
+ 
++#[allow(deprecated)]
+ #[crate::test]
+ async fn route_layer() {
+     let app = Router::new()

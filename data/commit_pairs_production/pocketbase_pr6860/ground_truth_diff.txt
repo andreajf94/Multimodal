@@ -1,0 +1,56 @@
+diff --git a/core/view.go b/core/view.go
+index d7db62570..5ae863b9c 100644
+--- a/core/view.go
++++ b/core/view.go
+@@ -215,7 +215,7 @@ func defaultViewField(name string) Field {
+ 	}
+ }
+ 
+-var castRegex = regexp.MustCompile(`(?i)^cast\s*\(.*\s+as\s+(\w+)\s*\)$`)
++var castRegex = regexp.MustCompile(`(?is)^cast\s*\(.*\s+as\s+(\w+)\s*\)$`)
+ 
+ func parseQueryToFields(app App, selectQuery string) (map[string]*queryField, error) {
+ 	p := new(identifiersParser)
+diff --git a/core/view_test.go b/core/view_test.go
+index 37eb2fcd5..3e0a343ea 100644
+--- a/core/view_test.go
++++ b/core/view_test.go
+@@ -394,6 +394,38 @@ func TestCreateViewFields(t *testing.T) {
+ 				"max": core.FieldTypeJSON,
+ 			},
+ 		},
++		{
++			"query with multiline cast",
++			`select
++				id,
++				cast(
++					(
++						case
++							when count(a.id) = 1 then 21
++							when count(a.id) = 2 then 18
++							else 0
++						end
++					) as int
++				) as cast_int
++			from demo1 a`,
++			false,
++			map[string]string{
++				"id":       core.FieldTypeText,
++				"cast_int": core.FieldTypeNumber,
++			},
++		},
++		{
++			"query with case-insensitive and extra-spaced cast",
++			`select
++				id,
++				CaSt( a.id  aS iNt ) as cast_int
++			from demo1 a`,
++			false,
++			map[string]string{
++				"id":       core.FieldTypeText,
++				"cast_int": core.FieldTypeNumber,
++			},
++		},
+ 		{
+ 			"query with reserved auth collection fields",
+ 			`
