@@ -1,14 +1,14 @@
 {
-  "feature_name": "Worker Heartbeat System",
-  "description": "Implement a worker heartbeat system that periodically reports worker status and resource utilization to the Temporal server. This system should track worker health, collect system resource metrics, and ensure proper cleanup during worker shutdown. The feature requires integrating heartbeat functionality across all worker types and removing the external resource tuner dependency.",
+  "feature_name": "Resource-Aware Worker Heartbeating",
+  "description": "Implement a worker heartbeat system that monitors and reports resource utilization (CPU, memory, cgroups) to enable intelligent task scheduling and resource management. This should integrate with the existing worker infrastructure to provide real-time resource metrics alongside standard heartbeat functionality.",
   "functional_requirements": [
-    "Create a heartbeat worker that periodically sends worker status and system resource metrics to the Temporal server",
-    "Implement system resource measurement capabilities to collect CPU, memory, and other resource utilization data from the host system",
-    "Integrate heartbeat functionality across all worker types (workflow, activity, nexus, and local activity workers)",
-    "Ensure workers always send a final shutdown heartbeat during cleanup, regardless of sticky queue configuration",
-    "Centralize namespace verification at the aggregated worker level and cache results for heartbeat efficiency",
-    "Remove external resource tuner dependency and migrate necessary functionality into the core SDK"
+    "Add resource monitoring capabilities to worker heartbeats, collecting CPU and memory usage data from the system",
+    "Integrate cgroups resource tuning functionality to read container-level resource constraints and utilization",
+    "Extend the worker heartbeat payload to include resource metrics alongside existing worker status information",
+    "Create a structured metrics collection system that can be tested across different environments (including non-Linux systems)",
+    "Ensure the resource monitoring works within the existing worker lifecycle and polling architecture",
+    "Add comprehensive testing for resource metric collection and heartbeat integration"
   ],
   "project_name": "sdk-go",
-  "source_pr": "https://github.com/temporalio/sdk-go/pull/2186"
+  "source_pr": ""
 }

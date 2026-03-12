@@ -91,3 +91,22 @@ class ImplementationPlan(BaseModel):
             paths.update(ticket.files_to_modify)
             paths.update(ticket.files_to_create)
         return sorted(paths)
+
+    def get_all_referenced_paths_split(self) -> tuple[list[str], list[str]]:
+        """Extract file paths split into must-exist vs new.
+
+        Returns:
+            (must_exist, new_files) where must_exist contains
+            files_to_modify + files_affected (should exist in repo)
+            and new_files contains files_to_create (should NOT exist).
+        """
+        must_exist: set[str] = set()
+        new_files: set[str] = set()
+        for decision in self.architecture_decisions:
+            must_exist.update(decision.files_affected)
+        for ticket in self.tickets:
+            must_exist.update(ticket.files_to_modify)
+            new_files.update(ticket.files_to_create)
+        # Don't double-penalise: if a file is in files_to_create, remove from must_exist
+        must_exist -= new_files
+        return sorted(must_exist), sorted(new_files)

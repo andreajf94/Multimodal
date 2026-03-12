@@ -117,9 +117,11 @@ def format_partial(completions: list[str]) -> list[float]:
 # ---------------------------------------------------------------------------
 
 def rgs_score(completions: list[str], file_manifests: list[list[str]]) -> list[float]:
-    """Score based on fraction of referenced file paths that exist in manifest.
+    """Score based on fraction of files_to_modify paths that exist in manifest.
 
     Max score: 3.0 (scaled from 0-1 RGS ratio).
+    Only checks files_to_modify against manifest — files_to_create are expected
+    to be new and should NOT be penalised for not existing.
     Falls back to regex path extraction if JSON parsing fails.
     """
     scores = []
@@ -130,20 +132,20 @@ def rgs_score(completions: list[str], file_manifests: list[list[str]]) -> list[f
         # Try structured extraction first
         plan = _parse_plan_json(text)
         if plan is not None:
-            referenced = _extract_file_paths(plan)
+            must_exist, _ = _extract_file_paths(plan)
         else:
             # Fallback: extract path-like strings from raw text
-            referenced = _extract_paths_regex(text)
+            must_exist = _extract_paths_regex(text)
 
-        if not referenced:
+        if not must_exist:
             scores.append(0.0)
             continue
 
         valid = sum(
-            1 for p in referenced
+            1 for p in must_exist
             if _normalize_path(p) in manifest_set or _normalize_path(p) in manifest_norm
         )
-        ratio = valid / len(referenced)
+        ratio = valid / len(must_exist)
         scores.append(ratio * 3.0)
     return scores
 
@@ -304,15 +306,25 @@ def _extract_paths_regex(text: str) -> list[str]:
     return list(set(paths))
 
 
-def _extract_file_paths(plan: dict) -> list[str]:
-    """Extract all file paths referenced in a plan dict."""
-    paths: set[str] = set()
+def _extract_file_paths(plan: dict) -> tuple[list[str], list[str]]:
+    """Extract file paths from a plan, split by must-exist vs new.
+
+    Returns:
+        (must_exist, new_files) where must_exist are files_to_modify
+        (should be in manifest) and new_files are files_to_create
+        (should NOT be in manifest).
+    """
+    must_exist: set[str] = set()
+    new_files: set[str] = set()
     for decision in plan.get("architecture_decisions", []):
-        paths.update(decision.get("files_affected", []))
+        # files_affected may include both existing and new — treat as must_exist
+        must_exist.update(decision.get("files_affected", []))
     for ticket in plan.get("tickets", []):
-        paths.update(ticket.get("files_to_modify", []))
-        paths.update(ticket.get("files_to_create", []))
-    return list(paths)
+        must_exist.update(ticket.get("files_to_modify", []))
+        new_files.update(ticket.get("files_to_create", []))
+    # Don't double-penalise: if a file is in files_to_create, remove from must_exist
+    must_exist -= new_files
+    return list(must_exist), list(new_files)
 
 
 def _normalize_path(path: str) -> str:

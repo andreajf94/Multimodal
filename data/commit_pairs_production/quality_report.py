@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 from collections import defaultdict
 
-data_dir = Path("D:/commit_pairs_production")
+data_dir = Path(__file__).parent
 complete = [d for d in data_dir.iterdir() if d.is_dir() and (d / "teacher_plan.json").exists()]
 
 print("="*60)

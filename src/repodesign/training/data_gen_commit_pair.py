@@ -141,11 +141,50 @@ Guidelines:
 - Return ONLY the JSON object"""
 
 
+def _categorize_diff_files(diff_text: str, file_manifest: set[str]) -> tuple[list[str], list[str]]:
+    """Categorize changed files into modify vs create based on diff headers and manifest.
+    
+    Args:
+        diff_text: The unified diff.
+        file_manifest: Set of existing file paths from RepoIR.
+    
+    Returns:
+        (files_to_modify, files_to_create)
+    """
+    files_to_modify = []
+    files_to_create = []
+    
+    # Parse diff to find new files (look for "new file mode" in diff headers)
+    current_file = None
+    is_new_file = False
+    
+    for line in diff_text.split('\n'):
+        if line.startswith('diff --git '):
+            # Extract filename: diff --git a/path/file.txt b/path/file.txt
+            parts = line.split()
+            if len(parts) >= 4:
+                current_file = parts[2][2:]  # Remove 'a/' prefix
+                is_new_file = False
+        elif line.startswith('new file mode') and current_file:
+            is_new_file = True
+        elif line.startswith('---') and current_file:
+            # End of header, categorize this file
+            if is_new_file or current_file not in file_manifest:
+                files_to_create.append(current_file)
+            else:
+                files_to_modify.append(current_file)
+            current_file = None
+            is_new_file = False
+    
+    return files_to_modify, files_to_create
+
+
 def generate_teacher_explanation(
     repo_ir_summary: str,
     spec: dict,
     diff_text: str,
     diff_files: list[str],
+    file_manifest: set[str],
 ) -> dict:
     """Generate a teacher explanation of real code changes.
 
@@ -154,10 +193,14 @@ def generate_teacher_explanation(
         spec: Feature spec derived from PR metadata.
         diff_text: The actual unified diff.
         diff_files: List of changed file paths.
+        file_manifest: Set of existing file paths for categorization.
 
     Returns:
         Structured explanation dict.
     """
+    # Categorize files based on diff headers and manifest
+    files_to_modify, files_to_create = _categorize_diff_files(diff_text, file_manifest)
+    
     # Truncate diff if needed to fit context
     diff_for_prompt = diff_text
     if len(diff_for_prompt) > 40_000:
@@ -169,15 +212,23 @@ def generate_teacher_explanation(
 ## Feature Request
 {json.dumps(spec, indent=2)}
 
-## Files Changed
-{chr(10).join(diff_files)}
+## Files to MODIFY (already exist in repo)
+{chr(10).join(files_to_modify) if files_to_modify else '(none)'}
+
+## Files to CREATE (new files)
+{chr(10).join(files_to_create) if files_to_create else '(none)'}
 
 ## Actual Diff
 ```diff
 {diff_for_prompt}
 ```
 
-Explain the implementation decisions made in this change."""
+Explain the implementation decisions made in this change. 
+
+CRITICAL REQUIREMENTS:
+1. Use ONLY files from the lists above - files_to_modify must only contain existing files, files_to_create must only contain new files
+2. Copy file paths EXACTLY as shown above, character-for-character, including any hashes, version numbers, or generated names
+3. Do NOT invent, modify, or "clean up" file paths - use the exact paths from the diff"""
 
     raw = _call_deepseek(
         TEACHER_EXPLAIN_SYSTEM,
@@ -185,7 +236,53 @@ Explain the implementation decisions made in this change."""
         model="deepseek-chat",
         max_tokens=8192,
     )
-    return _extract_json(raw)
+    teacher_plan = _extract_json(raw)
+    
+    # Extract actual diff files for validation
+    diff_file_set = set(diff_files)
+    
+    # Helper to fix hallucinated hashes: ui/dist/assets/File.WRONG.js -> ui/dist/assets/File.CORRECT.js
+    def fix_hallucinated_filename(filename: str) -> str:
+        """If filename has wrong hash, replace with correct one from diff."""
+        if filename in diff_file_set or filename in file_manifest:
+            return filename
+        
+        # Check if it's a hashed filename that got the hash wrong
+        # Pattern: path/basename.HASH.ext where HASH is 8 hex chars
+        import re
+        parts = filename.rsplit('.', 2)
+        if len(parts) == 3 and re.match(r'^[a-f0-9]{8}$', parts[1]):
+            # Has hash format, try to find correct version in diff
+            base_pattern = parts[0]  # e.g., "ui/dist/assets/AuthMethodsDocs"
+            ext = parts[2]  # e.g., "js"
+            
+            for diff_file in diff_file_set:
+                if diff_file.startswith(base_pattern + '.') and diff_file.endswith('.' + ext):
+                    return diff_file
+        
+        return filename
+    
+    # Post-process to fix any categorization errors and hallucinated filenames
+    for ticket in teacher_plan.get('tickets', []):
+        modify = ticket.get('files_to_modify', [])
+        create = ticket.get('files_to_create', [])
+        
+        # Fix hallucinated hashes
+        modify = [fix_hallucinated_filename(f) for f in modify]
+        create = [fix_hallucinated_filename(f) for f in create]
+        
+        # Fix categorization
+        fixed_modify = [f for f in modify if f in file_manifest]
+        fixed_create = [f for f in create if f not in file_manifest]
+        
+        # Move incorrectly categorized files
+        wrongly_in_modify = [f for f in modify if f not in file_manifest]
+        wrongly_in_create = [f for f in create if f in file_manifest]
+        
+        ticket['files_to_modify'] = fixed_modify + wrongly_in_create
+        ticket['files_to_create'] = fixed_create + wrongly_in_modify
+    
+    return teacher_plan
 
 
 # ---------------------------------------------------------------------------
@@ -232,7 +329,7 @@ def generate_commit_pair_example(
     logger.info(f"  Generating teacher explanation...")
     try:
         teacher_plan = generate_teacher_explanation(
-            summary, spec, diff_text, diff_files
+            summary, spec, diff_text, diff_files, set(file_manifest)
         )
         # Add metadata
         teacher_plan["source_pr"] = commit_pair_data.get("pr_url", "")

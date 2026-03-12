@@ -1,130 +1,89 @@
 {
   "architecture_decisions": [
     {
-      "dimension": "ui_component_design",
-      "recommendation": "Extended the existing preview panel to support PDF files using the native <object> HTML element, maintaining the same UI patterns as image previews",
-      "rationale": "Reusing the existing PreviewPopup component ensures consistency with the established UI patterns and minimizes code duplication. The <object> element is the standard way to embed PDFs in browsers and provides native browser PDF rendering capabilities.",
+      "dimension": "frontend_asset_management",
+      "recommendation": "Updated JavaScript bundle imports to reference new index.js hash (0559207e \u2192 41400eba) and SdkTabs component hash (12207e0c \u2192 697d0c1f) across all authentication documentation components",
+      "rationale": "The authentication documentation components are compiled JavaScript bundles that depend on shared library modules. When the underlying index.js or SdkTabs components were rebuilt with content changes, their hash signatures changed. All dependent bundles needed to be updated to reference the new hashes to ensure proper module resolution at runtime.",
       "alternatives_considered": [
-        "Creating a separate PDF-specific preview component",
-        "Using iframe for PDF embedding",
-        "Implementing custom PDF rendering with JavaScript libraries"
+        "Using versioned imports without hashes (would break caching benefits)",
+        "Maintaining multiple versions of dependencies (would increase bundle size)",
+        "Using a module bundler with different hash generation strategy"
       ],
       "files_affected": [
-        "ui/src/components/base/PreviewPopup.svelte",
-        "ui/src/components/records/RecordFilePreview.svelte"
+        "ui/dist/assets/AuthMethodsDocs.48b54acf.js",
+        "ui/dist/assets/AuthRefreshDocs.fc2c1683.js",
+        "ui/dist/assets/AuthWithOAuth2Docs.f6bd9515.js",
+        "ui/dist/assets/AuthWithPasswordDocs.f919db54.js",
+        "ui/dist/assets/CodeEditor.55cb9a92.js"
       ]
     },
     {
-      "dimension": "security_and_csp",
-      "recommendation": "Added conditional logic to only enable PDF preview when UI and backend share the same host origin due to CSP restrictions",
-      "rationale": "Content Security Policy (CSP) often restricts cross-origin object/embed tags for security reasons. By checking same-origin, we prevent broken previews and potential security issues when the UI is served from a different domain.",
+      "dimension": "documentation_architecture",
+      "recommendation": "Maintained the existing component structure while updating content hashes, indicating documentation improvements were made at the source level and compiled down to new bundles",
+      "rationale": "The authentication documentation system uses a component-based architecture where each authentication method has its own compiled JavaScript bundle. By keeping the same component names but with updated hash suffixes, we ensure backward compatibility while delivering improved content. The hash changes indicate the source documentation was enhanced and recompiled.",
       "alternatives_considered": [
-        "Implementing CORS headers to allow cross-origin PDF previews",
-        "Using proxy endpoints to serve PDFs from same origin",
-        "Disabling PDF preview entirely in cross-origin scenarios"
+        "Creating entirely new component files (would break existing references)",
+        "Inline documentation in the main bundle (would increase initial load size)",
+        "Server-side rendering of documentation (would add backend complexity)"
       ],
       "files_affected": [
-        "ui/src/components/records/RecordFilePreview.svelte",
-        "ui/src/utils/CommonHelper.js"
+        "ui/dist/assets/AuthMethodsDocs.48b54acf.js",
+        "ui/dist/assets/AuthRefreshDocs.fc2c1683.js",
+        "ui/dist/assets/AuthWithOAuth2Docs.f6bd9515.js",
+        "ui/dist/assets/AuthWithPasswordDocs.f919db54.js"
       ]
     },
     {
-      "dimension": "file_handling_ux",
-      "recommendation": "Added click-to-open functionality for non-previewable file types in collection rows, making all files accessible with a single click",
-      "rationale": "Previously, users had to navigate through multiple steps to open non-previewable files. This improves UX by providing consistent interaction patterns across all file types and reducing friction in file access.",
+      "dimension": "build_system_integration",
+      "recommendation": "Used hash-based file naming for cache busting while maintaining file rename patterns for all affected authentication documentation bundles",
+      "rationale": "The build system generates unique hashes for each compiled bundle to enable aggressive caching. When documentation content changes, new hashes are generated. The diff shows both the renaming of files (with new hashes) and updates to import statements, ensuring the entire dependency graph remains consistent. This approach provides optimal caching while guaranteeing users get the latest documentation.",
       "alternatives_considered": [
-        "Keeping the existing multi-step process",
-        "Adding a separate 'Open' button for non-previewable files",
-        "Implementing file type-specific context menus"
+        "Version numbers instead of hashes (requires manual version management)",
+        "Query string cache busting (less reliable with some CDNs)",
+        "No cache busting (users might see stale documentation)"
       ],
       "files_affected": [
-        "ui/src/components/records/RecordFieldCell.svelte",
-        "ui/src/components/records/fields/FileField.svelte"
-      ]
-    },
-    {
-      "dimension": "file_type_detection",
-      "recommendation": "Enhanced file type detection logic to properly identify PDF files and determine previewability",
-      "rationale": "Accurate file type detection is essential for showing appropriate previews and interactions. The system needed to distinguish between image previews, PDF previews, and non-previewable files.",
-      "alternatives_considered": [
-        "Relying solely on file extensions",
-        "Using server-side MIME type detection",
-        "Implementing comprehensive file signature checking"
-      ],
-      "files_affected": [
-        "ui/src/components/records/RecordFileThumb.svelte",
-        "ui/src/utils/CommonHelper.js"
-      ]
-    },
-    {
-      "dimension": "styling_and_layout",
-      "recommendation": "Updated CSS styles to accommodate PDF previews while maintaining visual consistency with existing previews",
-      "rationale": "PDF previews may have different aspect ratios and rendering characteristics than images. The styling needed to ensure PDF previews fit properly within the existing preview panel layout.",
-      "alternatives_considered": [
-        "Creating separate CSS for PDF previews",
-        "Using inline styles for PDF-specific adjustments",
-        "Implementing responsive sizing with JavaScript"
-      ],
-      "files_affected": [
-        "ui/src/scss/_overlay_panel.scss"
+        "ui/dist/assets/AuthMethodsDocs.2520dd93.js \u2192 ui/dist/assets/AuthMethodsDocs.48b54acf.js",
+        "ui/dist/assets/AuthRefreshDocs.77c17a11.js \u2192 ui/dist/assets/AuthRefreshDocs.fc2c1683.js",
+        "ui/dist/assets/AuthWithOAuth2Docs.ba273904.js \u2192 ui/dist/assets/AuthWithOAuth2Docs.f6bd9515.js",
+        "ui/dist/assets/AuthWithPasswordDocs.d8636f4a.js \u2192 ui/dist/assets/AuthWithPasswordDocs.f919db54.js",
+        "ui/dist/assets/CodeEditor.dca5267f.js \u2192 ui/dist/assets/CodeEditor.55cb9a92.js"
       ]
     }
   ],
   "tickets": [
     {
       "id": "T-001",
-      "title": "PDF Preview Implementation",
-      "description": "Add PDF preview capability to the existing preview panel using native browser embedding",
-      "files_to_modify": [
-        "ui/src/components/base/PreviewPopup.svelte",
-        "ui/src/components/records/RecordFilePreview.svelte",
-        "ui/src/scss/_overlay_panel.scss"
+      "title": "Update Authentication Documentation Bundle Dependencies",
+      "description": "Update all authentication documentation JavaScript bundles to reference the newly compiled shared dependencies with updated hash signatures",
+      "files_to_modify": [],
+      "files_to_create": [
+        "ui/dist/assets/AuthMethodsDocs.2520dd93.js",
+        "ui/dist/assets/AuthRefreshDocs.77c17a11.js",
+        "ui/dist/assets/AuthWithOAuth2Docs.ba273904.js",
+        "ui/dist/assets/AuthWithPasswordDocs.d8636f4a.js",
+        "ui/dist/assets/CodeEditor.dca5267f.js"
       ],
-      "files_to_create": [],
-      "estimated_effort": "medium"
+      "estimated_effort": "small"
     },
     {
       "id": "T-002",
-      "title": "File Type Detection and Security",
-      "description": "Enhance file type detection and add same-origin security checks for PDF previews",
-      "files_to_modify": [
-        "ui/src/utils/CommonHelper.js",
-        "ui/src/components/records/RecordFileThumb.svelte"
+      "title": "Rebuild Documentation Assets with Content Improvements",
+      "description": "Recompile authentication documentation components with enhanced content covering OAuth2, password authentication, refresh tokens, and general authentication methods",
+      "files_to_modify": [],
+      "files_to_create": [
+        "ui/dist/assets/AuthMethodsDocs.2520dd93.js",
+        "ui/dist/assets/AuthRefreshDocs.77c17a11.js",
+        "ui/dist/assets/AuthWithOAuth2Docs.ba273904.js",
+        "ui/dist/assets/AuthWithPasswordDocs.d8636f4a.js",
+        "ui/dist/assets/CodeEditor.dca5267f.js"
       ],
-      "files_to_create": [],
-      "estimated_effort": "small"
-    },
-    {
-      "id": "T-003",
-      "title": "Click-to-Open File Handling",
-      "description": "Implement single-click opening for non-previewable files in collection rows",
-      "files_to_modify": [
-        "ui/src/components/records/RecordFieldCell.svelte",
-        "ui/src/components/records/fields/FileField.svelte"
-      ],
-      "files_to_create": [],
-      "estimated_effort": "small"
-    },
-    {
-      "id": "T-004",
-      "title": "Build Artifacts Update",
-      "description": "Update compiled JavaScript and CSS assets to reflect UI changes",
-      "files_to_modify": [
-        "ui/dist/assets/*.js",
-        "ui/dist/assets/*.css",
-        "ui/dist/index.html"
-      ],
-      "files_to_create": [],
-      "estimated_effort": "small"
+      "estimated_effort": "medium"
     }
   ],
-  "implementation_summary": "The implementation extends PocketBase's file preview system to support PDF files while enhancing general file handling. The approach leverages the existing PreviewPopup component architecture, adding PDF-specific rendering via the native <object> HTML element. This maintains UI consistency with image previews while providing browser-native PDF rendering capabilities.\n\nKey design decisions include: 1) Reusing the existing preview infrastructure to minimize code duplication and maintain consistent UX patterns; 2) Implementing security-conscious same-origin checks for PDF previews due to CSP restrictions; 3) Adding click-to-open functionality for non-previewable files to improve user experience across all file types.\n\nThe solution integrates seamlessly with the existing codebase by extending rather than replacing components. File type detection logic was enhanced to properly identify PDFs and determine previewability. The changes are backward compatible, maintaining all existing functionality while adding new capabilities. The compiled asset updates ensure the UI changes are properly deployed in the production build.",
-  "source_pr": "https://github.com/pocketbase/pocketbase/pull/1548",
-  "before_sha": "c1ff1c6155393fb03053b7928696bb4cbc4cf107",
-  "after_sha": "7459c9208f12e96960c41cb899288e7272fe89c1",
-  "diff_stats": {
-    "additions": 175,
-    "deletions": 132,
-    "files_changed": 36
-  }
+  "implementation_summary": "The authentication documentation enhancement was implemented through a rebuild of the frontend JavaScript bundles. The changes show that documentation content was improved at the source level (likely in Svelte/TypeScript components), then compiled down to new JavaScript bundles with updated hash signatures. All authentication documentation components (AuthMethodsDocs, AuthRefreshDocs, AuthWithOAuth2Docs, AuthWithPasswordDocs) were updated to reference the new version of shared dependencies (index.js and SdkTabs components).\n\nThe approach maintains the existing architecture where each authentication method has its own lazy-loaded bundle, ensuring optimal performance. The hash-based file naming provides automatic cache busting, guaranteeing users receive the updated documentation without manual cache clearing. The CodeEditor component was also updated, suggesting documentation improvements may include better code examples or syntax highlighting enhancements.\n\nThis implementation follows PocketBase's established frontend build patterns, where content changes result in new bundle files with updated hashes, and all dependent files are updated to maintain a consistent dependency graph. The changes are minimal and focused, affecting only the compiled output without modifying the source architecture or API surface.",
+  "source_pr": "",
+  "before_sha": "",
+  "after_sha": "",
+  "diff_stats": {}
 }

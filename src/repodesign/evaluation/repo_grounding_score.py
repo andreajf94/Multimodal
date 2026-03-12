@@ -26,12 +26,16 @@ class RGSResult:
     valid_paths: int
     invalid_paths: list[str]
     valid_path_list: list[str]
+    new_file_paths: list[str]  # files_to_create (not checked against repo)
 
 
 def compute_rgs(plan: ImplementationPlan, repo_path: str) -> RGSResult:
     """Compute the Repo Grounding Score for a plan against a repository.
 
-    RGS = (number of referenced paths that exist) / (total referenced paths)
+    RGS = (files_to_modify that exist) / (total files_to_modify)
+
+    Only checks files_to_modify against the repo. files_to_create are
+    expected to be new and are NOT penalised for not existing.
 
     Args:
         plan: The implementation plan to evaluate.
@@ -40,22 +44,23 @@ def compute_rgs(plan: ImplementationPlan, repo_path: str) -> RGSResult:
     Returns:
         RGSResult with score and detailed breakdown.
     """
-    referenced_paths = plan.get_all_referenced_paths()
+    must_exist, new_files = plan.get_all_referenced_paths_split()
 
-    if not referenced_paths:
+    if not must_exist:
         return RGSResult(
             score=1.0,  # No paths to ground = vacuously true
             total_paths=0,
             valid_paths=0,
             invalid_paths=[],
             valid_path_list=[],
+            new_file_paths=new_files,
         )
 
     repo = Path(repo_path)
     valid: list[str] = []
     invalid: list[str] = []
 
-    for ref_path in referenced_paths:
+    for ref_path in must_exist:
         # Normalize the path
         normalized = ref_path.strip().lstrip("/")
 
@@ -79,7 +84,7 @@ def compute_rgs(plan: ImplementationPlan, repo_path: str) -> RGSResult:
             if not found:
                 invalid.append(ref_path)
 
-    total = len(referenced_paths)
+    total = len(must_exist)
     score = len(valid) / total if total > 0 else 1.0
 
     return RGSResult(
@@ -88,6 +93,7 @@ def compute_rgs(plan: ImplementationPlan, repo_path: str) -> RGSResult:
         valid_paths=len(valid),
         invalid_paths=invalid,
         valid_path_list=valid,
+        new_file_paths=new_files,
     )
 
 
