@@ -95,19 +95,18 @@ def check_teacher_plan(plan: dict) -> list[str]:
         warnings.append(f"Only {len(decisions)} architecture decisions (want >=3)")
     if len(tickets) < 3:
         warnings.append(f"Only {len(tickets)} tickets (want >=4)")
-    if not plan.get("technology_choices"):
-        warnings.append("No technology choices")
+    if not plan.get("technology_choices") and not plan.get("implementation_summary"):
+        warnings.append("No technology choices or implementation summary")
 
-    # Check file path grounding
-    all_paths = set()
-    for d in decisions:
-        all_paths.update(d.get("files_affected", []))
+    # Check file path grounding (only files_to_modify must exist)
+    must_exist = set()
+    new_files = set()
     for t in tickets:
-        all_paths.update(t.get("files_to_modify", []))
-        all_paths.update(t.get("files_to_create", []))
+        must_exist.update(t.get("files_to_modify", []))
+        new_files.update(t.get("files_to_create", []))
 
-    if len(all_paths) < 3:
-        warnings.append(f"Only {len(all_paths)} unique file paths referenced")
+    if len(must_exist) + len(new_files) < 3:
+        warnings.append(f"Only {len(must_exist) + len(new_files)} unique file paths referenced")
 
     return warnings
 
@@ -293,15 +292,16 @@ def main():
                 rgs = 0.0
                 if has_ir and ir:
                     manifest_set = set(ir.get("file_manifest", []))
-                    all_paths = set()
-                    for d in decisions:
-                        all_paths.update(d.get("files_affected", []))
+                    # RGS: only files_to_modify must exist; files_to_create are new
+                    must_exist = set()
+                    new_files = set()
                     for t in tickets:
-                        all_paths.update(t.get("files_to_modify", []))
-                        all_paths.update(t.get("files_to_create", []))
-                    existing = [p for p in all_paths if p in manifest_set or p.rstrip(" (new)") in manifest_set]
-                    if all_paths:
-                        rgs = len(existing) / len(all_paths)
+                        must_exist.update(t.get("files_to_modify", []))
+                        new_files.update(t.get("files_to_create", []))
+                    existing = [p for p in must_exist if p in manifest_set]
+                    if must_exist:
+                        rgs = len(existing) / len(must_exist)
+                    all_paths = must_exist | new_files
 
                 print(f"\n    {C.BOLD}Teacher Plan:{C.END}")
                 print(f"      Architecture decisions: {len(decisions)}")

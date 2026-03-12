@@ -230,16 +230,20 @@ def extract_repo_ir(
 
 
 def _classify_scale(star_count: int, num_contributors: int, infra: dict) -> ScaleTier | None:
-    """Heuristic scale classification based on repo metadata."""
-    has_k8s = infra.get("containerization") == "kubernetes"
-    has_ci = infra.get("ci_cd") is not None
-    has_docker = infra.get("containerization") in ("docker", "docker-compose", "kubernetes")
+    """Heuristic scale classification based on repo metadata.
 
-    if star_count >= 5000 or num_contributors >= 30 or has_k8s:
+    Uses stars as a proxy for user base and contributors for team size,
+    aligned with ScaleTier definitions:
+      hobby:      <1k users, 1 dev
+      startup:    1k-50k users, 2-5 devs
+      growth:     50k-1M users, 10-30 devs
+      enterprise: 1M+ users, 30+ devs
+    """
+    if star_count >= 50000 or num_contributors >= 500:
         return ScaleTier.ENTERPRISE
-    if star_count >= 500 or num_contributors >= 5 or (has_docker and has_ci):
+    if star_count >= 10000 or num_contributors >= 100:
         return ScaleTier.GROWTH
-    if star_count >= 10 or num_contributors >= 2 or has_ci:
+    if star_count >= 1000 or num_contributors >= 10:
         return ScaleTier.STARTUP
     return ScaleTier.HOBBY
 

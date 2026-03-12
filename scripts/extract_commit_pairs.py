@@ -36,6 +36,37 @@ from repodesign.extractors.pipeline import extract_repo_ir, save_repo_ir
 from repodesign.training.data_gen_commit_pair import generate_commit_pair_example
 
 
+def fetch_repo_metadata(repo_full_name: str) -> dict:
+    """Fetch star_count and contributor count from GitHub API."""
+    import requests
+    token = os.environ.get("GITHUB_TOKEN")
+    headers = {"Accept": "application/vnd.github.v3+json"}
+    if token:
+        headers["Authorization"] = f"token {token}"
+
+    meta = {"star_count": 0, "num_contributors": 0}
+    try:
+        resp = requests.get(f"https://api.github.com/repos/{repo_full_name}", headers=headers, timeout=15)
+        if resp.ok:
+            data = resp.json()
+            meta["star_count"] = data.get("stargazers_count", 0)
+        # Contributor count: use ?per_page=1&anon=true and parse Link header for total
+        resp2 = requests.get(
+            f"https://api.github.com/repos/{repo_full_name}/contributors",
+            headers=headers, params={"per_page": 1, "anon": "true"}, timeout=15,
+        )
+        if resp2.ok and "Link" in resp2.headers:
+            import re
+            match = re.search(r'page=(\d+)>; rel="last"', resp2.headers["Link"])
+            if match:
+                meta["num_contributors"] = int(match.group(1))
+        elif resp2.ok:
+            meta["num_contributors"] = len(resp2.json())
+    except Exception as e:
+        logging.warning(f"  Failed to fetch repo metadata for {repo_full_name}: {e}")
+    return meta
+
+
 def clone_at_commit(clone_url: str, sha: str, dest: str, timeout: int = 180) -> bool:
     """Clone a repo and checkout a specific commit."""
     try:
@@ -130,6 +161,10 @@ def main():
 
             print(f"\n[{i+1}/{len(all_pairs)}] {repo_name} PR #{pr_num}: cloning at {before_sha[:8]}...")
 
+            # Fetch real GitHub metadata for accurate scale classification
+            repo_meta = fetch_repo_metadata(pair_data["repo_full_name"])
+            print(f"  GitHub metadata: {repo_meta['star_count']:,} stars, {repo_meta['num_contributors']} contributors")
+
             clone_url = f"https://github.com/{pair_data['repo_full_name']}.git"
             with tempfile.TemporaryDirectory(prefix="cp_clone_") as tmp_dir:
                 repo_dir = os.path.join(tmp_dir, repo_name)
@@ -143,8 +178,8 @@ def main():
                     repo_ir = extract_repo_ir(
                         repo_path=repo_dir,
                         repo_url=f"https://github.com/{pair_data['repo_full_name']}",
-                        star_count=0,
-                        num_contributors=0,
+                        star_count=repo_meta["star_count"],
+                        num_contributors=repo_meta["num_contributors"],
                         skip_llm=False,
                         output_dir=pair_dir,
                     )

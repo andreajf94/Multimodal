@@ -26,17 +26,16 @@ for d in sorted(base.iterdir()):
     decisions = plan.get("architecture_decisions", [])
     tickets = plan.get("tickets", [])
 
-    # Collect all file paths from teacher plan
-    plan_paths = set()
-    for dec in decisions:
-        plan_paths.update(dec.get("files_affected", []))
+    # Collect file paths from teacher plan (split modify vs create)
+    must_exist = set()
+    new_files = set()
     for t in tickets:
-        plan_paths.update(t.get("files_to_modify", []))
-        plan_paths.update(t.get("files_to_create", []))
+        must_exist.update(t.get("files_to_modify", []))
+        new_files.update(t.get("files_to_create", []))
 
-    # RGS: fraction of plan paths that exist in repo manifest
-    existing = [p for p in plan_paths if p in manifest]
-    rgs = len(existing) / len(plan_paths) if plan_paths else 0
+    # RGS: only files_to_modify must exist in manifest
+    existing = [p for p in must_exist if p in manifest]
+    rgs = len(existing) / len(must_exist) if must_exist else 1.0
 
     # Diff stats
     diff_lines = len(diff_text.splitlines())
@@ -48,15 +47,15 @@ for d in sorted(base.iterdir()):
     print(f"  Source PR: {spec.get('source_pr', '?')}")
     print(f"  Architecture decisions: {len(decisions)}")
     print(f"  Tickets: {len(tickets)}")
-    print(f"  File paths in plan: {len(plan_paths)}")
-    print(f"  Paths in manifest: {len(existing)}/{len(plan_paths)}")
+    print(f"  files_to_modify: {len(must_exist)}, files_to_create: {len(new_files)}")
+    print(f"  Grounded (in manifest): {len(existing)}/{len(must_exist)}")
     print(f"  RGS: {rgs:.2f}")
     print(f"  Diff: {diff_lines} lines, {diff_kb:.1f} KB")
     print(f"  RepoIR: {len(manifest)} files, {ir['repo_metadata'].get('primary_language','?')}")
 
-    # Show which paths are grounded vs not
-    missing = plan_paths - set(existing)
+    # Show which files_to_modify are NOT in manifest
+    missing = must_exist - set(existing)
     if missing:
-        print(f"  Ungrounded paths ({len(missing)}):")
+        print(f"  Ungrounded files_to_modify ({len(missing)}):")
         for p in sorted(missing)[:5]:
             print(f"    - {p}")

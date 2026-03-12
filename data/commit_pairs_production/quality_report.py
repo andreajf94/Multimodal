@@ -23,19 +23,17 @@ print(f"\nBy repo:")
 for repo, dirs in sorted(repos.items()):
     print(f"  {repo}: {len(dirs)} PRs")
 
-# By language
-ts_repos = ['dub', 'polar', 'documenso', 'wxt', 'slidev', 'formbricks']
-rust_repos = ['axum', 'shuttle', 'loco', 'meilisearch', 'qdrant', 'tauri']
-go_repos = ['pocketbase', 'sdk']
-
+# By language (read from repo_ir metadata, not hardcoded)
 langs = defaultdict(int)
 for repo, dirs in repos.items():
-    if repo in ts_repos:
-        langs['TypeScript'] += len(dirs)
-    elif repo in rust_repos:
-        langs['Rust'] += len(dirs)
-    elif repo in go_repos:
-        langs['Go'] += len(dirs)
+    # Read language from the first repo_ir in this group
+    sample_ir_path = dirs[0] / "repo_ir.json"
+    if sample_ir_path.exists():
+        sample_ir = json.loads(sample_ir_path.read_text(encoding='utf-8'))
+        lang = sample_ir.get("repo_metadata", {}).get("primary_language", "unknown")
+        langs[lang] += len(dirs)
+    else:
+        langs["unknown"] += len(dirs)
 
 print(f"\nBy language:")
 for lang, count in sorted(langs.items(), key=lambda x: -x[1]):
@@ -53,18 +51,16 @@ for d in sorted(complete):
     repo_ir = json.loads((d / "repo_ir.json").read_text(encoding='utf-8'))
     manifest = set(repo_ir['file_manifest'])
     
-    plan_paths = []
-    for dec in plan.get('architecture_decisions', []):
-        plan_paths.extend(dec.get('files_affected', []))
+    # RGS: only files_to_modify must exist; files_to_create are new
+    must_exist = set()
     for ticket in plan.get('tickets', []):
-        plan_paths.extend(ticket.get('files_to_modify', []))
-        plan_paths.extend(ticket.get('files_to_create', []))
+        must_exist.update(ticket.get('files_to_modify', []))
     
-    if plan_paths:
-        grounded = sum(1 for p in plan_paths if p in manifest)
-        rgs = grounded / len(plan_paths)
+    if must_exist:
+        grounded = sum(1 for p in must_exist if p in manifest)
+        rgs = grounded / len(must_exist)
     else:
-        rgs = 0.0
+        rgs = 1.0  # no files_to_modify = vacuously grounded
     
     rgs_scores.append(rgs)
 
@@ -87,18 +83,18 @@ for d in sorted(complete)[:5]:
     repo_ir = json.loads((d / "repo_ir.json").read_text(encoding='utf-8'))
     manifest = set(repo_ir['file_manifest'])
     
-    plan_paths = []
-    for dec in plan.get('architecture_decisions', []):
-        plan_paths.extend(dec.get('files_affected', []))
+    # RGS: only files_to_modify must exist
+    must_exist = set()
+    new_files = set()
     for ticket in plan.get('tickets', []):
-        plan_paths.extend(ticket.get('files_to_modify', []))
-        plan_paths.extend(ticket.get('files_to_create', []))
+        must_exist.update(ticket.get('files_to_modify', []))
+        new_files.update(ticket.get('files_to_create', []))
     
-    if plan_paths:
-        grounded = sum(1 for p in plan_paths if p in manifest)
-        rgs = grounded / len(plan_paths)
+    if must_exist:
+        grounded = sum(1 for p in must_exist if p in manifest)
+        rgs = grounded / len(must_exist)
     else:
-        rgs = 0.0
+        rgs = 1.0
     
     diff_kb = (d / "ground_truth_diff.txt").stat().st_size / 1024
     
@@ -106,5 +102,6 @@ for d in sorted(complete)[:5]:
     print(f"  RGS: {rgs:.2f}")
     print(f"  Architecture decisions: {len(plan.get('architecture_decisions', []))}")
     print(f"  Tickets: {len(plan.get('tickets', []))}")
+    print(f"  files_to_modify: {len(must_exist)}, files_to_create: {len(new_files)}")
     print(f"  Diff: {diff_kb:.1f} KB")
     print()
