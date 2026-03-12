@@ -1,0 +1,241 @@
+diff --git a/packages/db-mongodb/src/queries/sanitizeQueryValue.ts b/packages/db-mongodb/src/queries/sanitizeQueryValue.ts
+index d5570ecb1f5..ca9bb27e7b6 100644
+--- a/packages/db-mongodb/src/queries/sanitizeQueryValue.ts
++++ b/packages/db-mongodb/src/queries/sanitizeQueryValue.ts
+@@ -450,12 +450,25 @@ export const sanitizeQueryValue = ({
+ 
+   if (path !== '_id' || (path === '_id' && hasCustomID && field.type === 'text')) {
+     if (operator === 'contains' && !Types.ObjectId.isValid(formattedValue)) {
+-      if (
+-        'hasMany' in field &&
+-        field.hasMany &&
+-        ['number', 'select', 'text'].includes(field.type)
+-      ) {
+-        // For array fields, we need to use $elemMatch to search within array elements
++      if ('hasMany' in field && field.hasMany && field.type === 'select') {
++        // For hasMany select, "contains" means the array includes this exact value
++        if (typeof formattedValue === 'string') {
++          return {
++            rawQuery: {
++              [path]: formattedValue,
++            },
++          }
++        } else if (Array.isArray(formattedValue)) {
++          return {
++            rawQuery: {
++              $or: formattedValue.map((val) => ({
++                [path]: val,
++              })),
++            },
++          }
++        }
++      } else if ('hasMany' in field && field.hasMany && ['number', 'text'].includes(field.type)) {
++        // For hasMany text/number, "contains" means substring matching within array elements
+         if (typeof formattedValue === 'string') {
+           // Search for documents where any array element contains this string
+           const escapedValue = escapeRegExp(formattedValue)
+diff --git a/packages/drizzle/src/queries/sanitizeQueryValue.ts b/packages/drizzle/src/queries/sanitizeQueryValue.ts
+index 0e2ceedbd1f..05ba2278021 100644
+--- a/packages/drizzle/src/queries/sanitizeQueryValue.ts
++++ b/packages/drizzle/src/queries/sanitizeQueryValue.ts
+@@ -238,12 +238,13 @@ export const sanitizeQueryValue = ({
+     }
+   }
+ 
+-  // For hasMany relationship/upload fields, contains should use equals operator
++  // hasMany relationship/upload/select fields are stored as separate rows in a join table.
++  // The JOIN already gives us individual rows, so "contains" becomes an equality check on each row's value.
+   if (
+     'hasMany' in field &&
+     field.hasMany &&
+     operator === 'contains' &&
+-    (field.type === 'relationship' || field.type === 'upload')
++    (field.type === 'relationship' || field.type === 'upload' || field.type === 'select')
+   ) {
+     operator = 'equals'
+   }
+@@ -260,7 +261,7 @@ export const sanitizeQueryValue = ({
+       Array.isArray(formattedValue) &&
+       'hasMany' in field &&
+       field.hasMany &&
+-      ['number', 'select', 'text'].includes(field.type)
++      ['number', 'text'].includes(field.type)
+     ) {
+       // For hasMany text/number/select fields with array values, wrap each element with % for LIKE matching
+       formattedValue = formattedValue.map((val) => `%${val}%`)
+diff --git a/test/database/getConfig.ts b/test/database/getConfig.ts
+index d25069bc007..ceb84d0be46 100644
+--- a/test/database/getConfig.ts
++++ b/test/database/getConfig.ts
+@@ -1016,6 +1016,23 @@ export const getConfig: () => Partial<Config> = () => ({
+         },
+       ],
+     },
++    {
++      slug: 'select-has-many',
++      fields: [
++        {
++          name: 'roles',
++          type: 'select',
++          hasMany: true,
++          options: ['user', 'admin', 'editor'],
++        },
++        {
++          name: 'food',
++          type: 'select',
++          hasMany: true,
++          options: ['apple', 'bananabread', 'banana'],
++        },
++      ],
++    },
+   ],
+   globals: [
+     {
+diff --git a/test/database/int.spec.ts b/test/database/int.spec.ts
+index a7d005563ac..2e246413112 100644
+--- a/test/database/int.spec.ts
++++ b/test/database/int.spec.ts
+@@ -692,6 +692,50 @@ describe('database', () => {
+     })
+   })
+ 
++  it('should query hasMany select field with contains operator', async () => {
++    const { id } = await payload.create({
++      collection: 'select-has-many',
++      data: {
++        roles: ['admin'],
++      },
++    })
++
++    const result = await payload.find({
++      collection: 'select-has-many',
++      where: {
++        roles: {
++          contains: 'admin',
++        },
++      },
++    })
++    expect(result.docs).toHaveLength(1)
++
++    expect(result.docs.some((doc) => doc.id === id)).toBe(true)
++
++    await payload.delete({ collection: 'select-has-many', id })
++  })
++
++  it('ensure querying hasMany select field with contains operator does not do partial matching', async () => {
++    const { id } = await payload.create({
++      collection: 'select-has-many',
++      data: {
++        food: ['bananabread'],
++      },
++    })
++
++    const result = await payload.find({
++      collection: 'select-has-many',
++      where: {
++        food: {
++          contains: 'banana',
++        },
++      },
++    })
++    expect(result.docs).toHaveLength(0)
++
++    await payload.delete({ collection: 'select-has-many', id })
++  })
++
+   describe('allow ID on create', () => {
+     beforeAll(() => {
+       payload.db.allowIDOnCreate = true
+diff --git a/test/database/payload-types.ts b/test/database/payload-types.ts
+index 6e45a8916da..5f593aa0581 100644
+--- a/test/database/payload-types.ts
++++ b/test/database/payload-types.ts
+@@ -89,6 +89,7 @@ export interface Config {
+     aliases: Alias;
+     'blocks-docs': BlocksDoc;
+     'unique-fields': UniqueField;
++    'select-has-many': SelectHasMany;
+     'payload-kv': PayloadKv;
+     users: User;
+     'payload-locked-documents': PayloadLockedDocument;
+@@ -119,6 +120,7 @@ export interface Config {
+     aliases: AliasesSelect<false> | AliasesSelect<true>;
+     'blocks-docs': BlocksDocsSelect<false> | BlocksDocsSelect<true>;
+     'unique-fields': UniqueFieldsSelect<false> | UniqueFieldsSelect<true>;
++    'select-has-many': SelectHasManySelect<false> | SelectHasManySelect<true>;
+     'payload-kv': PayloadKvSelect<false> | PayloadKvSelect<true>;
+     users: UsersSelect<false> | UsersSelect<true>;
+     'payload-locked-documents': PayloadLockedDocumentsSelect<false> | PayloadLockedDocumentsSelect<true>;
+@@ -144,6 +146,9 @@ export interface Config {
+     'virtual-relation-global': VirtualRelationGlobalSelect<false> | VirtualRelationGlobalSelect<true>;
+   };
+   locale: 'en' | 'es' | 'uk';
++  widgets: {
++    collections: CollectionsWidget;
++  };
+   user: User;
+   jobs: {
+     tasks: unknown;
+@@ -693,6 +698,17 @@ export interface UniqueField {
+   updatedAt: string;
+   createdAt: string;
+ }
++/**
++ * This interface was referenced by `Config`'s JSON-Schema
++ * via the `definition` "select-has-many".
++ */
++export interface SelectHasMany {
++  id: string;
++  roles?: ('user' | 'admin' | 'editor')[] | null;
++  food?: ('apple' | 'bananabread' | 'banana')[] | null;
++  updatedAt: string;
++  createdAt: string;
++}
+ /**
+  * This interface was referenced by `Config`'s JSON-Schema
+  * via the `definition` "payload-kv".
+@@ -830,6 +846,10 @@ export interface PayloadLockedDocument {
+         relationTo: 'unique-fields';
+         value: string | UniqueField;
+       } | null)
++    | ({
++        relationTo: 'select-has-many';
++        value: string | SelectHasMany;
++      } | null)
+     | ({
+         relationTo: 'users';
+         value: string | User;
+@@ -1330,6 +1350,16 @@ export interface UniqueFieldsSelect<T extends boolean = true> {
+   updatedAt?: T;
+   createdAt?: T;
+ }
++/**
++ * This interface was referenced by `Config`'s JSON-Schema
++ * via the `definition` "select-has-many_select".
++ */
++export interface SelectHasManySelect<T extends boolean = true> {
++  roles?: T;
++  food?: T;
++  updatedAt?: T;
++  createdAt?: T;
++}
+ /**
+  * This interface was referenced by `Config`'s JSON-Schema
+  * via the `definition` "payload-kv_select".
+@@ -1540,6 +1570,16 @@ export interface VirtualRelationGlobalSelect<T extends boolean = true> {
+   createdAt?: T;
+   globalType?: T;
+ }
++/**
++ * This interface was referenced by `Config`'s JSON-Schema
++ * via the `definition` "collections_widget".
++ */
++export interface CollectionsWidget {
++  data?: {
++    [k: string]: unknown;
++  };
++  width: 'full';
++}
+ /**
+  * This interface was referenced by `Config`'s JSON-Schema
+  * via the `definition` "auth".

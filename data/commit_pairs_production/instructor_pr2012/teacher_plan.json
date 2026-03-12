@@ -1,0 +1,132 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "data_modeling",
+      "recommendation": "Created ListResponse wrapper class that subclasses list and includes a _raw_response attribute to preserve raw LLM responses for list-type outputs",
+      "rationale": "When processing batch extractions with List[Model] response types, the raw response data was being lost because regular Python lists don't have a _raw_response attribute. This caused AttributeErrors in create_with_completion() when trying to access raw response data. The wrapper maintains list functionality while carrying metadata through the pipeline.",
+      "alternatives_considered": [
+        "Modifying the base list class (not possible in Python)",
+        "Creating a separate container class that isn't a list subclass (would break compatibility)",
+        "Storing raw responses in a separate cache (adds complexity and synchronization issues)"
+      ],
+      "files_affected": [
+        "instructor/dsl/response_list.py"
+      ]
+    },
+    {
+      "dimension": "api_design",
+      "recommendation": "Added ResponseList alias for backwards compatibility and exported both ListResponse and ResponseList from the DSL module",
+      "rationale": "Provides a clear migration path for existing code while maintaining API consistency. The alias ensures that code using either name continues to work, reducing breaking changes for library consumers.",
+      "alternatives_considered": [
+        "Only expose ListResponse (breaking change)",
+        "Deprecate one name in favor of the other (requires migration period)",
+        "Create a factory function instead of direct class usage (adds unnecessary indirection)"
+      ],
+      "files_affected": [
+        "instructor/dsl/__init__.py",
+        "instructor/dsl/response_list.py"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Modified response processing logic to detect list/iterable response models and wrap outputs in ListResponse with proper raw response attachment",
+      "rationale": "The core issue was that process_response() and process_response_async() were not preserving _raw_response for list-type outputs. By modifying the return paths in these functions, we ensure consistent behavior across synchronous and asynchronous processing. The fix handles both streaming and non-streaming cases separately to maintain existing behavior.",
+      "alternatives_considered": [
+        "Adding raw response attachment in IterableModel itself (wouldn't work for all list types)",
+        "Creating a decorator for response processing functions (adds complexity)",
+        "Modifying only the batch extraction code (incomplete fix)"
+      ],
+      "files_affected": [
+        "instructor/processing/response.py"
+      ]
+    },
+    {
+      "dimension": "type_system",
+      "recommendation": "Enhanced prepare_response_model() to properly distinguish between scalar lists and structured model lists, using ModelAdapter.__class_getitem__() instead of direct type annotation to avoid type checker issues",
+      "rationale": "The original logic had edge cases where list[User] (structured model) was incorrectly treated as a simple scalar list. The improved logic checks if list elements are Pydantic models before deciding on the adaptation strategy. Using __class_getitem__() avoids type checker warnings about invalid type forms.",
+      "alternatives_considered": [
+        "Creating separate type checkers for scalar vs model lists (overly complex)",
+        "Requiring explicit annotation for list types (breaking change)",
+        "Using runtime type inspection only (less performant)"
+      ],
+      "files_affected": [
+        "instructor/utils/core.py"
+      ]
+    },
+    {
+      "dimension": "testing",
+      "recommendation": "Added comprehensive test suite covering synchronous, asynchronous, streaming, and non-streaming scenarios for list-type responses",
+      "rationale": "The feature involves complex interactions between response processing, type preparation, and wrapper behavior. Tests verify that: 1) ListResponse preserves raw responses, 2) Streaming behavior remains intact for create_iterable(), 3) Type preparation correctly identifies model lists, and 4) Both sync and async paths work correctly.",
+      "alternatives_considered": [
+        "Adding tests to existing test files (could become unwieldy)",
+        "Only testing the happy path (insufficient coverage)",
+        "Mocking actual LLM calls (overly complex for unit tests)"
+      ],
+      "files_affected": [
+        "tests/test_list_response_wrapper.py"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Implement ListResponse wrapper for batch extraction support",
+      "description": "Create a list subclass that can carry raw response metadata through processing pipelines, enabling create_with_completion() to work with List[Model] response types",
+      "files_to_modify": [
+        "instructor/dsl/response_list.py",
+        "instructor/dsl/__init__.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-002",
+      "title": "Update response processing to handle list-type outputs",
+      "description": "Modify process_response() and process_response_async() to wrap list outputs in ListResponse and attach raw response data, ensuring consistent behavior across sync/async and streaming/non-streaming paths",
+      "files_to_modify": [
+        "instructor/processing/response.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-003",
+      "title": "Improve type preparation logic for list response models",
+      "description": "Enhance prepare_response_model() to correctly distinguish between scalar lists and structured model lists, fixing edge cases where list[User] was incorrectly adapted",
+      "files_to_modify": [
+        "instructor/utils/core.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-004",
+      "title": "Add comprehensive test coverage for list response wrapper",
+      "description": "Create test suite covering all scenarios: synchronous/asynchronous processing, streaming/non-streaming modes, and type preparation for list response models",
+      "files_to_modify": [],
+      "files_to_create": [
+        "tests/test_list_response_wrapper.py"
+      ],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-005",
+      "title": "Update changelog and documentation",
+      "description": "Document the fix for create_with_completion() crashing with list[T] response models and update the changelog with proper attribution",
+      "files_to_modify": [
+        "CHANGELOG.md"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation addresses a critical issue where batch extractions using List[Model] response types would crash due to missing raw response data. The core solution involves creating a ListResponse wrapper class that subclasses Python's built-in list while adding a _raw_response attribute to preserve metadata through processing pipelines.\n\nThe approach maintains backward compatibility through several key decisions: 1) ListResponse behaves exactly like a regular list for all operations, 2) A ResponseList alias is provided for code using the older name, 3) Streaming behavior for create_iterable() is preserved by separating IterableBase and PartialBase handling in response processing functions.\n\nThe response processing logic was refactored to handle list-type outputs consistently across synchronous and asynchronous paths. When a non-streaming IterableBase response is processed, it's wrapped in ListResponse with the raw response attached. For streaming cases, the existing generator behavior is maintained to support create_iterable() usage patterns.\n\nType preparation was enhanced to properly distinguish between scalar lists (like list[int]) and structured model lists (like list[User]). The logic now checks if list elements are Pydantic models before deciding on adaptation strategy, using ModelAdapter.__class_getitem__() to avoid type checker issues with complex generic types.\n\nThe changes integrate seamlessly with the existing codebase by leveraging the established DSL patterns and response processing infrastructure. The wrapper approach minimizes disruption while solving the core issue of metadata preservation for batch extraction scenarios.",
+  "source_pr": "https://github.com/567-labs/instructor/pull/2012",
+  "before_sha": "2067118da6f651ba78799b4c8830e37437fc4253",
+  "after_sha": "96ca9fe8df548b348cae567a3f83e74e2da917a5",
+  "diff_stats": {
+    "additions": 175,
+    "deletions": 29,
+    "files_changed": 6
+  }
+}

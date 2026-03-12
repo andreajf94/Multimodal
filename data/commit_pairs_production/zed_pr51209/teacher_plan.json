@@ -1,0 +1,159 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "connection_pooling",
+      "recommendation": "Created a centralized AgentConnectionStore to manage connection pooling at the project level, replacing per-connection instantiation with a shared connection cache",
+      "rationale": "The previous approach created new connections for each agent interaction, causing unnecessary overhead. By pooling connections keyed by ExternalAgent, we can reuse established connections across multiple operations within the same project, reducing latency and resource consumption. The store maintains connections as long as they're valid and cleans them up when agents are removed from the project.",
+      "alternatives_considered": [
+        "Maintaining connections at workspace level",
+        "Using a global connection pool across all projects",
+        "Keeping the existing per-connection approach"
+      ],
+      "files_affected": [
+        "crates/agent_ui/src/agent_connection_store.rs",
+        "crates/agent_ui/src/agent_panel.rs",
+        "crates/agent_ui/src/connection_view.rs"
+      ]
+    },
+    {
+      "dimension": "api_design",
+      "recommendation": "Simplified AgentServerDelegate by removing project and status_tx parameters, focusing only on essential connection management",
+      "rationale": "The delegate was overloaded with responsibilities - managing project references, status updates, and version notifications. By removing the project reference and status_tx, we separate concerns: the connection store handles connection lifecycle, while UI components manage status display. This makes the delegate more focused and reusable.",
+      "alternatives_considered": [
+        "Keeping the existing delegate interface",
+        "Creating separate delegates for different connection types",
+        "Adding more parameters to handle additional use cases"
+      ],
+      "files_affected": [
+        "crates/agent_servers/src/agent_servers.rs",
+        "crates/agent_servers/src/custom.rs",
+        "crates/agent_servers/src/e2e_tests.rs",
+        "crates/agent_ui/src/mention_set.rs"
+      ]
+    },
+    {
+      "dimension": "data_modeling",
+      "recommendation": "Made ExternalAgent hashable by deriving Eq and Hash traits, enabling it to be used as a key in connection store maps",
+      "rationale": "ExternalAgent needs to serve as a unique identifier for connection pooling. By implementing Eq and Hash, we can use it as a key in HashMap to track connections per agent type. This allows efficient lookup and management of pooled connections.",
+      "alternatives_considered": [
+        "Creating a separate ConnectionKey type",
+        "Using string identifiers instead of enum",
+        "Maintaining separate maps for different agent types"
+      ],
+      "files_affected": [
+        "crates/agent_ui/src/agent_ui.rs"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Standardized error handling by converting all connection errors to LoadError type in the connection store",
+      "rationale": "Previously, different error types flowed through the connection pipeline, making error handling inconsistent. By converting all errors to LoadError in the connection store's start_connection method, we ensure uniform error handling across all agent types and simplify error propagation to UI components.",
+      "alternatives_considered": [
+        "Keeping heterogeneous error types",
+        "Creating a new unified error type",
+        "Using anyhow::Error throughout"
+      ],
+      "files_affected": [
+        "crates/agent_ui/src/agent_connection_store.rs",
+        "crates/agent_ui/src/connection_view.rs"
+      ]
+    },
+    {
+      "dimension": "state_management",
+      "recommendation": "Implemented ConnectionEntry with three states (Connecting, Connected, Error) to manage connection lifecycle and provide async access via shared tasks",
+      "rationale": "Connection lifecycle needs to be managed across multiple consumers. The three-state enum with shared Future tasks allows multiple UI components to await the same connection result without duplicating connection attempts. Shared tasks ensure that only one connection attempt is made even with multiple concurrent requests.",
+      "alternatives_considered": [
+        "Using channels for connection results",
+        "Callback-based connection notification",
+        "Polling for connection status"
+      ],
+      "files_affected": [
+        "crates/agent_ui/src/agent_connection_store.rs"
+      ]
+    },
+    {
+      "dimension": "remote_collaboration",
+      "recommendation": "Removed loading status propagation in remote collaboration scenarios, keeping only version update notifications",
+      "rationale": "Loading status updates were creating unnecessary network traffic in remote collaboration without providing significant value. Version updates are more critical as they indicate when agents need to be restarted. This optimization reduces network overhead while maintaining essential functionality.",
+      "alternatives_considered": [
+        "Keeping both status and version updates",
+        "Adding more granular status types",
+        "Removing all remote notifications"
+      ],
+      "files_affected": [
+        "crates/project/src/agent_server_store.rs"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Implement Agent Connection Store for Connection Pooling",
+      "description": "Create a centralized store to manage ACP connections at the project level, enabling connection reuse and reducing overhead",
+      "files_to_modify": [],
+      "files_to_create": [
+        "crates/agent_ui/src/agent_connection_store.rs"
+      ],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-002",
+      "title": "Integrate Connection Store with Agent UI Components",
+      "description": "Update agent panel and connection view to use the new connection store instead of creating direct connections",
+      "files_to_modify": [
+        "crates/agent_ui/src/agent_panel.rs",
+        "crates/agent_ui/src/connection_view.rs",
+        "crates/agent_ui/src/agent_ui.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-003",
+      "title": "Simplify AgentServerDelegate Interface",
+      "description": "Remove unnecessary parameters from AgentServerDelegate to focus on core connection responsibilities",
+      "files_to_modify": [
+        "crates/agent_servers/src/agent_servers.rs",
+        "crates/agent_servers/src/custom.rs",
+        "crates/agent_servers/src/e2e_tests.rs",
+        "crates/agent_ui/src/mention_set.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-004",
+      "title": "Update Remote Collaboration Protocol",
+      "description": "Optimize remote agent communication by removing loading status updates while keeping version notifications",
+      "files_to_modify": [
+        "crates/project/src/agent_server_store.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-005",
+      "title": "Update Tests for New Connection Architecture",
+      "description": "Modify existing tests to work with the new connection store architecture",
+      "files_to_modify": [
+        "crates/agent_ui/src/connection_view.rs",
+        "crates/sidebar/Cargo.toml",
+        "crates/sidebar/src/sidebar.rs",
+        "crates/project/tests/integration/ext_agent_tests.rs",
+        "crates/project/tests/integration/extension_agent_tests.rs",
+        "crates/remote_server/src/remote_editing_tests.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    }
+  ],
+  "implementation_summary": "The implementation introduces project-scoped ACP connection pooling through a new AgentConnectionStore that manages connections as shared resources. Instead of creating new connections for each agent interaction, connections are now pooled and reused within a project context, significantly reducing connection overhead.\n\nThe key architectural change is the separation of connection management from UI presentation. The AgentConnectionStore handles the complete connection lifecycle - creation, pooling, health management, and cleanup - while UI components request connections from the store. This separation of concerns makes the system more maintainable and enables connection reuse across different parts of the UI.\n\nThe implementation follows a reactive pattern where connection entries emit events when their state changes (connecting \u2192 connected \u2192 error), allowing UI components to update accordingly. Error handling is standardized through the LoadError type, and remote collaboration is optimized by removing unnecessary loading status propagation while keeping critical version update notifications. The changes integrate smoothly with the existing codebase by maintaining backward compatibility in the agent server interfaces while providing significant performance improvements through connection reuse.",
+  "source_pr": "https://github.com/zed-industries/zed/pull/51209",
+  "before_sha": "50aef1f115493aab506df9d5b33da5435dc36bfc",
+  "after_sha": "e4b3c0fa84c668def9db2c1827c834b4391012b6",
+  "diff_stats": {
+    "additions": 313,
+    "deletions": 174,
+    "files_changed": 15
+  }
+}

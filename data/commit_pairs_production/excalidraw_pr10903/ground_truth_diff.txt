@@ -1,0 +1,301 @@
+diff --git a/packages/excalidraw/actions/actionExport.tsx b/packages/excalidraw/actions/actionExport.tsx
+index e47a5bb84c00..453a0be1f72f 100644
+--- a/packages/excalidraw/actions/actionExport.tsx
++++ b/packages/excalidraw/actions/actionExport.tsx
+@@ -300,7 +300,8 @@ export const actionExportWithDarkMode = register<
+   name: "exportWithDarkMode",
+   label: "imageExportDialog.label.darkMode",
+   trackEvent: { category: "export", action: "toggleTheme" },
+-  perform: (_elements, appState, value) => {
++  perform: (_elements, appState, value, app) => {
++    app.sessionExportThemeOverride = value ? THEME.DARK : THEME.LIGHT;
+     return {
+       appState: { ...appState, exportWithDarkMode: value },
+       captureUpdate: CaptureUpdateAction.EVENTUALLY,
+diff --git a/packages/excalidraw/components/App.tsx b/packages/excalidraw/components/App.tsx
+index 0b361e0e709b..75b850f8c2a2 100644
+--- a/packages/excalidraw/components/App.tsx
++++ b/packages/excalidraw/components/App.tsx
+@@ -595,6 +595,7 @@ const gesture: Gesture = {
+ class App extends React.Component<AppProps, AppState> {
+   canvas: AppClassProperties["canvas"];
+   interactiveCanvas: AppClassProperties["interactiveCanvas"] = null;
++  public sessionExportThemeOverride: AppState["theme"] | undefined;
+   rc: RoughCanvas;
+   unmounted: boolean = false;
+   actionManager: ActionManager;
+@@ -710,6 +711,7 @@ class App extends React.Component<AppProps, AppState> {
+     this.state = {
+       ...defaultAppState,
+       theme,
++      exportWithDarkMode: theme === THEME.DARK,
+       isLoading: true,
+       ...this.getCanvasOffsets(),
+       viewModeEnabled,
+@@ -3241,6 +3243,13 @@ class App extends React.Component<AppProps, AppState> {
+     const elements = this.scene.getElementsIncludingDeleted();
+     const elementsMap = this.scene.getElementsMapIncludingDeleted();
+ 
++    const shouldExportWithDarkMode =
++      (this.sessionExportThemeOverride ?? this.state.theme) === THEME.DARK;
++
++    if (this.state.exportWithDarkMode !== shouldExportWithDarkMode) {
++      this.setState({ exportWithDarkMode: shouldExportWithDarkMode });
++    }
++
+     if (!this.state.showWelcomeScreen && !elements.length) {
+       this.setState({ showWelcomeScreen: true });
+     }
+diff --git a/packages/excalidraw/components/ImageExportDialog.tsx b/packages/excalidraw/components/ImageExportDialog.tsx
+index 18831fa08e72..48afbaa966b8 100644
+--- a/packages/excalidraw/components/ImageExportDialog.tsx
++++ b/packages/excalidraw/components/ImageExportDialog.tsx
+@@ -59,6 +59,7 @@ type ImageExportModalProps = {
+   actionManager: ActionManager;
+   onExportImage: AppClassProperties["onExportImage"];
+   name: string;
++  exportWithDarkMode: boolean;
+ };
+ 
+ const ImageExportModal = ({
+@@ -68,6 +69,7 @@ const ImageExportModal = ({
+   actionManager,
+   onExportImage,
+   name,
++  exportWithDarkMode,
+ }: ImageExportModalProps) => {
+   const hasSelection = isSomeElementSelected(
+     elementsSnapshot,
+@@ -79,15 +81,13 @@ const ImageExportModal = ({
+   const [exportWithBackground, setExportWithBackground] = useState(
+     appStateSnapshot.exportBackground,
+   );
+-  const [exportDarkMode, setExportDarkMode] = useState(
+-    appStateSnapshot.exportWithDarkMode,
+-  );
+   const [embedScene, setEmbedScene] = useState(
+     appStateSnapshot.exportEmbedScene,
+   );
+   const [exportScale, setExportScale] = useState(appStateSnapshot.exportScale);
+ 
+   const previewRef = useRef<HTMLDivElement>(null);
++  const previewRenderRequestIdRef = useRef(0);
+   const [renderError, setRenderError] = useState<Error | null>(null);
+ 
+   const { onCopy, copyStatus, resetCopyStatus } = useCopyStatus();
+@@ -99,7 +99,7 @@ const ImageExportModal = ({
+   }, [
+     projectName,
+     exportWithBackground,
+-    exportDarkMode,
++    exportWithDarkMode,
+     exportScale,
+     embedScene,
+     resetCopyStatus,
+@@ -122,13 +122,18 @@ const ImageExportModal = ({
+       return;
+     }
+ 
++    const requestId = ++previewRenderRequestIdRef.current;
++    const isStaleRequest = () => {
++      return requestId !== previewRenderRequestIdRef.current;
++    };
++
+     exportToCanvas({
+       elements: exportedElements,
+       appState: {
+         ...appStateSnapshot,
+         name: projectName,
+         exportBackground: exportWithBackground,
+-        exportWithDarkMode: exportDarkMode,
++        exportWithDarkMode,
+         exportScale,
+         exportEmbedScene: embedScene,
+       },
+@@ -137,25 +142,41 @@ const ImageExportModal = ({
+       maxWidthOrHeight: Math.max(maxWidth, maxHeight),
+       exportingFrame,
+     })
+-      .then((canvas) => {
++      .then(async (canvas) => {
++        if (isStaleRequest()) {
++          return;
++        }
++
++        // If converting to blob fails, there's some problem that will likely
++        // prevent preview and export (e.g. canvas too big).
++        try {
++          await canvasToBlob(canvas);
++        } catch (error: any) {
++          if (error.name === "CANVAS_POSSIBLY_TOO_BIG") {
++            throw new Error(t("canvasError.canvasTooBig"));
++          }
++          throw error;
++        }
++
++        if (isStaleRequest()) {
++          return;
++        }
++
+         setRenderError(null);
+-        // if converting to blob fails, there's some problem that will
+-        // likely prevent preview and export (e.g. canvas too big)
+-        return canvasToBlob(canvas)
+-          .then(() => {
+-            previewNode.replaceChildren(canvas);
+-          })
+-          .catch((e) => {
+-            if (e.name === "CANVAS_POSSIBLY_TOO_BIG") {
+-              throw new Error(t("canvasError.canvasTooBig"));
+-            }
+-            throw e;
+-          });
++        previewNode.replaceChildren(canvas);
+       })
+       .catch((error) => {
++        if (isStaleRequest()) {
++          return;
++        }
++
+         console.error(error);
+         setRenderError(error);
+       });
++
++    return () => {
++      previewRenderRequestIdRef.current += 1;
++    };
+   }, [
+     appStateSnapshot,
+     files,
+@@ -163,7 +184,7 @@ const ImageExportModal = ({
+     exportingFrame,
+     projectName,
+     exportWithBackground,
+-    exportDarkMode,
++    exportWithDarkMode,
+     exportScale,
+     embedScene,
+   ]);
+@@ -233,9 +254,8 @@ const ImageExportModal = ({
+         >
+           <Switch
+             name="exportDarkModeSwitch"
+-            checked={exportDarkMode}
++            checked={exportWithDarkMode}
+             onChange={(checked) => {
+-              setExportDarkMode(checked);
+               actionManager.executeAction(
+                 actionExportWithDarkMode,
+                 "ui",
+@@ -399,6 +419,7 @@ export const ImageExportDialog = ({
+         actionManager={actionManager}
+         onExportImage={onExportImage}
+         name={name}
++        exportWithDarkMode={appState.exportWithDarkMode}
+       />
+     </Dialog>
+   );
+diff --git a/packages/excalidraw/tests/__snapshots__/excalidraw.test.tsx.snap b/packages/excalidraw/tests/__snapshots__/excalidraw.test.tsx.snap
+index ef0fb47e640e..2ed8bc1c53ba 100644
+--- a/packages/excalidraw/tests/__snapshots__/excalidraw.test.tsx.snap
++++ b/packages/excalidraw/tests/__snapshots__/excalidraw.test.tsx.snap
+@@ -2,7 +2,7 @@
+ 
+ exports[`<Excalidraw/> > <MainMenu/> > should render main menu with host menu items if passed from host 1`] = `
+ <div
+-  aria-labelledby="radix-:r7t:"
++  aria-labelledby="radix-:r85:"
+   aria-orientation="vertical"
+   class="dropdown-menu main-menu"
+   data-align="start"
+@@ -12,7 +12,7 @@ exports[`<Excalidraw/> > <MainMenu/> > should render main menu with host menu it
+   data-state="open"
+   data-testid="dropdown-menu"
+   dir="ltr"
+-  id="radix-:r7u:"
++  id="radix-:r86:"
+   role="menu"
+   style="outline: none; --radix-dropdown-menu-content-transform-origin: var(--radix-popper-transform-origin); --radix-dropdown-menu-content-available-width: var(--radix-popper-available-width); --radix-dropdown-menu-content-available-height: var(--radix-popper-available-height); --radix-dropdown-menu-trigger-width: var(--radix-popper-anchor-width); --radix-dropdown-menu-trigger-height: var(--radix-popper-anchor-height); animation: none;"
+   tabindex="-1"
+diff --git a/packages/excalidraw/tests/excalidraw.test.tsx b/packages/excalidraw/tests/excalidraw.test.tsx
+index 34135c618de2..8c365dc0d34e 100644
+--- a/packages/excalidraw/tests/excalidraw.test.tsx
++++ b/packages/excalidraw/tests/excalidraw.test.tsx
+@@ -6,8 +6,16 @@ import { THEME } from "@excalidraw/common";
+ 
+ import { t } from "../i18n";
+ import { Excalidraw, Footer, MainMenu } from "../index";
++import { actionExportWithDarkMode } from "../actions/actionExport";
+ 
+-import { fireEvent, GlobalTestState, toggleMenu, render } from "./test-utils";
++import {
++  act,
++  fireEvent,
++  GlobalTestState,
++  toggleMenu,
++  render,
++  waitFor,
++} from "./test-utils";
+ 
+ const { h } = window;
+ 
+@@ -304,6 +312,47 @@ describe("<Excalidraw/>", () => {
+       const darkModeToggle = queryByTestId(container, "toggle-dark-mode");
+       expect(darkModeToggle).toBe(null);
+     });
++
++    it("should sync export theme with the UI theme when there is no session override", async () => {
++      await render(<Excalidraw theme={THEME.DARK} />);
++
++      expect(h.state.exportWithDarkMode).toBe(true);
++
++      act(() => {
++        h.setState({ exportWithDarkMode: false });
++      });
++
++      await waitFor(() => {
++        expect(h.state.exportWithDarkMode).toBe(true);
++      });
++    });
++
++    it("should keep the export theme override for the current session", async () => {
++      await render(<Excalidraw theme={THEME.LIGHT} />);
++
++      act(() => {
++        (h.app as any).actionManager.executeAction(
++          actionExportWithDarkMode,
++          "ui",
++          true,
++        );
++      });
++
++      expect(h.app.sessionExportThemeOverride).toBe(THEME.DARK);
++      expect(h.state.exportWithDarkMode).toBe(true);
++
++      act(() => {
++        h.setState({ theme: THEME.DARK });
++      });
++
++      act(() => {
++        h.setState({ theme: THEME.LIGHT });
++      });
++
++      await waitFor(() => {
++        expect(h.state.exportWithDarkMode).toBe(true);
++      });
++    });
+   });
+ 
+   describe("Test name prop", () => {
+diff --git a/packages/excalidraw/types.ts b/packages/excalidraw/types.ts
+index ac185ab56390..0b654386bf33 100644
+--- a/packages/excalidraw/types.ts
++++ b/packages/excalidraw/types.ts
+@@ -719,6 +719,7 @@ export type AppProps = Merge<
+ export type AppClassProperties = {
+   props: AppProps;
+   state: AppState;
++  sessionExportThemeOverride: App["sessionExportThemeOverride"];
+   interactiveCanvas: HTMLCanvasElement | null;
+   /** static canvas */
+   canvas: HTMLCanvasElement;

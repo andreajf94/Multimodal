@@ -1,0 +1,13 @@
+{
+  "feature_name": "Fix Uint8Array serialization in nested JSON fields",
+  "description": "Update the parameterization logic to properly serialize Uint8Array values when they appear nested within objects or arrays in Json fields. Currently, nested Uint8Array values are incorrectly serialized as numeric-keyed objects instead of base64 strings, which breaks round-trip data consistency.",
+  "functional_requirements": [
+    "Replace JSON.stringify with safeJsonStringify in the parameterization module to handle ArrayBuffer.isView values",
+    "Ensure Uint8Array values nested inside objects are serialized as base64 strings when stored in Json fields",
+    "Ensure Uint8Array values nested inside arrays are serialized as base64 strings when stored in Json fields",
+    "Maintain existing correct behavior for top-level Uint8Array values (already working)",
+    "Handle deeply nested Uint8Array values consistently throughout the serialization process"
+  ],
+  "project_name": "prisma",
+  "source_pr": "https://github.com/prisma/prisma/pull/29268"
+}

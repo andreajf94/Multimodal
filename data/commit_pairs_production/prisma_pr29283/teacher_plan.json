@@ -1,0 +1,103 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "api_design",
+      "recommendation": "Updated the Management API response parsing to use the new connection model structure instead of deprecated fields",
+      "rationale": "The Management API changed its response format from flat `database.directConnection` fields to a nested `connections[].endpoints` structure. This required updating the parsing logic to extract connection strings from `connections[].endpoints.direct.connectionString` or `connections[].endpoints.pooled.connectionString`. This ensures compatibility with the latest API version and prepares for future API changes.",
+      "alternatives_considered": [
+        "Maintaining backward compatibility by checking both old and new fields",
+        "Creating a migration layer to transform old format to new format",
+        "Using feature flags to gradually roll out the new parsing logic"
+      ],
+      "files_affected": [
+        "packages/cli/src/Init.ts"
+      ]
+    },
+    {
+      "dimension": "dependency_management",
+      "recommendation": "Upgraded @prisma/management-api-sdk from 0.2.0 to 1.12.0 and hono from 4.11.7/4.12.0 to 4.12.3",
+      "rationale": "The Management API SDK v1.12.0 provides proper TypeScript types for the new connection model and exports renamed functions (`createManagementApiSdk` instead of `createManagementAPI`). The hono upgrade addresses security vulnerabilities and ensures compatibility with the updated SDK. This follows semantic versioning where major version changes indicate breaking API changes.",
+      "alternatives_considered": [
+        "Creating wrapper functions to maintain old API surface",
+        "Forking and patching the old SDK version",
+        "Delaying the upgrade until all breaking changes are understood"
+      ],
+      "files_affected": [
+        "package.json",
+        "packages/cli/package.json",
+        "pnpm-lock.yaml"
+      ]
+    },
+    {
+      "dimension": "type_safety",
+      "recommendation": "Updated TypeScript imports and type definitions to match the new SDK exports",
+      "rationale": "The Management API SDK v1.12.0 renamed its main exports: `ManagementAPI` \u2192 `ManagementApiSdk` and `createManagementAPI` \u2192 `createManagementApiSdk`. Updated all imports and type annotations to match the new naming convention. This ensures compile-time type safety and prevents runtime errors from mismatched types.",
+      "alternatives_considered": [
+        "Using type assertions to bypass TypeScript errors",
+        "Creating custom type definitions for the old API",
+        "Using dynamic imports to avoid type checking"
+      ],
+      "files_affected": [
+        "packages/cli/src/management-api/auth-client.ts",
+        "packages/cli/src/management-api/auth.ts"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Removed fallback to deprecated fields and added explicit error when connection string is missing",
+      "rationale": "Instead of trying to read from deprecated `directConnection` fields, the code now throws an immediate error if no connection string is found in the new format. This ensures failures happen early with clear error messages, rather than silently falling back to deprecated behavior that may stop working in the future.",
+      "alternatives_considered": [
+        "Keeping deprecated field fallback for backward compatibility",
+        "Logging a warning but continuing with deprecated fields",
+        "Implementing a configurable compatibility mode"
+      ],
+      "files_affected": [
+        "packages/cli/src/Init.ts"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Update Management API connection parsing",
+      "description": "Modify the prisma init --db command to read connection strings from the new Management API response format (connections[].endpoints) instead of deprecated directConnection fields",
+      "files_to_modify": [
+        "packages/cli/src/Init.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-002",
+      "title": "Upgrade Management API SDK and dependencies",
+      "description": "Update @prisma/management-api-sdk from 0.2.0 to 1.12.0 and hono from 4.11.7 to 4.12.3 to get new type definitions and security fixes",
+      "files_to_modify": [
+        "package.json",
+        "packages/cli/package.json",
+        "pnpm-lock.yaml"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-003",
+      "title": "Update SDK imports and type annotations",
+      "description": "Change all imports and type references from old Management API SDK naming (ManagementAPI, createManagementAPI) to new naming (ManagementApiSdk, createManagementApiSdk)",
+      "files_to_modify": [
+        "packages/cli/src/management-api/auth-client.ts",
+        "packages/cli/src/management-api/auth.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "This change migrates the `prisma init --db` command to use the new Management API connection model. The implementation involved three main areas: updating the connection string parsing logic, upgrading dependencies, and aligning TypeScript types with the new SDK exports.\n\nFirst, the connection parsing in `Init.ts` was refactored to read from the new nested structure (`connections[].endpoints.direct.connectionString` or `connections[].endpoints.pooled.connectionString`) instead of the deprecated flat `directConnection` object. The code now searches through connections array to find one with a valid connection string, preferring direct over pooled endpoints. This approach is more flexible and future-proof than the previous hardcoded field access.\n\nSecond, the Management API SDK was upgraded from 0.2.0 to 1.12.0, representing a major version bump that includes breaking API changes. The hono dependency was also updated to address security vulnerabilities. These updates required changes to package.json files and the lockfile to ensure consistent dependency resolution across the monorepo.\n\nThird, all TypeScript imports and type annotations were updated to match the renamed exports in the new SDK version. The main interface changed from `ManagementAPI` to `ManagementApiSdk`, and the factory function from `createManagementAPI` to `createManagementApiSdk`. This ensures type safety throughout the authentication and API client code.\n\nThe changes integrate cleanly with the existing codebase by maintaining the same function signatures and error handling patterns while updating the underlying implementation details. The migration is a breaking change that requires users to have compatible Management API endpoints, but this is acceptable as the old API format is being deprecated.",
+  "source_pr": "https://github.com/prisma/prisma/pull/29283",
+  "before_sha": "67382987828b6802482df74aef794146a78b4d05",
+  "after_sha": "57641cb8bcfdf8246abf61cf0dc80933396bcf3c",
+  "diff_stats": {
+    "additions": 49,
+    "deletions": 46,
+    "files_changed": 6
+  }
+}

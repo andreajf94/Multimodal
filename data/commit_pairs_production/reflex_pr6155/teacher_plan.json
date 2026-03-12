@@ -1,0 +1,113 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "api_design",
+      "recommendation": "Changed disable_plugins type from list[str] to list[type[Plugin]] to match the plugins parameter's type consistency",
+      "rationale": "The plugins parameter already accepts Plugin instances, so having disable_plugins accept Plugin classes creates a symmetrical API. This improves type safety and developer experience by providing consistent expectations for both plugin configuration options.",
+      "alternatives_considered": [
+        "Keep string-based approach for backward compatibility only",
+        "Create a separate parameter for class-based disabling",
+        "Use Union[type[Plugin], str] to support both types simultaneously"
+      ],
+      "files_affected": [
+        "reflex/config.py"
+      ]
+    },
+    {
+      "dimension": "backward_compatibility",
+      "recommendation": "Implemented runtime normalization with deprecation warnings for string inputs",
+      "rationale": "Existing codebases may use string paths for disable_plugins. By converting strings to Plugin classes at runtime and issuing deprecation warnings, we allow gradual migration while maintaining functionality. The deprecation timeline (0.8.28 to 0.9.0) gives users time to update their code.",
+      "alternatives_considered": [
+        "Immediate breaking change with no backward compatibility",
+        "Support both types indefinitely with no deprecation",
+        "Create a migration script for users"
+      ],
+      "files_affected": [
+        "reflex/config.py"
+      ]
+    },
+    {
+      "dimension": "environment_variable_handling",
+      "recommendation": "Extended environment variable interpreter to support type[Plugin] in addition to Plugin instances",
+      "rationale": "Environment variables are strings, so we need a way to convert string values to Plugin classes for the REFLEX_DISABLE_PLUGINS variable. By adding interpret_plugin_class_env and updating interpret_env_var_value to handle type[Plugin], we maintain environment variable support while changing the underlying type system.",
+      "alternatives_considered": [
+        "Drop environment variable support for disable_plugins",
+        "Keep string-based environment variables with runtime conversion",
+        "Require separate configuration for environment variables"
+      ],
+      "files_affected": [
+        "reflex/environment.py"
+      ]
+    },
+    {
+      "dimension": "code_organization",
+      "recommendation": "Extracted plugin class interpretation logic into a reusable function interpret_plugin_class_env",
+      "rationale": "Both disable_plugins normalization and environment variable interpretation need to convert strings to Plugin classes. By creating a dedicated function, we avoid code duplication and ensure consistent behavior across different code paths. This follows the DRY principle and makes the codebase more maintainable.",
+      "alternatives_considered": [
+        "Duplicate the string-to-class conversion logic in both places",
+        "Create a utility module for plugin-related operations",
+        "Use a class method on Plugin for this conversion"
+      ],
+      "files_affected": [
+        "reflex/environment.py",
+        "reflex/config.py"
+      ]
+    },
+    {
+      "dimension": "testing_strategy",
+      "recommendation": "Added comprehensive tests covering all normalization paths and backward compatibility scenarios",
+      "rationale": "The change involves multiple conversion paths (string\u2192class, instance\u2192class, class\u2192class) and backward compatibility. Tests ensure that all these paths work correctly and that deprecation warnings are properly triggered. The tests also verify that the environment variable interpretation works for the new type.",
+      "alternatives_considered": [
+        "Minimal testing focusing only on the new behavior",
+        "Separate test files for backward compatibility",
+        "Integration tests instead of unit tests"
+      ],
+      "files_affected": [
+        "tests/units/test_config.py",
+        "tests/units/test_environment.py"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Update disable_plugins type annotation and normalization",
+      "description": "Change the type annotation from list[str] to list[type[Plugin]] and implement runtime normalization for backward compatibility",
+      "files_to_modify": [
+        "reflex/config.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-002",
+      "title": "Extend environment variable interpreter for type[Plugin]",
+      "description": "Add support for interpreting environment variables as Plugin classes (type[Plugin]) in addition to Plugin instances",
+      "files_to_modify": [
+        "reflex/environment.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-003",
+      "title": "Add comprehensive test coverage",
+      "description": "Create tests for all normalization paths, backward compatibility scenarios, and environment variable interpretation",
+      "files_to_modify": [
+        "tests/units/test_config.py",
+        "tests/units/test_environment.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation updates the disable_plugins configuration parameter to accept Plugin class types instead of strings, aligning it with the existing plugins parameter for consistency. The core change involves modifying the type annotation in BaseConfig from list[str] to list[type[Plugin]] and implementing a normalization method _normalize_disable_plugins that handles backward compatibility by converting strings and Plugin instances to their corresponding classes.\n\nA key design decision was to extract the string-to-class conversion logic into a reusable function interpret_plugin_class_env in the environment module. This function is used both for runtime normalization in the config and for environment variable interpretation, ensuring consistent behavior. The environment variable interpreter was extended to recognize type[Plugin] annotations using Python's typing introspection (get_origin and get_args).\n\nThe implementation maintains full backward compatibility through deprecation warnings when strings are used, allowing existing codebases to continue working while encouraging migration to the new type-based approach. The builtin plugin checking logic was updated to work with Plugin classes instead of string paths, simplifying comparisons and improving type safety. Comprehensive tests were added to verify all conversion paths, ensuring the changes work correctly in various scenarios including environment variable usage, direct class passing, and backward compatibility modes.",
+  "source_pr": "https://github.com/reflex-dev/reflex/pull/6155",
+  "before_sha": "b9845ba4411ecbb84026e0c06471badfadbf211e",
+  "after_sha": "b8c9ef6595a8c0a74416717ceb8263bf980b61ae",
+  "diff_stats": {
+    "additions": 174,
+    "deletions": 18,
+    "files_changed": 4
+  }
+}

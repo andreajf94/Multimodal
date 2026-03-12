@@ -1,0 +1,1696 @@
+diff --git a/packages/element/src/Scene.ts b/packages/element/src/Scene.ts
+index eaef25796037..4ba663cebad7 100644
+--- a/packages/element/src/Scene.ts
++++ b/packages/element/src/Scene.ts
+@@ -438,6 +438,8 @@ export class Scene {
+     options: {
+       informMutation: boolean;
+       isDragging: boolean;
++      isBindingEnabled?: boolean;
++      isMidpointSnappingEnabled?: boolean;
+     } = {
+       informMutation: true,
+       isDragging: false,
+diff --git a/packages/element/src/binding.ts b/packages/element/src/binding.ts
+index bf1eeb63c797..566ef3c4e4d7 100644
+--- a/packages/element/src/binding.ts
++++ b/packages/element/src/binding.ts
+@@ -1,5 +1,4 @@
+ import {
+-  KEYS,
+   arrayToMap,
+   getFeatureFlag,
+   invariant,
+@@ -137,12 +136,6 @@ export const maxBindingDistance_simple = (zoom?: AppState["zoom"]): number => {
+   );
+ };
+ 
+-export const shouldEnableBindingForPointerEvent = (
+-  event: React.PointerEvent<HTMLElement>,
+-) => {
+-  return !event[KEYS.CTRL_OR_CMD];
+-};
+-
+ export const isBindingEnabled = (appState: {
+   isBindingEnabled: AppState["isBindingEnabled"];
+ }): boolean => {
+@@ -177,8 +170,20 @@ export const bindOrUnbindBindingElement = (
+     },
+   );
+ 
+-  bindOrUnbindBindingElementEdge(arrow, start, "start", scene);
+-  bindOrUnbindBindingElementEdge(arrow, end, "end", scene);
++  bindOrUnbindBindingElementEdge(
++    arrow,
++    start,
++    "start",
++    scene,
++    appState.isBindingEnabled,
++  );
++  bindOrUnbindBindingElementEdge(
++    arrow,
++    end,
++    "end",
++    scene,
++    appState.isBindingEnabled,
++  );
+   if (start.focusPoint || end.focusPoint) {
+     // If the strategy dictates a focus point override, then
+     // update the arrow points to point to the focus point.
+@@ -221,12 +226,21 @@ const bindOrUnbindBindingElementEdge = (
+   { mode, element, focusPoint }: BindingStrategy,
+   startOrEnd: "start" | "end",
+   scene: Scene,
++  shouldSnapToOutline = true,
+ ): void => {
+   if (mode === null) {
+     // null means break the binding
+     unbindBindingElement(arrow, startOrEnd, scene);
+   } else if (mode !== undefined) {
+-    bindBindingElement(arrow, element, mode, startOrEnd, scene, focusPoint);
++    bindBindingElement(
++      arrow,
++      element,
++      mode,
++      startOrEnd,
++      scene,
++      focusPoint,
++      shouldSnapToOutline,
++    );
+   }
+ };
+ 
+@@ -798,6 +812,7 @@ const getBindingStrategyForDraggingBindingElementEndpoints_simple = (
+               startDragged ? "start" : "end",
+               elementsMap,
+               appState.zoom,
++              appState.isMidpointSnappingEnabled,
+             ) || globalPoint,
+         }
+     : { mode: null };
+@@ -842,6 +857,7 @@ const getBindingStrategyForDraggingBindingElementEndpoints_simple = (
+               startDragged ? "end" : "start",
+               elementsMap,
+               appState.zoom,
++              appState.isMidpointSnappingEnabled,
+             ) || otherEndpoint,
+         }
+       : { mode: undefined }
+@@ -1005,6 +1021,7 @@ export const bindBindingElement = (
+   startOrEnd: "start" | "end",
+   scene: Scene,
+   focusPoint?: GlobalPoint,
++  shouldSnapToOutline = true,
+ ): void => {
+   const elementsMap = scene.getNonDeletedElementsMap();
+ 
+@@ -1019,6 +1036,7 @@ export const bindBindingElement = (
+         hoveredElement,
+         startOrEnd,
+         elementsMap,
++        shouldSnapToOutline,
+       ),
+     };
+   } else {
+@@ -1352,6 +1370,7 @@ export const bindPointToSnapToElementOutline = (
+   startOrEnd: "start" | "end",
+   elementsMap: ElementsMap,
+   customIntersector?: LineSegment<GlobalPoint>,
++  isMidpointSnappingEnabled = true,
+ ): GlobalPoint => {
+   const elbowed = isElbowArrow(arrowElement);
+   const point = LinearElementEditor.getPointAtIndexGlobalCoordinates(
+@@ -1391,13 +1410,9 @@ export const bindPointToSnapToElementOutline = (
+     const isHorizontal = headingIsHorizontal(
+       headingForPointFromElement(bindableElement, aabb, point),
+     );
+-    const snapPoint = snapToMid(
+-      bindableElement,
+-      elementsMap,
+-      edgePoint,
+-      0.05,
+-      arrowElement,
+-    );
++    const snapPoint = isMidpointSnappingEnabled
++      ? snapToMid(bindableElement, elementsMap, edgePoint, 0.05, arrowElement)
++      : undefined;
+     const resolved = snapPoint || point;
+     const otherPoint = pointFrom<GlobalPoint>(
+       isHorizontal ? bindableCenter[0] : resolved[0],
+@@ -1892,6 +1907,8 @@ export const calculateFixedPointForElbowArrowBinding = (
+   hoveredElement: ExcalidrawBindableElement,
+   startOrEnd: "start" | "end",
+   elementsMap: ElementsMap,
++  shouldSnapToOutline = true,
++  isMidpointSnappingEnabled = true,
+ ): { fixedPoint: FixedPoint } => {
+   const bounds = [
+     hoveredElement.x,
+@@ -1899,12 +1916,20 @@ export const calculateFixedPointForElbowArrowBinding = (
+     hoveredElement.x + hoveredElement.width,
+     hoveredElement.y + hoveredElement.height,
+   ] as Bounds;
+-  const snappedPoint = bindPointToSnapToElementOutline(
+-    linearElement,
+-    hoveredElement,
+-    startOrEnd,
+-    elementsMap,
+-  );
++  const snappedPoint = shouldSnapToOutline
++    ? bindPointToSnapToElementOutline(
++        linearElement,
++        hoveredElement,
++        startOrEnd,
++        elementsMap,
++        undefined,
++        isMidpointSnappingEnabled,
++      )
++    : LinearElementEditor.getPointAtIndexGlobalCoordinates(
++        linearElement,
++        startOrEnd === "start" ? 0 : -1,
++        elementsMap,
++      );
+   const globalMidPoint = pointFrom(
+     bounds[0] + (bounds[2] - bounds[0]) / 2,
+     bounds[1] + (bounds[3] - bounds[1]) / 2,
+diff --git a/packages/element/src/elbowArrow.ts b/packages/element/src/elbowArrow.ts
+index 63b3b7926d2a..9543b4182f6e 100644
+--- a/packages/element/src/elbowArrow.ts
++++ b/packages/element/src/elbowArrow.ts
+@@ -915,6 +915,8 @@ export const updateElbowArrowPoints = (
+   },
+   options?: {
+     isDragging?: boolean;
++    isBindingEnabled?: boolean;
++    isMidpointSnappingEnabled?: boolean;
+   },
+ ): ElementUpdate<ExcalidrawElbowArrowElement> => {
+   if (arrow.points.length < 2) {
+@@ -1202,6 +1204,8 @@ const getElbowArrowData = (
+   options?: {
+     isDragging?: boolean;
+     zoom?: AppState["zoom"];
++    isBindingEnabled?: boolean;
++    isMidpointSnappingEnabled?: boolean;
+   },
+ ) => {
+   const origStartGlobalPoint: GlobalPoint = pointTranslate<
+@@ -1215,7 +1219,7 @@ const getElbowArrowData = (
+ 
+   let hoveredStartElement = null;
+   let hoveredEndElement = null;
+-  if (options?.isDragging) {
++  if (options?.isDragging && options?.isBindingEnabled !== false) {
+     const elements = Array.from(elementsMap.values());
+     hoveredStartElement =
+       getHoveredElement(
+@@ -1255,6 +1259,8 @@ const getElbowArrowData = (
+     hoveredStartElement,
+     elementsMap,
+     options?.isDragging,
++    options?.isBindingEnabled,
++    options?.isMidpointSnappingEnabled,
+   );
+   const endGlobalPoint = getGlobalPoint(
+     {
+@@ -1270,6 +1276,8 @@ const getElbowArrowData = (
+     hoveredEndElement,
+     elementsMap,
+     options?.isDragging,
++    options?.isBindingEnabled,
++    options?.isMidpointSnappingEnabled,
+   );
+   const startHeading = getBindPointHeading(
+     startGlobalPoint,
+@@ -2213,14 +2221,18 @@ const getGlobalPoint = (
+   element?: ExcalidrawBindableElement | null,
+   elementsMap?: ElementsMap,
+   isDragging?: boolean,
++  isBindingEnabled = true,
++  isMidpointSnappingEnabled = true,
+ ): GlobalPoint => {
+   if (isDragging) {
+-    if (element && elementsMap) {
++    if (isBindingEnabled && element && elementsMap) {
+       return bindPointToSnapToElementOutline(
+         arrow,
+         element,
+         startOrEnd,
+         elementsMap,
++        undefined,
++        isMidpointSnappingEnabled,
+       );
+     }
+ 
+diff --git a/packages/element/src/linearElementEditor.ts b/packages/element/src/linearElementEditor.ts
+index e3d3f2e5105e..e57211abbcb7 100644
+--- a/packages/element/src/linearElementEditor.ts
++++ b/packages/element/src/linearElementEditor.ts
+@@ -359,11 +359,20 @@ export class LinearElementEditor {
+       linearElementEditor,
+     );
+ 
+-    LinearElementEditor.movePoints(element, app.scene, positions, {
+-      startBinding: updates?.startBinding,
+-      endBinding: updates?.endBinding,
+-      moveMidPointsWithElement: updates?.moveMidPointsWithElement,
+-    });
++    LinearElementEditor.movePoints(
++      element,
++      app.scene,
++      positions,
++      {
++        startBinding: updates?.startBinding,
++        endBinding: updates?.endBinding,
++        moveMidPointsWithElement: updates?.moveMidPointsWithElement,
++      },
++      {
++        isBindingEnabled: app.state.isBindingEnabled,
++        isMidpointSnappingEnabled: app.state.isMidpointSnappingEnabled,
++      },
++    );
+     // Set the suggested binding from the updates if available
+     if (isBindingElement(element, false)) {
+       if (isBindingEnabled(app.state)) {
+@@ -418,6 +427,7 @@ export class LinearElementEditor {
+                 "start",
+                 elementsMap,
+                 app.state.zoom,
++                app.state.isMidpointSnappingEnabled,
+               )
+             : linearElementEditor.initialState.altFocusPoint,
+       },
+@@ -538,11 +548,20 @@ export class LinearElementEditor {
+       linearElementEditor,
+     );
+ 
+-    LinearElementEditor.movePoints(element, app.scene, positions, {
+-      startBinding: updates?.startBinding,
+-      endBinding: updates?.endBinding,
+-      moveMidPointsWithElement: updates?.moveMidPointsWithElement,
+-    });
++    LinearElementEditor.movePoints(
++      element,
++      app.scene,
++      positions,
++      {
++        startBinding: updates?.startBinding,
++        endBinding: updates?.endBinding,
++        moveMidPointsWithElement: updates?.moveMidPointsWithElement,
++      },
++      {
++        isBindingEnabled: app.state.isBindingEnabled,
++        isMidpointSnappingEnabled: app.state.isMidpointSnappingEnabled,
++      },
++    );
+ 
+     // Set the suggested binding from the updates if available
+     if (isBindingElement(element, false)) {
+@@ -636,6 +655,7 @@ export class LinearElementEditor {
+                 "start",
+                 elementsMap,
+                 app.state.zoom,
++                app.state.isMidpointSnappingEnabled,
+               )
+             : linearElementEditor.initialState.altFocusPoint,
+       },
+@@ -1524,6 +1544,10 @@ export class LinearElementEditor {
+       endBinding?: FixedPointBinding | null;
+       moveMidPointsWithElement?: boolean | null;
+     },
++    options?: {
++      isBindingEnabled?: boolean;
++      isMidpointSnappingEnabled?: boolean;
++    },
+   ) {
+     const { points } = element;
+ 
+@@ -1592,6 +1616,8 @@ export class LinearElementEditor {
+       otherUpdates,
+       {
+         isDragging: Array.from(pointUpdates.values()).some((t) => t.isDragging),
++        isBindingEnabled: options?.isBindingEnabled,
++        isMidpointSnappingEnabled: options?.isMidpointSnappingEnabled,
+       },
+     );
+   }
+@@ -1706,6 +1732,8 @@ export class LinearElementEditor {
+       isDragging?: boolean;
+       zoom?: AppState["zoom"];
+       sceneElementsMap?: NonDeletedSceneElementsMap;
++      isBindingEnabled?: boolean;
++      isMidpointSnappingEnabled?: boolean;
+     },
+   ) {
+     if (isElbowArrow(element)) {
+@@ -1726,6 +1754,8 @@ export class LinearElementEditor {
+       scene.mutateElement(element, updates, {
+         informMutation: true,
+         isDragging: options?.isDragging ?? false,
++        isBindingEnabled: options?.isBindingEnabled,
++        isMidpointSnappingEnabled: options?.isMidpointSnappingEnabled,
+       });
+     } else {
+       // TODO do we need to get precise coords here just to calc centers?
+@@ -2145,14 +2175,16 @@ const pointDraggingUpdates = (
+         suggestedBinding: suggestedBindingElement
+           ? {
+               element: suggestedBindingElement,
+-              midPoint: snapToMid(
+-                suggestedBindingElement,
+-                elementsMap,
+-                pointFrom<GlobalPoint>(
+-                  scenePointerX - linearElementEditor.pointerOffset.x,
+-                  scenePointerY - linearElementEditor.pointerOffset.y,
+-                ),
+-              ),
++              midPoint: app.state.isMidpointSnappingEnabled
++                ? snapToMid(
++                    suggestedBindingElement,
++                    elementsMap,
++                    pointFrom<GlobalPoint>(
++                      scenePointerX - linearElementEditor.pointerOffset.x,
++                      scenePointerY - linearElementEditor.pointerOffset.y,
++                    ),
++                  )
++                : undefined,
+             }
+           : null,
+       },
+diff --git a/packages/element/src/mutateElement.ts b/packages/element/src/mutateElement.ts
+index c45c6df08c19..eb6350c2bf50 100644
+--- a/packages/element/src/mutateElement.ts
++++ b/packages/element/src/mutateElement.ts
+@@ -40,6 +40,8 @@ export const mutateElement = <TElement extends Mutable<ExcalidrawElement>>(
+   updates: ElementUpdate<TElement>,
+   options?: {
+     isDragging?: boolean;
++    isBindingEnabled?: boolean;
++    isMidpointSnappingEnabled?: boolean;
+   },
+ ) => {
+   let didChange = false;
+diff --git a/packages/element/src/utils.ts b/packages/element/src/utils.ts
+index 7013acf2f136..96e09bcbf11f 100644
+--- a/packages/element/src/utils.ts
++++ b/packages/element/src/utils.ts
+@@ -659,20 +659,23 @@ export const projectFixedPointOntoDiagonal = (
+   startOrEnd: "start" | "end",
+   elementsMap: ElementsMap,
+   zoom: AppState["zoom"],
++  isMidpointSnappingEnabled: boolean = true,
+ ): GlobalPoint | null => {
+   invariant(arrow.points.length >= 2, "Arrow must have at least two points");
+   if (arrow.width < 3 && arrow.height < 3) {
+     return null;
+   }
+ 
+-  const sideMidPoint = getSnapOutlineMidPoint(
+-    point,
+-    element,
+-    elementsMap,
+-    zoom,
+-  );
+-  if (sideMidPoint) {
+-    return sideMidPoint;
++  if (isMidpointSnappingEnabled) {
++    const sideMidPoint = getSnapOutlineMidPoint(
++      point,
++      element,
++      elementsMap,
++      zoom,
++    );
++    if (sideMidPoint) {
++      return sideMidPoint;
++    }
+   }
+ 
+   // Do the projection onto the diagonals (or center lines
+diff --git a/packages/excalidraw/actions/actionProperties.tsx b/packages/excalidraw/actions/actionProperties.tsx
+index 7fb9ed0e862d..93fe0ada1aaf 100644
+--- a/packages/excalidraw/actions/actionProperties.tsx
++++ b/packages/excalidraw/actions/actionProperties.tsx
+@@ -1830,6 +1830,7 @@ export const actionChangeArrowType = register<keyof typeof ARROW_TYPE>({
+                   startElement,
+                   "start",
+                   elementsMap,
++                  appState.isBindingEnabled,
+                 ),
+               }
+             : null;
+@@ -1843,6 +1844,7 @@ export const actionChangeArrowType = register<keyof typeof ARROW_TYPE>({
+                   endElement,
+                   "end",
+                   elementsMap,
++                  appState.isBindingEnabled,
+                 ),
+               }
+             : null;
+diff --git a/packages/excalidraw/actions/actionToggleArrowBinding.tsx b/packages/excalidraw/actions/actionToggleArrowBinding.tsx
+new file mode 100644
+index 000000000000..a4e6e50ed2c2
+--- /dev/null
++++ b/packages/excalidraw/actions/actionToggleArrowBinding.tsx
+@@ -0,0 +1,26 @@
++import { CaptureUpdateAction } from "@excalidraw/element";
++
++import { register } from "./register";
++
++export const actionToggleArrowBinding = register({
++  name: "arrowBinding",
++  label: "labels.arrowBinding",
++  viewMode: false,
++  trackEvent: {
++    category: "canvas",
++    predicate: (appState) => appState.bindingPreference === "disabled",
++  },
++  perform(elements, appState) {
++    const newPreference =
++      appState.bindingPreference === "enabled" ? "disabled" : "enabled";
++    return {
++      appState: {
++        ...appState,
++        bindingPreference: newPreference,
++        isBindingEnabled: newPreference === "enabled",
++      },
++      captureUpdate: CaptureUpdateAction.NEVER,
++    };
++  },
++  checked: (appState) => appState.bindingPreference === "enabled",
++});
+diff --git a/packages/excalidraw/actions/actionToggleMidpointSnapping.tsx b/packages/excalidraw/actions/actionToggleMidpointSnapping.tsx
+new file mode 100644
+index 000000000000..eca9df7e2759
+--- /dev/null
++++ b/packages/excalidraw/actions/actionToggleMidpointSnapping.tsx
+@@ -0,0 +1,23 @@
++import { CaptureUpdateAction } from "@excalidraw/element";
++
++import { register } from "./register";
++
++export const actionToggleMidpointSnapping = register({
++  name: "midpointSnapping",
++  label: "labels.midpointSnapping",
++  viewMode: false,
++  trackEvent: {
++    category: "canvas",
++    predicate: (appState) => !appState.isMidpointSnappingEnabled,
++  },
++  perform(elements, appState) {
++    return {
++      appState: {
++        ...appState,
++        isMidpointSnappingEnabled: !this.checked!(appState),
++      },
++      captureUpdate: CaptureUpdateAction.NEVER,
++    };
++  },
++  checked: (appState) => appState.isMidpointSnappingEnabled,
++});
+diff --git a/packages/excalidraw/actions/index.ts b/packages/excalidraw/actions/index.ts
+index 6b888e92d3c3..cc9ca1789c04 100644
+--- a/packages/excalidraw/actions/index.ts
++++ b/packages/excalidraw/actions/index.ts
+@@ -79,6 +79,8 @@ export {
+ export { actionToggleGridMode } from "./actionToggleGridMode";
+ export { actionToggleZenMode } from "./actionToggleZenMode";
+ export { actionToggleObjectsSnapMode } from "./actionToggleObjectsSnapMode";
++export { actionToggleArrowBinding } from "./actionToggleArrowBinding";
++export { actionToggleMidpointSnapping } from "./actionToggleMidpointSnapping";
+ 
+ export { actionToggleStats } from "./actionToggleStats";
+ export { actionUnbindText, actionBindText } from "./actionBoundText";
+diff --git a/packages/excalidraw/actions/types.ts b/packages/excalidraw/actions/types.ts
+index c85b0639ef54..ae80e4107c73 100644
+--- a/packages/excalidraw/actions/types.ts
++++ b/packages/excalidraw/actions/types.ts
+@@ -59,6 +59,8 @@ export type ActionName =
+   | "gridMode"
+   | "zenMode"
+   | "objectsSnapMode"
++  | "arrowBinding"
++  | "midpointSnapping"
+   | "stats"
+   | "changeStrokeColor"
+   | "changeBackgroundColor"
+diff --git a/packages/excalidraw/appState.ts b/packages/excalidraw/appState.ts
+index 18e303db2949..e51865b2eae7 100644
+--- a/packages/excalidraw/appState.ts
++++ b/packages/excalidraw/appState.ts
+@@ -70,6 +70,8 @@ export const getDefaultAppState = (): Omit<
+     gridStep: DEFAULT_GRID_STEP,
+     gridModeEnabled: false,
+     isBindingEnabled: true,
++    bindingPreference: "enabled",
++    isMidpointSnappingEnabled: true,
+     defaultSidebarDockedPreference: false,
+     isLoading: false,
+     isResizing: false,
+@@ -190,7 +192,9 @@ const APP_STATE_STORAGE_CONF = (<
+   gridStep: { browser: true, export: true, server: true },
+   gridModeEnabled: { browser: true, export: true, server: true },
+   height: { browser: false, export: false, server: false },
+-  isBindingEnabled: { browser: false, export: false, server: false },
++  isBindingEnabled: { browser: true, export: false, server: false },
++  bindingPreference: { browser: true, export: false, server: false },
++  isMidpointSnappingEnabled: { browser: true, export: false, server: false },
+   defaultSidebarDockedPreference: {
+     browser: true,
+     export: false,
+diff --git a/packages/excalidraw/components/App.tsx b/packages/excalidraw/components/App.tsx
+index adbcce44e532..0b361e0e709b 100644
+--- a/packages/excalidraw/components/App.tsx
++++ b/packages/excalidraw/components/App.tsx
+@@ -119,7 +119,6 @@ import {
+   fixBindingsAfterDeletion,
+   getHoveredElementForBinding,
+   isBindingEnabled,
+-  shouldEnableBindingForPointerEvent,
+   updateBoundElements,
+   LinearElementEditor,
+   newElementWith,
+@@ -319,6 +318,8 @@ import {
+   actionToggleElementLock,
+   actionToggleLinearEditor,
+   actionToggleObjectsSnapMode,
++  actionToggleArrowBinding,
++  actionToggleMidpointSnapping,
+   actionToggleCropEditor,
+ } from "../actions";
+ import { actionWrapTextInContainer } from "../actions/actionBoundText";
+@@ -2734,7 +2735,9 @@ class App extends React.Component<AppProps, AppState> {
+ 
+   private onBlur = withBatchedUpdates(() => {
+     isHoldingSpace = false;
+-    this.setState({ isBindingEnabled: true });
++    this.setState({
++      isBindingEnabled: this.state.bindingPreference === "enabled",
++    });
+   });
+ 
+   private onUnload = () => {
+@@ -4937,13 +4940,15 @@ class App extends React.Component<AppProps, AppState> {
+         return;
+       }
+ 
+-      if (event[KEYS.CTRL_OR_CMD] && this.state.isBindingEnabled) {
++      if (event[KEYS.CTRL_OR_CMD] && !event.repeat) {
+         if (getFeatureFlag("COMPLEX_BINDINGS")) {
+           this.resetDelayedBindMode();
+         }
+ 
+         flushSync(() => {
+-          this.setState({ isBindingEnabled: false });
++          this.setState({
++            isBindingEnabled: this.state.bindingPreference !== "enabled",
++          });
+         });
+ 
+         maybeHandleArrowPointlikeDrag({ app: this, event });
+@@ -5217,10 +5222,13 @@ class App extends React.Component<AppProps, AppState> {
+         }
+       }
+     }
+-    if (!event[KEYS.CTRL_OR_CMD] && !this.state.isBindingEnabled) {
+-      flushSync(() => {
+-        this.setState({ isBindingEnabled: true });
+-      });
++    if (!event[KEYS.CTRL_OR_CMD]) {
++      const preferenceEnabled = this.state.bindingPreference === "enabled";
++      if (this.state.isBindingEnabled !== preferenceEnabled) {
++        flushSync(() => {
++          this.setState({ isBindingEnabled: preferenceEnabled });
++        });
++      }
+ 
+       maybeHandleArrowPointlikeDrag({ app: this, event });
+     }
+@@ -7138,6 +7146,14 @@ class App extends React.Component<AppProps, AppState> {
+   private handleCanvasPointerDown = (
+     event: React.PointerEvent<HTMLElement>,
+   ) => {
++    // If Ctrl is not held, ensure isBindingEnabled reflects the user preference.
++    if (!event.ctrlKey) {
++      const preferenceEnabled = this.state.bindingPreference === "enabled";
++      if (this.state.isBindingEnabled !== preferenceEnabled) {
++        this.setState({ isBindingEnabled: preferenceEnabled });
++      }
++    }
++
+     const scenePointer = viewportCoordsToSceneCoords(event, this.state);
+     const { x: scenePointerX, y: scenePointerY } = scenePointer;
+     this.lastPointerMoveCoords = {
+@@ -7358,7 +7374,6 @@ class App extends React.Component<AppProps, AppState> {
+     }
+ 
+     this.clearSelectionIfNotUsingSelection();
+-    this.updateBindingEnabledOnPointerMove(event);
+ 
+     if (this.handleSelectionOnPointerDown(event, pointerDownState)) {
+       return;
+@@ -7581,6 +7596,13 @@ class App extends React.Component<AppProps, AppState> {
+     this.removePointer(event);
+     this.lastPointerUpEvent = event;
+ 
++    if (!event.ctrlKey) {
++      const preferenceEnabled = this.state.bindingPreference === "enabled";
++      if (this.state.isBindingEnabled !== preferenceEnabled) {
++        this.setState({ isBindingEnabled: preferenceEnabled });
++      }
++    }
++
+     const scenePointer = viewportCoordsToSceneCoords(
+       { clientX: event.clientX, clientY: event.clientY },
+       this.state,
+@@ -8636,7 +8658,9 @@ class App extends React.Component<AppProps, AppState> {
+   ): void => {
+     if (event.ctrlKey) {
+       flushSync(() => {
+-        this.setState({ isBindingEnabled: false });
++        this.setState({
++          isBindingEnabled: this.state.bindingPreference !== "enabled",
++        });
+       });
+     }
+ 
+@@ -11330,15 +11354,6 @@ class App extends React.Component<AppProps, AppState> {
+     this.addNewImagesToImageCache();
+   }, IMAGE_RENDER_TIMEOUT);
+ 
+-  private updateBindingEnabledOnPointerMove = (
+-    event: React.PointerEvent<HTMLElement>,
+-  ) => {
+-    const shouldEnableBinding = shouldEnableBindingForPointerEvent(event);
+-    if (this.state.isBindingEnabled !== shouldEnableBinding) {
+-      this.setState({ isBindingEnabled: shouldEnableBinding });
+-    }
+-  };
+-
+   private clearSelection(hitElement: ExcalidrawElement | null): void {
+     this.setState((prevState) => ({
+       selectedElementIds: makeNextSelectedElementIds({}, prevState),
+@@ -12100,6 +12115,8 @@ class App extends React.Component<AppProps, AppState> {
+         CONTEXT_MENU_SEPARATOR,
+         actionToggleGridMode,
+         actionToggleObjectsSnapMode,
++        actionToggleArrowBinding,
++        actionToggleMidpointSnapping,
+         actionToggleZenMode,
+         actionToggleViewMode,
+         actionToggleStats,
+diff --git a/packages/excalidraw/components/canvases/InteractiveCanvas.tsx b/packages/excalidraw/components/canvases/InteractiveCanvas.tsx
+index 15ecb61eaf55..c6245953b904 100644
+--- a/packages/excalidraw/components/canvases/InteractiveCanvas.tsx
++++ b/packages/excalidraw/components/canvases/InteractiveCanvas.tsx
+@@ -249,6 +249,7 @@ const getRelevantAppStateProps = (
+   multiElement: appState.multiElement,
+   newElement: appState.newElement,
+   isBindingEnabled: appState.isBindingEnabled,
++  isMidpointSnappingEnabled: appState.isMidpointSnappingEnabled,
+   suggestedBinding: appState.suggestedBinding,
+   isRotating: appState.isRotating,
+   elementsToHighlight: appState.elementsToHighlight,
+diff --git a/packages/excalidraw/components/main-menu/DefaultItems.tsx b/packages/excalidraw/components/main-menu/DefaultItems.tsx
+index 04cea3da48fe..8865dfa7aead 100644
+--- a/packages/excalidraw/components/main-menu/DefaultItems.tsx
++++ b/packages/excalidraw/components/main-menu/DefaultItems.tsx
+@@ -9,7 +9,9 @@ import {
+   actionLoadScene,
+   actionSaveToActiveFile,
+   actionShortcuts,
++  actionToggleArrowBinding,
+   actionToggleGridMode,
++  actionToggleMidpointSnapping,
+   actionToggleObjectsSnapMode,
+   actionToggleSearchMenu,
+   actionToggleStats,
+@@ -443,6 +445,40 @@ const PreferencesToggleSnapModeItem = () => {
+   );
+ };
+ 
++const PreferencesToggleArrowBindingItem = () => {
++  const { t } = useI18n();
++  const actionManager = useExcalidrawActionManager();
++  const appState = useUIAppState();
++  return (
++    <DropdownMenuItemCheckbox
++      checked={appState.bindingPreference === "enabled"}
++      onSelect={(event) => {
++        actionManager.executeAction(actionToggleArrowBinding);
++        event.preventDefault();
++      }}
++    >
++      {t("labels.arrowBinding")}
++    </DropdownMenuItemCheckbox>
++  );
++};
++
++const PreferencesToggleMidpointSnappingItem = () => {
++  const { t } = useI18n();
++  const actionManager = useExcalidrawActionManager();
++  const appState = useUIAppState();
++  return (
++    <DropdownMenuItemCheckbox
++      checked={appState.isMidpointSnappingEnabled}
++      onSelect={(event) => {
++        actionManager.executeAction(actionToggleMidpointSnapping);
++        event.preventDefault();
++      }}
++    >
++      {t("labels.midpointSnapping")}
++    </DropdownMenuItemCheckbox>
++  );
++};
++
+ export const PreferencesToggleGridModeItem = () => {
+   const { t } = useI18n();
+   const actionManager = useExcalidrawActionManager();
+@@ -538,6 +574,8 @@ export const Preferences = ({
+             <PreferencesToggleZenModeItem />
+             <PreferencesToggleViewModeItem />
+             <PreferencesToggleElementPropertiesItem />
++            <PreferencesToggleArrowBindingItem />
++            <PreferencesToggleMidpointSnappingItem />
+           </>
+         )}
+         {additionalItems}
+@@ -548,6 +586,8 @@ export const Preferences = ({
+ 
+ Preferences.ToggleToolLock = PreferencesToggleToolLockItem;
+ Preferences.ToggleSnapMode = PreferencesToggleSnapModeItem;
++Preferences.ToggleArrowBinding = PreferencesToggleArrowBindingItem;
++Preferences.ToggleMidpointSnapping = PreferencesToggleMidpointSnappingItem;
+ Preferences.ToggleGridMode = PreferencesToggleGridModeItem;
+ Preferences.ToggleZenMode = PreferencesToggleZenModeItem;
+ Preferences.ToggleViewMode = PreferencesToggleViewModeItem;
+diff --git a/packages/excalidraw/locales/en.json b/packages/excalidraw/locales/en.json
+index 18e8c88908f4..7a2a7294f8a5 100644
+--- a/packages/excalidraw/locales/en.json
++++ b/packages/excalidraw/locales/en.json
+@@ -177,7 +177,9 @@
+     "tab": "Tab",
+     "shapeSwitch": "Switch shape",
+     "preferences": "Preferences",
+-    "preferences_toolLock": "Tool lock"
++    "preferences_toolLock": "Tool lock",
++    "arrowBinding": "Arrow binding",
++    "midpointSnapping": "Snap to midpoints"
+   },
+   "elementLink": {
+     "title": "Link to object",
+diff --git a/packages/excalidraw/renderer/interactiveScene.ts b/packages/excalidraw/renderer/interactiveScene.ts
+index fc9331e6eae3..56c308713e40 100644
+--- a/packages/excalidraw/renderer/interactiveScene.ts
++++ b/packages/excalidraw/renderer/interactiveScene.ts
+@@ -407,8 +407,9 @@ const renderBindingHighlightForBindableElement_simple = (
+   }
+ 
+   if (
+-    isFrameLikeElement(suggestedBinding.element) ||
+-    isBindableElement(suggestedBinding.element)
++    appState.isMidpointSnappingEnabled &&
++    (isFrameLikeElement(suggestedBinding.element) ||
++      isBindableElement(suggestedBinding.element))
+   ) {
+     // Draw midpoint indicators
+     const linearElement = appState.selectedLinearElement;
+@@ -799,77 +800,79 @@ const renderBindingHighlightForBindableElement_complex = (
+ 
+     context.restore();
+ 
+-    // Draw midpoint indicators
+-    context.save();
+-    context.translate(
+-      element.x + appState.scrollX,
+-      element.y + appState.scrollY,
+-    );
+-
+-    const midpointRadius = 5 / appState.zoom.value;
+-    const cutoutPadding = 5 / appState.zoom.value;
+-    const cutoutRadius = midpointRadius + cutoutPadding;
++    if (appState.isMidpointSnappingEnabled) {
++      // Draw midpoint indicators
++      context.save();
++      context.translate(
++        element.x + appState.scrollX,
++        element.y + appState.scrollY,
++      );
+ 
+-    let midpoints;
+-    if (element.type === "diamond") {
+-      const [, curves] = deconstructDiamondElement(element);
+-      const center = elementCenterPoint(element, allElementsMap);
++      const midpointRadius = 5 / appState.zoom.value;
++      const cutoutPadding = 5 / appState.zoom.value;
++      const cutoutRadius = midpointRadius + cutoutPadding;
++
++      let midpoints;
++      if (element.type === "diamond") {
++        const [, curves] = deconstructDiamondElement(element);
++        const center = elementCenterPoint(element, allElementsMap);
++
++        midpoints = curves.map((curve) => {
++          const point = bezierEquation(curve, 0.5);
++          const rotatedPoint = pointRotateRads(point, center, element.angle);
++          return {
++            x: rotatedPoint[0] - element.x,
++            y: rotatedPoint[1] - element.y,
++          };
++        });
++      } else {
++        const center = elementCenterPoint(element, allElementsMap);
++        const basePoints = [
++          { x: element.width / 2, y: 0 }, // TOP
++          { x: element.width, y: element.height / 2 }, // RIGHT
++          { x: element.width / 2, y: element.height }, // BOTTOM
++          { x: 0, y: element.height / 2 }, // LEFT
++        ];
++        midpoints = basePoints.map((point) => {
++          const globalPoint = pointFrom<GlobalPoint>(
++            point.x + element.x,
++            point.y + element.y,
++          );
++          const rotatedPoint = pointRotateRads(
++            globalPoint,
++            center,
++            element.angle,
++          );
++          return {
++            x: rotatedPoint[0] - element.x,
++            y: rotatedPoint[1] - element.y,
++          };
++        });
++      }
+ 
+-      midpoints = curves.map((curve) => {
+-        const point = bezierEquation(curve, 0.5);
+-        const rotatedPoint = pointRotateRads(point, center, element.angle);
+-        return {
+-          x: rotatedPoint[0] - element.x,
+-          y: rotatedPoint[1] - element.y,
+-        };
+-      });
+-    } else {
+-      const center = elementCenterPoint(element, allElementsMap);
+-      const basePoints = [
+-        { x: element.width / 2, y: 0 }, // TOP
+-        { x: element.width, y: element.height / 2 }, // RIGHT
+-        { x: element.width / 2, y: element.height }, // BOTTOM
+-        { x: 0, y: element.height / 2 }, // LEFT
+-      ];
+-      midpoints = basePoints.map((point) => {
+-        const globalPoint = pointFrom<GlobalPoint>(
+-          point.x + element.x,
+-          point.y + element.y,
++      // Clear cutouts around midpoints
++      midpoints.forEach((midpoint) => {
++        context.clearRect(
++          midpoint.x - cutoutRadius,
++          midpoint.y - cutoutRadius,
++          cutoutRadius * 2,
++          cutoutRadius * 2,
+         );
+-        const rotatedPoint = pointRotateRads(
+-          globalPoint,
+-          center,
+-          element.angle,
+-        );
+-        return {
+-          x: rotatedPoint[0] - element.x,
+-          y: rotatedPoint[1] - element.y,
+-        };
+       });
+-    }
+-
+-    // Clear cutouts around midpoints
+-    midpoints.forEach((midpoint) => {
+-      context.clearRect(
+-        midpoint.x - cutoutRadius,
+-        midpoint.y - cutoutRadius,
+-        cutoutRadius * 2,
+-        cutoutRadius * 2,
+-      );
+-    });
+ 
+-    context.fillStyle =
+-      appState.theme === THEME.DARK
+-        ? `rgba(3, 93, 161, ${opacity})`
+-        : `rgba(106, 189, 252, ${opacity})`;
++      context.fillStyle =
++        appState.theme === THEME.DARK
++          ? `rgba(3, 93, 161, ${opacity})`
++          : `rgba(106, 189, 252, ${opacity})`;
+ 
+-    midpoints.forEach((midpoint) => {
+-      context.beginPath();
+-      context.arc(midpoint.x, midpoint.y, midpointRadius, 0, 2 * Math.PI);
+-      context.fill();
+-    });
++      midpoints.forEach((midpoint) => {
++        context.beginPath();
++        context.arc(midpoint.x, midpoint.y, midpointRadius, 0, 2 * Math.PI);
++        context.fill();
++      });
+ 
+-    context.restore();
++      context.restore();
++    }
+   }
+ 
+   return {
+diff --git a/packages/excalidraw/tests/__snapshots__/contextmenu.test.tsx.snap b/packages/excalidraw/tests/__snapshots__/contextmenu.test.tsx.snap
+index 38f748b81743..15458fa366b8 100644
+--- a/packages/excalidraw/tests/__snapshots__/contextmenu.test.tsx.snap
++++ b/packages/excalidraw/tests/__snapshots__/contextmenu.test.tsx.snap
+@@ -12,6 +12,7 @@ exports[`contextMenu element > right-clicking on a group should select whole gro
+     "type": "selection",
+   },
+   "bindMode": "orbit",
++  "bindingPreference": "enabled",
+   "collaborators": Map {},
+   "contextMenu": {
+     "items": [
+@@ -932,6 +933,7 @@ exports[`contextMenu element > right-clicking on a group should select whole gro
+   "isBindingEnabled": true,
+   "isCropping": false,
+   "isLoading": false,
++  "isMidpointSnappingEnabled": true,
+   "isResizing": false,
+   "isRotating": false,
+   "lastPointerDownWith": "mouse",
+@@ -1083,6 +1085,7 @@ exports[`contextMenu element > selecting 'Add to library' in context menu adds e
+     "type": "selection",
+   },
+   "bindMode": "orbit",
++  "bindingPreference": "enabled",
+   "collaborators": Map {},
+   "contextMenu": null,
+   "croppingElementId": null,
+@@ -1129,6 +1132,7 @@ exports[`contextMenu element > selecting 'Add to library' in context menu adds e
+   "isBindingEnabled": true,
+   "isCropping": false,
+   "isLoading": false,
++  "isMidpointSnappingEnabled": true,
+   "isResizing": false,
+   "isRotating": false,
+   "lastPointerDownWith": "mouse",
+@@ -1295,6 +1299,7 @@ exports[`contextMenu element > selecting 'Bring forward' in context menu brings
+     "type": "selection",
+   },
+   "bindMode": "orbit",
++  "bindingPreference": "enabled",
+   "collaborators": Map {},
+   "contextMenu": null,
+   "croppingElementId": null,
+@@ -1341,6 +1346,7 @@ exports[`contextMenu element > selecting 'Bring forward' in context menu brings
+   "isBindingEnabled": true,
+   "isCropping": false,
+   "isLoading": false,
++  "isMidpointSnappingEnabled": true,
+   "isResizing": false,
+   "isRotating": false,
+   "lastPointerDownWith": "mouse",
+@@ -1624,6 +1630,7 @@ exports[`contextMenu element > selecting 'Bring to front' in context menu brings
+     "type": "selection",
+   },
+   "bindMode": "orbit",
++  "bindingPreference": "enabled",
+   "collaborators": Map {},
+   "contextMenu": null,
+   "croppingElementId": null,
+@@ -1670,6 +1677,7 @@ exports[`contextMenu element > selecting 'Bring to front' in context menu brings
+   "isBindingEnabled": true,
+   "isCropping": false,
+   "isLoading": false,
++  "isMidpointSnappingEnabled": true,
+   "isResizing": false,
+   "isRotating": false,
+   "lastPointerDownWith": "mouse",
+@@ -1953,6 +1961,7 @@ exports[`contextMenu element > selecting 'Copy styles' in context menu copies st
+     "type": "selection",
+   },
+   "bindMode": "orbit",
++  "bindingPreference": "enabled",
+   "collaborators": Map {},
+   "contextMenu": null,
+   "croppingElementId": null,
+@@ -1999,6 +2008,7 @@ exports[`contextMenu element > selecting 'Copy styles' in context menu copies st
+   "isBindingEnabled": true,
+   "isCropping": false,
+   "isLoading": false,
++  "isMidpointSnappingEnabled": true,
+   "isResizing": false,
+   "isRotating": false,
+   "lastPointerDownWith": "mouse",
+@@ -2165,6 +2175,7 @@ exports[`contextMenu element > selecting 'Delete' in context menu deletes elemen
+     "type": "selection",
+   },
+   "bindMode": "orbit",
++  "bindingPreference": "enabled",
+   "collaborators": Map {},
+   "contextMenu": null,
+   "croppingElementId": null,
+@@ -2211,6 +2222,7 @@ exports[`contextMenu element > selecting 'Delete' in context menu deletes elemen
+   "isBindingEnabled": true,
+   "isCropping": false,
+   "isLoading": false,
++  "isMidpointSnappingEnabled": true,
+   "isResizing": false,
+   "isRotating": false,
+   "lastPointerDownWith": "mouse",
+@@ -2404,6 +2416,7 @@ exports[`contextMenu element > selecting 'Duplicate' in context menu duplicates
+     "type": "selection",
+   },
+   "bindMode": "orbit",
++  "bindingPreference": "enabled",
+   "collaborators": Map {},
+   "contextMenu": null,
+   "croppingElementId": null,
+@@ -2450,6 +2463,7 @@ exports[`contextMenu element > selecting 'Duplicate' in context menu duplicates
+   "isBindingEnabled": true,
+   "isCropping": false,
+   "isLoading": false,
++  "isMidpointSnappingEnabled": true,
+   "isResizing": false,
+   "isRotating": false,
+   "lastPointerDownWith": "mouse",
+@@ -2700,6 +2714,7 @@ exports[`contextMenu element > selecting 'Group selection' in context menu group
+     "type": "selection",
+   },
+   "bindMode": "orbit",
++  "bindingPreference": "enabled",
+   "collaborators": Map {},
+   "contextMenu": null,
+   "croppingElementId": null,
+@@ -2746,6 +2761,7 @@ exports[`contextMenu element > selecting 'Group selection' in context menu group
+   "isBindingEnabled": true,
+   "isCropping": false,
+   "isLoading": false,
++  "isMidpointSnappingEnabled": true,
+   "isResizing": false,
+   "isRotating": false,
+   "lastPointerDownWith": "mouse",
+@@ -3070,6 +3086,7 @@ exports[`contextMenu element > selecting 'Paste styles' in context menu pastes s
+     "type": "selection",
+   },
+   "bindMode": "orbit",
++  "bindingPreference": "enabled",
+   "collaborators": Map {},
+   "contextMenu": null,
+   "croppingElementId": null,
+@@ -3116,6 +3133,7 @@ exports[`contextMenu element > selecting 'Paste styles' in context menu pastes s
+   "isBindingEnabled": true,
+   "isCropping": false,
+   "isLoading": false,
++  "isMidpointSnappingEnabled": true,
+   "isResizing": false,
+   "isRotating": false,
+   "lastPointerDownWith": "mouse",
+@@ -3561,6 +3579,7 @@ exports[`contextMenu element > selecting 'Send backward' in context menu sends e
+     "type": "selection",
+   },
+   "bindMode": "orbit",
++  "bindingPreference": "enabled",
+   "collaborators": Map {},
+   "contextMenu": null,
+   "croppingElementId": null,
+@@ -3607,6 +3626,7 @@ exports[`contextMenu element > selecting 'Send backward' in context menu sends e
+   "isBindingEnabled": true,
+   "isCropping": false,
+   "isLoading": false,
++  "isMidpointSnappingEnabled": true,
+   "isResizing": false,
+   "isRotating": false,
+   "lastPointerDownWith": "mouse",
+@@ -3882,6 +3902,7 @@ exports[`contextMenu element > selecting 'Send to back' in context menu sends el
+     "type": "selection",
+   },
+   "bindMode": "orbit",
++  "bindingPreference": "enabled",
+   "collaborators": Map {},
+   "contextMenu": null,
+   "croppingElementId": null,
+@@ -3928,6 +3949,7 @@ exports[`contextMenu element > selecting 'Send to back' in context menu sends el
+   "isBindingEnabled": true,
+   "isCropping": false,
+   "isLoading": false,
++  "isMidpointSnappingEnabled": true,
+   "isResizing": false,
+   "isRotating": false,
+   "lastPointerDownWith": "mouse",
+@@ -4203,6 +4225,7 @@ exports[`contextMenu element > selecting 'Ungroup selection' in context menu ung
+     "type": "selection",
+   },
+   "bindMode": "orbit",
++  "bindingPreference": "enabled",
+   "collaborators": Map {},
+   "contextMenu": null,
+   "croppingElementId": null,
+@@ -4249,6 +4272,7 @@ exports[`contextMenu element > selecting 'Ungroup selection' in context menu ung
+   "isBindingEnabled": true,
+   "isCropping": false,
+   "isLoading": false,
++  "isMidpointSnappingEnabled": true,
+   "isResizing": false,
+   "isRotating": false,
+   "lastPointerDownWith": "mouse",
+@@ -4612,6 +4636,7 @@ exports[`contextMenu element > shows 'Group selection' in context menu for multi
+     "type": "selection",
+   },
+   "bindMode": "orbit",
++  "bindingPreference": "enabled",
+   "collaborators": Map {},
+   "contextMenu": {
+     "items": [
+@@ -5532,6 +5557,7 @@ exports[`contextMenu element > shows 'Group selection' in context menu for multi
+   "isBindingEnabled": true,
+   "isCropping": false,
+   "isLoading": false,
++  "isMidpointSnappingEnabled": true,
+   "isResizing": false,
+   "isRotating": false,
+   "lastPointerDownWith": "mouse",
+@@ -5827,6 +5853,7 @@ exports[`contextMenu element > shows 'Ungroup selection' in context menu for gro
+     "type": "selection",
+   },
+   "bindMode": "orbit",
++  "bindingPreference": "enabled",
+   "collaborators": Map {},
+   "contextMenu": {
+     "items": [
+@@ -6747,6 +6774,7 @@ exports[`contextMenu element > shows 'Ungroup selection' in context menu for gro
+   "isBindingEnabled": true,
+   "isCropping": false,
+   "isLoading": false,
++  "isMidpointSnappingEnabled": true,
+   "isResizing": false,
+   "isRotating": false,
+   "lastPointerDownWith": "mouse",
+@@ -7093,6 +7121,7 @@ exports[`contextMenu element > shows context menu for canvas > [end of test] app
+     "type": "selection",
+   },
+   "bindMode": "orbit",
++  "bindingPreference": "enabled",
+   "collaborators": Map {},
+   "contextMenu": {
+     "items": [
+@@ -7468,6 +7497,28 @@ exports[`contextMenu element > shows context menu for canvas > [end of test] app
+         },
+         "viewMode": false,
+       },
++      {
++        "checked": [Function],
++        "label": "labels.arrowBinding",
++        "name": "arrowBinding",
++        "perform": [Function],
++        "trackEvent": {
++          "category": "canvas",
++          "predicate": [Function],
++        },
++        "viewMode": false,
++      },
++      {
++        "checked": [Function],
++        "label": "labels.midpointSnapping",
++        "name": "midpointSnapping",
++        "perform": [Function],
++        "trackEvent": {
++          "category": "canvas",
++          "predicate": [Function],
++        },
++        "viewMode": false,
++      },
+       {
+         "checked": [Function],
+         "icon": <svg
+@@ -7680,6 +7731,7 @@ exports[`contextMenu element > shows context menu for canvas > [end of test] app
+   "isBindingEnabled": true,
+   "isCropping": false,
+   "isLoading": false,
++  "isMidpointSnappingEnabled": true,
+   "isResizing": false,
+   "isRotating": false,
+   "lastPointerDownWith": "mouse",
+@@ -7758,6 +7810,7 @@ exports[`contextMenu element > shows context menu for element > [end of test] ap
+     "type": "selection",
+   },
+   "bindMode": "orbit",
++  "bindingPreference": "enabled",
+   "collaborators": Map {},
+   "contextMenu": {
+     "items": [
+@@ -8678,6 +8731,7 @@ exports[`contextMenu element > shows context menu for element > [end of test] ap
+   "isBindingEnabled": true,
+   "isCropping": false,
+   "isLoading": false,
++  "isMidpointSnappingEnabled": true,
+   "isResizing": false,
+   "isRotating": false,
+   "lastPointerDownWith": "mouse",
+@@ -8747,6 +8801,7 @@ exports[`contextMenu element > shows context menu for element > [end of test] ap
+     "type": "selection",
+   },
+   "bindMode": "orbit",
++  "bindingPreference": "enabled",
+   "collaborators": Map {},
+   "contextMenu": {
+     "items": [
+@@ -9667,6 +9722,7 @@ exports[`contextMenu element > shows context menu for element > [end of test] ap
+   "isBindingEnabled": true,
+   "isCropping": false,
+   "isLoading": false,
++  "isMidpointSnappingEnabled": true,
+   "isResizing": false,
+   "isRotating": false,
+   "lastPointerDownWith": "mouse",
+diff --git a/packages/excalidraw/tests/__snapshots__/history.test.tsx.snap b/packages/excalidraw/tests/__snapshots__/history.test.tsx.snap
+index 97204839fc29..c81459c1c40d 100644
+--- a/packages/excalidraw/tests/__snapshots__/history.test.tsx.snap
++++ b/packages/excalidraw/tests/__snapshots__/history.test.tsx.snap
+@@ -12,6 +12,7 @@ exports[`history > multiplayer undo/redo > conflicts in arrows and their bindabl
+     "type": "selection",
+   },
+   "bindMode": "orbit",
++  "bindingPreference": "enabled",
+   "collaborators": Map {},
+   "contextMenu": null,
+   "croppingElementId": null,
+@@ -58,6 +59,7 @@ exports[`history > multiplayer undo/redo > conflicts in arrows and their bindabl
+   "isBindingEnabled": true,
+   "isCropping": false,
+   "isLoading": false,
++  "isMidpointSnappingEnabled": true,
+   "isResizing": false,
+   "isRotating": false,
+   "lastPointerDownWith": "mouse",
+@@ -641,6 +643,7 @@ exports[`history > multiplayer undo/redo > conflicts in arrows and their bindabl
+     "type": "selection",
+   },
+   "bindMode": "orbit",
++  "bindingPreference": "enabled",
+   "collaborators": Map {},
+   "contextMenu": null,
+   "croppingElementId": null,
+@@ -687,6 +690,7 @@ exports[`history > multiplayer undo/redo > conflicts in arrows and their bindabl
+   "isBindingEnabled": true,
+   "isCropping": false,
+   "isLoading": false,
++  "isMidpointSnappingEnabled": true,
+   "isResizing": false,
+   "isRotating": false,
+   "lastPointerDownWith": "mouse",
+@@ -1200,6 +1204,7 @@ exports[`history > multiplayer undo/redo > conflicts in arrows and their bindabl
+     "type": "selection",
+   },
+   "bindMode": "orbit",
++  "bindingPreference": "enabled",
+   "collaborators": Map {},
+   "contextMenu": null,
+   "croppingElementId": null,
+@@ -1246,6 +1251,7 @@ exports[`history > multiplayer undo/redo > conflicts in arrows and their bindabl
+   "isBindingEnabled": true,
+   "isCropping": false,
+   "isLoading": false,
++  "isMidpointSnappingEnabled": true,
+   "isResizing": false,
+   "isRotating": false,
+   "lastPointerDownWith": "mouse",
+@@ -1558,6 +1564,7 @@ exports[`history > multiplayer undo/redo > conflicts in arrows and their bindabl
+     "type": "selection",
+   },
+   "bindMode": "orbit",
++  "bindingPreference": "enabled",
+   "collaborators": Map {},
+   "contextMenu": null,
+   "croppingElementId": null,
+@@ -1604,6 +1611,7 @@ exports[`history > multiplayer undo/redo > conflicts in arrows and their bindabl
+   "isBindingEnabled": true,
+   "isCropping": false,
+   "isLoading": false,
++  "isMidpointSnappingEnabled": true,
+   "isResizing": false,
+   "isRotating": false,
+   "lastPointerDownWith": "mouse",
+@@ -1918,6 +1926,7 @@ exports[`history > multiplayer undo/redo > conflicts in arrows and their bindabl
+     "type": "selection",
+   },
+   "bindMode": "orbit",
++  "bindingPreference": "enabled",
+   "collaborators": Map {},
+   "contextMenu": null,
+   "croppingElementId": null,
+@@ -1964,6 +1973,7 @@ exports[`history > multiplayer undo/redo > conflicts in arrows and their bindabl
+   "isBindingEnabled": true,
+   "isCropping": false,
+   "isLoading": false,
++  "isMidpointSnappingEnabled": true,
+   "isResizing": false,
+   "isRotating": false,
+   "lastPointerDownWith": "mouse",
+@@ -2179,6 +2189,7 @@ exports[`history > multiplayer undo/redo > conflicts in arrows and their bindabl
+     "type": "selection",
+   },
+   "bindMode": "orbit",
++  "bindingPreference": "enabled",
+   "collaborators": Map {},
+   "contextMenu": null,
+   "croppingElementId": null,
+@@ -2225,6 +2236,7 @@ exports[`history > multiplayer undo/redo > conflicts in arrows and their bindabl
+   "isBindingEnabled": true,
+   "isCropping": false,
+   "isLoading": false,
++  "isMidpointSnappingEnabled": true,
+   "isResizing": false,
+   "isRotating": false,
+   "lastPointerDownWith": "mouse",
+@@ -2630,6 +2642,7 @@ exports[`history > multiplayer undo/redo > conflicts in bound text elements and
+     "type": "selection",
+   },
+   "bindMode": "orbit",
++  "bindingPreference": "enabled",
+   "collaborators": Map {},
+   "contextMenu": null,
+   "croppingElementId": null,
+@@ -2676,6 +2689,7 @@ exports[`history > multiplayer undo/redo > conflicts in bound text elements and
+   "isBindingEnabled": true,
+   "isCropping": false,
+   "isLoading": false,
++  "isMidpointSnappingEnabled": true,
+   "isResizing": false,
+   "isRotating": false,
+   "lastPointerDownWith": "mouse",
+@@ -2931,6 +2945,7 @@ exports[`history > multiplayer undo/redo > conflicts in bound text elements and
+     "type": "selection",
+   },
+   "bindMode": "orbit",
++  "bindingPreference": "enabled",
+   "collaborators": Map {},
+   "contextMenu": null,
+   "croppingElementId": null,
+@@ -2977,6 +2992,7 @@ exports[`history > multiplayer undo/redo > conflicts in bound text elements and
+   "isBindingEnabled": true,
+   "isCropping": false,
+   "isLoading": false,
++  "isMidpointSnappingEnabled": true,
+   "isResizing": false,
+   "isRotating": false,
+   "lastPointerDownWith": "mouse",
+@@ -3248,6 +3264,7 @@ exports[`history > multiplayer undo/redo > conflicts in bound text elements and
+     "type": "selection",
+   },
+   "bindMode": "orbit",
++  "bindingPreference": "enabled",
+   "collaborators": Map {},
+   "contextMenu": null,
+   "croppingElementId": null,
+@@ -3294,6 +3311,7 @@ exports[`history > multiplayer undo/redo > conflicts in bound text elements and
+   "isBindingEnabled": true,
+   "isCropping": false,
+   "isLoading": false,
++  "isMidpointSnappingEnabled": true,
+   "isResizing": false,
+   "isRotating": false,
+   "lastPointerDownWith": "mouse",
+@@ -3540,6 +3558,7 @@ exports[`history > multiplayer undo/redo > conflicts in bound text elements and
+     "type": "selection",
+   },
+   "bindMode": "orbit",
++  "bindingPreference": "enabled",
+   "collaborators": Map {},
+   "contextMenu": null,
+   "croppingElementId": null,
+@@ -3586,6 +3605,7 @@ exports[`history > multiplayer undo/redo > conflicts in bound text elements and
+   "isBindingEnabled": true,
+   "isCropping": false,
+   "isLoading": false,
++  "isMidpointSnappingEnabled": true,
+   "isResizing": false,
+   "isRotating": false,
+   "lastPointerDownWith": "mouse",
+@@ -3824,6 +3844,7 @@ exports[`history > multiplayer undo/redo > conflicts in bound text elements and
+     "type": "selection",
+   },
+   "bindMode": "orbit",
++  "bindingPreference": "enabled",
+   "collaborators": Map {},
+   "contextMenu": null,
+   "croppingElementId": null,
+@@ -3870,6 +3891,7 @@ exports[`history > multiplayer undo/redo > conflicts in bound text elements and
+   "isBindingEnabled": true,
+   "isCropping": false,
+   "isLoading": false,
++  "isMidpointSnappingEnabled": true,
+   "isResizing": false,
+   "isRotating": false,
+   "lastPointerDownWith": "mouse",
+@@ -4057,6 +4079,7 @@ exports[`history > multiplayer undo/redo > conflicts in bound text elements and
+     "type": "selection",
+   },
+   "bindMode": "orbit",
++  "bindingPreference": "enabled",
+   "collaborators": Map {},
+   "contextMenu": null,
+   "croppingElementId": null,
+@@ -4103,6 +4126,7 @@ exports[`history > multiplayer undo/redo > conflicts in bound text elements and
+   "isBindingEnabled": true,
+   "isCropping": false,
+   "isLoading": false,
++  "isMidpointSnappingEnabled": true,
+   "isResizing": false,
+   "isRotating": false,
+   "lastPointerDownWith": "mouse",
+@@ -4312,6 +4336,7 @@ exports[`history > multiplayer undo/redo > conflicts in bound text elements and
+     "type": "selection",
+   },
+   "bindMode": "orbit",
++  "bindingPreference": "enabled",
+   "collaborators": Map {},
+   "contextMenu": null,
+   "croppingElementId": null,
+@@ -4358,6 +4383,7 @@ exports[`history > multiplayer undo/redo > conflicts in bound text elements and
+   "isBindingEnabled": true,
+   "isCropping": false,
+   "isLoading": false,
++  "isMidpointSnappingEnabled": true,
+   "isResizing": false,
+   "isRotating": false,
+   "lastPointerDownWith": "mouse",
+@@ -4581,6 +4607,7 @@ exports[`history > multiplayer undo/redo > conflicts in bound text elements and
+     "type": "selection",
+   },
+   "bindMode": "orbit",
++  "bindingPreference": "enabled",
+   "collaborators": Map {},
+   "contextMenu": null,
+   "croppingElementId": null,
+@@ -4627,6 +4654,7 @@ exports[`history > multiplayer undo/redo > conflicts in bound text elements and
+   "isBindingEnabled": true,
+   "isCropping": false,
+   "isLoading": false,
++  "isMidpointSnappingEnabled": true,
+   "isResizing": false,
+   "isRotating": false,
+   "lastPointerDownWith": "mouse",
+@@ -4808,6 +4836,7 @@ exports[`history > multiplayer undo/redo > conflicts in bound text elements and
+     "type": "selection",
+   },
+   "bindMode": "orbit",
++  "bindingPreference": "enabled",
+   "collaborators": Map {},
+   "contextMenu": null,
+   "croppingElementId": null,
+@@ -4854,6 +4883,7 @@ exports[`history > multiplayer undo/redo > conflicts in bound text elements and
+   "isBindingEnabled": true,
+   "isCropping": false,
+   "isLoading": false,
++  "isMidpointSnappingEnabled": true,
+   "isResizing": false,
+   "isRotating": false,
+   "lastPointerDownWith": "mouse",
+@@ -5035,6 +5065,7 @@ exports[`history > multiplayer undo/redo > conflicts in bound text elements and
+     "type": "selection",
+   },
+   "bindMode": "orbit",
++  "bindingPreference": "enabled",
+   "collaborators": Map {},
+   "contextMenu": null,
+   "croppingElementId": null,
+@@ -5081,6 +5112,7 @@ exports[`history > multiplayer undo/redo > conflicts in bound text elements and
+   "isBindingEnabled": true,
+   "isCropping": false,
+   "isLoading": false,
++  "isMidpointSnappingEnabled": true,
+   "isResizing": false,
+   "isRotating": false,
+   "lastPointerDownWith": "mouse",
+@@ -5280,6 +5312,7 @@ exports[`history > multiplayer undo/redo > conflicts in bound text elements and
+     "type": "selection",
+   },
+   "bindMode": "orbit",
++  "bindingPreference": "enabled",
+   "collaborators": Map {},
+   "contextMenu": null,
+   "croppingElementId": null,
+@@ -5326,6 +5359,7 @@ exports[`history > multiplayer undo/redo > conflicts in bound text elements and
+   "isBindingEnabled": true,
+   "isCropping": false,
+   "isLoading": false,
++  "isMidpointSnappingEnabled": true,
+   "isResizing": false,
+   "isRotating": false,
+   "lastPointerDownWith": "mouse",
+@@ -5534,6 +5568,7 @@ exports[`history > multiplayer undo/redo > conflicts in frames and their childre
+     "type": "selection",
+   },
+   "bindMode": "orbit",
++  "bindingPreference": "enabled",
+   "collaborators": Map {},
+   "contextMenu": null,
+   "croppingElementId": null,
+@@ -5580,6 +5615,7 @@ exports[`history > multiplayer undo/redo > conflicts in frames and their childre
+   "isBindingEnabled": true,
+   "isCropping": false,
+   "isLoading": false,
++  "isMidpointSnappingEnabled": true,
+   "isResizing": false,
+   "isRotating": false,
+   "lastPointerDownWith": "mouse",
+@@ -5790,6 +5826,7 @@ exports[`history > multiplayer undo/redo > should iterate through the history wh
+     "type": "selection",
+   },
+   "bindMode": "orbit",
++  "bindingPreference": "enabled",
+   "collaborators": Map {},
+   "contextMenu": null,
+   "croppingElementId": null,
+@@ -5836,6 +5873,7 @@ exports[`history > multiplayer undo/redo > should iterate through the history wh
+   "isBindingEnabled": true,
+   "isCropping": false,
+   "isLoading": false,
++  "isMidpointSnappingEnabled": true,
+   "isResizing": false,
+   "isRotating": false,
+   "lastPointerDownWith": "mouse",
+@@ -6117,6 +6155,7 @@ exports[`history > multiplayer undo/redo > should iterate through the history wh
+     "type": "selection",
+   },
+   "bindMode": "orbit",
++  "bindingPreference": "enabled",
+   "collaborators": Map {},
+   "contextMenu": null,
+   "croppingElementId": null,
+@@ -6163,6 +6202,7 @@ exports[`history > multiplayer undo/redo > should iterate through the history wh
+   "isBindingEnabled": true,
+   "isCropping": false,
+   "isLoading": false,
++  "isMidpointSnappingEnabled": true,
+   "isResizing": false,
+   "isRotating": false,
+   "lastPointerDownWith": "mouse",
+@@ -6542,6 +6582,7 @@ exports[`history > multiplayer undo/redo > should iterate through the history wh
+     "type": "selection",
+   },
+   "bindMode": "orbit",
++  "bindingPreference": "enabled",
+   "collaborators": Map {},
+   "contextMenu": null,
+   "croppingElementId": null,
+@@ -6588,6 +6629,7 @@ exports[`history > multiplayer undo/redo > should iterate through the history wh
+   "isBindingEnabled": true,
+   "isCropping": false,
+   "isLoading": false,
++  "isMidpointSnappingEnabled": true,
+   "isResizing": false,
+   "isRotating": false,
+   "lastPointerDownWith": "mouse",
+@@ -6914,6 +6956,7 @@ exports[`history > multiplayer undo/redo > should iterate through the history wh
+     "type": "selection",
+   },
+   "bindMode": "orbit",
++  "bindingPreference": "enabled",
+   "collaborators": Map {},
+   "contextMenu": null,
+   "croppingElementId": null,
+@@ -6960,6 +7003,7 @@ exports[`history > multiplayer undo/redo > should iterate through the history wh
+   "isBindingEnabled": true,
+   "isCropping": false,
+   "isLoading": false,
++  "isMidpointSnappingEnabled": true,
+   "isResizing": false,
+   "isRotating": false,
+   "lastPointerDownWith": "mouse",
+@@ -7224,6 +7268,7 @@ exports[`history > multiplayer undo/redo > should iterate through the history wh
+     "type": "selection",
+   },
+   "bindMode": "orbit",
++  "bindingPreference": "enabled",
+   "collaborators": Map {},
+   "contextMenu": null,
+   "croppingElementId": null,
+@@ -7270,6 +7315,7 @@ exports[`history > multiplayer undo/redo > should iterate through the history wh
+   "isBindingEnabled": true,
+   "isCropping": false,
+   "isLoading": false,
++  "isMidpointSnappingEnabled": true,
+   "isResizing": false,
+   "isRotating": false,
+   "lastPointerDownWith": "mouse",
+@@ -7514,6 +7560,7 @@ exports[`history > multiplayer undo/redo > should iterate through the history wh
+     "type": "selection",
+   },
+   "bindMode": "orbit",
++  "bindingPreference": "enabled",
+   "collaborators": Map {},
+   "contextMenu": null,
+   "croppingElementId": null,
+@@ -7560,6 +7607,7 @@ exports[`history > multiplayer undo/redo > should iterate through the history wh
+   "isBindingEnabled": true,
+   "isCropping": false,
+   "isLoading": false,
++  "isMidpointSnappingEnabled": true,
+   "isResizing": false,
+   "isRotating": false,
+   "lastPointerDownWith": "mouse",
+@@ -7742,6 +7790,7 @@ exports[`history > multiplayer undo/redo > should iterate through the history wh
+     "type": "selection",
+   },
+   "bindMode": "orbit",
++  "bindingPreference": "enabled",
+   "collaborators": Map {},
+   "contextMenu": null,
+   "croppingElementId": null,
+@@ -7788,6 +7837,7 @@ exports[`history > multiplayer undo/redo > should iterate through the history wh
+   "isBindingEnabled": true,
+   "isCropping": false,
+   "isLoading": false,
++  "isMidpointSnappingEnabled": true,
+   "isResizing": false,
+   "isRotating": false,
+   "lastPointerDownWith": "mouse",
+@@ -8092,6 +8142,7 @@ exports[`history > multiplayer undo/redo > should iterate through the history wh
+     "type": "selection",
+   },
+   "bindMode": "orbit",
++  "bindingPreference": "enabled",
+   "collaborators": Map {},
+   "contextMenu": null,
+   "croppingElementId": null,
+@@ -8138,6 +8189,7 @@ exports[`history > multiplayer undo/redo > should iterate through the history wh
+   "isBindingEnabled": true,
+   "isCropping": false,
+   "isLoading": false,
++  "isMidpointSnappingEnabled": true,
+   "isResizing": false,
+   "isRotating": false,
+   "lastPointerDownWith": "mouse",
+@@ -8442,6 +8494,7 @@ exports[`history > multiplayer undo/redo > should not let remote changes to inte
+     "type": "selection",
+   },
+   "bindMode": "orbit",
++  "bindingPreference": "enabled",
+   "collaborators": Map {},
+   "contextMenu": null,
+   "croppingElementId": null,
+@@ -8488,6 +8541,7 
+
+... [truncated, 130981 chars total]

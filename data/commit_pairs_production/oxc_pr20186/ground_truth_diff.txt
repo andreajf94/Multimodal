@@ -1,0 +1,149 @@
+diff --git a/apps/oxlint/src-js/plugins/lint.ts b/apps/oxlint/src-js/plugins/lint.ts
+index 5283991da49f6..348e4f1e2baa3 100644
+--- a/apps/oxlint/src-js/plugins/lint.ts
++++ b/apps/oxlint/src-js/plugins/lint.ts
+@@ -14,7 +14,7 @@ import {
+   addVisitorToCompiled,
+   compiledVisitor,
+   finalizeCompiledVisitor,
+-  initCompiledVisitor,
++  resetCompiledVisitor,
+   VISITOR_EMPTY,
+   VISITOR_CFG,
+ } from "./visitor.ts";
+@@ -185,8 +185,6 @@ export function lintFileImpl(
+   setGlobalsForFile(globalsJSON);
+ 
+   // Get visitors for this file from all rules
+-  initCompiledVisitor();
+-
+   for (let i = 0, len = ruleIds.length; i < len; i++) {
+     const ruleId = ruleIds[i];
+     debugAssert(ruleId < registeredRules.length, "Rule ID out of bounds");
+@@ -245,6 +243,9 @@ export function lintFileImpl(
+     }
+ 
+     debugAssert(ancestors.length === 0, "`ancestors` should be empty after walking AST");
++
++    // Reset compiled visitor, ready for next file
++    resetCompiledVisitor();
+   }
+ 
+   // Run any `after` hooks
+@@ -317,8 +318,9 @@ export function resetStateAfterError() {
+   // so no leftovers bleed into next file.
+   // We could have a separate function to reset state which could be simpler and faster, but `resetStateAfterError`
+   // should never be called - only happens when rules return an invalid visitor or malfunction.
+-  // So better to use the existing function, rather than bloat the package with more code which should never run.
++  // So better to use the existing functions, rather than bloat the package with more code which should never run.
+   finalizeCompiledVisitor();
++  resetCompiledVisitor();
+ 
+   diagnostics.length = 0;
+   ancestors.length = 0;
+diff --git a/apps/oxlint/src-js/plugins/visitor.ts b/apps/oxlint/src-js/plugins/visitor.ts
+index f1893dab54025..d07947426f568 100644
+--- a/apps/oxlint/src-js/plugins/visitor.ts
++++ b/apps/oxlint/src-js/plugins/visitor.ts
+@@ -60,12 +60,12 @@
+ // No more than 1 compiled visitor exists at any time, so we reuse a single array `compiledVisitor`,
+ // rather than creating a new array for each file being linted.
+ //
+-// To compile visitors, call:
+-// * `initCompiledVisitor` once.
+-// * `addVisitorToCompiled` with each visitor object.
+-// * `finalizeCompiledVisitor` once.
++// To compile a visitor and use it:
+ //
+-// After this sequence of calls, `compiledVisitor` is ready to be used to walk the AST.
++// 1. Call `addVisitorToCompiled` with each visitor object.
++// 2. Call `finalizeCompiledVisitor` once.
++// 3. Walk AST with compiled visitor.
++// 4. Call `resetCompiledVisitor` once.
+ //
+ // We also recycle:
+ //
+@@ -230,22 +230,6 @@ let enterExitObjectCacheNextIndex = 0;
+ const visitPropsCache: VisitProp[] = [];
+ let visitPropsCacheNextIndex = 0;
+ 
+-/**
+- * Initialize compiled visitor, ready for calls to `addVisitor`.
+- */
+-export function initCompiledVisitor(): void {
+-  // Reset `compiledVisitor` array after previous compilation
+-  compiledVisitor.fill(null);
+-
+-  // Reset enter+exit objects which were used in previous compilation
+-  for (let i = 0; i < enterExitObjectCacheNextIndex; i++) {
+-    const enterExit = enterExitObjectCache[i];
+-    enterExit.enter = null;
+-    enterExit.exit = null;
+-  }
+-  enterExitObjectCacheNextIndex = 0;
+-}
+-
+ /**
+  * Add a visitor to compiled visitor.
+  *
+@@ -492,6 +476,26 @@ export function finalizeCompiledVisitor(): VisitorState {
+   return visitState;
+ }
+ 
++/**
++ * Reset compiled visitor.
++ *
++ * This frees visit functions stored in `compiledVisitor`, and makes them eligible for garbage collection.
++ *
++ * After calling this function, `compiledVisitor` is in a clean state, ready for next file's visitor to be compiled.
++ */
++export function resetCompiledVisitor(): void {
++  // Reset `compiledVisitor` array
++  compiledVisitor.fill(null);
++
++  // Reset enter+exit objects
++  for (let i = 0; i < enterExitObjectCacheNextIndex; i++) {
++    const enterExit = enterExitObjectCache[i];
++    enterExit.enter = null;
++    enterExit.exit = null;
++  }
++  enterExitObjectCacheNextIndex = 0;
++}
++
+ // Array used by `mergeVisitFns` and `mergeCfgVisitFns` to store visit functions extracted from an array of `VisitProp`s.
+ // This array is used ephemerally, so we re-use same array for each merge.
+ const visitFns: VisitFn[] = [];
+diff --git a/apps/oxlint/test/compile_visitor.test.ts b/apps/oxlint/test/compile_visitor.test.ts
+index a67129852e16b..6b018995c88a3 100644
+--- a/apps/oxlint/test/compile_visitor.test.ts
++++ b/apps/oxlint/test/compile_visitor.test.ts
+@@ -1,6 +1,6 @@
+ // oxlint-disable jest/no-conditional-expect
+ 
+-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
++import { afterEach, describe, expect, it, vi } from "vitest";
+ import {
+   NODE_TYPES_COUNT,
+   LEAF_NODE_TYPES_COUNT,
+@@ -10,7 +10,7 @@ import {
+   addVisitorToCompiled,
+   compiledVisitor,
+   finalizeCompiledVisitor,
+-  initCompiledVisitor,
++  resetCompiledVisitor,
+   VISITOR_EMPTY,
+   VISITOR_NOT_EMPTY,
+ } from "../src-js/plugins/visitor.ts";
+@@ -40,8 +40,10 @@ const SPAN: Node = {
+ };
+ 
+ describe("compile visitor", () => {
+-  beforeEach(initCompiledVisitor);
+-  afterEach(finalizeCompiledVisitor);
++  afterEach(() => {
++    finalizeCompiledVisitor();
++    resetCompiledVisitor();
++  });
+ 
+   it("throws if visitor is not an object", () => {
+     const expectedErr = new TypeError("Visitor returned from `create` method must be an object");

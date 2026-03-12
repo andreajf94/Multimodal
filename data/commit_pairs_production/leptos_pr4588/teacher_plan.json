@@ -1,0 +1,113 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "error_handling",
+      "recommendation": "Replaced opaque panic messages with a shared diagnostic constant that explains SSR feature conflicts and provides actionable troubleshooting steps",
+      "rationale": "The original panic messages ('directive removed early', 'callback removed before attaching', 'property removed early') were cryptic and didn't help developers understand the root cause. When the SSR feature is unintentionally enabled in client-side builds, tachys skips creating client-side values to avoid cross-thread panics, but the error messages didn't explain this. The new approach provides clear diagnostic information that helps developers identify and resolve feature unification issues.",
+      "alternatives_considered": [
+        "Keeping the original generic messages",
+        "Creating separate diagnostic messages for each module",
+        "Using a runtime configuration to customize error messages",
+        "Implementing a more sophisticated error type instead of panics"
+      ],
+      "files_affected": [
+        "tachys/src/html/mod.rs"
+      ]
+    },
+    {
+      "dimension": "api_design",
+      "recommendation": "Created a shared constant FEATURE_CONFLICT_DIAGNOSTIC in the html module that's accessible to all submodules",
+      "rationale": "Centralizing the diagnostic message ensures consistency across all panic locations and makes it easy to update the message in one place. The constant is marked as pub(crate) to limit visibility to the crate while being accessible to the directive, event, and property modules. This follows the DRY principle and ensures all error messages provide the same helpful information.",
+      "alternatives_considered": [
+        "Duplicating the message in each module",
+        "Creating a separate diagnostic module",
+        "Using a macro to generate the message",
+        "Making the message a function that returns &'static str"
+      ],
+      "files_affected": [
+        "tachys/src/html/mod.rs"
+      ]
+    },
+    {
+      "dimension": "developer_experience",
+      "recommendation": "Included specific troubleshooting instructions in the diagnostic message, including the exact cargo command to run",
+      "rationale": "The message not only explains what's wrong ('ssr feature is active') but also why it matters ('skips creating client-side values to avoid cross-thread panics') and provides concrete steps to fix it ('Run cargo tree -e features -i tachys'). This reduces the time developers spend debugging feature unification issues and empowers them to resolve the problem independently.",
+      "alternatives_considered": [
+        "Generic error message without troubleshooting steps",
+        "Referring to documentation instead of inline instructions",
+        "Providing multiple possible solutions",
+        "Using a link to external documentation"
+      ],
+      "files_affected": [
+        "tachys/src/html/mod.rs"
+      ]
+    },
+    {
+      "dimension": "maintenance",
+      "recommendation": "Updated all relevant panic locations in event handlers, directives, and properties modules to use the shared diagnostic constant",
+      "rationale": "Consistently applying the same diagnostic message across all modules ensures developers get the same helpful information regardless of which code path triggers the panic. This makes the framework more predictable and easier to debug. The changes are minimal and focused, replacing only the panic message strings while preserving the existing panic behavior.",
+      "alternatives_considered": [
+        "Only fixing the most common panic locations",
+        "Creating different messages for different module types",
+        "Adding logging before panicking",
+        "Using conditional compilation for different error messages"
+      ],
+      "files_affected": [
+        "tachys/src/html/directive.rs",
+        "tachys/src/html/event.rs",
+        "tachys/src/html/property.rs"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Create shared SSR feature conflict diagnostic message",
+      "description": "Add a centralized diagnostic constant that explains SSR feature conflicts and provides troubleshooting instructions for developers when client-side values are None due to unintentional SSR feature activation",
+      "files_to_modify": [
+        "tachys/src/html/mod.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-002",
+      "title": "Update directive module panic messages",
+      "description": "Replace all 'directive removed early' panic messages with the shared diagnostic constant in the directive module's build, hydrate, and rebuild methods",
+      "files_to_modify": [
+        "tachys/src/html/directive.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-003",
+      "title": "Update event module panic messages",
+      "description": "Replace 'callback removed before attaching' panic messages with the shared diagnostic constant in event listener attachment methods",
+      "files_to_modify": [
+        "tachys/src/html/event.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-004",
+      "title": "Update property module panic messages",
+      "description": "Replace 'property removed early' panic messages with the shared diagnostic constant in property hydration, build, and rebuild methods",
+      "files_to_modify": [
+        "tachys/src/html/property.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation addresses a common pain point in the Leptos framework where unintentional activation of the SSR feature in client-side builds leads to cryptic panic messages. The solution creates a shared diagnostic constant FEATURE_CONFLICT_DIAGNOSTIC in tachys/src/html/mod.rs that clearly explains the problem: when the SSR feature is active, tachys skips creating client-side values (event handlers, directives, properties) to avoid cross-thread panics on multithreaded servers. The message provides actionable troubleshooting advice, including running `cargo tree -e features -i tachys` to identify the source of feature unification.\n\nThis constant is then used to replace all opaque panic messages in three key modules: directive.rs (3 locations), event.rs (2 locations), and property.rs (3 locations). The approach maintains the existing panic behavior but dramatically improves the developer experience by transforming unhelpful messages like 'directive removed early' into comprehensive diagnostic information that helps developers understand and resolve the configuration issue.\n\nThe implementation follows several good software engineering practices: it centralizes the diagnostic message for consistency and maintainability (DRY principle), provides concrete troubleshooting steps rather than generic warnings, and makes minimal changes to the existing codebase while significantly improving error messaging. The solution is particularly valuable for a framework like Leptos where feature unification issues can be confusing for developers new to Rust's Cargo feature system.",
+  "source_pr": "https://github.com/leptos-rs/leptos/pull/4588",
+  "before_sha": "50a05b7d04738a61ef1bcff99a568f626c27f655",
+  "after_sha": "61205eaefe98ddd9c28c40c2ae8c844e4d13e43a",
+  "diff_stats": {
+    "additions": 24,
+    "deletions": 8,
+    "files_changed": 4
+  }
+}

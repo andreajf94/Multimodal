@@ -1,0 +1,76 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "release_management",
+      "recommendation": "Removed release candidate suffixes from version numbers to mark stable releases",
+      "rationale": "The change transitions packages from release candidate (rc) versions to stable releases by removing the 'rc1' suffix. This is a standard practice in semantic versioning where rc versions indicate pre-release testing phases, and removing the suffix signals the package is ready for production use.",
+      "alternatives_considered": [
+        "Keeping rc suffixes for longer testing periods",
+        "Using different versioning schemes like dev or beta tags",
+        "Skipping rc versions entirely and going directly to stable"
+      ],
+      "files_affected": [
+        "libs/community/pyproject.toml",
+        "libs/community/uv.lock"
+      ]
+    },
+    {
+      "dimension": "dependency_management",
+      "recommendation": "Updated dependency version constraints to require stable releases instead of release candidates",
+      "rationale": "When a package transitions from rc to stable, its dependencies must also reference the stable versions. This ensures consistent version resolution and prevents dependency conflicts. The lock file update ensures reproducible builds by pinning exact versions.",
+      "alternatives_considered": [
+        "Keeping rc dependencies which could cause version conflicts",
+        "Using version ranges without specific constraints",
+        "Not updating the lock file and relying on dynamic resolution"
+      ],
+      "files_affected": [
+        "libs/community/pyproject.toml",
+        "libs/community/uv.lock"
+      ]
+    },
+    {
+      "dimension": "monorepo_coordination",
+      "recommendation": "Synchronized version updates across multiple packages in the monorepo",
+      "rationale": "LangChain uses a monorepo structure where packages have interdependencies. When langchain-community updates to 0.3.17, related packages (langchain, langchain-core, langchain-text-splitters, langchain-tests) must also have their versions and dependencies updated to maintain compatibility. The lock file serves as the single source of truth for all package versions.",
+      "alternatives_considered": [
+        "Updating only the community package independently",
+        "Using version ranges that allow multiple versions",
+        "Separate version management for each package"
+      ],
+      "files_affected": [
+        "libs/community/uv.lock"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Update community package version to stable 0.3.17",
+      "description": "Transition langchain-community from release candidate 0.3.17rc1 to stable release 0.3.17 by updating version metadata and removing rc suffixes",
+      "files_to_modify": [
+        "libs/community/pyproject.toml"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-002",
+      "title": "Synchronize dependency lock file for release",
+      "description": "Update uv.lock to reflect stable versions of all packages and their dependencies, ensuring consistent version resolution across the monorepo",
+      "files_to_modify": [
+        "libs/community/uv.lock"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    }
+  ],
+  "implementation_summary": "This change implements the release process for langchain-community version 0.3.17 by transitioning from release candidate to stable release. The approach follows standard semantic versioning practices where rc suffixes are removed to indicate production readiness.\n\nThe key pattern used is coordinated version management across a monorepo. The change updates not only the main package version but also synchronizes dependencies across related packages (langchain, langchain-core, langchain-text-splitters, and langchain-tests). This ensures that when langchain-community requires langchain>=0.3.18, it's referencing the stable version rather than the release candidate.\n\nThe changes integrate with the existing codebase by maintaining the established dependency structure while updating version constraints. The uv.lock file serves as the central coordination point, ensuring all packages in the monorepo have consistent version references. This approach minimizes the risk of dependency conflicts and ensures reproducible builds for users of the released package.",
+  "source_pr": "https://github.com/langchain-ai/langchain/pull/29676",
+  "before_sha": "01314c51fa661ea0f7dab45fbe4297ff3d7b688e",
+  "after_sha": "bff25b552c0f7bc6db4eb4f9872915d702aeb2ac",
+  "diff_stats": {
+    "additions": 24,
+    "deletions": 14,
+    "files_changed": 2
+  }
+}

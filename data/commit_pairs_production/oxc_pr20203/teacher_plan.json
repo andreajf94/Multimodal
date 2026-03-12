@@ -1,0 +1,112 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "type_system",
+      "recommendation": "Created distinct type definitions for AST node visitors and CFG event handlers by introducing a generic VisitProp<T> interface and CfgVisitProp type alias",
+      "rationale": "AST node visitors and CFG event handlers have different function signatures (VisitFn vs CfgVisitFn) but were previously treated identically by the type system. This caused type safety issues and required unsafe casts. By making VisitProp generic, we can maintain separate type information while reusing the same data structure.",
+      "alternatives_considered": [
+        "Creating completely separate interfaces for AST and CFG visitors",
+        "Using union types throughout without generic parameterization",
+        "Keeping the unsafe casts and adding runtime type checks"
+      ],
+      "files_affected": [
+        "apps/oxlint/src-js/plugins/visitor.ts"
+      ]
+    },
+    {
+      "dimension": "type_safety",
+      "recommendation": "Added type assertions (typeAssertIs) to validate function types at critical boundaries and removed unsafe type casts",
+      "rationale": "The previous implementation used 'as' type assertions that could mask type errors. By adding explicit type assertions with typeAssertIs, we ensure type safety at runtime while maintaining TypeScript's type checking. This is especially important where generic types need to be narrowed to specific types.",
+      "alternatives_considered": [
+        "Using TypeScript's type guards with custom predicates",
+        "Adding runtime validation functions",
+        "Keeping the unsafe casts with comments explaining the assumptions"
+      ],
+      "files_affected": [
+        "apps/oxlint/src-js/plugins/visitor.ts"
+      ]
+    },
+    {
+      "dimension": "api_design",
+      "recommendation": "Updated the compiledVisitor array type to include CfgVisitFn in the union and exported the VisitFn and EnterExit types for external use",
+      "rationale": "The compiledVisitor array needs to store both AST visitor functions and CFG event handlers. By expanding the union type, we maintain a single data structure while properly typing its contents. Exporting the types allows the lint.ts module to use them without type assertions.",
+      "alternatives_considered": [
+        "Creating separate arrays for AST and CFG visitors",
+        "Using 'any' type for the compiledVisitor array",
+        "Keeping the existing type and adding more runtime checks"
+      ],
+      "files_affected": [
+        "apps/oxlint/src-js/plugins/visitor.ts",
+        "apps/oxlint/src-js/plugins/lint.ts"
+      ]
+    },
+    {
+      "dimension": "performance_optimization",
+      "recommendation": "Maintained the existing caching and reuse patterns for VisitProp objects while adding proper type safety",
+      "rationale": "The visitor compilation is a hot path in the linter, so object reuse and array pre-allocation are critical for performance. The generic approach preserves these optimizations while adding type safety. The visitPropsCache now uses a union type to accommodate both visitor types.",
+      "alternatives_considered": [
+        "Creating separate caches for AST and CFG visitors",
+        "Using immutable data structures with better type safety",
+        "Removing the cache and creating new objects each time"
+      ],
+      "files_affected": [
+        "apps/oxlint/src-js/plugins/visitor.ts"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Added debug assertions to validate type boundaries and prevent CFG events from being processed as AST nodes",
+      "rationale": "CFG events have different type IDs than AST nodes, and mixing them could cause runtime errors. The debugAssert ensures that selector-based visitors only match AST nodes, not CFG events. This catches configuration errors early during development.",
+      "alternatives_considered": [
+        "Silently ignoring CFG events in selector processing",
+        "Throwing runtime errors in production",
+        "Adding compile-time type checks only"
+      ],
+      "files_affected": [
+        "apps/oxlint/src-js/plugins/visitor.ts"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Refactor Visitor Type System with Generics",
+      "description": "Convert the VisitProp interface to be generic over the visitor function type, allowing separate type definitions for AST node visitors and CFG event handlers while maintaining the same data structure",
+      "files_to_modify": [
+        "apps/oxlint/src-js/plugins/visitor.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-002",
+      "title": "Add Type Safety with Assertions",
+      "description": "Introduce type assertions at critical boundaries to validate function types and remove unsafe casts, ensuring proper type narrowing for generic types",
+      "files_to_modify": [
+        "apps/oxlint/src-js/plugins/visitor.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-003",
+      "title": "Update External Type Usage",
+      "description": "Export and use the proper visitor types in the lint module, replacing unsafe type assertions with proper type imports and annotations",
+      "files_to_modify": [
+        "apps/oxlint/src-js/plugins/lint.ts",
+        "apps/oxlint/src-js/plugins/visitor.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The changes implement a type system enhancement for the visitor compilation system in oxlint's JavaScript plugin layer. The core issue was that AST node visitors (VisitFn) and CFG (Control Flow Graph) event handlers (CfgVisitFn) have different function signatures but were previously treated identically by the type system, requiring unsafe type casts.\n\nThe solution introduces a generic VisitProp<T> interface that can be parameterized with either VisitFn or CfgVisitFn. This allows maintaining separate type information while reusing the same data structures and caching patterns critical for performance. A CfgVisitProp type alias is created for CFG-specific visitors, and type assertions (typeAssertIs) are added at boundaries where generic types need to be narrowed.\n\nThe compiledVisitor array's type is expanded to include CfgVisitFn in its union, and the types are properly exported for use in the lint module. This eliminates the need for unsafe 'as' casts in lint.ts while maintaining backward compatibility. The implementation preserves all existing performance optimizations like object caching and array pre-allocation while adding compile-time type safety and runtime validation through debug assertions.",
+  "source_pr": "https://github.com/oxc-project/oxc/pull/20203",
+  "before_sha": "a080650d4e68e75dd07f4b4f9e0af8a58d5ba75b",
+  "after_sha": "f85e16cb5c68f90b6e0d53cc55c96b869068560a",
+  "diff_stats": {
+    "additions": 33,
+    "deletions": 23,
+    "files_changed": 2
+  }
+}

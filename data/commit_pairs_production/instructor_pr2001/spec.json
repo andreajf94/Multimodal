@@ -1,0 +1,14 @@
+{
+  "feature_name": "Preserve thought_signature in GenAI validation retries",
+  "description": "Modify the GENAI_TOOLS validation retry mechanism to preserve response metadata (particularly thought_signature) when validation fails and the system needs to re-ask the model. Instead of discarding metadata, replay the original model content and append tool function responses containing validation errors. This ensures metadata like thought_signature persists across retry attempts.",
+  "functional_requirements": [
+    "Update the reask_genai_tools function to preserve thought_signature and other metadata when validation fails",
+    "Implement logic that replays the original model content and appends tool function responses containing validation error details",
+    "Handle edge cases where function calls are absent or not the first part of the response",
+    "Add unit tests covering the GENAI reask path with thought_signature preservation",
+    "Add end-to-end validation retry tests for the GENAI_TOOLS mode (LLM-gated)",
+    "Clean up any unused imports in related validation and audit modules"
+  ],
+  "project_name": "instructor",
+  "source_pr": "https://github.com/567-labs/instructor/pull/2001"
+}

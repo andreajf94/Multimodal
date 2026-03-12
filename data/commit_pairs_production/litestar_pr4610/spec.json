@@ -1,0 +1,14 @@
+{
+  "feature_name": "Normalized Exception Handling",
+  "description": "Refactor exception handling to align with user expectations by removing the catch-all exception handler and allowing unhandled exceptions to bubble up to the ASGI server. Fix related issues in test clients and WebSocket exception handling while simplifying exception group handling in tests.",
+  "functional_requirements": [
+    "Remove the catch-all exception handler so unhandled exceptions propagate to the ASGI server instead of being automatically caught",
+    "Implement a clear exception handling priority: 1) registered exception handlers, 2) debug mode responses for 500 errors, 3) HTTPException responses",
+    "Fix the broken `raise_server_exceptions` flag in test clients to properly control exception behavior during testing",
+    "Fix WebSocket exception swallowing to ensure exceptions are properly propagated in WebSocket connections",
+    "Simplify exception group handling in test clients so exception groups containing only one exception raise that single exception",
+    "Ensure exception traceback logging is decoupled from exception handling logic for better reliability"
+  ],
+  "project_name": "litestar",
+  "source_pr": "https://github.com/litestar-org/litestar/pull/4610"
+}

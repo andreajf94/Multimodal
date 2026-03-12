@@ -1,0 +1,120 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "api_design",
+      "recommendation": "Removed Fn() trait implementations for Signal<T> and ArcSignal<T> to align stable and nightly Rust behavior",
+      "rationale": "The Fn() trait implementation was causing inconsistencies between stable and nightly Rust compilers for the IntoReactiveValue trait. By removing it, we ensure uniform behavior across compiler versions while maintaining function-call syntax through a different mechanism.",
+      "alternatives_considered": [
+        "Keeping separate implementations for stable vs nightly with feature flags",
+        "Creating a custom trait instead of using Fn()",
+        "Requiring explicit .get() calls instead of function-call syntax"
+      ],
+      "files_affected": [
+        "reactive_graph/src/nightly.rs"
+      ]
+    },
+    {
+      "dimension": "api_design",
+      "recommendation": "Implemented Deref trait with unsafe transmutation to maintain function-call syntax for Signal types",
+      "rationale": "The Deref implementation allows Signal() syntax to work by treating Signal as a smart pointer to a Fn() -> T. The unsafe transmutation is necessary because we need to create a closure with the same memory layout as the Signal type to enable the function-call syntax without actually implementing the Fn() trait.",
+      "alternatives_considered": [
+        "Using a macro to generate function-call syntax",
+        "Creating a wrapper type with explicit call method",
+        "Abandoning function-call syntax entirely"
+      ],
+      "files_affected": [
+        "reactive_graph/src/nightly.rs"
+      ]
+    },
+    {
+      "dimension": "testing",
+      "recommendation": "Updated test cases to verify both stable and nightly behavior works correctly",
+      "rationale": "Added comprehensive tests to ensure: 1) closures can be converted to Signal via IntoReactiveValue on both compilers, 2) function-call syntax still works on nightly, 3) complex expressions with multiple signals work correctly. This prevents regression and verifies the alignment goal.",
+      "alternatives_considered": [
+        "Only testing the new behavior",
+        "Separating tests into stable/nightly modules",
+        "Reducing test coverage to focus on core functionality"
+      ],
+      "files_affected": [
+        "reactive_graph/src/into_reactive_value.rs"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Added runtime assertion to verify memory layout consistency in Deref implementation",
+      "rationale": "The unsafe transmutation in readable_deref_impl requires that the closure has the exact same memory layout as the Signal type. The assert_eq! check ensures this invariant holds at runtime, catching any compiler changes that might break the assumption.",
+      "alternatives_considered": [
+        "Using compile-time assertions with const generics",
+        "Relying on documentation and hoping for the best",
+        "Using a safer but more complex wrapper type"
+      ],
+      "files_affected": [
+        "reactive_graph/src/nightly.rs"
+      ]
+    },
+    {
+      "dimension": "api_design",
+      "recommendation": "Removed nightly feature guards from IntoReactiveValue implementations for closures",
+      "rationale": "Previously, closure-to-Signal conversions were only available on stable Rust (with #[cfg(not(feature = \"nightly\"))]). Now they work on both compilers consistently, enabling automatic conversion of closures to Signal<_> with #[prop(into)] without requiring Signal::derive() wrappers.",
+      "alternatives_considered": [
+        "Keeping the feature guards but with different conditions",
+        "Creating separate traits for stable vs nightly",
+        "Requiring explicit conversion methods"
+      ],
+      "files_affected": [
+        "reactive_graph/src/wrappers.rs"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Remove Fn() trait implementations from Signal types",
+      "description": "Remove the Fn() trait implementation from Signal<T> and ArcSignal<T> to eliminate compiler differences between stable and nightly Rust. This is the core change that enables consistent IntoReactiveValue behavior.",
+      "files_to_modify": [
+        "reactive_graph/src/nightly.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-002",
+      "title": "Implement Deref-based function-call syntax replacement",
+      "description": "Create a Deref implementation that uses unsafe transmutation to maintain Signal() syntax without implementing the Fn() trait. This includes the readable_deref_impl module with safety checks.",
+      "files_to_modify": [
+        "reactive_graph/src/nightly.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "large"
+    },
+    {
+      "id": "T-003",
+      "title": "Update IntoReactiveValue implementations for consistency",
+      "description": "Remove #[cfg(not(feature = \"nightly\"))] guards from all closure-to-Signal conversions in wrappers.rs, making them available on both compiler versions.",
+      "files_to_modify": [
+        "reactive_graph/src/wrappers.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-004",
+      "title": "Update and expand test coverage",
+      "description": "Modify existing tests and add new ones to verify: 1) closure conversion works on both compilers, 2) function-call syntax still works, 3) complex signal expressions function correctly.",
+      "files_to_modify": [
+        "reactive_graph/src/into_reactive_value.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    }
+  ],
+  "implementation_summary": "The changes implement a strategic alignment of the Signal API between stable and nightly Rust compilers. The core issue was that Signal<T> and ArcSignal<T> implemented the Fn() trait, which caused inconsistent behavior in the IntoReactiveValue trait across compiler versions. Instead of maintaining separate code paths, the solution removes the Fn() trait implementations entirely and replaces them with a Deref implementation that uses unsafe transmutation to enable function-call syntax.\n\nThe implementation introduces a readable_deref_impl module that creates a closure with the same memory layout as the Signal type, then transmutes a reference to the Signal into a reference to that closure. This clever hack, inspired by Dioxus Signals, maintains the convenient Signal() syntax while eliminating the compiler inconsistency. Runtime assertions ensure the memory layout assumption holds.\n\nAdditionally, all #[cfg(not(feature = \"nightly\"))] guards are removed from closure-to-Signal conversions in the IntoReactiveValue implementations, making this functionality available uniformly. The test suite is updated to verify both the new consistent behavior and that existing functionality (like complex signal expressions and TypedBuilder integration) continues to work correctly. This approach balances API convenience with cross-compiler consistency, though it introduces some unsafe code that requires careful maintenance.",
+  "source_pr": "https://github.com/leptos-rs/leptos/pull/4523",
+  "before_sha": "9cdab543295048233f2b74d66c90138353fdba1e",
+  "after_sha": "b9b17e2a4778018ffea385fd33c52489e615ae41",
+  "diff_stats": {
+    "additions": 92,
+    "deletions": 20,
+    "files_changed": 3
+  }
+}

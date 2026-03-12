@@ -1,0 +1,87 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "api_design",
+      "recommendation": "Added dictionary-style config support alongside existing object-style config handling in Google GenAI utilities",
+      "rationale": "The Google GenAI SDK accepts config parameters both as dictionary objects and typed config objects. Previously, the code only handled object-style configs (using hasattr/getattr), which caused fields like labels, cached_content, and thinking_config to be lost when users passed dictionaries. This change ensures both formats are supported consistently.",
+      "alternatives_considered": [
+        "Forcing users to always use typed config objects (would break existing dictionary usage)",
+        "Converting all dictionaries to typed objects automatically (adds complexity and potential type mismatches)",
+        "Creating separate functions for dictionary vs object configs (would duplicate logic)"
+      ],
+      "files_affected": [
+        "instructor/providers/gemini/utils.py"
+      ]
+    },
+    {
+      "dimension": "data_modeling",
+      "recommendation": "Enhanced config field extraction logic to handle both dictionary.get() and object attribute access patterns",
+      "rationale": "The original implementation assumed config would always be an object with attributes, but enterprise users frequently pass dictionaries for flexibility. The updated logic checks isinstance(user_config, dict) first, then falls back to hasattr/getattr for object-style configs. This preserves all configuration fields regardless of input format.",
+      "alternatives_considered": [
+        "Converting dictionaries to config objects at entry point (would require knowing the exact config class)",
+        "Using try/except AttributeError blocks (less explicit than isinstance checks)",
+        "Creating a wrapper class that normalizes both formats (adds abstraction layer)"
+      ],
+      "files_affected": [
+        "instructor/providers/gemini/utils.py"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Maintained backward compatibility while fixing field preservation issues",
+      "rationale": "The changes were made with careful attention to not break existing code. By adding dictionary support alongside object support, and maintaining the same field extraction order (dictionary first, then object attributes), existing code continues to work while fixing the reported issues. The None checks ensure safe access patterns.",
+      "alternatives_considered": [
+        "Breaking change requiring users to update their config format (would disrupt existing integrations)",
+        "Deprecating dictionary support entirely (would reduce flexibility)",
+        "Adding configuration format detection at library entry points (more invasive changes)"
+      ],
+      "files_affected": [
+        "instructor/providers/gemini/utils.py"
+      ]
+    },
+    {
+      "dimension": "testing",
+      "recommendation": "Added comprehensive test coverage specifically for dictionary-style config inputs",
+      "rationale": "The tests verify that all previously problematic fields (labels, cached_content, thinking_config) are properly preserved when config is passed as a dictionary. Tests cover both structured outputs and tools modes, and verify that cached_content correctly suppresses system_instruction and tool definitions regardless of config format.",
+      "alternatives_considered": [
+        "Only testing object-style configs (would miss the specific issue being fixed)",
+        "Adding integration tests instead of unit tests (slower and harder to maintain)",
+        "Testing through existing provider tests (less focused on the specific bug)"
+      ],
+      "files_affected": [
+        "tests/test_genai_config_merging.py"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Fix Google GenAI dictionary config field preservation",
+      "description": "Update config merging utilities to properly extract fields from dictionary-style config parameters, ensuring labels, cached_content, thinking_config, and automatic_function_calling are preserved when users pass config as dict instead of typed object",
+      "files_to_modify": [
+        "instructor/providers/gemini/utils.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-002",
+      "title": "Add comprehensive tests for dictionary config behavior",
+      "description": "Create test cases that specifically verify label preservation, cached content behavior, and thinking_config extraction when config is provided as a dictionary, covering both structured outputs and tools modes",
+      "files_to_modify": [
+        "tests/test_genai_config_merging.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The changes address a critical issue where Google GenAI configuration fields were being lost when users passed config parameters as dictionaries instead of typed objects. The implementation modifies three key functions in `instructor/providers/gemini/utils.py` (`update_genai_kwargs`, `handle_genai_structured_outputs`, and `handle_genai_tools`) to check for dictionary configs using `isinstance(user_config, dict)` before falling back to object attribute access with `hasattr`/`getattr`. This dual-path approach ensures backward compatibility while fixing the reported issue.\n\nThe core pattern added is a consistent check: if the config is a dictionary, use `.get()` to extract fields; otherwise, use attribute access. This pattern is applied to all relevant fields including `thinking_config`, `cached_content`, `labels`, and `automatic_function_calling`. The changes are minimal and focused, modifying only the field extraction logic without altering the overall flow or return types.\n\nComplementary tests in `tests/test_genai_config_merging.py` verify the fix works correctly. The tests specifically target dictionary config inputs and validate that: 1) labels are preserved for tracking purposes, 2) cached_content properly suppresses system instructions and tools when active, and 3) thinking_config is extracted regardless of config format. These tests reference issue #1759, confirming they address the exact enterprise tracking problems reported by users.",
+  "source_pr": "https://github.com/567-labs/instructor/pull/2005",
+  "before_sha": "3b8681207679c10c283ac73de8a16b3eaae99dd0",
+  "after_sha": "b31ffee152ad5dfefd61847f5da7a9ec7170aef2",
+  "diff_stats": {
+    "additions": 151,
+    "deletions": 14,
+    "files_changed": 2
+  }
+}

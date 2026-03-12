@@ -1,0 +1,118 @@
+diff --git a/leptos/Cargo.toml b/leptos/Cargo.toml
+index 0a80f561e6..5c0b9f4c17 100644
+--- a/leptos/Cargo.toml
++++ b/leptos/Cargo.toml
+@@ -90,6 +90,7 @@ ssr = [
+ nightly = ["leptos_macro/nightly", "reactive_graph/nightly", "tachys/nightly"]
+ rkyv = ["server_fn/rkyv", "leptos_server/rkyv"]
+ bitcode = ["server_fn/bitcode"]
++bitcode-serde = ["server_fn/bitcode-serde"]
+ serde-lite = ["server_fn/serde-lite", "leptos_server/serde-lite"]
+ cbor = ["server_fn/cbor"]
+ msgpack = ["server_fn/msgpack"]
+@@ -155,6 +156,7 @@ denylist = [
+   "spin",
+   "islands",
+   "bitcode",
++  "bitcode-serde",
+   "serde-lite",
+   "cbor",
+   "msgpack",
+diff --git a/server_fn/Cargo.toml b/server_fn/Cargo.toml
+index e402bcd2c8..e66a0bcb16 100644
+--- a/server_fn/Cargo.toml
++++ b/server_fn/Cargo.toml
+@@ -130,6 +130,7 @@ rkyv = ["dep:rkyv"]
+ msgpack = ["dep:rmp-serde"]
+ postcard = ["dep:postcard"]
+ bitcode = ["dep:bitcode"]
++bitcode-serde = ["dep:bitcode", "bitcode?/serde"]
+ default-tls = ["reqwest?/default-tls"]
+ rustls = ["reqwest?/rustls", "tokio-tungstenite?/rustls"]
+ reqwest = ["dep:reqwest", "dep:tokio-tungstenite", "dep:tokio"]
+diff --git a/server_fn/src/codec/bitcode_serde.rs b/server_fn/src/codec/bitcode_serde.rs
+new file mode 100644
+index 0000000000..a695801746
+--- /dev/null
++++ b/server_fn/src/codec/bitcode_serde.rs
+@@ -0,0 +1,52 @@
++use crate::{
++    codec::{Patch, Post, Put},
++    ContentType, Decodes, Encodes, Format, FormatType,
++};
++use bytes::Bytes;
++use serde::{de::DeserializeOwned, Serialize};
++
++/// Serializes and deserializes with [`bitcode`]'s `serde` integration.
++pub struct BitcodeSerdeEncoding;
++
++impl ContentType for BitcodeSerdeEncoding {
++    const CONTENT_TYPE: &'static str = "application/x-bitcode-serde";
++}
++
++impl FormatType for BitcodeSerdeEncoding {
++    const FORMAT_TYPE: Format = Format::Binary;
++}
++
++impl<T> Encodes<T> for BitcodeSerdeEncoding
++where
++    T: Serialize,
++{
++    type Error = bitcode::Error;
++
++    fn encode(value: &T) -> Result<Bytes, Self::Error> {
++        bitcode::serialize(value).map(Bytes::from)
++    }
++}
++
++impl<T> Decodes<T> for BitcodeSerdeEncoding
++where
++    T: DeserializeOwned,
++{
++    type Error = bitcode::Error;
++
++    fn decode(bytes: Bytes) -> Result<T, Self::Error> {
++        bitcode::deserialize(bytes.as_ref())
++    }
++}
++
++/// Pass arguments and receive responses using `bitcode`'s serde integration in a `POST` request.
++pub type BitcodeSerde = Post<BitcodeSerdeEncoding>;
++
++/// Pass arguments and receive responses using `bitcode`'s serde integration in the body of a `PATCH` request.
++/// **Note**: Browser support for `PATCH` requests without JS/WASM may be poor.
++/// Consider using a `POST` request if functionality without JS/WASM is required.
++pub type PatchBitcodeSerde = Patch<BitcodeSerdeEncoding>;
++
++/// Pass arguments and receive responses using `bitcode`'s serde integration in the body of a `PUT` request.
++/// **Note**: Browser support for `PUT` requests without JS/WASM may be poor.
++/// Consider using a `POST` request if functionality without JS/WASM is required.
++pub type PutBitcodeSerde = Put<BitcodeSerdeEncoding>;
+diff --git a/server_fn/src/codec/mod.rs b/server_fn/src/codec/mod.rs
+index 99fcbe46fc..471326a494 100644
+--- a/server_fn/src/codec/mod.rs
++++ b/server_fn/src/codec/mod.rs
+@@ -55,6 +55,11 @@ mod bitcode;
+ #[cfg(feature = "bitcode")]
+ pub use bitcode::*;
+ 
++#[cfg(feature = "bitcode-serde")]
++mod bitcode_serde;
++#[cfg(feature = "bitcode-serde")]
++pub use bitcode_serde::*;
++
+ mod patch;
+ pub use patch::*;
+ mod post;
+diff --git a/server_fn/tests/server_macro.rs b/server_fn/tests/server_macro.rs
+index fabe643190..4f22c5538d 100644
+--- a/server_fn/tests/server_macro.rs
++++ b/server_fn/tests/server_macro.rs
+@@ -12,6 +12,7 @@
+         feature = "cbor",
+         feature = "msgpack",
+         feature = "bitcode",
++        feature = "bitcode-serde",
+     ))
+ ))]
+ 

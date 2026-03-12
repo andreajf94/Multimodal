@@ -1,0 +1,49 @@
+diff --git a/test_runner/regress/test_compaction.py b/test_runner/regress/test_compaction.py
+index a780aa2e527b..94c18ac54821 100644
+--- a/test_runner/regress/test_compaction.py
++++ b/test_runner/regress/test_compaction.py
+@@ -863,7 +863,6 @@ def assert_broken():
+     assert not env.pageserver.log_contains(".*Circuit breaker failure ended.*")
+ 
+ 
+-@pytest.mark.skip(reason="Lakebase mode")
+ def test_ps_corruption_detection_feedback(neon_env_builder: NeonEnvBuilder):
+     """
+     Test that when the pageserver detects corruption during image layer creation,
+@@ -890,7 +889,9 @@ def test_ps_corruption_detection_feedback(neon_env_builder: NeonEnvBuilder):
+     timeline_id = env.initial_timeline
+ 
+     pageserver_http = env.pageserver.http_client()
+-    workload = Workload(env, tenant_id, timeline_id)
++    workload = Workload(
++        env, tenant_id, timeline_id, endpoint_opts={"config_lines": ["neon.lakebase_mode=true"]}
++    )
+     workload.init()
+ 
+     # Enable the failpoint that will cause image layer creation to fail due to a (simulated) detected
+diff --git a/test_runner/regress/test_wal_acceptor.py b/test_runner/regress/test_wal_acceptor.py
+index 33d308fb5a6d..1e8ca216d05b 100644
+--- a/test_runner/regress/test_wal_acceptor.py
++++ b/test_runner/regress/test_wal_acceptor.py
+@@ -2742,7 +2742,6 @@ def unevicted():
+     wait_until(unevicted)
+ 
+ 
+-@pytest.mark.skip(reason="Lakebase mode")
+ def test_timeline_disk_usage_limit(neon_env_builder: NeonEnvBuilder):
+     """
+     Test that the timeline disk usage circuit breaker works as expected. We test that:
+@@ -2762,7 +2761,12 @@ def test_timeline_disk_usage_limit(neon_env_builder: NeonEnvBuilder):
+ 
+     # Create a timeline and endpoint
+     env.create_branch("test_timeline_disk_usage_limit")
+-    endpoint = env.endpoints.create_start("test_timeline_disk_usage_limit")
++    endpoint = env.endpoints.create_start(
++        "test_timeline_disk_usage_limit",
++        config_lines=[
++            "neon.lakebase_mode=true",
++        ],
++    )
+ 
+     # Install the neon extension in the test database. We need it to query perf counter metrics.
+     with closing(endpoint.connect()) as conn:

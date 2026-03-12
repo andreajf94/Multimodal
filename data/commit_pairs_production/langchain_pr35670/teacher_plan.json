@@ -1,0 +1,87 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "api_design",
+      "recommendation": "Converted `_make_message_chunk_from_anthropic_event` from a class method to an instance method to enable method overriding in subclasses",
+      "rationale": "The change allows child classes like ChatAnthropicBedrock to customize streaming behavior. Instance methods can be overridden in Python subclasses, while class methods cannot be easily overridden without changing the calling convention. This is essential for handling API variations where usage metadata arrives at different points in the stream (e.g., input tokens at start, output tokens at end in Bedrock vs. standard Anthropic API).",
+      "alternatives_considered": [
+        "Keep as class method with a configuration parameter",
+        "Create a separate handler class with dependency injection",
+        "Use a strategy pattern with pluggable event processors"
+      ],
+      "files_affected": [
+        "libs/partners/anthropic/langchain_anthropic/chat_models.py"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Maintained identical method signature and behavior while changing from class to instance method",
+      "rationale": "Preserving the exact signature (parameters, return types, docstring) ensures backward compatibility for internal callers. The method still returns the same tuple of (AIMessageChunk | None, RawMessageStreamEvent | None) and handles all the same event types. This minimizes risk of breaking existing streaming functionality while enabling extensibility.",
+      "alternatives_considered": [
+        "Change method signature to include self parameter differently",
+        "Add new parameters for subclass customization",
+        "Break into multiple smaller methods"
+      ],
+      "files_affected": [
+        "libs/partners/anthropic/langchain_anthropic/chat_models.py"
+      ]
+    },
+    {
+      "dimension": "testing",
+      "recommendation": "Updated test calls to use instance method instead of importing and calling the function directly",
+      "rationale": "Tests must reflect the actual usage pattern after the refactoring. The test now creates a ChatAnthropic instance and calls the instance method, which validates that the method works correctly in its new form and maintains the same behavior. This also tests that subclasses would be able to override the method as intended.",
+      "alternatives_considered": [
+        "Mock the method call without testing actual implementation",
+        "Keep test importing the function directly (would break)",
+        "Create a test-specific subclass to verify override capability"
+      ],
+      "files_affected": [
+        "libs/partners/anthropic/tests/unit_tests/test_chat_models.py"
+      ]
+    },
+    {
+      "dimension": "code_organization",
+      "recommendation": "Moved the method definition inside the ChatAnthropic class and removed the standalone function",
+      "rationale": "Placing the method inside the class where it's used improves encapsulation and makes the codebase more maintainable. The method is tightly coupled to ChatAnthropic's streaming implementation, so it belongs as an instance method. This also follows Pythonic conventions where methods that operate on instance data should be instance methods.",
+      "alternatives_considered": [
+        "Keep as standalone function but add a hook for subclasses",
+        "Create a mixin class with the method",
+        "Use a class variable to store the function reference"
+      ],
+      "files_affected": [
+        "libs/partners/anthropic/langchain_anthropic/chat_models.py"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Convert Anthropic event handler to instance method",
+      "description": "Refactor the `_make_message_chunk_from_anthropic_event` method from a standalone class method to an instance method of ChatAnthropic class to enable subclass customization of streaming behavior",
+      "files_to_modify": [
+        "libs/partners/anthropic/langchain_anthropic/chat_models.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-002",
+      "title": "Update test calls for instance method",
+      "description": "Update unit tests to call the method as an instance method rather than importing and calling the standalone function",
+      "files_to_modify": [
+        "libs/partners/anthropic/tests/unit_tests/test_chat_models.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation converts the `_make_message_chunk_from_anthropic_event` function from a standalone class method to an instance method of the ChatAnthropic class. This change was made to enable subclasses like ChatAnthropicBedrock to override the streaming behavior, particularly for handling usage metadata that arrives at different points in the stream compared to the standard Anthropic API.\n\nThe key changes include: 1) Moving the entire function definition inside the ChatAnthropic class with `self` as the first parameter, 2) Updating all internal calls in `_stream` and `_astream` methods to use `self._make_message_chunk_from_anthropic_event` instead of the standalone function, and 3) Updating test code to create an instance and call the method on that instance rather than importing the function directly.\n\nThis refactoring maintains backward compatibility by preserving the exact method signature and behavior while enabling extensibility through inheritance. The approach follows Python's object-oriented design principles where methods that are specific to a class's implementation and may need customization in subclasses should be instance methods. The change is minimal and focused, affecting only the calling convention without altering the core streaming logic, which reduces risk while achieving the desired extensibility.",
+  "source_pr": "https://github.com/langchain-ai/langchain/pull/35670",
+  "before_sha": "fbfe4b812de119ec8e233627d88422727c823c35",
+  "after_sha": "f11a1050233b3c816ff1d3e9f82c3f0434ce1bc5",
+  "diff_stats": {
+    "additions": 188,
+    "deletions": 184,
+    "files_changed": 2
+  }
+}

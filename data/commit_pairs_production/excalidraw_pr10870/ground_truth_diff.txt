@@ -1,0 +1,1728 @@
+diff --git a/.eslintrc.json b/.eslintrc.json
+index 89f8227361c5..708210535c9a 100644
+--- a/.eslintrc.json
++++ b/.eslintrc.json
+@@ -39,5 +39,26 @@
+         "allowReferrer": true
+       }
+     ]
+-  }
++  },
++  "overrides": [
++    {
++      "files": ["packages/excalidraw/**/*.{ts,tsx}"],
++      "excludedFiles": ["packages/excalidraw/**/*.test.{ts,tsx}", "packages/excalidraw/**/*.test.*.{ts,tsx}"],
++      "rules": {
++        "@typescript-eslint/no-restricted-imports": [
++          "error",
++          {
++            "patterns": [
++              {
++                "group": ["@excalidraw/excalidraw"],
++                "message": "Do not import from the barrel 'index.tsx' files. Use direct relative imports to the specific module instead.",
++                "allowTypeImports": true
++              }
++            ],
++            "paths": [".", "..", "../..", "../../..", "../../../..", "../../../../..", "../index", "../../index", "../../../index", "../../../../index"]
++          }
++        ]
++      }
++    }
++  ]
+ }
+diff --git a/examples/with-script-in-browser/package.json b/examples/with-script-in-browser/package.json
+index 653c2be40e59..512786a65926 100644
+--- a/examples/with-script-in-browser/package.json
++++ b/examples/with-script-in-browser/package.json
+@@ -3,14 +3,14 @@
+   "version": "1.0.0",
+   "private": true,
+   "dependencies": {
+-    "react": "19.0.0",
+-    "react-dom": "19.0.0",
+     "@excalidraw/excalidraw": "*",
+-    "browser-fs-access": "0.29.1"
++    "browser-fs-access": "0.38.0",
++    "react": "19.0.0",
++    "react-dom": "19.0.0"
+   },
+   "devDependencies": {
+-    "vite": "5.0.12",
+-    "typescript": "^5"
++    "typescript": "^5",
++    "vite": "5.0.12"
+   },
+   "scripts": {
+     "start": "vite",
+diff --git a/examples/with-script-in-browser/utils.ts b/examples/with-script-in-browser/utils.ts
+index 285e9652d358..35f2c332c3bd 100644
+--- a/examples/with-script-in-browser/utils.ts
++++ b/examples/with-script-in-browser/utils.ts
+@@ -4,8 +4,6 @@ import { unstable_batchedUpdates } from "react-dom";
+ 
+ type FILE_EXTENSION = Exclude<keyof typeof MIME_TYPES, "binary">;
+ 
+-const INPUT_CHANGE_INTERVAL_MS = 500;
+-
+ export type ResolvablePromise<T> = Promise<T> & {
+   resolve: [T] extends [undefined] ? (value?: T) => void : (value: T) => void;
+   reject: (error: Error) => void;
+@@ -54,40 +52,6 @@ export const fileOpen = <M extends boolean | undefined = false>(opts: {
+     extensions,
+     mimeTypes,
+     multiple: opts.multiple ?? false,
+-    legacySetup: (resolve, reject, input) => {
+-      const scheduleRejection = debounce(reject, INPUT_CHANGE_INTERVAL_MS);
+-      const focusHandler = () => {
+-        checkForFile();
+-        document.addEventListener("keyup", scheduleRejection);
+-        document.addEventListener("pointerup", scheduleRejection);
+-        scheduleRejection();
+-      };
+-      const checkForFile = () => {
+-        // this hack might not work when expecting multiple files
+-        if (input.files?.length) {
+-          const ret = opts.multiple ? [...input.files] : input.files[0];
+-          resolve(ret as RetType);
+-        }
+-      };
+-      requestAnimationFrame(() => {
+-        window.addEventListener("focus", focusHandler);
+-      });
+-      const interval = window.setInterval(() => {
+-        checkForFile();
+-      }, INPUT_CHANGE_INTERVAL_MS);
+-      return (rejectPromise) => {
+-        clearInterval(interval);
+-        scheduleRejection.cancel();
+-        window.removeEventListener("focus", focusHandler);
+-        document.removeEventListener("keyup", scheduleRejection);
+-        document.removeEventListener("pointerup", scheduleRejection);
+-        if (rejectPromise) {
+-          // so that something is shown in console if we need to debug this
+-          console.warn("Opening the file was canceled (legacy-fs).");
+-          rejectPromise(new Error("Request Aborted"));
+-        }
+-      };
+-    },
+   }) as Promise<RetType>;
+ };
+ 
+diff --git a/excalidraw-app/App.tsx b/excalidraw-app/App.tsx
+index 2e71cc67885d..011379a4c11f 100644
+--- a/excalidraw-app/App.tsx
++++ b/excalidraw-app/App.tsx
+@@ -5,6 +5,8 @@ import {
+   CaptureUpdateAction,
+   reconcileElements,
+   useEditorInterface,
++  ExcalidrawAPIProvider,
++  useExcalidrawAPI,
+ } from "@excalidraw/excalidraw";
+ import { trackEvent } from "@excalidraw/excalidraw/analytics";
+ import { getDefaultAppState } from "@excalidraw/excalidraw/appState";
+@@ -34,7 +36,6 @@ import {
+ import polyfill from "@excalidraw/excalidraw/polyfill";
+ import { useCallback, useEffect, useRef, useState } from "react";
+ import { loadFromBlob } from "@excalidraw/excalidraw/data/blob";
+-import { useCallbackRefState } from "@excalidraw/excalidraw/hooks/useCallbackRefState";
+ import { t } from "@excalidraw/excalidraw/i18n";
+ 
+ import {
+@@ -74,6 +75,7 @@ import type {
+   BinaryFiles,
+   ExcalidrawInitialDataState,
+   UIAppState,
++  ExcalidrawProps,
+ } from "@excalidraw/excalidraw/types";
+ import type { ResolutionType } from "@excalidraw/common/utility-types";
+ import type { ResolvablePromise } from "@excalidraw/common/utils";
+@@ -114,6 +116,7 @@ import {
+ } from "./data";
+ 
+ import { updateStaleImageStatuses } from "./data/FileManager";
++import { FileStatusStore } from "./data/fileStatusStore";
+ import {
+   importFromLocalStorage,
+   importUsernameFromLocalStorage,
+@@ -369,6 +372,8 @@ const initializeScene = async (opts: {
+ };
+ 
+ const ExcalidrawWrapper = () => {
++  const excalidrawAPI = useExcalidrawAPI();
++
+   const [errorMessage, setErrorMessage] = useState("");
+   const isCollabDisabled = isRunningInIframe();
+ 
+@@ -399,9 +404,6 @@ const ExcalidrawWrapper = () => {
+     }, VERSION_TIMEOUT);
+   }, []);
+ 
+-  const [excalidrawAPI, excalidrawRefCallback] =
+-    useCallbackRefState<ExcalidrawImperativeAPI>();
+-
+   const [, setShareDialogState] = useAtom(shareDialogStateAtom);
+   const [collabAPI] = useAtom(collabAPIAtom);
+   const [isCollaborating] = useAtomWithInitialValue(isCollaboratingAtom, () => {
+@@ -433,18 +435,15 @@ const ExcalidrawWrapper = () => {
+     }
+   }, [excalidrawAPI]);
+ 
+-  useEffect(() => {
+-    if (!excalidrawAPI || (!isCollabDisabled && !collabAPI)) {
+-      return;
+-    }
+-
+-    const loadImages = (
+-      data: ResolutionType<typeof initializeScene>,
+-      isInitialLoad = false,
+-    ) => {
+-      if (!data.scene) {
++  // ---------------------------------------------------------------------------
++  // Hoisted loadImages
++  // ---------------------------------------------------------------------------
++  const loadImages = useCallback(
++    (data: ResolutionType<typeof initializeScene>, isInitialLoad = false) => {
++      if (!data.scene || !excalidrawAPI) {
+         return;
+       }
++
+       if (collabAPI?.isCollaborating()) {
+         if (data.scene.elements) {
+           collabAPI
+@@ -471,6 +470,12 @@ const ExcalidrawWrapper = () => {
+           }, [] as FileId[]) || [];
+ 
+         if (data.isExternalScene) {
++          if (fileIds.length) {
++            // Direct Firebase call (not through FileManager), so track manually
++            FileStatusStore.updateStatuses(
++              fileIds.map((id) => [id, "loading"]),
++            );
++          }
+           loadFilesFromFirebase(
+             `${FIREBASE_STORAGE_PREFIXES.shareLinkFiles}/${data.id}`,
+             data.key,
+@@ -482,12 +487,18 @@ const ExcalidrawWrapper = () => {
+               erroredFiles,
+               elements: excalidrawAPI.getSceneElementsIncludingDeleted(),
+             });
++            FileStatusStore.updateStatuses([
++              ...loadedFiles.map((f) => [f.id, "loaded"] as [FileId, "loaded"]),
++              ...[...erroredFiles.keys()].map(
++                (id) => [id, "error"] as [FileId, "error"],
++              ),
++            ]);
+           });
+         } else if (isInitialLoad) {
+           if (fileIds.length) {
+             LocalData.fileStorage
+               .getFiles(fileIds)
+-              .then(({ loadedFiles, erroredFiles }) => {
++              .then(async ({ loadedFiles, erroredFiles }) => {
+                 if (loadedFiles.length) {
+                   excalidrawAPI.addFiles(loadedFiles);
+                 }
+@@ -500,10 +511,19 @@ const ExcalidrawWrapper = () => {
+           }
+           // on fresh load, clear unused files from IDB (from previous
+           // session)
+-          LocalData.fileStorage.clearObsoleteFiles({ currentFileIds: fileIds });
++          LocalData.fileStorage.clearObsoleteFiles({
++            currentFileIds: fileIds,
++          });
+         }
+       }
+-    };
++    },
++    [collabAPI, excalidrawAPI],
++  );
++
++  useEffect(() => {
++    if (!excalidrawAPI || (!isCollabDisabled && !collabAPI)) {
++      return;
++    }
+ 
+     initializeScene({ collabAPI, excalidrawAPI }).then(async (data) => {
+       loadImages(data, /* isInitialLoad */ true);
+@@ -628,7 +648,7 @@ const ExcalidrawWrapper = () => {
+         false,
+       );
+     };
+-  }, [isCollabDisabled, collabAPI, excalidrawAPI, setLangCode]);
++  }, [isCollabDisabled, collabAPI, excalidrawAPI, setLangCode, loadImages]);
+ 
+   useEffect(() => {
+     const unloadHandler = (event: BeforeUnloadEvent) => {
+@@ -773,6 +793,56 @@ const ExcalidrawWrapper = () => {
+     [setShareDialogState],
+   );
+ 
++  // ---------------------------------------------------------------------------
++  // onExport — intercepts file save to wait for pending image loads
++  // ---------------------------------------------------------------------------
++  const onExport: Required<ExcalidrawProps>["onExport"] = useCallback(
++    async function* () {
++      let snapshot = FileStatusStore.getSnapshot();
++      const { pending, total } = FileStatusStore.getPendingCount(
++        snapshot.value,
++      );
++      if (pending === 0) {
++        return;
++      }
++
++      // Yield initial progress
++      yield {
++        type: "progress",
++        progress: (total - pending) / total,
++        message: `Loading images (${total - pending}/${total})...`,
++      };
++
++      // Wait for all pending images to finish
++      while (true) {
++        snapshot = await FileStatusStore.pull(snapshot.version);
++        const { pending: nowPending, total: nowTotal } =
++          FileStatusStore.getPendingCount(snapshot.value);
++
++        yield {
++          type: "progress",
++          progress: (nowTotal - nowPending) / nowTotal,
++          message: `Loading images (${nowTotal - nowPending}/${nowTotal})...`,
++        };
++
++        if (nowPending === 0) {
++          await new Promise((r) => setTimeout(r, 500));
++          yield {
++            type: "progress",
++            message: `Preparing export...`,
++          };
++          return;
++        }
++      }
++    },
++    [],
++  );
++
++  // const onExport = () => {
++  //   return new Promise((r) => setTimeout(r, 2500));
++  //   // console.log("onExport");
++  // };
++
+   // browsers generally prevent infinite self-embedding, there are
+   // cases where it still happens, and while we disallow self-embedding
+   // by not whitelisting our own origin, this serves as an additional guard
+@@ -839,8 +909,8 @@ const ExcalidrawWrapper = () => {
+       })}
+     >
+       <Excalidraw
+-        excalidrawAPI={excalidrawRefCallback}
+         onChange={onChange}
++        onExport={onExport}
+         initialData={initialStatePromiseRef.current.promise}
+         isCollaborating={isCollaborating}
+         onPointerUpdate={collabAPI?.onPointerUpdate}
+@@ -1206,7 +1276,9 @@ const ExcalidrawApp = () => {
+   return (
+     <TopErrorBoundary>
+       <Provider store={appJotaiStore}>
+-        <ExcalidrawWrapper />
++        <ExcalidrawAPIProvider>
++          <ExcalidrawWrapper />
++        </ExcalidrawAPIProvider>
+       </Provider>
+     </TopErrorBoundary>
+   );
+diff --git a/excalidraw-app/collab/Collab.tsx b/excalidraw-app/collab/Collab.tsx
+index 6eef30d7f162..622f92fb5e41 100644
+--- a/excalidraw-app/collab/Collab.tsx
++++ b/excalidraw-app/collab/Collab.tsx
+@@ -72,6 +72,7 @@ import {
+   FileManager,
+   updateStaleImageStatuses,
+ } from "../data/FileManager";
++import { FileStatusStore } from "../data/fileStatusStore";
+ import { LocalData } from "../data/LocalData";
+ import {
+   isSavedToFirebase,
+@@ -149,6 +150,7 @@ class Collab extends PureComponent<CollabProps, CollabState> {
+     };
+     this.portal = new Portal(this);
+     this.fileManager = new FileManager({
++      onFileStatusChange: FileStatusStore.updateStatuses.bind(FileStatusStore),
+       getFiles: async (fileIds) => {
+         const { roomId, roomKey } = this.portal;
+         if (!roomId || !roomKey) {
+diff --git a/excalidraw-app/data/FileManager.ts b/excalidraw-app/data/FileManager.ts
+index 435d81325260..849e47bc929c 100644
+--- a/excalidraw-app/data/FileManager.ts
++++ b/excalidraw-app/data/FileManager.ts
+@@ -40,10 +40,12 @@ export class FileManager {
+ 
+   private _getFiles;
+   private _saveFiles;
++  private _onFileStatusChange;
+ 
+   constructor({
+     getFiles,
+     saveFiles,
++    onFileStatusChange,
+   }: {
+     getFiles: (fileIds: FileId[]) => Promise<{
+       loadedFiles: BinaryFileData[];
+@@ -53,9 +55,13 @@ export class FileManager {
+       savedFiles: Map<FileId, BinaryFileData>;
+       erroredFiles: Map<FileId, BinaryFileData>;
+     }>;
++    onFileStatusChange?: (
++      updates: Array<[FileId, "loading" | "loaded" | "error"]>,
++    ) => void;
+   }) {
+     this._getFiles = getFiles;
+     this._saveFiles = saveFiles;
++    this._onFileStatusChange = onFileStatusChange;
+   }
+ 
+   /**
+@@ -146,6 +152,8 @@ export class FileManager {
+       this.fetchingFiles.set(id, true);
+     }
+ 
++    this._onFileStatusChange?.(ids.map((id) => [id, "loading"]));
++
+     try {
+       const { loadedFiles, erroredFiles } = await this._getFiles(ids);
+ 
+@@ -156,6 +164,13 @@ export class FileManager {
+         this.erroredFiles_fetch.set(fileId, true);
+       }
+ 
++      this._onFileStatusChange?.([
++        ...loadedFiles.map((f) => [f.id, "loaded"] as [FileId, "loaded"]),
++        ...[...erroredFiles.keys()].map(
++          (id) => [id, "error"] as [FileId, "error"],
++        ),
++      ]);
++
+       return { loadedFiles, erroredFiles };
+     } finally {
+       for (const id of ids) {
+@@ -195,6 +210,13 @@ export class FileManager {
+   };
+ 
+   reset() {
++    if (this._onFileStatusChange && this.fetchingFiles.size) {
++      this._onFileStatusChange(
++        [...this.fetchingFiles.keys()].map(
++          (id) => [id, "error"] as [FileId, "error"],
++        ),
++      );
++    }
+     this.fetchingFiles.clear();
+     this.savingFiles.clear();
+     this.savedFiles.clear();
+diff --git a/excalidraw-app/data/LocalData.ts b/excalidraw-app/data/LocalData.ts
+index 13cdf09ac417..634fdc4f1c6a 100644
+--- a/excalidraw-app/data/LocalData.ts
++++ b/excalidraw-app/data/LocalData.ts
+@@ -42,6 +42,7 @@ import type { MaybePromise } from "@excalidraw/common/utility-types";
+ import { SAVE_TO_LOCAL_STORAGE_TIMEOUT, STORAGE_KEYS } from "../app_constants";
+ 
+ import { FileManager } from "./FileManager";
++import { FileStatusStore } from "./fileStatusStore";
+ import { Locker } from "./Locker";
+ import { updateBrowserStateVersion } from "./tabSync";
+ 
+@@ -166,6 +167,7 @@ export class LocalData {
+   // ---------------------------------------------------------------------------
+ 
+   static fileStorage = new LocalFileManager({
++    onFileStatusChange: FileStatusStore.updateStatuses.bind(FileStatusStore),
+     getFiles(ids) {
+       return getMany(ids, filesStore).then(
+         async (filesData: (BinaryFileData | undefined)[]) => {
+diff --git a/excalidraw-app/data/fileStatusStore.ts b/excalidraw-app/data/fileStatusStore.ts
+new file mode 100644
+index 000000000000..ff9363ed5d30
+--- /dev/null
++++ b/excalidraw-app/data/fileStatusStore.ts
+@@ -0,0 +1,48 @@
++import { VersionedSnapshotStore } from "@excalidraw/common";
++
++import type { FileId } from "@excalidraw/element/types";
++
++export type FileLoadingStatus = "loading" | "loaded" | "error";
++
++export class FileStatusStore {
++  private static store = new VersionedSnapshotStore<
++    Map<FileId, FileLoadingStatus>
++  >(new Map());
++
++  static getSnapshot() {
++    return this.store.getSnapshot();
++  }
++
++  static pull(sinceVersion?: number) {
++    return this.store.pull(sinceVersion);
++  }
++
++  static updateStatuses(updates: Array<[FileId, FileLoadingStatus]>) {
++    if (!updates.length) {
++      return;
++    }
++    this.store.update((prev) => {
++      let changed = false;
++      const next = new Map(prev);
++      for (const [id, status] of updates) {
++        if (next.get(id) !== status) {
++          next.set(id, status);
++          changed = true;
++        }
++      }
++      return changed ? next : prev;
++    });
++  }
++
++  static getPendingCount(statuses: Map<FileId, FileLoadingStatus>) {
++    let pending = 0;
++    let total = 0;
++    for (const status of statuses.values()) {
++      total++;
++      if (status === "loading") {
++        pending++;
++      }
++    }
++    return { pending, total };
++  }
++}
+diff --git a/packages/common/src/appEventBus.test.ts b/packages/common/src/appEventBus.test.ts
+new file mode 100644
+index 000000000000..9a768c2ff774
+--- /dev/null
++++ b/packages/common/src/appEventBus.test.ts
+@@ -0,0 +1,74 @@
++import { AppEventBus } from "./appEventBus";
++
++type TestEvents = {
++  initialize: [api: number];
++  pointerUp: [pointerId: string];
++  viewState: [zoom: number];
++};
++
++const behavior = {
++  initialize: { cardinality: "once", replay: "last" },
++  pointerUp: { cardinality: "many", replay: "none" },
++  viewState: { cardinality: "many", replay: "last" },
++} as const;
++
++const flushMicrotasks = async () => Promise.resolve();
++
++describe("AppEventBus", () => {
++  it("replays once events to late callback and Promise subscribers", async () => {
++    const bus = new AppEventBus<TestEvents, typeof behavior>(behavior);
++    bus.emit("initialize", 42);
++
++    const calls: number[] = [];
++    bus.on("initialize", (value) => {
++      calls.push(value);
++    });
++
++    expect(calls).toEqual([]);
++    await flushMicrotasks();
++    expect(calls).toEqual([42]);
++
++    await expect(bus.on("initialize")).resolves.toBe(42);
++  });
++
++  it("does not replay stream events to late subscribers", async () => {
++    const bus = new AppEventBus<TestEvents, typeof behavior>(behavior);
++    bus.emit("pointerUp", "first");
++
++    const calls: string[] = [];
++    bus.on("pointerUp", (pointerId) => {
++      calls.push(pointerId);
++    });
++
++    await flushMicrotasks();
++    expect(calls).toEqual([]);
++
++    bus.emit("pointerUp", "second");
++    expect(calls).toEqual(["second"]);
++  });
++
++  it("replays replay-last stream events and stays subscribed", async () => {
++    const bus = new AppEventBus<TestEvents, typeof behavior>(behavior);
++    bus.emit("viewState", 1);
++
++    const calls: number[] = [];
++    bus.on("viewState", (zoom) => {
++      calls.push(zoom);
++    });
++
++    await flushMicrotasks();
++    expect(calls).toEqual([1]);
++
++    bus.emit("viewState", 2);
++    expect(calls).toEqual([1, 2]);
++  });
++
++  it("throws when emitting a once event twice", () => {
++    const bus = new AppEventBus<TestEvents, typeof behavior>(behavior);
++    bus.emit("initialize", 1);
++
++    expect(() => {
++      bus.emit("initialize", 2);
++    }).toThrow('Event "initialize" can only be emitted once');
++  });
++});
+diff --git a/packages/common/src/appEventBus.ts b/packages/common/src/appEventBus.ts
+new file mode 100644
+index 000000000000..e561419fedfe
+--- /dev/null
++++ b/packages/common/src/appEventBus.ts
+@@ -0,0 +1,136 @@
++import type { UnsubscribeCallback } from "@excalidraw/excalidraw/types";
++
++import { Emitter } from "./emitter";
++import { isProdEnv } from "./utils";
++
++export type AppEventPayloadMap = Record<string, unknown[]>;
++
++export type AppEventBehavior = {
++  cardinality: "once" | "many";
++  replay: "none" | "last";
++};
++
++export type AppEventBehaviorMap<Events extends AppEventPayloadMap> = {
++  [K in keyof Events]: AppEventBehavior;
++};
++
++type AwaitableAppEventKeys<
++  Events extends AppEventPayloadMap,
++  Behavior extends AppEventBehaviorMap<Events>,
++> = {
++  [K in keyof Events]: Behavior[K]["cardinality"] extends "once"
++    ? Behavior[K]["replay"] extends "last"
++      ? K
++      : never
++    : never;
++}[keyof Events];
++
++type AppEventPromiseValue<Args extends any[]> = Args extends [infer Only]
++  ? Only
++  : Args;
++
++export class AppEventBus<
++  Events extends AppEventPayloadMap,
++  Behavior extends AppEventBehaviorMap<Events>,
++> {
++  private readonly emitters = new Map<keyof Events, Emitter<any>>();
++  private readonly lastPayload = new Map<keyof Events, any[]>();
++  private readonly emittedOnce = new Set<keyof Events>();
++
++  constructor(private readonly behavior: Behavior) {}
++
++  private getEmitter<K extends keyof Events>(name: K): Emitter<Events[K]> {
++    let emitter = this.emitters.get(name);
++    if (!emitter) {
++      emitter = new Emitter<any>();
++      this.emitters.set(name, emitter);
++    }
++    return emitter as Emitter<Events[K]>;
++  }
++
++  private toPromiseValue<Args extends any[]>(
++    args: Args,
++  ): AppEventPromiseValue<Args> {
++    return (args.length === 1 ? args[0] : args) as AppEventPromiseValue<Args>;
++  }
++
++  public on<K extends keyof Events>(
++    name: K,
++    callback: (...args: Events[K]) => void,
++  ): UnsubscribeCallback;
++  public on<K extends AwaitableAppEventKeys<Events, Behavior>>(
++    name: K,
++  ): Promise<AppEventPromiseValue<Events[K]>>;
++  public on<K extends keyof Events>(
++    name: K,
++    callback?: (...args: Events[K]) => void,
++  ): UnsubscribeCallback | Promise<AppEventPromiseValue<Events[K]>> {
++    const eventBehavior = this.behavior[name];
++    const cachedPayload = this.lastPayload.get(name) as Events[K] | undefined;
++
++    if (callback) {
++      if (eventBehavior.replay === "last" && cachedPayload) {
++        queueMicrotask(() => callback(...cachedPayload));
++
++        if (eventBehavior.cardinality === "once") {
++          return () => {};
++        }
++      }
++
++      return this.getEmitter(name).on(callback);
++    }
++
++    if (
++      eventBehavior.cardinality !== "once" ||
++      eventBehavior.replay !== "last"
++    ) {
++      throw new Error(`Event "${String(name)}" requires a callback`);
++    }
++
++    if (cachedPayload) {
++      return Promise.resolve(this.toPromiseValue(cachedPayload));
++    }
++
++    return new Promise<AppEventPromiseValue<Events[K]>>((resolve) => {
++      this.getEmitter(name).once((...args: Events[K]) => {
++        resolve(this.toPromiseValue(args));
++      });
++    });
++  }
++
++  public emit<K extends keyof Events>(name: K, ...args: Events[K]) {
++    const eventBehavior = this.behavior[name];
++
++    if (!isProdEnv()) {
++      if (eventBehavior.cardinality === "once") {
++        if (this.emittedOnce.has(name)) {
++          throw new Error(`Event "${String(name)}" can only be emitted once`);
++        }
++        this.emittedOnce.add(name);
++      }
++    }
++
++    if (eventBehavior.replay === "last") {
++      this.lastPayload.set(name, args);
++    }
++
++    try {
++      this.getEmitter(name).trigger(...args);
++    } finally {
++      if (eventBehavior.cardinality === "once") {
++        this.getEmitter(name).clear();
++      }
++    }
++  }
++
++  public clear() {
++    this.lastPayload.clear();
++    this.emittedOnce.clear();
++
++    for (const emitter of this.emitters.values()) {
++      emitter.clear();
++    }
++
++    this.emitters.clear();
++  }
++}
+diff --git a/packages/common/src/index.ts b/packages/common/src/index.ts
+index ca5397ddd140..022f7714bb2a 100644
+--- a/packages/common/src/index.ts
++++ b/packages/common/src/index.ts
+@@ -11,5 +11,7 @@ export * from "./random";
+ export * from "./url";
+ export * from "./utils";
+ export * from "./emitter";
++export * from "./appEventBus";
+ export * from "./editorInterface";
++export * from "./versionedSnapshotStore";
+ export { Debug } from "../debug";
+diff --git a/packages/common/src/versionedSnapshotStore.ts b/packages/common/src/versionedSnapshotStore.ts
+new file mode 100644
+index 000000000000..979f01798703
+--- /dev/null
++++ b/packages/common/src/versionedSnapshotStore.ts
+@@ -0,0 +1,70 @@
++export type VersionedSnapshot<T> = Readonly<{
++  version: number;
++  value: T;
++}>;
++
++export class VersionedSnapshotStore<T> {
++  private version = 0;
++  private value: T;
++  private readonly waiters = new Set<
++    (snapshot: VersionedSnapshot<T>) => void
++  >();
++  private readonly subscribers = new Set<
++    (snapshot: VersionedSnapshot<T>) => void
++  >();
++
++  constructor(
++    initialValue: T,
++    private readonly isEqual: (prev: T, next: T) => boolean = Object.is,
++  ) {
++    this.value = initialValue;
++  }
++
++  public getSnapshot(): VersionedSnapshot<T> {
++    return { version: this.version, value: this.value };
++  }
++
++  public set(nextValue: T): boolean {
++    if (this.isEqual(this.value, nextValue)) {
++      return false;
++    }
++
++    this.value = nextValue;
++    this.version += 1;
++
++    const snapshot = this.getSnapshot();
++
++    for (const subscriber of this.subscribers) {
++      subscriber(snapshot);
++    }
++    for (const waiter of this.waiters) {
++      waiter(snapshot);
++    }
++    this.waiters.clear();
++
++    return true;
++  }
++
++  public update(updater: (prev: T) => T): boolean {
++    return this.set(updater(this.value));
++  }
++
++  public subscribe(
++    subscriber: (snapshot: VersionedSnapshot<T>) => void,
++  ): () => void {
++    this.subscribers.add(subscriber);
++    return () => {
++      this.subscribers.delete(subscriber);
++    };
++  }
++
++  public pull(sinceVersion = -1): Promise<VersionedSnapshot<T>> {
++    if (this.version !== sinceVersion) {
++      return Promise.resolve(this.getSnapshot());
++    }
++
++    return new Promise((resolve) => {
++      this.waiters.add(resolve);
++    });
++  }
++}
+diff --git a/packages/excalidraw/CHANGELOG.md b/packages/excalidraw/CHANGELOG.md
+index e4a98d19e892..5d2fa482db9e 100644
+--- a/packages/excalidraw/CHANGELOG.md
++++ b/packages/excalidraw/CHANGELOG.md
+@@ -11,6 +11,92 @@ The change should be grouped under one of the below section and must contain PR
+ Please add the latest change on the top under the correct section.
+ -->
+ 
++## Unreleased
++
++## Excalidraw API
++
++### Breaking changes
++
++- Renamed the `excalidrawAPI` prop to `onExcalidrawAPI`.
++
++### Features
++
++- Added `onMount` and `onInitialize` props. `onMount` receives `{ excalidrawAPI, container }` once the editor root is mounted, and `onInitialize` fires once the initial scene has loaded.
++
++  ```tsx
++  <Excalidraw
++    onMount={({ excalidrawAPI, container }) => {
++      console.log(container);
++      excalidrawAPI.scrollToContent();
++    }}
++    onInitialize={(api) => {
++      api.refresh();
++    }}
++  />
++  ```
++
++- Same events are also accessible imperatively through `api.onEvent(...)`.
++
++  ```tsx
++  <Excalidraw
++    onExcalidrawAPI={(api) => {
++      api.onEvent("editor:mount", ({ excalidrawAPI, container }) => {
++        excalidrawAPI.scrollToContent();
++        console.log(container);
++      });
++
++      api.onEvent("editor:initialize").then((readyApi) => {
++        readyApi.scrollToContent();
++      });
++    }}
++  />
++  ```
++
++  Note that in future releases, most, if not all, `excalidrawAPI.on*` subscriptions will be removed in favor of `excalidrawAPI.onEvent(name)`.
++
++- Exported `ExcalidrawAPIProvider`, `useExcalidrawAPI`, and `useAppStateValue` from the package entrypoint. The imperative API also now exposes `onStateChange`.
++
++  ```tsx
++  <ExcalidrawAPIProvider>
++    <Excalidraw />
++    <Logger />
++  </ExcalidrawAPIProvider>;
++
++  function Logger() {
++    const api = useExcalidrawAPI();
++
++    useAppStateValue("viewModeEnabled", (viewModeEnabled) => {
++      console.log("view mode changed:", viewModeEnabled);
++    });
++
++    React.useEffect(() => {
++      if (api) {
++        console.log("editor instance id:", api.id);
++      }
++    }, [api]);
++
++    return null;
++  }
++  ```
++
++- Added `onExport` so host apps can delay JSON export until async work completes. The handler receives the export data plus an `AbortSignal`, and may return a `Promise` or an async generator that yields progress updates for the built-in toast UI.
++
++  ```tsx
++  <Excalidraw
++    onExport={async function* (_type, { files }, { signal }) {
++      yield { type: "progress", message: "Waiting for images..." };
++
++      await waitForImagesToLoad(files, signal);
++
++      if (signal.aborted) {
++        return;
++      }
++
++      yield { type: "progress", message: "Export ready", progress: 1 };
++    }}
++  />
++  ```
++
+ ## Excalidraw Library
+ 
+ ## 0.18.0 (2025-03-11)
+diff --git a/packages/excalidraw/actions/actionDeleteSelected.tsx b/packages/excalidraw/actions/actionDeleteSelected.tsx
+index 9821abadc820..c25712eb94c3 100644
+--- a/packages/excalidraw/actions/actionDeleteSelected.tsx
++++ b/packages/excalidraw/actions/actionDeleteSelected.tsx
+@@ -30,7 +30,7 @@ import { getSelectedElements, isSomeElementSelected } from "../scene";
+ import { TrashIcon } from "../components/icons";
+ import { ToolButton } from "../components/ToolButton";
+ 
+-import { useStylesPanelMode } from "..";
++import { useStylesPanelMode } from "../components/App";
+ 
+ import { register } from "./register";
+ 
+diff --git a/packages/excalidraw/actions/actionDuplicateSelection.tsx b/packages/excalidraw/actions/actionDuplicateSelection.tsx
+index 462803d205a8..4c22a80ee73a 100644
+--- a/packages/excalidraw/actions/actionDuplicateSelection.tsx
++++ b/packages/excalidraw/actions/actionDuplicateSelection.tsx
+@@ -27,7 +27,7 @@ import { t } from "../i18n";
+ import { isSomeElementSelected } from "../scene";
+ import { getShortcutKey } from "../shortcut";
+ 
+-import { useStylesPanelMode } from "..";
++import { useStylesPanelMode } from "../components/App";
+ 
+ import { register } from "./register";
+ 
+diff --git a/packages/excalidraw/actions/actionExport.tsx b/packages/excalidraw/actions/actionExport.tsx
+index 453a0be1f72f..b7ed8974f127 100644
+--- a/packages/excalidraw/actions/actionExport.tsx
++++ b/packages/excalidraw/actions/actionExport.tsx
+@@ -9,18 +9,20 @@ import { getNonDeletedElements } from "@excalidraw/element";
+ 
+ import { CaptureUpdateAction } from "@excalidraw/element";
+ 
+-import type { Theme } from "@excalidraw/element/types";
++import type { ExcalidrawElement, Theme } from "@excalidraw/element/types";
+ 
+ import { useEditorInterface } from "../components/App";
+ import { CheckboxItem } from "../components/CheckboxItem";
+ import { DarkModeToggle } from "../components/DarkModeToggle";
+ import { ProjectName } from "../components/ProjectName";
++import { Toast } from "../components/Toast";
+ import { ToolButton } from "../components/ToolButton";
+ import { Tooltip } from "../components/Tooltip";
+ import { ExportIcon, questionCircle, saveAs } from "../components/icons";
+ import { loadFromJSON, saveAsJSON } from "../data";
+ import { isImageFileHandle } from "../data/blob";
+ import { nativeFileSystemSupported } from "../data/filesystem";
++
+ import { resaveAsImageWithScene } from "../data/resave";
+ 
+ import { t } from "../i18n";
+@@ -31,7 +33,15 @@ import "../components/ToolIcon.scss";
+ 
+ import { register } from "./register";
+ 
+-import type { AppState } from "../types";
++import type { JSONExportData } from "../data/json";
++
++import type {
++  AppClassProperties,
++  AppState,
++  BinaryFiles,
++  ExcalidrawProps,
++  OnExportProgress,
++} from "../types";
+ 
+ export const actionChangeProjectName = register<AppState["name"]>({
+   name: "changeProjectName",
+@@ -150,6 +160,143 @@ export const actionChangeExportEmbedScene = register<
+   ),
+ });
+ 
++// ---------------------------------------------------------------------------
++// onExport interception helpers
++// ---------------------------------------------------------------------------
++
++let onExportInProgress = false;
++
++const onProgressToast = (
++  app: AppClassProperties,
++  progress: {
++    message?: OnExportProgress["message"];
++    progress?: number | null;
++  },
++) => {
++  const message = progress.message ?? t("progressDialog.defaultMessage");
++  app.setAppState({
++    toast: {
++      message:
++        progress.progress != null ? (
++          <>
++            {message}
++            <Toast.ProgressBar progress={progress.progress} />
++          </>
++        ) : (
++          message
++        ),
++      duration: Infinity,
++    },
++  });
++};
++
++/** awaits host app's onExport result, and renders progress to the UI */
++async function handleOnExportResult(
++  onExportResult: ReturnType<NonNullable<ExcalidrawProps["onExport"]>>,
++  opts: {
++    signal: AbortSignal;
++    app: AppClassProperties;
++  },
++): Promise<void> {
++  if (opts.app.state.isLoading) {
++    onProgressToast(opts.app, { progress: null });
++    await opts.app.onStateChange({ predicate: (state) => !state.isLoading });
++  }
++
++  if (
++    onExportResult != null &&
++    typeof onExportResult === "object" &&
++    Symbol.asyncIterator in onExportResult
++  ) {
++    for await (const value of onExportResult) {
++      if (opts.signal.aborted) {
++        onExportResult.return();
++        return;
++      }
++      if (value.type === "progress") {
++        onProgressToast(opts.app, {
++          message: value.message,
++          progress: value.progress ?? null,
++        });
++      } else if (value.type === "done") {
++        return;
++      }
++    }
++
++    // Generator completed without explicit "done" message
++    return;
++  }
++
++  if (onExportResult instanceof Promise) {
++    onProgressToast(opts.app, { progress: null });
++    await onExportResult;
++  }
++}
++
++function prepareDataForJSONExport(
++  elements: readonly ExcalidrawElement[],
++  appState: AppState,
++  files: BinaryFiles,
++  app: AppClassProperties,
++): { abortController: AbortController; data: Promise<JSONExportData> } {
++  const abortController = new AbortController();
++  const signal = abortController.signal;
++
++  const dataPromise = new Promise<JSONExportData>(async (resolve) => {
++    try {
++      if (app.props.onExport) {
++        await handleOnExportResult(
++          app.props.onExport(
++            "json",
++            {
++              elements,
++              appState,
++              files,
++            },
++            {
++              signal,
++            },
++          ),
++          {
++            app,
++            signal,
++          },
++        );
++      }
++    } catch (error: any) {
++      if (error?.name === "AbortError") {
++        // if abort error, assume it's a reaction on the signal being aborted
++        console.warn(
++          `onExport() aborted by host app (signal aborted: ${signal.aborted})`,
++        );
++      } else {
++        // non-abort error
++        //
++        console.error("Error during props.onExport() handling", error);
++      }
++
++      // either way, we currently don't allow host apps to cancel save actions
++      // so we resolve to orig data
++    }
++
++    resolve({
++      elements,
++      appState,
++      // return latest files in case they finished loading during onExport
++      files: app.files,
++    });
++  });
++
++  return {
++    abortController,
++    data: dataPromise,
++  };
++}
++
++// ---------------------------------------------------------------------------
++// Save actions
++// ---------------------------------------------------------------------------
++
+ export const actionSaveToActiveFile = register({
+   name: "saveToActiveFile",
+   label: "buttons.save",
+@@ -163,42 +310,62 @@ export const actionSaveToActiveFile = register({
+     );
+   },
+   perform: async (elements, appState, value, app) => {
+-    const fileHandleExists = !!appState.fileHandle;
++    if (onExportInProgress) {
++      return false;
++    }
++    onExportInProgress = true;
++
++    const previousFileHandle = appState.fileHandle;
++    const filename = app.getName();
++
++    const { abortController, data: exportedDataPromise } =
++      prepareDataForJSONExport(elements, appState, app.files, app);
+ 
+     try {
+-      const { fileHandle } = isImageFileHandle(appState.fileHandle)
++      const { fileHandle } = isImageFileHandle(previousFileHandle)
+         ? await resaveAsImageWithScene(
+-            elements,
+-            appState,
+-            app.files,
+-            app.getName(),
++            exportedDataPromise,
++            previousFileHandle,
++            filename,
+           )
+-        : await saveAsJSON(elements, appState, app.files, app.getName());
++        : await saveAsJSON({
++            data: exportedDataPromise,
++            filename,
++            fileHandle: previousFileHandle,
++          });
+ 
+       return {
+-        captureUpdate: CaptureUpdateAction.EVENTUALLY,
++        captureUpdate: CaptureUpdateAction.NEVER,
+         appState: {
+-          ...appState,
+           fileHandle,
+-          toast: fileHandleExists
+-            ? {
+-                message: fileHandle?.name
+-                  ? t("toast.fileSavedToFilename").replace(
+-                      "{filename}",
+-                      `"${fileHandle.name}"`,
+-                    )
+-                  : t("toast.fileSaved"),
+-              }
+-            : null,
++          toast: {
++            message:
++              previousFileHandle && fileHandle?.name
++                ? t("toast.fileSavedToFilename").replace(
++                    "{filename}",
++                    `"${fileHandle.name}"`,
++                  )
++                : t("toast.fileSaved"),
++            duration: 1500,
++          },
+         },
+       };
+     } catch (error: any) {
++      abortController.abort();
++
+       if (error?.name !== "AbortError") {
+         console.error(error);
+       } else {
+         console.warn(error);
+       }
+-      return { captureUpdate: CaptureUpdateAction.EVENTUALLY };
++      return {
++        captureUpdate: CaptureUpdateAction.NEVER,
++        appState: {
++          toast: null,
++        },
++      };
++    } finally {
++      onExportInProgress = false;
+     }
+   },
+   keyTest: (event) =>
+@@ -212,36 +379,50 @@ export const actionSaveFileToDisk = register({
+   viewMode: true,
+   trackEvent: { category: "export" },
+   perform: async (elements, appState, value, app) => {
++    if (onExportInProgress) {
++      return false;
++    }
++    onExportInProgress = true;
++
++    const { abortController, data: exportedDataPromise } =
++      prepareDataForJSONExport(elements, appState, app.files, app);
++
+     try {
+-      const { fileHandle } = await saveAsJSON(
+-        elements,
+-        {
+-          ...appState,
+-          fileHandle: null,
+-        },
+-        app.files,
+-        app.getName(),
+-      );
++      const { fileHandle: savedFileHandle } = await saveAsJSON({
++        data: exportedDataPromise,
++        filename: app.getName(),
++        fileHandle: null,
++      });
++
+       return {
+-        captureUpdate: CaptureUpdateAction.EVENTUALLY,
++        captureUpdate: CaptureUpdateAction.NEVER,
+         appState: {
+-          ...appState,
+           openDialog: null,
+-          fileHandle,
++          fileHandle: savedFileHandle,
+           toast: { message: t("toast.fileSaved") },
+         },
+       };
+     } catch (error: any) {
++      abortController.abort();
+       if (error?.name !== "AbortError") {
+         console.error(error);
+       } else {
+         console.warn(error);
+       }
+-      return { captureUpdate: CaptureUpdateAction.EVENTUALLY };
++      return {
++        captureUpdate: CaptureUpdateAction.NEVER,
++        appState: {
++          toast: null,
++        },
++      };
++    } finally {
++      onExportInProgress = false;
+     }
+   },
+   keyTest: (event) =>
+-    event.key === KEYS.S && event.shiftKey && event[KEYS.CTRL_OR_CMD],
++    event.key.toLowerCase() === KEYS.S &&
++    event.shiftKey &&
++    event[KEYS.CTRL_OR_CMD],
+   PanelComponent: ({ updateData }) => (
+     <ToolButton
+       type="button"
+diff --git a/packages/excalidraw/actions/actionHistory.tsx b/packages/excalidraw/actions/actionHistory.tsx
+index 0232bb33e318..1b530adeaf5c 100644
+--- a/packages/excalidraw/actions/actionHistory.tsx
++++ b/packages/excalidraw/actions/actionHistory.tsx
+@@ -18,7 +18,7 @@ import { HistoryChangedEvent } from "../history";
+ import { useEmitter } from "../hooks/useEmitter";
+ import { t } from "../i18n";
+ 
+-import { useStylesPanelMode } from "..";
++import { useStylesPanelMode } from "../components/App";
+ 
+ import type { History } from "../history";
+ import type { AppClassProperties, AppState } from "../types";
+diff --git a/packages/excalidraw/clipboard.ts b/packages/excalidraw/clipboard.ts
+index 165534741f24..6de0b12eabc8 100644
+--- a/packages/excalidraw/clipboard.ts
++++ b/packages/excalidraw/clipboard.ts
+@@ -33,8 +33,6 @@ import {
+   normalizeFile,
+ } from "./data/blob";
+ 
+-import type { FileSystemHandle } from "./data/filesystem";
+-
+ import type { BinaryFiles } from "./types";
+ 
+ type ElementsClipboard = {
+@@ -369,7 +367,7 @@ type AllowedParsedDataTransferItem =
+       type: ValueOf<typeof IMAGE_MIME_TYPES>;
+       kind: "file";
+       file: File;
+-      fileHandle: FileSystemHandle | null;
++      fileHandle: FileSystemFileHandle | null;
+     }
+   | { type: ValueOf<typeof STRING_MIME_TYPES>; kind: "string"; value: string };
+ 
+@@ -378,7 +376,7 @@ type ParsedDataTransferItem =
+       type: string;
+       kind: "file";
+       file: File;
+-      fileHandle: FileSystemHandle | null;
++      fileHandle: FileSystemFileHandle | null;
+     }
+   | { type: string; kind: "string"; value: string };
+ 
+diff --git a/packages/excalidraw/components/App.tsx b/packages/excalidraw/components/App.tsx
+index 75b850f8c2a2..09f059d2abb0 100644
+--- a/packages/excalidraw/components/App.tsx
++++ b/packages/excalidraw/components/App.tsx
+@@ -88,6 +88,7 @@ import {
+   isShallowEqual,
+   arrayToMap,
+   applyDarkModeFilter,
++  AppEventBus,
+   type EXPORT_IMAGE_TYPES,
+   randomInteger,
+   CLASSES,
+@@ -448,7 +449,7 @@ import { StaticCanvas, InteractiveCanvas } from "./canvases";
+ import NewElementCanvas from "./canvases/NewElementCanvas";
+ import { isPointHittingLink } from "./hyperlink/helpers";
+ import { MagicIcon, copyIcon, fullscreenIcon } from "./icons";
+-import { Toast } from "./Toast";
++import { AppStateObserver, type OnStateChange } from "./AppStateObserver";
+ 
+ import { findShapeByKey } from "./shapes";
+ 
+@@ -464,7 +465,6 @@ import type {
+ import type { ClipboardData, PastedMixedContent } from "../clipboard";
+ import type { ExportedElements } from "../data";
+ import type { ContextMenuItems } from "./ContextMenu";
+-import type { FileSystemHandle } from "../data/filesystem";
+ 
+ import type {
+   AppClassProperties,
+@@ -488,6 +488,7 @@ import type {
+   UnsubscribeCallback,
+   EmbedsValidationStatus,
+   ElementsPendingErasure,
++  ExcalidrawImperativeAPIEventMap,
+   GenerateDiagramToCode,
+   NullableGridSize,
+   Offsets,
+@@ -513,6 +514,11 @@ const EditorInterfaceContext = React.createContext<EditorInterface>(
+ );
+ EditorInterfaceContext.displayName = "EditorInterfaceContext";
+ 
++const editorLifecycleEventBehavior = {
++  "editor:mount": { cardinality: "once", replay: "last" },
++  "editor:initialize": { cardinality: "once", replay: "last" },
++} as const;
++
+ export const ExcalidrawContainerContext = React.createContext<{
+   container: HTMLDivElement | null;
+   id: string | null;
+@@ -545,6 +551,15 @@ const ExcalidrawActionManagerContext = React.createContext<ActionManager>(
+ );
+ ExcalidrawActionManagerContext.displayName = "ExcalidrawActionManagerContext";
+ 
++export const ExcalidrawAPIContext =
++  React.createContext<ExcalidrawImperativeAPI | null>(null);
++ExcalidrawAPIContext.displayName = "ExcalidrawAPIContext";
++
++export const ExcalidrawAPISetContext = React.createContext<
++  ((api: ExcalidrawImperativeAPI) => void) | null
++>(null);
++ExcalidrawAPISetContext.displayName = "ExcalidrawAPISetContext";
++
+ export const useApp = () => useContext(AppContext);
+ export const useAppProps = () => useContext(AppPropsContext);
+ export const useEditorInterface = () =>
+@@ -561,6 +576,10 @@ export const useExcalidrawSetAppState = () =>
+   useContext(ExcalidrawSetAppStateContext);
+ export const useExcalidrawActionManager = () =>
+   useContext(ExcalidrawActionManagerContext);
++/**
++ * Requires wrapping your component in <ExcalidrawAPIContext.Provider>
++ */
++export const useExcalidrawAPI = () => useContext(ExcalidrawAPIContext);
+ 
+ let didTapTwice: boolean = false;
+ let tappedTwiceTimer = 0;
+@@ -635,12 +654,26 @@ class App extends React.Component<AppProps, AppState> {
+    * insert to DOM before user initially scrolls to them) */
+   private initializedEmbeds = new Set<ExcalidrawIframeLikeElement["id"]>();
+ 
+-  private handleToastClose = () => {
+-    this.setToast(null);
+-  };
+-
+   private elementsPendingErasure: ElementsPendingErasure = new Set();
+ 
++  private _initialized = false;
++
++  private readonly editorLifecycleEvents = new AppEventBus<
++    ExcalidrawImperativeAPIEventMap,
++    typeof editorLifecycleEventBehavior
++  >(editorLifecycleEventBehavior);
++
++  public onEvent = this.editorLifecycleEvents.on.bind(
++    this.editorLifecycleEvents,
++  ) as AppEventBus<
++    ExcalidrawImperativeAPIEventMap,
++    typeof editorLifecycleEventBehavior
++  >["on"];
++
++  private appStateObserver = new AppStateObserver(() => this.state);
++
++  public onStateChange: OnStateChange = this.appStateObserver.onStateChange;
++
+   public flowChartCreator: FlowChartCreator = new FlowChartCreator();
+   private flowChartNavigator: FlowChartNavigator = new FlowChartNavigator();
+ 
+@@ -696,11 +729,12 @@ class App extends React.Component<AppProps, AppState> {
+   >();
+   onRemoveEventListenersEmitter = new Emitter<[]>();
+ 
++  api: ExcalidrawImperativeAPI;
++
+   constructor(props: AppProps) {
+     super(props);
+     const defaultAppState = getDefaultAppState();
+     const {
+-      excalidrawAPI,
+       viewModeEnabled = false,
+       zenModeEnabled = false,
+       gridModeEnabled = false,
+@@ -708,6 +742,7 @@ class App extends React.Component<AppProps, AppState> {
+       theme = defaultAppState.theme,
+       name = `${t("labels.untitled")}-${getDateTime()}`,
+     } = props;
++
+     this.state = {
+       ...defaultAppState,
+       theme,
+@@ -744,51 +779,6 @@ class App extends React.Component<AppProps, AppState> {
+     this.store = new Store(this);
+     this.history = new History(this.store);
+ 
+-    if (excalidrawAPI) {
+-      const api: ExcalidrawImperativeAPI = {
+-        updateScene: this.updateScene,
+-        applyDeltas: this.applyDeltas,
+-        mutateElement: this.mutateElement,
+-        updateLibrary: this.library.updateLibrary,
+-        addFiles: this.addFiles,
+-        resetScene: this.resetScene,
+-        getSceneElementsIncludingDeleted: this.getSceneElementsIncludingDeleted,
+-        getSceneElementsMapIncludingDeleted:
+-          this.getSceneElementsMapIncludingDeleted,
+-        history: {
+-          clear: this.resetHistory,
+-        },
+-        scrollToContent: this.scrollToContent,
+-        getSceneElements: this.getSceneElements,
+-        getAppState: () => this.state,
+-        getFiles: () => this.files,
+-        getName: this.getName,
+-        registerAction: (action: Action) => {
+-          this.actionManager.registerAction(action);
+-        },
+-        refresh: this.refresh,
+-        setToast: this.setToast,
+-        id: this.id,
+-        setActiveTool: this.setActiveTool,
+-        setCursor: this.setCursor,
+-        resetCursor: this.resetCursor,
+-        getEditorInterface: () => this.editorInterface,
+-        updateFrameRendering: this.updateFrameRendering,
+-        toggleSidebar: this.toggleSidebar,
+-        onChange: (cb) => this.onChangeEmitter.on(cb),
+-        onIncrement: (cb) => this.store.onStoreIncrementEmitter.on(cb),
+-        onPointerDown: (cb) => this.onPointerDownEmitter.on(cb),
+-        onPointerUp: (cb) => this.onPointerUpEmitter.on(cb),
+-        onScrollChange: (cb) => this.onScrollChangeEmitter.on(cb),
+-        onUserFollow: (cb) => this.onUserFollowEmitter.on(cb),
+-      } as const;
+-      if (typeof excalidrawAPI === "function") {
+-        excalidrawAPI(api);
+-      } else {
+-        console.error("excalidrawAPI should be a function!");
+-      }
+-    }
+-
+     this.excalidrawContainerValue = {
+       container: this.excalidrawContainerRef.current,
+       id: this.id,
+@@ -800,6 +790,48 @@ class App extends React.Component<AppProps, AppState> {
+     this.actionManager.registerAll(actions);
+     this.actionManager.registerAction(createUndoAction(this.history));
+     this.actionManager.registerAction(createRedoAction(this.history));
++
++    this.api = {
++      updateScene: this.updateScene,
++      applyDeltas: this.applyDeltas,
++      mutateElement: this.mutateElement,
++      updateLibrary: this.library.updateLibrary,
++      addFiles: this.addFiles,
++      resetScene: this.resetScene,
++      getSceneElementsIncludingDeleted: this.getSceneElementsIncludingDeleted,
++      getSceneElementsMapIncludingDeleted:
++        this.getSceneElementsMapIncludingDeleted,
++      history: {
++        clear: this.resetHistory,
++      },
++      scrollToContent: this.scrollToContent,
++      getSceneElements: this.getSceneElements,
++      getAppState: () => this.state,
++      getFiles: () => this.files,
++      getName: this.getName,
++      registerAction: (action: Action) => {
++        this.actionManager.registerAction(action);
++      },
++      refresh: this.refresh,
++      setToast: this.setToast,
++      id: this.id,
++      setActiveTool: this.setActiveTool,
++      setCursor: this.setCursor,
++      resetCursor: this.resetCursor,
++      getEditorInterface: () => this.editorInterface,
++      updateFrameRendering: this.updateFrameRendering,
++      toggleSidebar: this.toggleSidebar,
++      onChange: (cb) => this.onChangeEmitter.on(cb),
++      onIncrement: (cb) => this.store.onStoreIncrementEmitter.on(cb),
++      onPointerDown: (cb) => this.onPointerDownEmitter.on(cb),
++      onPointerUp: (cb) => this.onPointerUpEmitter.on(cb),
++      onScrollChange: (cb) => this.onScrollChangeEmitter.on(cb),
++      onUserFollow: (cb) => this.onUserFollowEmitter.on(cb),
++      onStateChange: this.onStateChange,
++      onEvent: this.onEvent,
++    } as const;
++
++    props.onExcalidrawAPI?.(this.api);
+   }
+ 
+   updateEditorAtom = <Value, Args extends unknown[], Result>(
+@@ -2042,282 +2074,279 @@ class App extends React.Component<AppProps, AppState> {
+         onPointerEnter={this.toggleOverscrollBehavior}
+         onPointerLeave={this.toggleOverscrollBehavior}
+       >
+-        <AppContext.Provider value={this}>
+-          <AppPropsContext.Provider value={this.props}>
+-            <ExcalidrawContainerContext.Provider
+-              value={this.excalidrawContainerValue}
+-            >
+-              <EditorInterfaceContext.Provider value={this.editorInterface}>
+-                <ExcalidrawSetAppStateContext.Provider value={this.setAppState}>
+-                  <ExcalidrawAppStateContext.Provider value={this.state}>
+-                    <ExcalidrawElementsContext.Provider
+-                      value={this.scene.getNonDeletedElements()}
+-                    >
+-                      <ExcalidrawActionManagerContext.Provider
+-                        value={this.actionManager}
++        <ExcalidrawAPIContext.Provider value={this.api}>
++          <AppContext.Provider value={this}>
++            <AppPropsContext.Provider value={this.props}>
++              <ExcalidrawContainerContext.Provider
++                value={this.excalidrawContainerValue}
++              >
++                <EditorInterfaceContext.Provider value={this.editorInterface}>
++                  <ExcalidrawSetAppStateContext.Provider
++                    value={this.setAppState}
++                  >
++                    <ExcalidrawAppStateContext.Provider value={this.state}>
++                      <ExcalidrawElementsContext.Provider
++                        value={this.scene.getNonDeletedElements()}
+                       >
+-                        <LayerUI
+-                          canvas={this.canvas}
+-                          appState={this.state}
+-                          files={this.files}
+-                          setAppState={this.setAppState}
+-                          actionManager={this.actionManager}
+-                          elements={this.scene.getNonDeletedElements()}
+-                          onLockToggle={this.toggleLock}
+-                          onPenModeToggle={this.togglePenMode}
+-                          onHandToolToggle={this.onHandToolToggle}
+-                          langCode={getLanguage().code}
+-                          renderTopLeftUI={renderTopLeftUI}
+-                          renderTopRightUI={renderTopRightUI}
+-                          renderCustomStats={renderCustomStats}
+-                          showExitZenModeBtn={
+-                            typeof this.props?.zenModeEnabled === "undefined" &&
+-                            this.state.zenModeEnabled
+-                          }
+-                          UIOptions={this.props.UIOptions}
+-                          onExportImage={this.onExportImage}
+-                          renderWelcomeScreen={
+-                            !this.state.isLoading &&
+-                            this.state.showWelcomeScreen &&
+-                            this.state.activeTool.type ===
+-                              this.state.preferredSelectionTool.type &&
+-                            !this.state.zenModeEnabled &&
+-                            !this.scene.getElementsIncludingDeleted().length
+-                          }
+-                          app={this}
+-                          isCollaborating={this.props.isCollaborating}
+-                          generateLinkForSelection={
+-                            this.props.generateLinkForSelection
+-                          }
++                        <ExcalidrawActionManagerContext.Provider
++                          value={this.actionManager}
+                         >
+-                          {this.props.children}
+-                        </LayerUI>
+-
+-                        <div className="excalidraw-textEditorContainer" />
+-                        <div className="excalidraw-contextMenuContainer" />
+-                        <div className="excalidraw-eye-dropper-container" />
+-                        <SVGLayer
+-                          trails={[
+-                            this.laserTrails,
+-                            this.lassoTrail,
+-                            this.eraserTrail,
+-                          ]}
+-                        />
+-                        {selectedElements.length === 1 &&
+-                          this.state.openDialog?.name !==
+-                            "elementLinkSelector" &&
+-                          this.state.showHyperlinkPopup && (
+-                            <Hyperlink
+-                              key={firstSelectedElement.id}
+-                              element={firstSelectedElement}
+-                              scene={this.scene}
+-                              setAppState={this.setAppState}
+-                              onLinkOpen={this.props.onLinkOpen}
+-                              setToast={this.setToast}
+-                              updateEmbedValidationStatus={
+-                                this.updateEmbedValidationStatus
+-                              }
+-                            />
+-                          )}
+-                        {this.props.aiEnabled !== false &&
+-                          selectedElements.length === 1 &&
+-                          isMagicFrameElement(firstSelectedElement) && (
+-                            <ElementCanvasButtons
+-                              element={firstSelectedElement}
+-                              elementsMap={elementsMap}
+-                            >
+-                              <ElementCanvasButton
+-                                title={t("labels.convertToCode")}
+-                                icon={MagicIcon}
+-                                checked={false}
+-                                onChange={() =>
+-                                  this.onMagicFrameGenerate(
+-                                    firstSelectedElement,
+-                                    "button",
+-                                  )
+-                                }
+-                              />
+-                            </ElementCanvasButtons>
+-                          )}
+-                        {selectedElements.length === 1 &&
+-                          isIframeElement(firstSelectedElement) &&
+-                          firstSelectedElement.customData?.generationData
+-                            ?.status === "done" && (
+-                            <ElementCanvasButtons
+-                              element={firstSelectedElement}
+-                              elementsMap={elementsMap}
+-                            >
+-                              <ElementCanvasButton
+-                                title={t("labels.copySource")}
+-                                icon={copyIcon}
+-                                checked={false}
+-                                onChange={() =>
+-                                  this.onIframeSrcCopy(firstSelectedElement)
++                          <LayerUI
++                            canvas={this.canvas}
++                            appState={this.state}
++                            files={this.files}
++                            setAppState={this.setAppState}
++                            actionManager={this.actionManager}
++                            elements={this.scene.getNonDeletedElements()}
++                            onLockToggle={this.toggleLock}
++                            onPenModeToggle={this.togglePenMode}
++                            onHandToolToggle={this.onHandToolToggle}
++                            langCode={getLanguage().code}
++                            renderTopLeftUI={renderTopLeftUI}
++                            renderTopRightUI={renderTopRightUI}
++                            renderCustomStats={renderCustomStats}
++                            showExitZenModeBtn={
++                              typeof this.props?.zenModeEnabled ===
++                                "undefined" && this.state.zenModeEnabled
++                            }
++                            UIOptions={this.props.UIOptions}
++                            onExportImage={this.onExportImage}
++                            renderWelcomeScreen={
++                              !this.state.isLoading &&
++                              this.state.showWelcomeScreen &&
++                              this.state.activeTool.type ===
++                                this.state.preferredSelectionTool.type &&
++                              !this.state.zenModeEnabled &&
++                              !this.scene.getElementsIncludingDeleted().length
++                            }
++                            app={this}
++                            isCollaborating={this.props.isCollaborating}
++                            generateLinkForSelection={
++                              this.props.generateLinkForSelection
++                            }
++                          >
++                            {this.props.children}
++                          </LayerUI>
++
++                          <div className="excalidraw-textEditorContainer" />
++                          <div className="excalidraw-contextMenuContainer" />
++                          <div className="excalidraw-eye-dropper-container" />
++                          <SVGLayer
++                            trails={[
++                              this.laserTrails,
++                              this.lassoTrail,
++                              this.eraserTrail,
++                            ]}
++                          />
++                          {selectedElements.length === 1 &&
++                            this.state.openDialog?.name !==
++                              "elementLinkSelector" &&
++                            this.state.showHyperlinkPopup && (
++                              <Hyperlink
++                                key={firstSelectedElement.id}
++                                element={firstSelectedElement}
++                                scene={this.scene}
++                                setAppState={this.setAppState}
++                                onLinkOpen={this.props.onLinkOpen}
++                                setToast={this
+
+... [truncated, 132203 chars total]

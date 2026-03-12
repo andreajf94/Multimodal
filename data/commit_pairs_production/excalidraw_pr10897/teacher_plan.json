@@ -1,0 +1,158 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "api_design",
+      "recommendation": "Implemented CodeMirror as a lazy-loaded component with graceful fallback to textarea",
+      "rationale": "CodeMirror provides superior editing experience (syntax highlighting, line numbers, keyboard shortcuts) but adds significant bundle size. Lazy loading prevents impacting initial page load, while the fallback ensures functionality when CodeMirror fails to load. The component exposes a consistent API (value, onChange, errorLine) regardless of which editor is active.",
+      "alternatives_considered": [
+        "Directly importing CodeMirror in main bundle",
+        "Using Monaco Editor (heavier)",
+        "Enhancing textarea with custom syntax highlighting"
+      ],
+      "files_affected": [
+        "packages/excalidraw/components/TTDDialog/CodeMirrorEditor.tsx",
+        "packages/excalidraw/components/TTDDialog/TTDDialogInput.tsx"
+      ]
+    },
+    {
+      "dimension": "performance_optimization",
+      "recommendation": "Configured Vite to chunk CodeMirror dependencies separately and excluded them from service worker pre-caching",
+      "rationale": "CodeMirror and its dependencies (@codemirror/, @lezer/) are large and only needed for the Mermaid editor. Manual chunking prevents them from bloating the main bundle. Excluding CodeMirrorEditor-*.js from pre-caching avoids downloading unused code for users who never open the Mermaid editor, while still allowing CacheFirst strategy for those who do.",
+      "alternatives_considered": [
+        "Including in main bundle",
+        "Using dynamic imports without chunk configuration",
+        "Full pre-caching of all assets"
+      ],
+      "files_affected": [
+        "excalidraw-app/vite.config.mts"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Implemented comprehensive Mermaid error parsing and auto-fix system with BETA labeling",
+      "rationale": "Mermaid syntax errors are common but often follow predictable patterns. The system extracts line numbers from error messages, provides user-friendly guidance, and attempts automatic fixes for common issues (trailing characters, missing 'end' statements, extra arrowheads). BETA labeling manages user expectations for experimental features. The auto-fix uses breadth-first search with depth limits to prevent infinite loops.",
+      "alternatives_considered": [
+        "Only showing raw error messages",
+        "Server-side error correction",
+        "Manual fix suggestions without automation"
+      ],
+      "files_affected": [
+        "packages/excalidraw/components/TTDDialog/utils/mermaidError.ts",
+        "packages/excalidraw/components/TTDDialog/utils/mermaidAutoFix.ts",
+        "packages/excalidraw/components/TTDDialog/MermaidToExcalidraw.tsx"
+      ]
+    },
+    {
+      "dimension": "ui_ux",
+      "recommendation": "Enhanced error display with syntax guidance, line highlighting, and auto-fix buttons",
+      "rationale": "Raw Mermaid error messages are technical and confusing. The new UI shows likely causes, highlights error lines in the editor, and provides actionable fixes. Error lines are highlighted with a red background in CodeMirror. Auto-fix buttons appear only when fixes are available, reducing UI clutter.",
+      "alternatives_considered": [
+        "Minimal error display",
+        "Separate error documentation",
+        "Always-visible fix suggestions"
+      ],
+      "files_affected": [
+        "packages/excalidraw/components/TTDDialog/TTDDialogOutput.tsx",
+        "packages/excalidraw/components/TTDDialog/TTDDialog.scss",
+        "packages/excalidraw/locales/en.json"
+      ]
+    },
+    {
+      "dimension": "testing",
+      "recommendation": "Added comprehensive unit tests for error parsing, auto-fix logic, and integration",
+      "rationale": "Auto-fix logic involves string manipulation and error parsing which are prone to edge cases. Unit tests ensure fixes work correctly for various error patterns. Integration tests verify the quote normalization fallback works as expected. Test files mirror the structure of implementation files.",
+      "alternatives_considered": [
+        "End-to-end tests only",
+        "Manual testing",
+        "No testing for auto-fix features"
+      ],
+      "files_affected": [
+        "packages/excalidraw/components/TTDDialog/common.test.ts",
+        "packages/excalidraw/components/TTDDialog/utils/mermaidAutoFix.test.ts",
+        "packages/excalidraw/components/TTDDialog/utils/mermaidError.test.ts"
+      ]
+    },
+    {
+      "dimension": "accessibility_compatibility",
+      "recommendation": "Updated isWritableElement utility to recognize CodeMirror editor as writable",
+      "rationale": "Excalidraw's keyboard shortcuts system needs to know when the user is editing text to avoid conflicts. The original implementation didn't recognize CodeMirror's custom editor as a writable element, causing keyboard shortcuts to interfere with editing. Adding the .cm-editor check ensures proper keyboard handling.",
+      "alternatives_considered": [
+        "Disabling all keyboard shortcuts when CodeMirror is focused",
+        "Custom event listeners for CodeMirror",
+        "Modifying keyboard shortcut system"
+      ],
+      "files_affected": [
+        "packages/common/src/utils.ts"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "CodeMirror Editor Integration",
+      "description": "Replace basic textarea with CodeMirror editor for enhanced Mermaid editing experience with syntax highlighting, line numbers, and better keyboard shortcuts",
+      "files_to_modify": [
+        "packages/excalidraw/components/TTDDialog/TTDDialogInput.tsx",
+        "packages/excalidraw/components/TTDDialog/TTDDialog.scss",
+        "excalidraw-app/vite.config.mts",
+        "packages/common/src/utils.ts"
+      ],
+      "files_to_create": [
+        "packages/excalidraw/components/TTDDialog/CodeMirrorEditor.tsx",
+        "packages/excalidraw/components/TTDDialog/mermaid-lang-lite.ts"
+      ],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-002",
+      "title": "Mermaid Error Enhancement and Auto-fix",
+      "description": "Improve error display with line highlighting and guidance, implement client-side auto-fix for common Mermaid syntax errors as a BETA feature",
+      "files_to_modify": [
+        "packages/excalidraw/components/TTDDialog/MermaidToExcalidraw.tsx",
+        "packages/excalidraw/components/TTDDialog/TTDDialogOutput.tsx",
+        "packages/excalidraw/components/TTDDialog/common.ts",
+        "packages/excalidraw/locales/en.json"
+      ],
+      "files_to_create": [
+        "packages/excalidraw/components/TTDDialog/utils/mermaidError.ts",
+        "packages/excalidraw/components/TTDDialog/utils/mermaidAutoFix.ts"
+      ],
+      "estimated_effort": "large"
+    },
+    {
+      "id": "T-003",
+      "title": "Testing Infrastructure",
+      "description": "Add unit tests for error parsing, auto-fix logic, and integration tests for the Mermaid conversion pipeline",
+      "files_to_modify": [
+        "packages/excalidraw/tests/MermaidToExcalidraw.test.tsx",
+        "packages/excalidraw/tests/__snapshots__/MermaidToExcalidraw.test.tsx.snap"
+      ],
+      "files_to_create": [
+        "packages/excalidraw/components/TTDDialog/common.test.ts",
+        "packages/excalidraw/components/TTDDialog/utils/mermaidAutoFix.test.ts",
+        "packages/excalidraw/components/TTDDialog/utils/mermaidError.test.ts"
+      ],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-004",
+      "title": "Dependency Management",
+      "description": "Add CodeMirror dependencies and update package configuration",
+      "files_to_modify": [
+        "packages/excalidraw/package.json",
+        "yarn.lock"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation enhances the Mermaid editor in Excalidraw's Text-to-Diagram (TTD) dialog through three main pillars: editor experience, error handling, and performance optimization.\n\nFirst, the basic textarea is replaced with CodeMirror, providing syntax highlighting, line numbers, and better keyboard shortcuts (including Cmd+Enter for submission). CodeMirror is lazy-loaded to prevent bundle bloat, with a graceful fallback to textarea if loading fails. The editor supports theme switching (light/dark) and highlights error lines with a red background. A custom lightweight Mermaid syntax definition (mermaid-lang-lite.ts) provides basic highlighting without full language server overhead.\n\nSecond, error handling is significantly improved. Mermaid error messages are parsed to extract line numbers and provide user-friendly guidance. A client-side auto-fix system attempts to correct common syntax errors like trailing characters after labels, missing 'end' statements, and extra arrowheads. The auto-fix uses a breadth-first search with depth limits (max depth 4, max candidates 30) to prevent infinite loops. This feature is marked as BETA in the UI to manage expectations.\n\nThird, performance considerations are addressed through careful chunking. CodeMirror dependencies are placed in a separate 'codemirror.chunk' to avoid bloating the main bundle. The service worker configuration excludes CodeMirrorEditor-*.js from pre-caching while still allowing CacheFirst strategy after initial load. The implementation maintains backward compatibility through the textarea fallback and updates the isWritableElement utility to recognize CodeMirror editors for proper keyboard shortcut handling.\n\nThe changes integrate seamlessly with the existing TTD dialog architecture, extending rather than replacing current functionality. All new features are thoroughly tested with unit tests covering error parsing, auto-fix logic, and integration scenarios.",
+  "source_pr": "https://github.com/excalidraw/excalidraw/pull/10897",
+  "before_sha": "47c254216b45b42e48a20de693ffc3ab15cff86f",
+  "after_sha": "c1dbbdf678c71b93f491ce344cc7ba773f654585",
+  "diff_stats": {
+    "additions": 1490,
+    "deletions": 45,
+    "files_changed": 19
+  }
+}

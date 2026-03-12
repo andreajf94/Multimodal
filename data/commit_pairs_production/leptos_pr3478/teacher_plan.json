@@ -1,0 +1,124 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "api_design",
+      "recommendation": "Enhanced the EitherOf type system with comprehensive iterator trait implementations and utility methods using a macro-driven approach",
+      "rationale": "The original implementation only provided basic Iterator support with just the `next()` method. By implementing the full Iterator, ExactSizeIterator, and DoubleEndedIterator traits, we provide a complete iterator API that works seamlessly with Rust's ecosystem. The macro approach ensures consistency across all EitherOf variants (3-16) while minimizing code duplication.",
+      "alternatives_considered": [
+        "Manual implementation for each variant",
+        "Using proc-macros for code generation",
+        "Limiting to only the most commonly used iterator methods"
+      ],
+      "files_affected": [
+        "either_of/src/lib.rs"
+      ]
+    },
+    {
+      "dimension": "dependency_management",
+      "recommendation": "Added the 'paste' crate as a dependency and updated pin-project-lite version",
+      "rationale": "The 'paste' crate is needed for the macro to generate method names with proper hygiene (e.g., `map_left`, `unwrap_right`). Updating pin-project-lite to 0.2.16 ensures compatibility and security updates. The dependency changes are minimal and focused on enabling the new functionality.",
+      "alternatives_considered": [
+        "Manual string concatenation in macros",
+        "Using a different macro crate",
+        "Avoiding dependency additions by limiting functionality"
+      ],
+      "files_affected": [
+        "Cargo.lock",
+        "either_of/Cargo.toml"
+      ]
+    },
+    {
+      "dimension": "backward_compatibility",
+      "recommendation": "Maintained all existing functionality while adding new features through conditional compilation and feature flags",
+      "rationale": "Changed from unconditional `#![no_std]` to `#![cfg_attr(feature = \"no_std\", no_std)]` to allow std usage when needed (e.g., for Error trait implementation). Added a 'no_std' feature that's enabled by default, ensuring existing no_std users aren't affected. All existing APIs remain unchanged.",
+      "alternatives_considered": [
+        "Breaking change to always require std",
+        "Creating a separate crate for enhanced functionality",
+        "Dropping no_std support entirely"
+      ],
+      "files_affected": [
+        "either_of/src/lib.rs",
+        "either_of/Cargo.toml"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Added comprehensive error handling methods and implemented std::error::Error trait conditionally",
+      "rationale": "Added `unwrap_*`, `as_*`, `is_*`, and `into_*` methods for each variant following Rust's Result/Option conventions. Conditionally implements std::error::Error when not in no_std mode (with a TODO for core::error::Error when MSRV >= 1.81.0). This makes EitherOf types more ergonomic for error propagation.",
+      "alternatives_considered": [
+        "Leaving error handling to users",
+        "Only implementing basic unwrap methods",
+        "Always requiring std for Error trait"
+      ],
+      "files_affected": [
+        "either_of/src/lib.rs"
+      ]
+    },
+    {
+      "dimension": "testing",
+      "recommendation": "Reorganized tests into a proper test module and added comprehensive test coverage",
+      "rationale": "Moved all tests into a `#[cfg(test)] mod tests` block following Rust conventions. Added a panic test for `unwrap_wrong_either()` to verify error messages. The existing compile-time tests for the `either!` macro were preserved and enhanced with proper module organization.",
+      "alternatives_considered": [
+        "Keeping tests inline",
+        "Adding only minimal tests",
+        "Creating separate test files"
+      ],
+      "files_affected": [
+        "either_of/src/lib.rs"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Enhance EitherOf iterator capabilities",
+      "description": "Add comprehensive Iterator, ExactSizeIterator, and DoubleEndedIterator trait implementations to all EitherOf variants, enabling full iterator functionality",
+      "files_to_modify": [
+        "either_of/src/lib.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-002",
+      "title": "Add utility methods and error handling",
+      "description": "Implement map, inspect, as_*, is_*, unwrap_*, and into_* methods for each variant, plus swap() and From<Result> for Either, and EitherOr implementation for Either",
+      "files_to_modify": [
+        "either_of/src/lib.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-003",
+      "title": "Update dependencies and configuration",
+      "description": "Add 'paste' crate dependency, update pin-project-lite version, add feature flags for conditional no_std support, and bump crate version to 0.1.4",
+      "files_to_modify": [
+        "Cargo.lock",
+        "either_of/Cargo.toml",
+        "either_of/src/lib.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-004",
+      "title": "Improve test organization and coverage",
+      "description": "Reorganize tests into proper test module, add panic test for unwrap methods, and maintain existing macro compile-time tests",
+      "files_to_modify": [
+        "either_of/src/lib.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation significantly enhances the EitherOf type system within the Leptos framework's utility crate. The core approach uses a sophisticated macro (`tuples!`) to generate consistent implementations across all EitherOf variants (from Either up to EitherOf16). This macro-driven approach ensures maintainability while providing comprehensive functionality.\n\nKey patterns include: 1) Complete iterator trait implementations (Iterator, ExactSizeIterator, DoubleEndedIterator) with all standard methods like `fold`, `map`, `filter`, `sum`, `product`, etc.; 2) Ergonomic utility methods following Rust conventions (`map_left`, `unwrap_right`, `as_left`, `is_right`); 3) Conditional compilation for no_std support via feature flags; 4) Seamless integration with existing traits like Display, Error, and From<Result>.\n\nThe changes integrate smoothly with the existing codebase by maintaining backward compatibility - all existing code continues to work unchanged. The enhanced EitherOf types now behave more like standard Rust enums with full iterator support, making them more useful in generic contexts and iterator chains. The dependency additions are minimal (just the 'paste' crate) and focused on enabling the macro hygiene needed for method generation.\n\nTrade-offs include increased compile times due to the extensive macro expansions and generated code, but this is balanced by the significant usability improvements. The implementation also includes TODO comments for future enhancements (core::error::Error and is_sorted methods) that will become available with newer Rust versions, showing forward-thinking design.",
+  "source_pr": "https://github.com/leptos-rs/leptos/pull/3478",
+  "before_sha": "9ccefbbd8c8e1baf111b118ec0eb5c2f53fc71cf",
+  "after_sha": "b62ae56094c9fec4a2ae55ae1ed430258cf4d231",
+  "diff_stats": {
+    "additions": 725,
+    "deletions": 170,
+    "files_changed": 3
+  }
+}

@@ -1,0 +1,53 @@
+diff --git a/packages/common/first-referrer-cookie.test.ts b/packages/common/first-referrer-cookie.test.ts
+index 18f54214620b2..4fa97a927513c 100644
+--- a/packages/common/first-referrer-cookie.test.ts
++++ b/packages/common/first-referrer-cookie.test.ts
+@@ -232,6 +232,33 @@ describe('first-referrer-cookie', () => {
+         has_existing_cookie: false,
+       })
+     })
++
++    it('parses URL-encoded value from Next.js response.cookies.set()', () => {
++      const header = `${MW_DIAG_COOKIE_NAME}=hit%3D1%26would_stamp%3D1%26has_cookie%3D0`
++      expect(parseMwDiagCookie(header)).toEqual({
++        hit: true,
++        would_stamp: true,
++        has_existing_cookie: false,
++      })
++    })
++
++    it('parses URL-encoded value with has_cookie=1', () => {
++      const header = `${MW_DIAG_COOKIE_NAME}=hit%3D1%26would_stamp%3D0%26has_cookie%3D1`
++      expect(parseMwDiagCookie(header)).toEqual({
++        hit: true,
++        would_stamp: false,
++        has_existing_cookie: true,
++      })
++    })
++
++    it('parses URL-encoded value among multiple cookies', () => {
++      const header = `session=abc; ${MW_DIAG_COOKIE_NAME}=hit%3D1%26would_stamp%3D0%26has_cookie%3D0; theme=dark`
++      expect(parseMwDiagCookie(header)).toEqual({
++        hit: true,
++        would_stamp: false,
++        has_existing_cookie: false,
++      })
++    })
+   })
+ 
+   describe('shouldRefreshCookie', () => {
+diff --git a/packages/common/first-referrer-cookie.ts b/packages/common/first-referrer-cookie.ts
+index 4f9a8436fb64b..2fef56d656b84 100644
+--- a/packages/common/first-referrer-cookie.ts
++++ b/packages/common/first-referrer-cookie.ts
+@@ -290,8 +290,8 @@ export function parseMwDiagCookie(cookieHeader: string): MwDiagData | null {
+ 
+     if (!match) return null
+ 
+-    const value = match.slice(`${MW_DIAG_COOKIE_NAME}=`.length)
+-    const params = new URLSearchParams(value)
++    const rawValue = match.slice(`${MW_DIAG_COOKIE_NAME}=`.length)
++    const params = new URLSearchParams(decodeURIComponent(rawValue))
+ 
+     if (params.get('hit') !== '1') return null
+ 

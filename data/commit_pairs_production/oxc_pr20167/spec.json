@@ -1,0 +1,13 @@
+{
+  "feature_name": "Ensure after hooks always run in linter plugins",
+  "description": "Implement a fix to guarantee that when a `before` hook is called in the `createOnce` API, its corresponding `after` hook will always execute, even when errors occur during AST visitation. This ensures plugin state tracking remains reliable across all linting scenarios.",
+  "functional_requirements": [
+    "Wrap the entire linting process in a try/catch block to handle errors thrown during AST traversal",
+    "Ensure after hooks are called within the error handling logic so they execute regardless of rule failures",
+    "Maintain the invariant that if a before hook runs, its after hook will always run for the same file",
+    "Handle errors thrown at various stages: in before hooks, during AST visitation, and in after hooks themselves",
+    "Replace existing test fixtures with a comprehensive test that validates behavior across all error scenarios"
+  ],
+  "project_name": "oxc",
+  "source_pr": "https://github.com/oxc-project/oxc/pull/20167"
+}

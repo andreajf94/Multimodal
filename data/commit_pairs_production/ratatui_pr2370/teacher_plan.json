@@ -1,0 +1,84 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "infrastructure",
+      "recommendation": "Created symbolic links from each crate directory to the root LICENSE file instead of copying the license file",
+      "rationale": "Using symlinks ensures all crates reference the same canonical license file, preventing version drift and making license updates propagate automatically. The relative path '../LICENSE' works correctly within the repository structure and will be resolved when each crate is packaged for publication on crates.io.",
+      "alternatives_considered": [
+        "Copying the LICENSE file to each crate directory",
+        "Maintaining separate license files for each crate",
+        "Using absolute paths in symlinks"
+      ],
+      "files_affected": [
+        "ratatui-core/LICENSE",
+        "ratatui-crossterm/LICENSE",
+        "ratatui-termion/LICENSE",
+        "ratatui-termwiz/LICENSE",
+        "ratatui-widgets/LICENSE",
+        "ratatui/LICENSE"
+      ]
+    },
+    {
+      "dimension": "legal_compliance",
+      "recommendation": "Excluded ratatui-macros crate from the symlink pattern due to different copyright holders",
+      "rationale": "The ratatui-macros crate already has its own LICENSE file with different copyright information. Creating a symlink would incorrectly apply the root license's copyright holders to code with different authorship, potentially violating licensing terms or creating legal ambiguity.",
+      "alternatives_considered": [
+        "Creating a symlink anyway and updating the root LICENSE to include all copyright holders",
+        "Copying the ratatui-macros/LICENSE to other crates",
+        "Creating a composite LICENSE file"
+      ],
+      "files_affected": [
+        "ratatui-core/LICENSE",
+        "ratatui-crossterm/LICENSE",
+        "ratatui-termion/LICENSE",
+        "ratatui-termwiz/LICENSE",
+        "ratatui-widgets/LICENSE",
+        "ratatui/LICENSE"
+      ]
+    },
+    {
+      "dimension": "publishing_workflow",
+      "recommendation": "Used file mode 120000 (symlink) for all created LICENSE files",
+      "rationale": "The 120000 file mode explicitly marks these as symbolic links in Git, ensuring proper handling across different operating systems and Git clients. This mode is standard for symlinks in Git repositories and ensures the links are preserved when cloning the repository.",
+      "alternatives_considered": [
+        "Using regular files with copied content",
+        "Using hard links",
+        "Creating symlinks only during build/publish process"
+      ],
+      "files_affected": [
+        "ratatui-core/LICENSE",
+        "ratatui-crossterm/LICENSE",
+        "ratatui-termion/LICENSE",
+        "ratatui-termwiz/LICENSE",
+        "ratatui-widgets/LICENSE",
+        "ratatui/LICENSE"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Add LICENSE symlinks to crate directories",
+      "description": "Create symbolic links from each crate directory to the root LICENSE file to ensure proper licensing when crates are published to crates.io",
+      "files_to_modify": [],
+      "files_to_create": [
+        "ratatui-core/LICENSE",
+        "ratatui-crossterm/LICENSE",
+        "ratatui-termion/LICENSE",
+        "ratatui-termwiz/LICENSE",
+        "ratatui-widgets/LICENSE",
+        "ratatui/LICENSE"
+      ],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "This change addresses a packaging requirement for Rust crates published to crates.io by ensuring each crate directory includes proper licensing information. The implementation follows established patterns from other Rust projects like clap-rs, using symbolic links rather than file copies to maintain a single source of truth for the license.\n\nThe key design decision was to use relative path symlinks ('../LICENSE') from each crate directory to the root LICENSE file. This approach ensures that when each crate is packaged for publication, the symlink will be resolved and the actual license content will be included in the published crate. The file mode 120000 explicitly marks these as symlinks in Git, which is important for cross-platform compatibility.\n\nA notable exception was made for the ratatui-macros crate, which already has its own LICENSE file with different copyright holders. This demonstrates careful attention to legal compliance - rather than applying a one-size-fits-all solution, the implementation respects existing licensing differences between crates. The change integrates seamlessly with the existing workspace structure and requires no modifications to build scripts or CI/CD workflows.",
+  "source_pr": "https://github.com/ratatui/ratatui/pull/2370",
+  "before_sha": "23c6525818f91b69452ee430642f49d81080e3ef",
+  "after_sha": "746e9c9ca2370a2ff033fb082f765f4c32a629b4",
+  "diff_stats": {
+    "additions": 6,
+    "deletions": 0,
+    "files_changed": 6
+  }
+}

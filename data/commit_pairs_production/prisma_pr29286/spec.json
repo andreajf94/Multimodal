@@ -1,0 +1,14 @@
+{
+  "feature_name": "Cross-bundle null type detection",
+  "description": "Implement a duck-typing solution to detect Prisma null types (DbNull, JsonNull, AnyNull) across bundled environments. Replace all instanceof ObjectEnumValue checks with a function that works when browser and server entry points resolve to separate copies of the runtime utilities.",
+  "functional_requirements": [
+    "Create an isObjectEnumValue() function that checks for the presence of _getName and _getNamespace methods",
+    "Replace all instanceof ObjectEnumValue checks in serialization and cloning code with the new duck-typing function",
+    "Export isObjectEnumValue from both browser and server runtime entry points",
+    "Update null type validation to check by name string rather than singleton identity",
+    "Ensure the solution follows the existing isDecimalJsLike pattern used elsewhere in the codebase",
+    "Maintain backward compatibility with existing null type usage patterns"
+  ],
+  "project_name": "prisma",
+  "source_pr": "https://github.com/prisma/prisma/pull/29286"
+}

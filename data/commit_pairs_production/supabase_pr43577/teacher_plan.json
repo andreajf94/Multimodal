@@ -1,0 +1,148 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "component_reusability",
+      "recommendation": "Created a reusable PreventNavigationOnUnsavedChanges component to consolidate navigation guard logic that was previously duplicated across multiple files",
+      "rationale": "The diff shows identical beforeunload and routeChangeStart handling logic was repeated in TemplateEditor.tsx, Reports.tsx, and edge function pages. By extracting this into a shared component, we achieve DRY principles, reduce code duplication, and ensure consistent behavior across all editing interfaces. The component accepts a hasChanges prop and handles all navigation scenarios internally.",
+      "alternatives_considered": [
+        "Keeping duplicated logic in each component",
+        "Creating a custom hook instead of a component",
+        "Using a higher-order component wrapper"
+      ],
+      "files_affected": [
+        "apps/studio/components/ui-patterns/Dialogs/PreventNavigationOnUnsavedChanges.tsx",
+        "apps/studio/components/ui-patterns/Dialogs/DiscardChangesConfirmationDialog.tsx"
+      ]
+    },
+    {
+      "dimension": "api_design",
+      "recommendation": "Exported the DiscardChangesConfirmationDialogProps interface to make it reusable by the new component",
+      "rationale": "The PreventNavigationOnUnsavedChanges component needs to accept props for customizing the confirmation dialog (title, description, etc.). By exporting the existing interface from DiscardChangesConfirmationDialog.tsx, we maintain type safety and enable prop forwarding without duplicating type definitions. This follows the TypeScript best practice of reusing existing types.",
+      "alternatives_considered": [
+        "Duplicating the interface in the new component",
+        "Creating a new interface with a subset of props",
+        "Using any type for props"
+      ],
+      "files_affected": [
+        "apps/studio/components/ui-patterns/Dialogs/DiscardChangesConfirmationDialog.tsx"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Maintained the same error throwing mechanism for routeChangeStart events to prevent navigation",
+      "rationale": "The implementation continues to throw 'Route change declined' when intercepting Next.js router events with unsaved changes. This is the standard pattern for preventing route changes in Next.js applications. The throw statement stops the navigation without causing actual runtime errors since it's caught by the router's event system.",
+      "alternatives_considered": [
+        "Using router.block() (deprecated in Next.js)",
+        "Implementing custom history blocking",
+        "Using window.confirm() for all navigation types"
+      ],
+      "files_affected": [
+        "apps/studio/components/ui-patterns/Dialogs/PreventNavigationOnUnsavedChanges.tsx"
+      ]
+    },
+    {
+      "dimension": "state_management",
+      "rationale": "The component uses local state (navigateUrl, confirmNavigate) to track pending navigation and user confirmation. This keeps the component self-contained and doesn't require external state management. The confirmNavigate flag prevents infinite loops when the user confirms navigation.",
+      "recommendation": "Used local React state within the component to manage navigation confirmation flow",
+      "alternatives_considered": [
+        "Using React Context for global navigation state",
+        "Using URL search params to track navigation state",
+        "Using a global store like Zustand or Redux"
+      ],
+      "files_affected": [
+        "apps/studio/components/ui-patterns/Dialogs/PreventNavigationOnUnsavedChanges.tsx"
+      ]
+    },
+    {
+      "dimension": "performance",
+      "recommendation": "Memoized hasUnsavedChanges calculations in edge function pages to prevent unnecessary re-renders",
+      "rationale": "In code.tsx and new.tsx, the hasUnsavedChanges is now computed with useMemo based on file comparisons. This prevents recalculating the equality check on every render, which is important since file content comparison (isEqual on arrays of files) can be expensive. The dependency arrays ensure the calculation only runs when relevant data changes.",
+      "alternatives_considered": [
+        "Calculating on every render",
+        "Using useEffect to set state",
+        "Using a custom comparison hook"
+      ],
+      "files_affected": [
+        "apps/studio/pages/project/[ref]/functions/[functionSlug]/code.tsx",
+        "apps/studio/pages/project/[ref]/functions/new.tsx"
+      ]
+    },
+    {
+      "dimension": "cleanup_and_maintenance",
+      "recommendation": "Removed duplicate useEffect cleanup logic and useLatest hook usage that became unnecessary",
+      "rationale": "The original edge function pages used useLatest hook and complex effect cleanup for beforeunload events. With the new component approach, this logic is centralized and simplified. Removing these reduces cognitive load and potential bugs from effect dependency management. The imports were also reorganized for better readability.",
+      "alternatives_considered": [
+        "Keeping the old logic alongside the new component",
+        "Creating a hybrid approach",
+        "Using a more complex abstraction"
+      ],
+      "files_affected": [
+        "apps/studio/pages/project/[ref]/functions/[functionSlug]/code.tsx",
+        "apps/studio/pages/project/[ref]/functions/new.tsx"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Create reusable navigation guard component",
+      "description": "Implement a shared React component that handles both browser beforeunload events and Next.js router change events to prevent accidental navigation loss",
+      "files_to_modify": [
+        "apps/studio/components/ui-patterns/Dialogs/DiscardChangesConfirmationDialog.tsx"
+      ],
+      "files_to_create": [
+        "apps/studio/components/ui-patterns/Dialogs/PreventNavigationOnUnsavedChanges.tsx"
+      ],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-002",
+      "title": "Integrate navigation guard into email templates",
+      "description": "Replace duplicated navigation guard logic in TemplateEditor.tsx with the new reusable component",
+      "files_to_modify": [
+        "apps/studio/components/interfaces/Auth/EmailTemplates/TemplateEditor.tsx"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-003",
+      "title": "Integrate navigation guard into observability reports",
+      "description": "Replace custom navigation guard implementation in Reports.tsx with the new reusable component",
+      "files_to_modify": [
+        "apps/studio/components/interfaces/Reports/Reports.tsx"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-004",
+      "title": "Integrate navigation guard into edge function editing",
+      "description": "Replace complex beforeunload logic in edge function code editor with the new reusable component and optimize hasUnsavedChanges calculation",
+      "files_to_modify": [
+        "apps/studio/pages/project/[ref]/functions/[functionSlug]/code.tsx"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-005",
+      "title": "Integrate navigation guard into new edge function creation",
+      "description": "Replace beforeunload logic in new edge function page with the new reusable component",
+      "files_to_modify": [
+        "apps/studio/pages/project/[ref]/functions/new.tsx"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation addresses the unsaved changes navigation guard requirement by creating a reusable React component that centralizes all navigation protection logic. The key architectural decision was to extract duplicated beforeunload and routeChangeStart handling from multiple editing interfaces into a single shared component, `PreventNavigationOnUnsavedChanges`. This component accepts a `hasChanges` boolean prop and handles both browser-level navigation (tab closing, back button) and Next.js client-side routing events.\n\nThe component integrates with the existing `DiscardChangesConfirmationDialog` by extending its props interface, ensuring visual consistency across the application. When unsaved changes exist and navigation is attempted, the component displays a confirmation dialog that allows users to either cancel navigation (keeping changes) or confirm navigation (discarding changes). The implementation properly handles edge cases like BASE_PATH considerations and ensures the guard only triggers when there are actual unsaved changes.\n\nIntegration into existing editing interfaces involved removing duplicate logic from email templates, observability reports, and edge function pages, then adding the new component with appropriate `hasChanges` state. For edge functions, the implementation was optimized by memoizing the `hasUnsavedChanges` calculation using `useMemo` to prevent expensive file comparisons on every render. This approach maintains existing functionality while extending consistent protection across all editing interfaces, following DRY principles and improving maintainability.",
+  "source_pr": "https://github.com/supabase/supabase/pull/43577",
+  "before_sha": "423ec30bec2662008c9a610fb81fef48b9c4618e",
+  "after_sha": "87581e02cb85c67bba9f90650efa3e51d00100ee",
+  "diff_stats": {
+    "additions": 92,
+    "deletions": 109,
+    "files_changed": 6
+  }
+}

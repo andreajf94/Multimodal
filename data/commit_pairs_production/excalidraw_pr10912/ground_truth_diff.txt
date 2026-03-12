@@ -1,0 +1,209 @@
+diff --git a/packages/common/src/utils.test.ts b/packages/common/src/utils.test.ts
+index 25929722f702..677aaf22450a 100644
+--- a/packages/common/src/utils.test.ts
++++ b/packages/common/src/utils.test.ts
+@@ -3,6 +3,12 @@ import {
+   mapFind,
+   reduceToCommonValue,
+ } from "@excalidraw/common";
++import { vi } from "vitest";
++
++// Import directly to avoid the @excalidraw/common throttleRAF mock from setupTests.ts.
++import { throttleRAF } from "./utils";
++
++type RafCallback = FrameRequestCallback;
+ 
+ describe("@excalidraw/common/utils", () => {
+   describe("isTransparent()", () => {
+@@ -79,4 +85,87 @@ describe("@excalidraw/common/utils", () => {
+       expect(mapFind([1, 2], () => null)).toBe(undefined);
+     });
+   });
++
++  describe("throttleRAF()", () => {
++    let frameCallbacks: Map<number, RafCallback>;
++    let nextFrameId: number;
++
++    const runScheduledFrame = (timestamp = 16) => {
++      const callbacks = [...frameCallbacks.values()];
++      frameCallbacks.clear();
++      callbacks.forEach((callback) => callback(timestamp));
++    };
++
++    beforeEach(() => {
++      frameCallbacks = new Map();
++      nextFrameId = 0;
++
++      vi.spyOn(window, "requestAnimationFrame").mockImplementation(
++        (callback) => {
++          const frameId = ++nextFrameId;
++          frameCallbacks.set(frameId, callback);
++          return frameId;
++        },
++      );
++
++      vi.spyOn(window, "cancelAnimationFrame").mockImplementation((frameId) => {
++        frameCallbacks.delete(frameId);
++      });
++    });
++
++    afterEach(() => {
++      vi.restoreAllMocks();
++    });
++
++    it("should invoke the callback with the last args from the same frame", () => {
++      const fn = vi.fn();
++      const throttled = throttleRAF(fn);
++
++      throttled("first", 1);
++      throttled("second", 2);
++      throttled("last", 3);
++
++      expect(fn).not.toHaveBeenCalled();
++      expect(window.requestAnimationFrame).toHaveBeenCalledTimes(1);
++
++      runScheduledFrame();
++
++      expect(fn).toHaveBeenCalledTimes(1);
++      expect(fn).toHaveBeenCalledWith("last", 3);
++    });
++
++    it("should flush the pending callback immediately", () => {
++      const fn = vi.fn();
++      const throttled = throttleRAF(fn);
++
++      throttled("first");
++      throttled("last");
++
++      throttled.flush();
++
++      expect(window.cancelAnimationFrame).toHaveBeenCalledTimes(1);
++      expect(fn).toHaveBeenCalledTimes(1);
++      expect(fn).toHaveBeenCalledWith("last");
++
++      runScheduledFrame();
++
++      expect(fn).toHaveBeenCalledTimes(1);
++    });
++
++    it("should cancel the pending callback", () => {
++      const fn = vi.fn();
++      const throttled = throttleRAF(fn);
++
++      throttled("first");
++      throttled("last");
++
++      throttled.cancel();
++
++      expect(window.cancelAnimationFrame).toHaveBeenCalledTimes(1);
++
++      runScheduledFrame();
++
++      expect(fn).not.toHaveBeenCalled();
++    });
++  });
+ });
+diff --git a/packages/common/src/utils.ts b/packages/common/src/utils.ts
+index 26c75dcfa29d..e9793236492d 100644
+--- a/packages/common/src/utils.ts
++++ b/packages/common/src/utils.ts
+@@ -169,10 +169,6 @@ export const throttleRAF = <T extends any[]>(fn: (...args: T) => void) => {
+   };
+ 
+   const ret = (...args: T) => {
+-    if (isTestEnv()) {
+-      fn(...args);
+-      return;
+-    }
+     lastArgs = args;
+     if (timerId === null) {
+       scheduleFunc();
+diff --git a/packages/excalidraw/index.tsx b/packages/excalidraw/index.tsx
+index ab0054ee35e7..90ddfb896ea4 100644
+--- a/packages/excalidraw/index.tsx
++++ b/packages/excalidraw/index.tsx
+@@ -267,6 +267,7 @@ export {
+   sceneCoordsToViewportCoords,
+   viewportCoordsToSceneCoords,
+   getFormFactor,
++  throttleRAF,
+ } from "@excalidraw/common";
+ 
+ export {
+diff --git a/packages/excalidraw/tests/clipboard.test.tsx b/packages/excalidraw/tests/clipboard.test.tsx
+index 7386b360cd99..f3fda88d113e 100644
+--- a/packages/excalidraw/tests/clipboard.test.tsx
++++ b/packages/excalidraw/tests/clipboard.test.tsx
+@@ -28,7 +28,9 @@ const { h } = window;
+ const mouse = new Pointer("mouse");
+ 
+ vi.mock("@excalidraw/common", async (importOriginal) => {
+-  const module: any = await importOriginal();
++  const module = await importOriginal<typeof import("@excalidraw/common")>();
++  const { mockThrottleRAF } = await import("./helpers/mocks");
++
+   return {
+     __esmodule: true,
+     ...module,
+@@ -37,6 +39,7 @@ vi.mock("@excalidraw/common", async (importOriginal) => {
+       ...module.KEYS,
+       CTRL_OR_CMD: "ctrlKey",
+     },
++    throttleRAF: mockThrottleRAF,
+   };
+ });
+ 
+diff --git a/packages/excalidraw/tests/helpers/mocks.ts b/packages/excalidraw/tests/helpers/mocks.ts
+index a2f3e8f3f421..71aa020b0a4f 100644
+--- a/packages/excalidraw/tests/helpers/mocks.ts
++++ b/packages/excalidraw/tests/helpers/mocks.ts
+@@ -3,6 +3,25 @@ import React from "react";
+ import { vi } from "vitest";
+ 
+ import type { parseMermaidToExcalidraw } from "@excalidraw/mermaid-to-excalidraw";
++import type { throttleRAF as throttleRAFType } from "@excalidraw/common";
++
++type ThrottledFn<T extends unknown[]> = ((...args: T) => void) & {
++  flush: () => void;
++  cancel: () => void;
++};
++
++export const mockThrottleRAF: typeof throttleRAFType = <T extends unknown[]>(
++  fn: (...args: T) => void,
++) => {
++  const ret = ((...args: T) => {
++    fn(...args);
++  }) as ThrottledFn<T>;
++
++  ret.flush = () => {};
++  ret.cancel = () => {};
++
++  return ret;
++};
+ 
+ export const mockMermaidToExcalidraw = (opts: {
+   parseMermaidToExcalidraw: typeof parseMermaidToExcalidraw;
+diff --git a/setupTests.ts b/setupTests.ts
+index 245c5732670b..41bc8e165c1d 100644
+--- a/setupTests.ts
++++ b/setupTests.ts
+@@ -6,9 +6,19 @@ import "@testing-library/jest-dom";
+ import { vi } from "vitest";
+ 
+ import polyfill from "./packages/excalidraw/polyfill";
++import { mockThrottleRAF } from "./packages/excalidraw/tests/helpers/mocks";
+ import { yellow } from "./packages/excalidraw/tests/helpers/colorize";
+ import { testPolyfills } from "./packages/excalidraw/tests/helpers/polyfills";
+ 
++vi.mock("@excalidraw/common", async (importOriginal) => {
++  const module = await importOriginal<typeof import("@excalidraw/common")>();
++
++  return {
++    ...module,
++    throttleRAF: mockThrottleRAF,
++  };
++});
++
+ // mock for pep.js not working with setPointerCapture()
+ HTMLElement.prototype.setPointerCapture = vi.fn();
+ 

@@ -1,0 +1,110 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "api_design",
+      "recommendation": "Refactored the public API to expose `is_global_defined` and `is_ecma_script_global` methods while making `env_contains_var` private",
+      "rationale": "This creates a clear separation between the high-level API for rule authors (checking if a global is defined) and the low-level implementation details (environment-specific variable checking). The new API better reflects the intended use case: rules should check if a global is available through any means (environment OR globals config), not just through environment settings.",
+      "alternatives_considered": [
+        "Keep `env_contains_var` public and add a separate method for globals checking",
+        "Modify `env_contains_var` to also check globals config (would break backward compatibility)",
+        "Create a trait with default implementations for global checking"
+      ],
+      "files_affected": [
+        "crates/oxc_linter/src/context/mod.rs"
+      ]
+    },
+    {
+      "dimension": "data_modeling",
+      "recommendation": "Changed the data flow so rules check the consolidated 'globals' configuration instead of directly accessing environment settings",
+      "rationale": "This prepares for a future refactoring where environment settings will be resolved into the globals configuration before reaching the linting context. By centralizing global definition checking in the context module, we ensure consistency across all rules and make the system more maintainable.",
+      "alternatives_considered": [
+        "Have each rule check both environment and globals config separately",
+        "Create a separate global resolution service",
+        "Use a visitor pattern to collect all global references first"
+      ],
+      "files_affected": [
+        "crates/oxc_linter/src/context/mod.rs",
+        "crates/oxc_linter/src/rules/eslint/no_undef.rs",
+        "crates/oxc_linter/src/rules/eslint/no_extend_native.rs",
+        "crates/oxc_linter/src/rules/eslint/no_constant_binary_expression.rs"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Added early return optimization in `is_global_defined` by checking if the variable is in root_unresolved_references first",
+      "rationale": "This prevents unnecessary lookups in the globals and environment maps for variables that are already resolved locally. It's a performance optimization that leverages the existing scoping information to short-circuit the global lookup process.",
+      "alternatives_considered": [
+        "Check globals first, then environment (would be slower for locally resolved variables)",
+        "Cache the results of global lookups",
+        "Create a bloom filter for fast negative checks"
+      ],
+      "files_affected": [
+        "crates/oxc_linter/src/context/mod.rs"
+      ]
+    },
+    {
+      "dimension": "testing",
+      "recommendation": "Added a test case to verify that globals configuration overrides environment settings",
+      "rationale": "The new test ensures that when a global is explicitly defined in the 'globals' config (even with browser environment disabled), it should still be recognized as defined. This validates the core functionality of the refactoring and prevents regression.",
+      "alternatives_considered": [
+        "Only test the existing behavior without adding new test cases",
+        "Create separate test files for globals configuration",
+        "Use property-based testing to generate test cases"
+      ],
+      "files_affected": [
+        "crates/oxc_linter/src/rules/eslint/no_undef.rs"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Refactor global variable checking API in lint context",
+      "description": "Update the LintContext API to provide clear methods for checking global definitions, separating environment-based checking from consolidated global checking. Make env_contains_var private and expose is_global_defined and is_ecma_script_global methods.",
+      "files_to_modify": [
+        "crates/oxc_linter/src/context/mod.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-002",
+      "title": "Update no-undef rule to use consolidated globals checking",
+      "description": "Modify the no-undef rule to use the new is_global_defined method instead of separate checks for environment and globals config. Add test coverage for globals configuration overriding environment settings.",
+      "files_to_modify": [
+        "crates/oxc_linter/src/rules/eslint/no_undef.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-003",
+      "title": "Update no-extend-native rule to use ECMAScript global checking",
+      "description": "Change the no-extend-native rule to use is_ecma_script_global instead of env_contains_var to ensure it only considers true ECMAScript builtins and not user-defined globals.",
+      "files_to_modify": [
+        "crates/oxc_linter/src/rules/eslint/no_extend_native.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-004",
+      "title": "Update no-constant-binary-expression rule for global constructor detection",
+      "description": "Modify the no-constant-binary-expression rule to use is_ecma_script_global when checking if a NewExpression's callee is a global constructor, ensuring consistent behavior with other rules.",
+      "files_to_modify": [
+        "crates/oxc_linter/src/rules/eslint/no_constant_binary_expression.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "This change refactors how linter rules check for global variable definitions to prepare for a future architecture where environment settings are resolved into the globals configuration before reaching the linting context. The core architectural shift is moving from direct environment checking to consolidated global definition checking.\n\nThe implementation introduces two new public methods on LintContext: `is_global_defined()` for general global checking (including both environment and globals config) and `is_ecma_script_global()` specifically for ECMAScript builtins. The existing `env_contains_var()` method is made private, signaling that rule authors should use the higher-level APIs. This creates a cleaner abstraction layer where rules don't need to understand the implementation details of how globals are resolved.\n\nThree specific rules were updated to use the new APIs: no-undef now uses `is_global_defined()` to check if a variable is defined through any means (environment OR globals config), while no-extend-native and no-constant-binary-expression use `is_ecma_script_global()` to specifically check for ECMAScript builtins. The test addition for no-undef validates that globals configuration can override environment settings, which is a key requirement for the future refactoring. This change maintains backward compatibility while paving the way for a more maintainable architecture.",
+  "source_pr": "https://github.com/oxc-project/oxc/pull/20089",
+  "before_sha": "1735215c4d6ce738fcae72e3981a2fa7d9be203c",
+  "after_sha": "a9acb2bfcf0b37eb647f0fd94180952d98ba559b",
+  "diff_stats": {
+    "additions": 33,
+    "deletions": 12,
+    "files_changed": 4
+  }
+}

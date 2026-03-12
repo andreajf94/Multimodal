@@ -1,0 +1,513 @@
+diff --git a/crates/action_log/src/action_log.rs b/crates/action_log/src/action_log.rs
+index 5679f3c58fe520..28245944e39dec 100644
+--- a/crates/action_log/src/action_log.rs
++++ b/crates/action_log/src/action_log.rs
+@@ -209,7 +209,7 @@ impl ActionLog {
+         cx: &mut Context<Self>,
+     ) {
+         match event {
+-            BufferEvent::Edited => {
++            BufferEvent::Edited { .. } => {
+                 let Some(tracked_buffer) = self.tracked_buffers.get_mut(&buffer) else {
+                     return;
+                 };
+diff --git a/crates/assistant_text_thread/src/text_thread.rs b/crates/assistant_text_thread/src/text_thread.rs
+index 34007868f9f128..7df6b32e597330 100644
+--- a/crates/assistant_text_thread/src/text_thread.rs
++++ b/crates/assistant_text_thread/src/text_thread.rs
+@@ -1219,7 +1219,7 @@ impl TextThread {
+             } => cx.emit(TextThreadEvent::Operation(
+                 TextThreadOperation::BufferOperation(operation.clone()),
+             )),
+-            language::BufferEvent::Edited => {
++            language::BufferEvent::Edited { .. } => {
+                 self.count_remaining_tokens(cx);
+                 self.reparse(cx);
+                 cx.emit(TextThreadEvent::MessagesEdited);
+diff --git a/crates/channel/src/channel_buffer.rs b/crates/channel/src/channel_buffer.rs
+index 8b6f30a3cd3bf1..6145b1cf055fae 100644
+--- a/crates/channel/src/channel_buffer.rs
++++ b/crates/channel/src/channel_buffer.rs
+@@ -221,7 +221,7 @@ impl ChannelBuffer {
+                     })
+                     .log_err();
+             }
+-            language::BufferEvent::Edited => {
++            language::BufferEvent::Edited { .. } => {
+                 cx.emit(ChannelBufferEvent::BufferEdited);
+             }
+             _ => {}
+diff --git a/crates/copilot/src/copilot.rs b/crates/copilot/src/copilot.rs
+index 179e217d207554..3506672b2e7941 100644
+--- a/crates/copilot/src/copilot.rs
++++ b/crates/copilot/src/copilot.rs
+@@ -949,7 +949,7 @@ impl Copilot {
+             && let Some(registered_buffer) = server.registered_buffers.get_mut(&buffer.entity_id())
+         {
+             match event {
+-                language::BufferEvent::Edited => {
++                language::BufferEvent::Edited { .. } => {
+                     drop(registered_buffer.report_changes(&buffer, cx));
+                 }
+                 language::BufferEvent::Saved => {
+diff --git a/crates/edit_prediction/src/edit_prediction.rs b/crates/edit_prediction/src/edit_prediction.rs
+index 1f692eff2c062c..5e1c9f9a03ec0c 100644
+--- a/crates/edit_prediction/src/edit_prediction.rs
++++ b/crates/edit_prediction/src/edit_prediction.rs
+@@ -1217,7 +1217,7 @@ impl EditPredictionStore {
+                         cx.subscribe(buffer, {
+                             let project = project.downgrade();
+                             move |this, buffer, event, cx| {
+-                                if let language::BufferEvent::Edited = event
++                                if let language::BufferEvent::Edited { .. } = event
+                                     && let Some(project) = project.upgrade()
+                                 {
+                                     this.report_changes_for_buffer(&buffer, &project, false, cx);
+diff --git a/crates/editor/src/editor.rs b/crates/editor/src/editor.rs
+index 40cfb8caf01a03..28c200c22ab01f 100644
+--- a/crates/editor/src/editor.rs
++++ b/crates/editor/src/editor.rs
+@@ -24128,7 +24128,10 @@ impl Editor {
+         cx: &mut Context<Self>,
+     ) {
+         match event {
+-            multi_buffer::Event::Edited { edited_buffer } => {
++            multi_buffer::Event::Edited {
++                edited_buffer,
++                is_local,
++            } => {
+                 self.scrollbar_marker_state.dirty = true;
+                 self.active_indent_guides_state.dirty = true;
+                 self.refresh_active_diagnostics(cx);
+@@ -24138,7 +24141,7 @@ impl Editor {
+                 self.refresh_matching_bracket_highlights(&snapshot, cx);
+                 self.refresh_outline_symbols_at_cursor(cx);
+                 self.refresh_sticky_headers(&snapshot, cx);
+-                if self.has_active_edit_prediction() {
++                if *is_local && self.has_active_edit_prediction() {
+                     self.update_visible_edit_prediction(window, cx);
+                 }
+ 
+diff --git a/crates/git_ui/src/file_diff_view.rs b/crates/git_ui/src/file_diff_view.rs
+index 115a53abbc240a..c684c230cf54cd 100644
+--- a/crates/git_ui/src/file_diff_view.rs
++++ b/crates/git_ui/src/file_diff_view.rs
+@@ -108,7 +108,7 @@ impl FileDiffView {
+ 
+         for buffer in [&old_buffer, &new_buffer] {
+             cx.subscribe(buffer, move |this, _, event, _| match event {
+-                language::BufferEvent::Edited
++                language::BufferEvent::Edited { .. }
+                 | language::BufferEvent::LanguageChanged(_)
+                 | language::BufferEvent::Reparsed => {
+                     this.buffer_changes_tx.send(()).ok();
+diff --git a/crates/git_ui/src/text_diff_view.rs b/crates/git_ui/src/text_diff_view.rs
+index 1419fa049ee2aa..9ae1b379471e49 100644
+--- a/crates/git_ui/src/text_diff_view.rs
++++ b/crates/git_ui/src/text_diff_view.rs
+@@ -165,7 +165,7 @@ impl TextDiffView {
+         let (buffer_changes_tx, mut buffer_changes_rx) = watch::channel(());
+ 
+         cx.subscribe(&source_buffer, move |this, _, event, _| match event {
+-            language::BufferEvent::Edited
++            language::BufferEvent::Edited { .. }
+             | language::BufferEvent::LanguageChanged(_)
+             | language::BufferEvent::Reparsed => {
+                 this.buffer_changes_tx.send(()).ok();
+diff --git a/crates/language/src/buffer.rs b/crates/language/src/buffer.rs
+index d183615317ecaa..a8bf8dd83ca76f 100644
+--- a/crates/language/src/buffer.rs
++++ b/crates/language/src/buffer.rs
+@@ -359,7 +359,7 @@ pub enum BufferEvent {
+         is_local: bool,
+     },
+     /// The buffer was edited.
+-    Edited,
++    Edited { is_local: bool },
+     /// The buffer's `dirty` bit changed.
+     DirtyChanged,
+     /// The buffer was saved.
+@@ -2457,7 +2457,7 @@ impl Buffer {
+             false
+         };
+         if let Some((transaction_id, start_version)) = self.text.end_transaction_at(now) {
+-            self.did_edit(&start_version, was_dirty, cx);
++            self.did_edit(&start_version, was_dirty, true, cx);
+             Some(transaction_id)
+         } else {
+             None
+@@ -2844,7 +2844,13 @@ impl Buffer {
+         Some(edit_id)
+     }
+ 
+-    fn did_edit(&mut self, old_version: &clock::Global, was_dirty: bool, cx: &mut Context<Self>) {
++    fn did_edit(
++        &mut self,
++        old_version: &clock::Global,
++        was_dirty: bool,
++        is_local: bool,
++        cx: &mut Context<Self>,
++    ) {
+         self.was_changed();
+ 
+         if self.edits_since::<usize>(old_version).next().is_none() {
+@@ -2852,7 +2858,7 @@ impl Buffer {
+         }
+ 
+         self.reparse(cx, true);
+-        cx.emit(BufferEvent::Edited);
++        cx.emit(BufferEvent::Edited { is_local });
+         if was_dirty != self.is_dirty() {
+             cx.emit(BufferEvent::DirtyChanged);
+         }
+@@ -2964,7 +2970,7 @@ impl Buffer {
+         self.text.apply_ops(buffer_ops);
+         self.deferred_ops.insert(deferred_ops);
+         self.flush_deferred_ops(cx);
+-        self.did_edit(&old_version, was_dirty, cx);
++        self.did_edit(&old_version, was_dirty, false, cx);
+         // Notify independently of whether the buffer was edited as the operations could include a
+         // selection update.
+         cx.notify();
+@@ -3119,7 +3125,7 @@ impl Buffer {
+ 
+         if let Some((transaction_id, operation)) = self.text.undo() {
+             self.send_operation(Operation::Buffer(operation), true, cx);
+-            self.did_edit(&old_version, was_dirty, cx);
++            self.did_edit(&old_version, was_dirty, true, cx);
+             self.restore_encoding_for_transaction(transaction_id, was_dirty);
+             Some(transaction_id)
+         } else {
+@@ -3137,7 +3143,7 @@ impl Buffer {
+         let old_version = self.version.clone();
+         if let Some(operation) = self.text.undo_transaction(transaction_id) {
+             self.send_operation(Operation::Buffer(operation), true, cx);
+-            self.did_edit(&old_version, was_dirty, cx);
++            self.did_edit(&old_version, was_dirty, true, cx);
+             true
+         } else {
+             false
+@@ -3159,7 +3165,7 @@ impl Buffer {
+             self.send_operation(Operation::Buffer(operation), true, cx);
+         }
+         if undone {
+-            self.did_edit(&old_version, was_dirty, cx)
++            self.did_edit(&old_version, was_dirty, true, cx)
+         }
+         undone
+     }
+@@ -3169,7 +3175,7 @@ impl Buffer {
+         let operation = self.text.undo_operations(counts);
+         let old_version = self.version.clone();
+         self.send_operation(Operation::Buffer(operation), true, cx);
+-        self.did_edit(&old_version, was_dirty, cx);
++        self.did_edit(&old_version, was_dirty, true, cx);
+     }
+ 
+     /// Manually redoes a specific transaction in the buffer's redo history.
+@@ -3179,7 +3185,7 @@ impl Buffer {
+ 
+         if let Some((transaction_id, operation)) = self.text.redo() {
+             self.send_operation(Operation::Buffer(operation), true, cx);
+-            self.did_edit(&old_version, was_dirty, cx);
++            self.did_edit(&old_version, was_dirty, true, cx);
+             self.restore_encoding_for_transaction(transaction_id, was_dirty);
+             Some(transaction_id)
+         } else {
+@@ -3220,7 +3226,7 @@ impl Buffer {
+             self.send_operation(Operation::Buffer(operation), true, cx);
+         }
+         if redone {
+-            self.did_edit(&old_version, was_dirty, cx)
++            self.did_edit(&old_version, was_dirty, true, cx)
+         }
+         redone
+     }
+@@ -3330,7 +3336,7 @@ impl Buffer {
+         if !ops.is_empty() {
+             for op in ops {
+                 self.send_operation(Operation::Buffer(op), true, cx);
+-                self.did_edit(&old_version, was_dirty, cx);
++                self.did_edit(&old_version, was_dirty, true, cx);
+             }
+         }
+     }
+diff --git a/crates/language/src/buffer_tests.rs b/crates/language/src/buffer_tests.rs
+index 49d871cc860bb6..a47578faa2037e 100644
+--- a/crates/language/src/buffer_tests.rs
++++ b/crates/language/src/buffer_tests.rs
+@@ -458,15 +458,18 @@ fn test_edit_events(cx: &mut gpui::App) {
+     assert_eq!(
+         mem::take(&mut *buffer_1_events.lock()),
+         vec![
+-            BufferEvent::Edited,
++            BufferEvent::Edited { is_local: true },
+             BufferEvent::DirtyChanged,
+-            BufferEvent::Edited,
+-            BufferEvent::Edited,
++            BufferEvent::Edited { is_local: true },
++            BufferEvent::Edited { is_local: true },
+         ]
+     );
+     assert_eq!(
+         mem::take(&mut *buffer_2_events.lock()),
+-        vec![BufferEvent::Edited, BufferEvent::DirtyChanged]
++        vec![
++            BufferEvent::Edited { is_local: false },
++            BufferEvent::DirtyChanged
++        ]
+     );
+ 
+     buffer1.update(cx, |buffer, cx| {
+@@ -481,11 +484,17 @@ fn test_edit_events(cx: &mut gpui::App) {
+     });
+     assert_eq!(
+         mem::take(&mut *buffer_1_events.lock()),
+-        vec![BufferEvent::Edited, BufferEvent::DirtyChanged,]
++        vec![
++            BufferEvent::Edited { is_local: true },
++            BufferEvent::DirtyChanged,
++        ]
+     );
+     assert_eq!(
+         mem::take(&mut *buffer_2_events.lock()),
+-        vec![BufferEvent::Edited, BufferEvent::DirtyChanged]
++        vec![
++            BufferEvent::Edited { is_local: false },
++            BufferEvent::DirtyChanged
++        ]
+     );
+ }
+ 
+diff --git a/crates/multi_buffer/src/multi_buffer.rs b/crates/multi_buffer/src/multi_buffer.rs
+index 32898f1515a0c4..2b4428b36a8c8f 100644
+--- a/crates/multi_buffer/src/multi_buffer.rs
++++ b/crates/multi_buffer/src/multi_buffer.rs
+@@ -119,6 +119,7 @@ pub enum Event {
+     DiffHunksToggled,
+     Edited {
+         edited_buffer: Option<Entity<Buffer>>,
++        is_local: bool,
+     },
+     TransactionUndone {
+         transaction_id: TransactionId,
+@@ -1912,6 +1913,7 @@ impl MultiBuffer {
+ 
+         cx.emit(Event::Edited {
+             edited_buffer: None,
++            is_local: true,
+         });
+         cx.emit(Event::ExcerptsAdded {
+             buffer,
+@@ -1974,6 +1976,7 @@ impl MultiBuffer {
+         }
+         cx.emit(Event::Edited {
+             edited_buffer: None,
++            is_local: true,
+         });
+         cx.emit(Event::ExcerptsRemoved {
+             ids,
+@@ -2330,6 +2333,7 @@ impl MultiBuffer {
+         }
+         cx.emit(Event::Edited {
+             edited_buffer: None,
++            is_local: true,
+         });
+         cx.emit(Event::ExcerptsRemoved {
+             ids,
+@@ -2394,8 +2398,9 @@ impl MultiBuffer {
+         use language::BufferEvent;
+         let buffer_id = buffer.read(cx).remote_id();
+         cx.emit(match event {
+-            BufferEvent::Edited => Event::Edited {
++            &BufferEvent::Edited { is_local } => Event::Edited {
+                 edited_buffer: Some(buffer),
++                is_local,
+             },
+             BufferEvent::DirtyChanged => Event::DirtyChanged,
+             BufferEvent::Saved => Event::Saved,
+@@ -2484,6 +2489,7 @@ impl MultiBuffer {
+         }
+         cx.emit(Event::Edited {
+             edited_buffer: None,
++            is_local: true,
+         });
+     }
+ 
+@@ -2530,6 +2536,7 @@ impl MultiBuffer {
+         }
+         cx.emit(Event::Edited {
+             edited_buffer: None,
++            is_local: true,
+         });
+     }
+ 
+@@ -2769,6 +2776,7 @@ impl MultiBuffer {
+         cx.emit(Event::DiffHunksToggled);
+         cx.emit(Event::Edited {
+             edited_buffer: None,
++            is_local: true,
+         });
+     }
+ 
+@@ -2885,6 +2893,7 @@ impl MultiBuffer {
+         cx.emit(Event::DiffHunksToggled);
+         cx.emit(Event::Edited {
+             edited_buffer: None,
++            is_local: true,
+         });
+     }
+ 
+@@ -2952,6 +2961,7 @@ impl MultiBuffer {
+         }
+         cx.emit(Event::Edited {
+             edited_buffer: None,
++            is_local: true,
+         });
+         cx.emit(Event::ExcerptsExpanded { ids: vec![id] });
+         cx.notify();
+@@ -3059,6 +3069,7 @@ impl MultiBuffer {
+         }
+         cx.emit(Event::Edited {
+             edited_buffer: None,
++            is_local: true,
+         });
+         cx.emit(Event::ExcerptsExpanded { ids });
+         cx.notify();
+@@ -3702,6 +3713,7 @@ impl MultiBuffer {
+         cx.emit(Event::DiffHunksToggled);
+         cx.emit(Event::Edited {
+             edited_buffer: None,
++            is_local: true,
+         });
+     }
+ }
+diff --git a/crates/multi_buffer/src/multi_buffer_tests.rs b/crates/multi_buffer/src/multi_buffer_tests.rs
+index 41e475a554b994..c169297e2d5e17 100644
+--- a/crates/multi_buffer/src/multi_buffer_tests.rs
++++ b/crates/multi_buffer/src/multi_buffer_tests.rs
+@@ -171,12 +171,15 @@ fn test_excerpt_boundaries_and_clipping(cx: &mut App) {
+         &[
+             Event::Edited {
+                 edited_buffer: None,
++                is_local: true,
+             },
+             Event::Edited {
+                 edited_buffer: None,
++                is_local: true,
+             },
+             Event::Edited {
+                 edited_buffer: None,
++                is_local: true,
+             }
+         ]
+     );
+diff --git a/crates/project/src/lsp_store.rs b/crates/project/src/lsp_store.rs
+index 97aa03cec730c6..ff272cb10a662f 100644
+--- a/crates/project/src/lsp_store.rs
++++ b/crates/project/src/lsp_store.rs
+@@ -4429,7 +4429,7 @@ impl LspStore {
+         cx: &mut Context<Self>,
+     ) {
+         match event {
+-            language::BufferEvent::Edited => {
++            language::BufferEvent::Edited { .. } => {
+                 self.on_buffer_edited(buffer, cx);
+             }
+ 
+diff --git a/crates/project/src/project.rs b/crates/project/src/project.rs
+index 756f095511a968..ed8884cd68c6df 100644
+--- a/crates/project/src/project.rs
++++ b/crates/project/src/project.rs
+@@ -3636,11 +3636,11 @@ impl Project {
+         event: &BufferEvent,
+         cx: &mut Context<Self>,
+     ) -> Option<()> {
+-        if matches!(event, BufferEvent::Edited | BufferEvent::Reloaded) {
++        if matches!(event, BufferEvent::Edited { .. } | BufferEvent::Reloaded) {
+             self.request_buffer_diff_recalculation(&buffer, cx);
+         }
+ 
+-        if matches!(event, BufferEvent::Edited) {
++        if matches!(event, BufferEvent::Edited { .. }) {
+             cx.emit(Event::BufferEdited);
+         }
+ 
+diff --git a/crates/project/tests/integration/project_tests.rs b/crates/project/tests/integration/project_tests.rs
+index d86b969e61ed17..2cecc5054df29b 100644
+--- a/crates/project/tests/integration/project_tests.rs
++++ b/crates/project/tests/integration/project_tests.rs
+@@ -5552,7 +5552,7 @@ async fn test_buffer_is_dirty(cx: &mut gpui::TestAppContext) {
+         assert_eq!(
+             *events.lock(),
+             &[
+-                language::BufferEvent::Edited,
++                language::BufferEvent::Edited { is_local: true },
+                 language::BufferEvent::DirtyChanged
+             ]
+         );
+@@ -5581,9 +5581,9 @@ async fn test_buffer_is_dirty(cx: &mut gpui::TestAppContext) {
+         assert_eq!(
+             *events.lock(),
+             &[
+-                language::BufferEvent::Edited,
++                language::BufferEvent::Edited { is_local: true },
+                 language::BufferEvent::DirtyChanged,
+-                language::BufferEvent::Edited,
++                language::BufferEvent::Edited { is_local: true },
+             ],
+         );
+         events.lock().clear();
+@@ -5598,7 +5598,7 @@ async fn test_buffer_is_dirty(cx: &mut gpui::TestAppContext) {
+     assert_eq!(
+         *events.lock(),
+         &[
+-            language::BufferEvent::Edited,
++            language::BufferEvent::Edited { is_local: true },
+             language::BufferEvent::DirtyChanged
+         ]
+     );
+@@ -5638,7 +5638,7 @@ async fn test_buffer_is_dirty(cx: &mut gpui::TestAppContext) {
+     assert_eq!(
+         mem::take(&mut *events.lock()),
+         &[
+-            language::BufferEvent::Edited,
++            language::BufferEvent::Edited { is_local: true },
+             language::BufferEvent::DirtyChanged
+         ]
+     );
+@@ -5653,7 +5653,7 @@ async fn test_buffer_is_dirty(cx: &mut gpui::TestAppContext) {
+     assert_eq!(
+         *events.lock(),
+         &[
+-            language::BufferEvent::Edited,
++            language::BufferEvent::Edited { is_local: true },
+             language::BufferEvent::DirtyChanged
+         ]
+     );
+diff --git a/crates/svg_preview/src/svg_preview_view.rs b/crates/svg_preview/src/svg_preview_view.rs
+index cc7e2052295f73..1a001c6e188544 100644
+--- a/crates/svg_preview/src/svg_preview_view.rs
++++ b/crates/svg_preview/src/svg_preview_view.rs
+@@ -182,7 +182,7 @@ impl SvgPreviewView {
+             buffer,
+             window,
+             move |this, _buffer, event: &BufferEvent, window, cx| match event {
+-                BufferEvent::Edited | BufferEvent::Saved => {
++                BufferEvent::Edited { .. } | BufferEvent::Saved => {
+                     this.render_image(window, cx);
+                 }
+                 _ => {}
+diff --git a/crates/vim/src/state.rs b/crates/vim/src/state.rs
+index 0244a14c83b422..69b2816cc0bdc5 100644
+--- a/crates/vim/src/state.rs
++++ b/crates/vim/src/state.rs
+@@ -515,7 +515,7 @@ impl MarksState {
+         cx: &mut Context<Self>,
+     ) {
+         let on_change = cx.subscribe(buffer_handle, move |this, buffer, event, cx| match event {
+-            BufferEvent::Edited => {
++            BufferEvent::Edited { .. } => {
+                 if let Some(path) = this.path_for_buffer(&buffer, cx) {
+                     this.serialize_buffer_marks(path, &buffer, cx);
+                 }

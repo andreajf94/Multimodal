@@ -1,0 +1,166 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "api_design",
+      "recommendation": "Created a stateful widget pattern with Surface3D as state and VolatilitySurface as widget, following existing ratatui patterns",
+      "rationale": "The ratatui library already uses StatefulWidget pattern extensively (e.g., in tests/stateful_widget_ref.rs). This approach separates rendering logic from state management, making the example consistent with library conventions and easier for users to understand and extend.",
+      "alternatives_considered": [
+        "Creating a monolithic widget that manages its own state",
+        "Using callback-based architecture"
+      ],
+      "files_affected": [
+        "examples/apps/volatility-surface/src/display/surface_3d.rs"
+      ]
+    },
+    {
+      "dimension": "data_modeling",
+      "recommendation": "Used 2D grid structure (Vec<Vec<f64>>) for volatility surface data with separate strike and expiration vectors",
+      "rationale": "The volatility surface naturally maps to a 2D grid where X-axis represents strike prices (moneyness) and Y-axis represents expiration times. This structure allows efficient row/column traversal for grid line rendering and matches financial data conventions.",
+      "alternatives_considered": [
+        "Using a flat array with index calculations",
+        "Using a struct per data point with coordinates"
+      ],
+      "files_affected": [
+        "examples/apps/volatility-surface/src/volatility.rs",
+        "examples/apps/volatility-surface/src/display/surface_3d.rs"
+      ]
+    },
+    {
+      "dimension": "rendering_optimization",
+      "recommendation": "Used Braille marker for Canvas widget instead of block characters, providing 8x resolution",
+      "rationale": "Braille characters (Marker::Braille) provide 2x4 dot resolution per character cell vs 1x1 for block characters. This enables smoother curves and higher detail in the 3D visualization without requiring more terminal space.",
+      "alternatives_considered": [
+        "Using half-block characters",
+        "Using custom Unicode characters",
+        "ASCII-only rendering"
+      ],
+      "files_affected": [
+        "examples/apps/volatility-surface/src/display/surface_3d.rs"
+      ]
+    },
+    {
+      "dimension": "color_system",
+      "recommendation": "Added colorgrad dependency for perceptually uniform color gradients and created custom palette system",
+      "rationale": "The colorgrad crate provides scientifically accurate color gradients (viridis, plasma, inferno) that are perceptually uniform and colorblind-friendly. Custom palettes (phosphor, fear, calm) were added for visual variety while maintaining readability.",
+      "alternatives_considered": [
+        "Hardcoding RGB values",
+        "Using ratatui's built-in color palette only",
+        "Implementing custom gradient math"
+      ],
+      "files_affected": [
+        "Cargo.lock",
+        "examples/apps/volatility-surface/src/display/palette.rs"
+      ]
+    },
+    {
+      "dimension": "interactive_controls",
+      "recommendation": "Implemented keyboard controls following vim-style (hjkl) and arrow key conventions with real-time response",
+      "rationale": "Using both vim-style (hjkl) and arrow keys accommodates different user preferences. The controls provide immediate visual feedback with smooth rotation/zoom, enhancing the interactive demo experience.",
+      "alternatives_considered": [
+        "Mouse controls only",
+        "Modal interface",
+        "Command-line arguments for rotation"
+      ],
+      "files_affected": [
+        "examples/apps/volatility-surface/src/main.rs"
+      ]
+    },
+    {
+      "dimension": "animation_performance",
+      "recommendation": "Implemented 50 FPS target with delta-time based updates and FPS counter for performance monitoring",
+      "rationale": "50 FPS provides smooth animation while being conservative on CPU usage. The FpsCounter helps users understand performance characteristics and ensures the example runs well across different terminal emulators.",
+      "alternatives_considered": [
+        "Fixed 60 FPS",
+        "Uncapped frame rate",
+        "Event-driven updates only"
+      ],
+      "files_affected": [
+        "examples/apps/volatility-surface/src/main.rs"
+      ]
+    },
+    {
+      "dimension": "perspective_projection",
+      "recommendation": "Implemented proper 3D perspective projection with rotation matrices and camera distance",
+      "rationale": "True perspective projection (dividing by distance) creates realistic 3D appearance where distant objects appear smaller. Rotation matrices around X and Z axes allow natural exploration of the 3D surface from any angle.",
+      "alternatives_considered": [
+        "Orthographic projection",
+        "Isometric projection",
+        "2D heatmap representation"
+      ],
+      "files_affected": [
+        "examples/apps/volatility-surface/src/display/surface_3d.rs"
+      ]
+    },
+    {
+      "dimension": "documentation",
+      "recommendation": "Created comprehensive README with usage instructions and VHS tape for animated demo",
+      "rationale": "The README provides immediate context for users, while the VHS tape (volatility-surface.tape) generates an animated GIF demonstrating the interactive features. This follows existing ratatui example patterns and serves as both documentation and marketing material.",
+      "alternatives_considered": [
+        "Minimal comments only",
+        "Separate tutorial document",
+        "Video recording instead of VHS"
+      ],
+      "files_affected": [
+        "examples/apps/volatility-surface/README.md",
+        "examples/vhs/volatility-surface.tape"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Create 3D volatility surface visualization core",
+      "description": "Implement the main 3D rendering engine with perspective projection, rotation matrices, and Braille canvas rendering",
+      "files_to_modify": [],
+      "files_to_create": [
+        "examples/apps/volatility-surface/src/display/surface_3d.rs",
+        "examples/apps/volatility-surface/src/display/palette.rs",
+        "examples/apps/volatility-surface/src/display.rs"
+      ],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-002",
+      "title": "Add synthetic volatility data generation",
+      "description": "Create realistic financial volatility surface data with time-based animation and market dynamics simulation",
+      "files_to_modify": [],
+      "files_to_create": [
+        "examples/apps/volatility-surface/src/volatility.rs"
+      ],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-003",
+      "title": "Build interactive application shell",
+      "description": "Create the main application with keyboard controls, FPS counter, UI layout, and state management",
+      "files_to_modify": [],
+      "files_to_create": [
+        "examples/apps/volatility-surface/src/main.rs"
+      ],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-004",
+      "title": "Setup project infrastructure and dependencies",
+      "description": "Add Cargo.toml, README, VHS demo tape, and update lockfile with new dependencies",
+      "files_to_modify": [
+        "Cargo.lock"
+      ],
+      "files_to_create": [
+        "examples/apps/volatility-surface/Cargo.toml",
+        "examples/apps/volatility-surface/README.md",
+        "examples/vhs/volatility-surface.tape"
+      ],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation creates a sophisticated 3D volatility surface visualization example that demonstrates advanced terminal graphics capabilities in ratatui. The core architecture follows the library's established StatefulWidget pattern, separating the rendering logic (VolatilitySurface widget) from the interactive state (Surface3D struct). This makes the example immediately familiar to existing ratatui users and demonstrates best practices for widget development.\n\nKey technical achievements include proper 3D perspective projection using rotation matrices and camera distance calculations, which creates realistic depth perception. The use of Braille markers for the Canvas widget provides 8x higher resolution than block characters, enabling smooth curves in the wireframe visualization. The color system leverages the colorgrad crate for perceptually uniform gradients while adding custom palettes for visual variety.\n\nThe example integrates seamlessly with existing ratatui patterns: it uses the same layout system, follows the example app structure with proper Cargo.toml workspace inheritance, and includes a VHS tape for automated demo generation like other examples. The synthetic data generation in VolatilityEngine creates realistic financial volatility surfaces with time-based animation, making the example self-contained without external dependencies. Interactive controls support both vim-style (hjkl) and arrow keys, with smooth 50 FPS animation and performance monitoring via an FPS counter.",
+  "source_pr": "https://github.com/ratatui/ratatui/pull/2322",
+  "before_sha": "720303e806b884f37f986913c111e79a4e243ae9",
+  "after_sha": "9d9239a702d8cd29ca321745901ddb56bff20f70",
+  "diff_stats": {
+    "additions": 837,
+    "deletions": 1,
+    "files_changed": 9
+  }
+}

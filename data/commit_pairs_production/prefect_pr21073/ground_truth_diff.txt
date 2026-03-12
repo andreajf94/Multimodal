@@ -1,0 +1,75 @@
+diff --git a/src/prefect/serializers.py b/src/prefect/serializers.py
+index 6ebc9074e4cd..dd4c51850f4c 100644
+--- a/src/prefect/serializers.py
++++ b/src/prefect/serializers.py
+@@ -88,12 +88,20 @@ def prefect_json_object_decoder(result: dict[str, Any]) -> Any:
+     if "__class__" in result:
+         class_name = result["__class__"]
+         if class_name not in _TYPE_ADAPTER_CACHE:
+-            _TYPE_ADAPTER_CACHE[class_name] = TypeAdapter(
+-                from_qualified_name(class_name)
+-            )
++            try:
++                cls = from_qualified_name(class_name)
++            except (ImportError, AttributeError):
++                return result
++            _TYPE_ADAPTER_CACHE[class_name] = TypeAdapter(cls)
+         return _TYPE_ADAPTER_CACHE[class_name].validate_python(result["data"])
+     elif "__exc_type__" in result:
+-        return from_qualified_name(result["__exc_type__"])(result["message"])
++        try:
++            exc_cls = from_qualified_name(result["__exc_type__"])
++        except (ImportError, AttributeError):
++            raise ValueError(f"Invalid exception type: {result['__exc_type__']!r}")
++        if not (isinstance(exc_cls, type) and issubclass(exc_cls, BaseException)):
++            raise ValueError(f"Invalid exception type: {result['__exc_type__']!r}")
++        return exc_cls(result["message"])
+     else:
+         return result
+ 
+diff --git a/tests/test_serializers.py b/tests/test_serializers.py
+index 098d672bdbe4..33a4326582c7 100644
+--- a/tests/test_serializers.py
++++ b/tests/test_serializers.py
+@@ -447,6 +447,41 @@ def test_dataclass_generic_model_roundtrip(self):
+         assert loaded.data == "hello"
+ 
+ 
++class TestJSONObjectDecoderSecurity:
++    def test_exc_type_rejects_non_exception_class(self):
++        with pytest.raises(ValueError, match="Invalid exception type"):
++            prefect_json_object_decoder(
++                {"__exc_type__": "builtins.int", "message": "42"}
++            )
++
++    def test_exc_type_allows_real_exception(self):
++        result = prefect_json_object_decoder(
++            {"__exc_type__": "builtins.ValueError", "message": "test error"}
++        )
++        assert isinstance(result, ValueError)
++        assert str(result) == "test error"
++
++    def test_exc_type_raises_on_unimportable_class(self):
++        with pytest.raises(ValueError, match="Invalid exception type"):
++            prefect_json_object_decoder(
++                {"__exc_type__": "nonexistent.FakeError", "message": "test"}
++            )
++
++    def test_exc_type_raises_on_dotless_name(self):
++        with pytest.raises(ValueError, match="Invalid exception type"):
++            prefect_json_object_decoder({"__exc_type__": "int", "message": "test"})
++
++    def test_class_path_handles_unimportable_class(self):
++        result = prefect_json_object_decoder(
++            {"__class__": "nonexistent.Module", "data": {}}
++        )
++        assert result == {"__class__": "nonexistent.Module", "data": {}}
++
++    def test_class_path_handles_dotless_name(self):
++        result = prefect_json_object_decoder({"__class__": "int", "data": {}})
++        assert result == {"__class__": "int", "data": {}}
++
++
+ class TestCompressedSerializer:
+     @pytest.mark.parametrize("data", SERIALIZER_TEST_CASES)
+     def test_simple_roundtrip(self, data: Any):

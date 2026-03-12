@@ -1,0 +1,136 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "api_design",
+      "recommendation": "Enhanced response schemas to include detailed timing metrics for prewarm, offload, and promotion operations",
+      "rationale": "The feature required adding timing metrics to HTTP responses. Instead of creating separate response types, we extended the existing enum variants (LfcPrewarmState::Completed, LfcOffloadState::Completed, PromoteState::Completed) with timing fields. This maintains backward compatibility for clients that only check the status while providing rich timing data for observability.",
+      "alternatives_considered": [
+        "Creating separate timing response structs",
+        "Adding timing fields to wrapper structs",
+        "Returning timing data in HTTP headers"
+      ],
+      "files_affected": [
+        "libs/compute_api/src/responses.rs",
+        "compute_tools/src/http/openapi_spec.yaml"
+      ]
+    },
+    {
+      "dimension": "data_modeling",
+      "recommendation": "Changed LfcPrewarmState::Completed from a simple variant to a struct variant with timing and progress fields",
+      "rationale": "Previously, progress metrics (total, prewarmed, skipped) were returned in a separate wrapper struct (LfcPrewarmStateWithProgress). By embedding these fields directly in the Completed variant, we simplify the API surface and ensure timing and progress data are always available together when prewarm completes successfully.",
+      "alternatives_considered": [
+        "Keeping separate wrapper struct",
+        "Adding timing fields to the wrapper struct",
+        "Creating a new enum variant with timing"
+      ],
+      "files_affected": [
+        "compute_tools/src/compute_prewarm.rs",
+        "libs/compute_api/src/responses.rs",
+        "compute_tools/src/compute.rs",
+        "compute_tools/src/http/routes/lfc.rs"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Added early validation in promote HTTP handler and improved error messages",
+      "rationale": "The promote endpoint now validates the spec immediately in the HTTP handler rather than deep in the promotion logic. This provides better error feedback to callers and prevents wasted work. Error messages were also made more descriptive (e.g., 'compute mode \"{mode}\" is not replica' instead of just 'is not replica').",
+      "alternatives_considered": [
+        "Keeping validation deep in promote_impl",
+        "Adding validation in a middleware",
+        "Using custom error types"
+      ],
+      "files_affected": [
+        "compute_tools/src/http/routes/promote.rs",
+        "compute_tools/src/compute_promote.rs"
+      ]
+    },
+    {
+      "dimension": "performance_monitoring",
+      "recommendation": "Added fine-grained timing measurements using Instant for key sub-operations",
+      "rationale": "To meet the requirement of reporting timing metrics, we instrumented critical code paths with Instant timers. For prewarm: state download, decompression, and database loading. For offload: state query, compression, and upload. For promotion: LSN wait, pg_promote execution, and reconfiguration. These timings help identify bottlenecks in production.",
+      "alternatives_considered": [
+        "Using tracing spans with durations",
+        "Adding Prometheus histograms",
+        "Logging timing information separately"
+      ],
+      "files_affected": [
+        "compute_tools/src/compute_prewarm.rs",
+        "compute_tools/src/compute_promote.rs"
+      ]
+    },
+    {
+      "dimension": "configuration_management",
+      "recommendation": "Added synchronous_standby_names=walproposer configuration during promotion",
+      "rationale": "The feature explicitly required configuring promoted computes with synchronous_standby_names=walproposer to prevent walproposer from getting stuck. This was added as an ALTER SYSTEM SET command alongside the safekeepers configuration, ensuring the promoted primary is properly configured for synchronous replication.",
+      "alternatives_considered": [
+        "Adding to the spec template",
+        "Setting via postgresql.conf",
+        "Making it configurable"
+      ],
+      "files_affected": [
+        "compute_tools/src/compute_promote.rs"
+      ]
+    },
+    {
+      "dimension": "testing",
+      "recommendation": "Updated regression test to verify promotion configuration changes",
+      "rationale": "Added a restart check in the test to ensure the promoted compute retains its new configuration after restart. This validates that the synchronous_standby_names setting and other configuration changes persist correctly through the promotion process.",
+      "alternatives_considered": [
+        "Adding a new dedicated test",
+        "Checking configuration without restart",
+        "Relying on existing tests"
+      ],
+      "files_affected": [
+        "test_runner/regress/test_replica_promotes.py"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Add timing metrics to LFC prewarm and offload operations",
+      "description": "Enhanced prewarm and offload implementations to measure and report timing of sub-operations (download, decompression, database loading for prewarm; query, compression, upload for offload). Updated response schemas and API documentation.",
+      "files_to_modify": [
+        "compute_tools/src/compute_prewarm.rs",
+        "libs/compute_api/src/responses.rs",
+        "compute_tools/src/http/openapi_spec.yaml",
+        "compute_tools/src/http/routes/lfc.rs",
+        "compute_tools/src/compute.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-002",
+      "title": "Add timing metrics and walproposer configuration to promotion",
+      "description": "Enhanced promotion to measure LSN wait, pg_promote execution, and reconfiguration timing. Added synchronous_standby_names=walproposer configuration to prevent walproposer issues. Improved error handling and validation.",
+      "files_to_modify": [
+        "compute_tools/src/compute_promote.rs",
+        "libs/compute_api/src/responses.rs",
+        "compute_tools/src/http/openapi_spec.yaml",
+        "compute_tools/src/http/routes/promote.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-003",
+      "title": "Update tests for promotion timing and configuration",
+      "description": "Enhanced existing regression test to verify promoted compute configuration persists after restart, ensuring synchronous_standby_names and other settings are properly applied.",
+      "files_to_modify": [
+        "test_runner/regress/test_replica_promotes.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation adds detailed timing metrics to three critical compute operations: LFC prewarm, LFC offload, and replica promotion. For each operation, we instrumented key sub-steps using Instant timers and embedded the timing data directly into the existing response enum variants. This approach maintains API backward compatibility while providing rich observability data.\n\nFor prewarm operations, we consolidated the previously separate progress reporting (LfcPrewarmStateWithProgress) into the main LfcPrewarmState::Completed variant, simplifying the API. The timing metrics include state download, decompression, and database loading times. Similarly, offload operations now report state query, compression, and upload times.\n\nPromotion received significant enhancements: we added timing for LSN catch-up, pg_promote execution, and reconfiguration. Crucially, we added the synchronous_standby_names=walproposer configuration to prevent walproposer from getting stuck after promotion. The HTTP handler now validates the promotion spec early, providing better error feedback to callers.\n\nAll changes are reflected in the OpenAPI specification, ensuring API documentation stays current. The regression test was updated to verify that promoted computes retain their new configuration after restart, providing confidence that the synchronous_standby_names setting and other changes persist correctly.",
+  "source_pr": "https://github.com/neondatabase/neon/pull/12730",
+  "before_sha": "b4a63e0a34a1c3f0de95cfec8ac935047ce45317",
+  "after_sha": "df4e37b7cc1ba9fb9b21988a3ecd5b0590f33d53",
+  "diff_stats": {
+    "additions": 209,
+    "deletions": 149,
+    "files_changed": 8
+  }
+}

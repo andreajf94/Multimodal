@@ -1,0 +1,12 @@
+{
+  "feature_name": "Fix polymorphic join limit application",
+  "description": "Fix an issue where querying folders with nested subfolders returns incorrect results in SQL databases. Currently, the polymorphic UNION query applies LIMIT at the global level, causing incomplete or incorrect child data for some parent folders. Restructure the query so parent correlation occurs before applying the LIMIT to ensure accurate nested subfolder queries.",
+  "functional_requirements": [
+    "Restructure the polymorphic join query to apply LIMIT per parent folder rather than globally",
+    "Ensure parent correlation logic executes before any LIMIT constraints are applied to the result set",
+    "Maintain existing query functionality while fixing the limit application order",
+    "Add comprehensive tests for nested folder queries with various limit scenarios"
+  ],
+  "project_name": "payload",
+  "source_pr": "https://github.com/payloadcms/payload/pull/15652"
+}

@@ -1,0 +1,12 @@
+{
+  "feature_name": "Convert Anthropic Event Handler to Instance Method",
+  "description": "Convert the `_make_message_chunk_from_anthropic_event` method from a class method to an instance method to allow child classes to override streaming behavior. This change enables subclasses like ChatAnthropicBedrock to implement custom logic for handling usage metadata that arrives at different points in the stream (input tokens at start, output tokens at end) compared to the standard Anthropic API.",
+  "functional_requirements": [
+    "Change `_make_message_chunk_from_anthropic_event` from a class method to an instance method in the ChatAnthropic class",
+    "Update all internal calls to this method to use the instance reference instead of the class reference",
+    "Ensure the method signature remains compatible with existing streaming event processing logic",
+    "Update test files to reflect the change from class method to instance method calls"
+  ],
+  "project_name": "langchain",
+  "source_pr": "https://github.com/langchain-ai/langchain/pull/35670"
+}

@@ -1,0 +1,12 @@
+{
+  "feature_name": "Plugin Type Consistency for disable_plugins",
+  "description": "Update the `disable_plugins` configuration parameter to accept Plugin class types instead of strings, making it consistent with the existing `plugins` parameter. Maintain backward compatibility by accepting strings at runtime with a deprecation warning, and ensure environment variable support continues to work through updated interpreter logic.",
+  "functional_requirements": [
+    "Change the type annotation for `disable_plugins` from `list[str]` to `list[type[Plugin]]` in the configuration system",
+    "Implement runtime normalization that converts string plugin names to their corresponding Plugin classes, issuing a deprecation warning when strings are used",
+    "Update the environment variable interpreter to resolve Plugin classes from string values, reusing this logic where appropriate to avoid duplication",
+    "Ensure the REFLEX_DISABLE_PLUGINS environment variable continues to function correctly with the new type system"
+  ],
+  "project_name": "reflex",
+  "source_pr": "https://github.com/reflex-dev/reflex/pull/6155"
+}

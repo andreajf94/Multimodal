@@ -1,0 +1,158 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "state_management",
+      "recommendation": "Created a new SharedState base class with linking/unlinking capabilities to enable state synchronization across user sessions",
+      "rationale": "The framework needed a way to share state between different clients without requiring manual synchronization. By creating a dedicated SharedState class that inherits from State, we maintain consistency with the existing state management system while adding specialized linking functionality. This approach allows states to be linked by token references, enabling automatic propagation of changes across connected clients.",
+      "alternatives_considered": [
+        "Manual event broadcasting between clients",
+        "Centralized global state store",
+        "WebSocket room-based sharing"
+      ],
+      "files_affected": [
+        "reflex/istate/shared.py",
+        "reflex/__init__.py"
+      ]
+    },
+    {
+      "dimension": "concurrency_control",
+      "recommendation": "Implemented a locking mechanism for linked state modifications using AsyncExitStack and context managers",
+      "rationale": "When multiple clients share state, concurrent modifications must be synchronized to prevent race conditions. The _modify_linked_states context manager acquires locks on all linked states before allowing modifications, ensuring atomic updates. This prevents inconsistent state when multiple clients modify the same linked state simultaneously.",
+      "alternatives_considered": [
+        "Optimistic locking with conflict resolution",
+        "Eventual consistency model",
+        "Single-writer multiple-reader locks"
+      ],
+      "files_affected": [
+        "reflex/istate/shared.py",
+        "reflex/istate/manager/__init__.py"
+      ]
+    },
+    {
+      "dimension": "api_design",
+      "recommendation": "Added _link_to() and _unlink() methods to SharedState with clear token-based linking semantics",
+      "rationale": "The API needed to be intuitive for developers while handling the complexity of state synchronization. Token-based linking provides a simple abstraction: states can be linked to any token, and subsequent accesses transparently use the linked state. The underscore prefix indicates these are internal methods, while maintaining the event-driven pattern consistent with the framework.",
+      "alternatives_considered": [
+        "Explicit subscription model",
+        "Room-based grouping",
+        "Direct state reference passing"
+      ],
+      "files_affected": [
+        "reflex/istate/shared.py"
+      ]
+    },
+    {
+      "dimension": "data_modeling",
+      "recommendation": "Added _reflex_internal_links dictionary to State class to track linked relationships",
+      "rationale": "Linked state relationships need to be persisted across requests and server restarts. By storing the mapping from state names to linked tokens in the state itself (via _reflex_internal_links), the linking survives serialization/deserialization. This dictionary approach allows multiple states within the same app to have different linking configurations.",
+      "alternatives_considered": [
+        "External link registry",
+        "Database table for relationships",
+        "In-memory only linking"
+      ],
+      "files_affected": [
+        "reflex/state.py",
+        "tests/integration/test_computed_vars.py",
+        "tests/units/test_state.py"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Added _override_base_method decorator to safely override base State methods in SharedState",
+      "rationale": "SharedState needs to override certain BaseState methods (_clean, _mark_dirty) to track dirty variables for propagation. The decorator marks these methods as intentional overrides, preventing the framework's method override validation from raising errors. This maintains the safety of the override checking while allowing necessary customizations.",
+      "alternatives_considered": [
+        "Disabling override checking entirely",
+        "Adding exceptions to the validation logic",
+        "Creating separate method names"
+      ],
+      "files_affected": [
+        "reflex/state.py",
+        "reflex/istate/shared.py"
+      ]
+    },
+    {
+      "dimension": "performance",
+      "recommendation": "Implemented asynchronous task-based updates for linked clients to avoid blocking",
+      "rationale": "When a linked state changes, all connected clients need updates. Synchronous updates would block the original client's response. By creating asyncio tasks for each update (_do_update_other_tokens), updates happen concurrently without delaying the response. Error handling via _log_update_client_errors prevents task failures from crashing the server.",
+      "alternatives_considered": [
+        "Synchronous broadcasting",
+        "Batch updates on timer",
+        "Deferred queue processing"
+      ],
+      "files_affected": [
+        "reflex/istate/shared.py"
+      ]
+    },
+    {
+      "dimension": "testing",
+      "recommendation": "Created comprehensive integration tests covering linking, unlinking, and concurrent modifications",
+      "rationale": "Linked state functionality involves complex interactions between multiple clients, background tasks, and state synchronization. The integration test (test_linked_state.py) simulates real-world scenarios with multiple browser tabs, verifying that state changes propagate correctly, linking/unlinking works, and concurrent modifications don't cause inconsistencies. This ensures the feature works end-to-end.",
+      "alternatives_considered": [
+        "Unit tests only",
+        "Manual testing",
+        "Simplified test scenarios"
+      ],
+      "files_affected": [
+        "tests/integration/test_linked_state.py"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Implement SharedState base class with linking capabilities",
+      "description": "Create the core SharedState class with _link_to and _unlink methods, supporting token-based state sharing between clients",
+      "files_to_modify": [
+        "reflex/__init__.py"
+      ],
+      "files_to_create": [
+        "reflex/istate/shared.py"
+      ],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-002",
+      "title": "Add state manager support for linked state modifications",
+      "description": "Extend the state manager to handle linked state locking and modification contexts",
+      "files_to_modify": [
+        "reflex/istate/manager/__init__.py",
+        "reflex/app.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-003",
+      "title": "Update State class to track linked relationships",
+      "description": "Add _reflex_internal_links dictionary and override method decorator to support linked state tracking",
+      "files_to_modify": [
+        "reflex/state.py",
+        "tests/integration/test_computed_vars.py",
+        "tests/units/test_state.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-004",
+      "title": "Create comprehensive integration tests",
+      "description": "Build end-to-end tests verifying linked state functionality across multiple clients and scenarios",
+      "files_to_modify": [
+        "pyi_hashes.json"
+      ],
+      "files_to_create": [
+        "tests/integration/test_linked_state.py"
+      ],
+      "estimated_effort": "medium"
+    }
+  ],
+  "implementation_summary": "The implementation introduces a linked shared state mechanism that allows different user sessions to synchronize state through token-based linking. The core innovation is the SharedState class, which extends the existing State system with _link_to() and _unlink() methods. When a state is linked to another token, subsequent accesses transparently use the linked state, and modifications automatically propagate to all connected clients.\n\nKey patterns include the use of context managers for atomic modifications (_modify_linked_states), asynchronous task-based updates to avoid blocking, and a token-based linking system that integrates with the existing state serialization. The implementation carefully handles concurrency through locking mechanisms and maintains compatibility with existing features like computed variables, background events, and frontend rendering.\n\nThe changes integrate seamlessly with the existing codebase by extending rather than replacing functionality. The State class gains a _reflex_internal_links dictionary for persistence, while the state manager gets new modify_state_with_links context. This approach maintains backward compatibility while adding powerful new capabilities for building collaborative applications where multiple users need to share and synchronize application state.",
+  "source_pr": "https://github.com/reflex-dev/reflex/pull/6024",
+  "before_sha": "224f9208f262b8d07e522437ccbc5655a9bcf384",
+  "after_sha": "290772273de297c6a8ce6ca4279539ae288b0037",
+  "diff_stats": {
+    "additions": 869,
+    "deletions": 8,
+    "files_changed": 9
+  }
+}

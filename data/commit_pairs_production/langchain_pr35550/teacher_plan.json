@@ -1,0 +1,91 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "api_design",
+      "recommendation": "Modified _create_subset_model_v2 function to properly preserve default_factory when reconstructing FieldInfoV2 objects",
+      "rationale": "The function was incorrectly passing only the 'default' parameter to FieldInfoV2, which caused fields with default_factory to lose their factory function. This made Pydantic treat these fields as required in the generated JSON schema. The fix ensures both default and default_factory attributes are properly forwarded based on which one is present in the original field.",
+      "alternatives_considered": [
+        "Creating a completely new field reconstruction mechanism",
+        "Modifying the FieldInfoV2 constructor to handle both parameters automatically",
+        "Using field.model_dump() to extract all field attributes"
+      ],
+      "files_affected": [
+        "libs/core/langchain_core/utils/pydantic.py"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Added conditional logic to check for default_factory before default when building field_kwargs",
+      "rationale": "Pydantic fields can have either default or default_factory, but not both. The original code always passed default=field.default, which would be None for fields with default_factory. By checking default_factory first and only using default when default_factory is None, we ensure the correct attribute is preserved. This follows Pydantic's own internal logic for field construction.",
+      "alternatives_considered": [
+        "Always passing both parameters and letting FieldInfoV2 handle the conflict",
+        "Creating a custom field reconstruction function",
+        "Modifying the original model's fields directly instead of creating subset models"
+      ],
+      "files_affected": [
+        "libs/core/langchain_core/utils/pydantic.py"
+      ]
+    },
+    {
+      "dimension": "testing",
+      "recommendation": "Added comprehensive test coverage in both tool-specific and pydantic utility test files",
+      "rationale": "The bug affected tool schema generation, so tests were added to test_tools.py to verify the fix works in the actual tool context. Additionally, a unit test was added to test_pydantic.py to directly test the _create_subset_model_v2 function's behavior with default_factory fields. This provides defense in depth - testing both the specific bug scenario and the underlying utility function.",
+      "alternatives_considered": [
+        "Only testing at the tool level",
+        "Only testing the pydantic utility function",
+        "Adding integration tests instead of unit tests"
+      ],
+      "files_affected": [
+        "libs/core/tests/unit_tests/test_tools.py",
+        "libs/core/tests/unit_tests/utils/test_pydantic.py"
+      ]
+    },
+    {
+      "dimension": "data_modeling",
+      "recommendation": "Ensured proper JSON schema generation for Pydantic models with default_factory fields",
+      "rationale": "When tools use Pydantic models as args_schema, the system needs to generate OpenAPI-compatible JSON schemas. Fields with default_factory should be optional (not in required array) since they have a way to generate default values. The fix ensures the subset model correctly reflects this in its schema, maintaining compatibility with external systems that consume these schemas.",
+      "alternatives_considered": [
+        "Modifying the JSON schema generation logic instead of the model creation",
+        "Creating a custom JSON schema generator",
+        "Requiring users to avoid default_factory in tool schemas"
+      ],
+      "files_affected": [
+        "libs/core/langchain_core/utils/pydantic.py",
+        "libs/core/tests/unit_tests/test_tools.py",
+        "libs/core/tests/unit_tests/utils/test_pydantic.py"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Fix default_factory preservation in subset model creation",
+      "description": "Modify _create_subset_model_v2 to properly preserve default_factory attribute when reconstructing fields, ensuring fields with default_factory are correctly marked as optional in generated JSON schemas",
+      "files_to_modify": [
+        "libs/core/langchain_core/utils/pydantic.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-002",
+      "title": "Add test coverage for default_factory field handling",
+      "description": "Create unit tests to verify that tools with default_factory in args_schema generate correct schemas and that the _create_subset_model_v2 function properly handles default_factory fields",
+      "files_to_modify": [
+        "libs/core/tests/unit_tests/test_tools.py",
+        "libs/core/tests/unit_tests/utils/test_pydantic.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation addresses a bug in the LangChain core library where fields with default_factory in tool argument schemas were incorrectly marked as required in generated JSON schemas. The root cause was in the _create_subset_model_v2 function in pydantic.py, which was creating FieldInfoV2 objects without preserving the default_factory attribute when reconstructing fields for subset models.\n\nThe fix modifies the field reconstruction logic to check for default_factory first, and only use the default parameter when default_factory is None. This follows Pydantic's own semantics where fields can have either default or default_factory, but not both. The change is minimal and surgical, affecting only the specific code path that builds FieldInfoV2 objects during subset model creation.\n\nTest coverage was added at two levels: first, a direct unit test for the _create_subset_model_v2 function to verify it properly handles default_factory fields; second, an integration test at the tool level to ensure the fix works in the actual context of tool schema generation. This approach ensures the bug is fixed at its source while also verifying the fix works end-to-end. The implementation maintains backward compatibility and follows existing patterns in the codebase, using the same FieldInfoV2 constructor but with the correct parameters based on the original field's configuration.",
+  "source_pr": "https://github.com/langchain-ai/langchain/pull/35550",
+  "before_sha": "e015fb2267760076d3939c9fb31508debf949239",
+  "after_sha": "b21c0a8062b5cc7e9e4b3d652091ef50c5a24d5c",
+  "diff_stats": {
+    "additions": 42,
+    "deletions": 1,
+    "files_changed": 3
+  }
+}

@@ -1,0 +1,86 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "api_design",
+      "recommendation": "Added a __schema_name__ class attribute to AbstractDTO to allow custom OpenAPI schema names",
+      "rationale": "This provides a simple, declarative way for developers to customize schema names without requiring complex configuration or inheritance patterns. Using a class attribute aligns with Python's class-level configuration patterns and is easily discoverable via IDE autocomplete.",
+      "alternatives_considered": [
+        "Passing schema_name as a parameter to DTO constructor - would require API changes and break backward compatibility",
+        "Using a separate configuration class - would add complexity for a simple customization",
+        "Using a decorator - would require additional syntax and learning curve"
+      ],
+      "files_affected": [
+        "litestar/dto/base_dto.py"
+      ]
+    },
+    {
+      "dimension": "data_modeling",
+      "recommendation": "Modified the transfer model creation logic to use custom schema names when provided",
+      "rationale": "The change ensures that when __schema_name__ is set, it's used as the model name in generated OpenAPI schemas instead of auto-generated names. This happens at the point where the transfer model type is created, which is the right place since it's where the model name is first determined.",
+      "alternatives_considered": [
+        "Modifying OpenAPI generation separately - would create inconsistency between DTO internals and OpenAPI output",
+        "Using a post-processing step - would be less efficient and more complex"
+      ],
+      "files_affected": [
+        "litestar/dto/_backend.py"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Enhanced schema key comparison logic to handle edge cases in OpenAPI component deduplication",
+      "rationale": "The change adds a fallback string comparison when field types aren't strictly equal, preventing false positives in schema deduplication. This ensures that custom schema names don't cause incorrect merging of different types in the OpenAPI schema.",
+      "alternatives_considered": [
+        "Strict equality checking only - would break existing functionality",
+        "Ignoring the issue - would lead to incorrect OpenAPI schemas"
+      ],
+      "files_affected": [
+        "litestar/_openapi/datastructures.py"
+      ]
+    },
+    {
+      "dimension": "backward_compatibility",
+      "recommendation": "Made __schema_name__ optional with None default to maintain backward compatibility",
+      "rationale": "Existing DTOs continue to work without modification, using auto-generated names as before. The feature is opt-in, requiring explicit developer action to use custom names.",
+      "alternatives_considered": [
+        "Making it required - would break all existing DTO implementations",
+        "Using a different default value - could cause confusion or unintended behavior"
+      ],
+      "files_affected": [
+        "litestar/dto/base_dto.py",
+        "litestar/dto/_backend.py"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Add DTO schema name customization support",
+      "description": "Implement the core feature allowing developers to specify custom schema names for DTOs in OpenAPI documentation",
+      "files_to_modify": [
+        "litestar/dto/base_dto.py",
+        "litestar/dto/_backend.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-002",
+      "title": "Fix OpenAPI schema deduplication edge case",
+      "description": "Enhance schema comparison logic to handle cases where custom schema names might affect type equality checks",
+      "files_to_modify": [
+        "litestar/_openapi/datastructures.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation adds support for custom DTO schema names in OpenAPI documentation through three coordinated changes. First, a `__schema_name__` class attribute was added to the `AbstractDTO` base class, providing a declarative way for developers to specify custom names. This attribute defaults to `None`, maintaining backward compatibility for existing DTOs.\n\nSecond, the DTO backend logic was modified to use the custom schema name when creating transfer model types. In `litestar/dto/_backend.py`, the `create_transfer_model_type` method now checks for `self.dto_factory.__schema_name__` and uses it if provided, falling back to the auto-generated name otherwise. This ensures the custom name propagates through the entire DTO processing pipeline.\n\nThird, an edge case in OpenAPI schema generation was addressed. The change in `litestar/_openapi/datastructures.py` enhances the type comparison logic with a string representation fallback (`f\"{field.raw!r}\" != f\"{existing_type.raw!r}\"`). This prevents incorrect schema deduplication when custom schema names are used, ensuring that different types with similar structures aren't incorrectly merged in the OpenAPI output.\n\nThe approach follows the framework's existing patterns: using class attributes for configuration, maintaining backward compatibility through optional features, and ensuring consistency across the DTO ecosystem. The changes are minimal and focused, avoiding unnecessary complexity while solving the core problem of repetitive, auto-generated class names in OpenAPI schemas.",
+  "source_pr": "https://github.com/litestar-org/litestar/pull/4131",
+  "before_sha": "7a635036c5f7949b5491291d0598f1369f14ba9c",
+  "after_sha": "3f1f6b49841fbb1b0d5bb07209b56db500a576a0",
+  "diff_stats": {
+    "additions": 3,
+    "deletions": 3,
+    "files_changed": 3
+  }
+}

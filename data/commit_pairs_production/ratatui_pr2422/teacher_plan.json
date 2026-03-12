@@ -1,0 +1,76 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "api_design",
+      "recommendation": "Updated import statements to use the correct module paths from the main ratatui crate instead of the ratatui_widgets crate",
+      "rationale": "The examples were incorrectly importing from `ratatui_widgets::` which doesn't exist as a separate crate in the current project structure. The correct imports should come from `ratatui::widgets::` which is the actual module path within the main ratatui crate. This ensures the examples compile correctly and serve as proper references for developers.",
+      "alternatives_considered": [
+        "Creating a ratatui_widgets crate to match the import statements",
+        "Using crate-relative imports with `crate::widgets::`",
+        "Reorganizing the module structure to match the existing imports"
+      ],
+      "files_affected": [
+        "ratatui-widgets/examples/calendar.rs",
+        "ratatui-widgets/examples/canvas.rs"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Fixed compilation errors by correcting module paths rather than adding complex error handling",
+      "rationale": "The simplest and most correct solution was to fix the import paths directly. Since these are example files meant to demonstrate proper usage, they should compile without errors. Adding error handling for incorrect imports would be inappropriate for example code.",
+      "alternatives_considered": [
+        "Adding conditional compilation flags",
+        "Creating wrapper modules to redirect imports",
+        "Adding build-time checks or macros"
+      ],
+      "files_affected": [
+        "ratatui-widgets/examples/calendar.rs",
+        "ratatui-widgets/examples/canvas.rs"
+      ]
+    },
+    {
+      "dimension": "maintainability",
+      "recommendation": "Consolidated imports from the same module to reduce import statements",
+      "rationale": "In canvas.rs, the `Points` type was moved from a separate `ratatui_widgets::canvas::Points` import to be included in the existing `ratatui::widgets::canvas::{...}` import statement. This follows Rust best practices for keeping imports organized and reduces the number of import statements.",
+      "alternatives_considered": [
+        "Keeping separate import statements for clarity",
+        "Using wildcard imports",
+        "Creating a prelude module for canvas types"
+      ],
+      "files_affected": [
+        "ratatui-widgets/examples/canvas.rs"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Fix calendar example imports",
+      "description": "Update import statements in calendar.rs to use correct module paths from ratatui::widgets::calendar instead of ratatui_widgets::calendar",
+      "files_to_modify": [
+        "ratatui-widgets/examples/calendar.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-002",
+      "title": "Fix canvas example imports",
+      "description": "Update import statements in canvas.rs to use correct module paths from ratatui::widgets::canvas and consolidate imports",
+      "files_to_modify": [
+        "ratatui-widgets/examples/canvas.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The changes address compilation errors in two widget examples by correcting import statements that were referencing a non-existent `ratatui_widgets` crate. In calendar.rs, the imports for `CalendarEventStore` and `Monthly` were changed from `ratatui_widgets::calendar::{CalendarEventStore, Monthly}` to `ratatui::widgets::calendar::{CalendarEventStore, Monthly}`. This aligns with the actual module structure where calendar widgets are part of the main ratatui crate's widgets module.\n\nIn canvas.rs, a similar correction was made but with an additional optimization. The `Points` type import was consolidated into the existing `ratatui::widgets::canvas::{...}` import statement, removing the separate `ratatui_widgets::canvas::Points` import entirely. This not only fixes the compilation error but also improves code organization by grouping related imports together.\n\nThese changes are minimal and focused, addressing only the import path issues without modifying any functional code. The approach maintains backward compatibility and ensures the examples serve their purpose as working references for developers. By fixing these import statements, the examples can now compile successfully, which is essential for a library that provides extensive examples as part of its documentation and learning resources.",
+  "source_pr": "https://github.com/ratatui/ratatui/pull/2422",
+  "before_sha": "09a3027bfce906b86bf20bdcf36fc5e365892b7c",
+  "after_sha": "ef72dbae54100b2c1084735cb5d7db474f2d81f2",
+  "diff_stats": {
+    "additions": 2,
+    "deletions": 3,
+    "files_changed": 2
+  }
+}

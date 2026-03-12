@@ -1,0 +1,75 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "api_design",
+      "recommendation": "Modified DTO backend to conditionally apply custom __schema_name__ only to root transfer models, preventing nested child models from inheriting the parent's custom schema name in OpenAPI references",
+      "rationale": "The fix ensures that when a DTO defines a custom __schema_name__, only the root-level model uses that name in OpenAPI schemas. Nested child models should maintain their own schema names to prevent incorrect $ref references in the generated OpenAPI documentation. This maintains proper schema separation and avoids confusing references where child models incorrectly point to parent schemas.",
+      "alternatives_considered": [
+        "Propagating __schema_name__ to all nested models (current broken behavior)",
+        "Creating a separate naming strategy for nested models",
+        "Adding a flag to DTOConfig to control schema name inheritance"
+      ],
+      "files_affected": [
+        "litestar/dto/_backend.py"
+      ]
+    },
+    {
+      "dimension": "testing",
+      "recommendation": "Added comprehensive test to verify that custom __schema_name__ only applies to root DTO and not nested child models in OpenAPI schemas",
+      "rationale": "The test validates the fix by checking that: 1) The root model uses the custom schema name, 2) Child models have their own schema names, 3) $ref references in the OpenAPI spec correctly point to child schemas rather than the parent's custom schema. This prevents regression and ensures the OpenAPI documentation remains correct for nested DTO structures.",
+      "alternatives_considered": [
+        "Only unit testing the backend logic without OpenAPI integration",
+        "Testing with existing DTO tests rather than adding a new integration test",
+        "Creating a separate test file for DTO schema naming"
+      ],
+      "files_affected": [
+        "tests/unit/test_openapi/test_integration.py"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Used a simple equality check (model_name == self.model_type.__name__) to identify root models rather than adding complex tracking mechanisms",
+      "rationale": "This approach leverages the existing model naming pattern where nested models have different names than the root model type. It's a lightweight solution that doesn't require additional state tracking or complex logic. The backend already generates different names for nested models, making this check reliable and maintainable.",
+      "alternatives_considered": [
+        "Adding a 'is_root' parameter to track hierarchy",
+        "Using a stack to track model nesting depth",
+        "Adding a flag to TransferDTOFieldDefinition to indicate root vs nested"
+      ],
+      "files_affected": [
+        "litestar/dto/_backend.py"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Fix DTO schema name inheritance for nested models",
+      "description": "Modify DTO backend to ensure custom __schema_name__ only applies to root-level transfer models, preventing nested child models from incorrectly inheriting parent's custom schema name in OpenAPI $ref references",
+      "files_to_modify": [
+        "litestar/dto/_backend.py",
+        "tests/unit/test_openapi/test_integration.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-002",
+      "title": "Update test formatting for consistency",
+      "description": "Minor formatting fix in test file to maintain code style consistency (line break in method signature)",
+      "files_to_modify": [
+        "tests/unit/test_dto/test_factory/test_backends/test_base_dto.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation addresses a bug in the DTO system where custom __schema_name__ definitions were incorrectly propagating to nested child models in OpenAPI schema generation. The core fix is in the `create_transfer_model_type` method of the DTO backend, where a conditional check now determines if the current model is the root model (by comparing `model_name` with `self.model_type.__name__`). Only root models receive the custom schema name; nested models continue to use their auto-generated names.\n\nThis approach maintains backward compatibility while fixing the incorrect behavior where child model $ref references would point to the parent's custom schema name instead of their own schemas. The solution is elegant because it leverages the existing naming pattern where nested models already have different names than the root model, avoiding the need for complex hierarchy tracking.\n\nA comprehensive integration test was added to verify the fix works correctly within the OpenAPI generation pipeline. The test creates a DTO with a custom __schema_name__ containing nested child models, then validates that: 1) the root model uses the custom name, 2) child models have separate schema entries, and 3) $ref references correctly point to child schemas. This ensures the OpenAPI documentation remains accurate for applications using nested DTO structures with custom schema names.",
+  "source_pr": "https://github.com/litestar-org/litestar/pull/4606",
+  "before_sha": "30ae1fa5ef197e816bd89968625ad395e367ba0b",
+  "after_sha": "e68dd0b58b078fa83d5ad23a542ce4d7116a83ed",
+  "diff_stats": {
+    "additions": 61,
+    "deletions": 2,
+    "files_changed": 3
+  }
+}

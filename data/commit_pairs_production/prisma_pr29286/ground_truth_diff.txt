@@ -1,0 +1,303 @@
+diff --git a/packages/client-runtime-utils/src/nullTypes.ts b/packages/client-runtime-utils/src/nullTypes.ts
+index bcc78145c2e7..1b7adb44a870 100644
+--- a/packages/client-runtime-utils/src/nullTypes.ts
++++ b/packages/client-runtime-utils/src/nullTypes.ts
+@@ -4,10 +4,20 @@
+  */
+ const secret = Symbol()
+ 
++/**
++ * Global symbol used to identify ObjectEnumValue instances across bundle
++ * boundaries. `Symbol.for()` returns the same symbol globally, so it works
++ * even when multiple copies of this module are loaded (e.g., browser and
++ * server bundles in Next.js, or HMR reloads).
++ * See: https://github.com/prisma/prisma/issues/29257
++ */
++const PRISMA_OBJECT_ENUM_VALUE = Symbol.for('prisma.objectEnumValue')
++
+ /**
+  * Base class for unique values of object-valued enums.
+  */
+ export abstract class ObjectEnumValue {
++  readonly [PRISMA_OBJECT_ENUM_VALUE] = true
+   #representation: string
+ 
+   constructor(arg?: symbol) {
+@@ -80,6 +90,19 @@ export const DbNull = new DbNullClass(secret)
+ export const JsonNull = new JsonNullClass(secret)
+ export const AnyNull = new AnyNullClass(secret)
+ 
++/**
++ * Check if a value is an ObjectEnumValue instance. Uses a global symbol
++ * instead of instanceof to work across bundle boundaries (e.g., when a
++ * Next.js app bundles browser and server code separately, creating duplicate
++ * module instances of @prisma/client-runtime-utils).
++ * See: https://github.com/prisma/prisma/issues/29257
++ */
++export function isObjectEnumValue(value: unknown): value is ObjectEnumValue {
++  return (
++    typeof value === 'object' && value !== null && (value as Record<symbol, unknown>)[PRISMA_OBJECT_ENUM_VALUE] === true
++  )
++}
++
+ /**
+  * Check if a value is the DBNull singleton instance.
+  */
+diff --git a/packages/client/src/runtime/core/errorRendering/ArgumentsRenderingTree.ts b/packages/client/src/runtime/core/errorRendering/ArgumentsRenderingTree.ts
+index 0405223e8337..3ae57b8ce3d6 100644
+--- a/packages/client/src/runtime/core/errorRendering/ArgumentsRenderingTree.ts
++++ b/packages/client/src/runtime/core/errorRendering/ArgumentsRenderingTree.ts
+@@ -1,5 +1,5 @@
+ import { uncapitalize } from '@prisma/client-common'
+-import { ObjectEnumValue } from '@prisma/client-runtime-utils'
++import { isObjectEnumValue } from '@prisma/client-runtime-utils'
+ import { Writer } from '@prisma/ts-builders'
+ 
+ import { ErrorFormat } from '../../getPrismaClient'
+@@ -95,7 +95,7 @@ function buildInputValue(value: unknown) {
+     return new ScalarValue(`new Date("${dateStr}")`)
+   }
+ 
+-  if (value instanceof ObjectEnumValue) {
++  if (isObjectEnumValue(value)) {
+     return new ScalarValue(`Prisma.${value._getName()}`)
+   }
+ 
+diff --git a/packages/client/src/runtime/core/jsonProtocol/serializeJsonQuery.test.ts b/packages/client/src/runtime/core/jsonProtocol/serializeJsonQuery.test.ts
+index 76f942fc6b54..bb0addfc6657 100644
+--- a/packages/client/src/runtime/core/jsonProtocol/serializeJsonQuery.test.ts
++++ b/packages/client/src/runtime/core/jsonProtocol/serializeJsonQuery.test.ts
+@@ -784,6 +784,101 @@ test('args - AnyNull field', () => {
+   `)
+ })
+ 
++function makeCrossBundleNullValue(name: string) {
++  const value = Object.create(null)
++  value[Symbol.for('prisma.objectEnumValue')] = true
++  value._getName = () => name
++  value._getNamespace = () => 'NullTypes'
++  return value
++}
++
++test('args - cross-bundle DbNull serializes correctly', () => {
++  expect(
++    serialize({
++      modelName: 'User',
++      action: 'findMany',
++      args: { where: { jsonColumn: makeCrossBundleNullValue('DbNull') } },
++    }),
++  ).toMatchInlineSnapshot(`
++    "{
++      "modelName": "User",
++      "action": "findMany",
++      "query": {
++        "arguments": {
++          "where": {
++            "jsonColumn": {
++              "$type": "Enum",
++              "value": "DbNull"
++            }
++          }
++        },
++        "selection": {
++          "$composites": true,
++          "$scalars": true
++        }
++      }
++    }"
++  `)
++})
++
++test('args - cross-bundle JsonNull serializes correctly', () => {
++  expect(
++    serialize({
++      modelName: 'User',
++      action: 'findMany',
++      args: { where: { jsonColumn: makeCrossBundleNullValue('JsonNull') } },
++    }),
++  ).toMatchInlineSnapshot(`
++    "{
++      "modelName": "User",
++      "action": "findMany",
++      "query": {
++        "arguments": {
++          "where": {
++            "jsonColumn": {
++              "$type": "Enum",
++              "value": "JsonNull"
++            }
++          }
++        },
++        "selection": {
++          "$composites": true,
++          "$scalars": true
++        }
++      }
++    }"
++  `)
++})
++
++test('args - cross-bundle AnyNull serializes correctly', () => {
++  expect(
++    serialize({
++      modelName: 'User',
++      action: 'findMany',
++      args: { where: { jsonColumn: makeCrossBundleNullValue('AnyNull') } },
++    }),
++  ).toMatchInlineSnapshot(`
++    "{
++      "modelName": "User",
++      "action": "findMany",
++      "query": {
++        "arguments": {
++          "where": {
++            "jsonColumn": {
++              "$type": "Enum",
++              "value": "AnyNull"
++            }
++          }
++        },
++        "selection": {
++          "$composites": true,
++          "$scalars": true
++        }
++      }
++    }"
++  `)
++})
++
+ test('args - array', () => {
+   expect(
+     serialize({
+diff --git a/packages/client/src/runtime/core/jsonProtocol/serializeJsonQuery.ts b/packages/client/src/runtime/core/jsonProtocol/serializeJsonQuery.ts
+index 443ecc13d783..34ed986f1c73 100644
+--- a/packages/client/src/runtime/core/jsonProtocol/serializeJsonQuery.ts
++++ b/packages/client/src/runtime/core/jsonProtocol/serializeJsonQuery.ts
+@@ -1,5 +1,5 @@
+ import { RuntimeDataModel, RuntimeModel, uncapitalize } from '@prisma/client-common'
+-import { isAnyNull, isDbNull, isJsonNull, ObjectEnumValue } from '@prisma/client-runtime-utils'
++import { isObjectEnumValue } from '@prisma/client-runtime-utils'
+ import { assertNever } from '@prisma/internals'
+ 
+ import { ErrorFormat } from '../../getPrismaClient'
+@@ -324,11 +324,12 @@ function serializeArgumentsValue(
+     return { $type: 'Decimal', value: jsValue.toFixed() }
+   }
+ 
+-  if (jsValue instanceof ObjectEnumValue) {
+-    if (!isDbNull(jsValue) && !isJsonNull(jsValue) && !isAnyNull(jsValue)) {
+-      throw new Error('Invalid ObjectEnumValue')
++  if (isObjectEnumValue(jsValue)) {
++    const name = jsValue._getName()
++    if (name !== 'DbNull' && name !== 'JsonNull' && name !== 'AnyNull') {
++      throw new Error(`Invalid ObjectEnumValue: expected DbNull, JsonNull, or AnyNull, got ${name}`)
+     }
+-    return { $type: 'Enum', value: jsValue._getName() }
++    return { $type: 'Enum', value: name }
+   }
+ 
+   if (isJSONConvertible(jsValue)) {
+diff --git a/packages/client/src/runtime/index-browser.ts b/packages/client/src/runtime/index-browser.ts
+index 7d0073b5c486..e94ba26355f1 100644
+--- a/packages/client/src/runtime/index-browser.ts
++++ b/packages/client/src/runtime/index-browser.ts
+@@ -2,7 +2,16 @@ import * as Public from './core/public'
+ 
+ export { makeStrictEnum } from './strictEnum'
+ export { getRuntime } from './utils/getRuntime'
+-export { AnyNull, DbNull, isAnyNull, isDbNull, isJsonNull, JsonNull, NullTypes } from '@prisma/client-runtime-utils'
++export {
++  AnyNull,
++  DbNull,
++  isAnyNull,
++  isDbNull,
++  isJsonNull,
++  isObjectEnumValue,
++  JsonNull,
++  NullTypes,
++} from '@prisma/client-runtime-utils'
+ export { Decimal } from '@prisma/client-runtime-utils'
+ 
+ export { Public }
+diff --git a/packages/client/src/runtime/index.ts b/packages/client/src/runtime/index.ts
+index 8c4dbcd8d95c..765cfc302a18 100644
+--- a/packages/client/src/runtime/index.ts
++++ b/packages/client/src/runtime/index.ts
+@@ -43,6 +43,7 @@ export {
+   isAnyNull,
+   isDbNull,
+   isJsonNull,
++  isObjectEnumValue,
+   JsonNull,
+   NullTypes,
+   ObjectEnumValue,
+diff --git a/packages/client/src/runtime/utils/deepCloneArgs.test.ts b/packages/client/src/runtime/utils/deepCloneArgs.test.ts
+index 64f24cec483d..ee0c87c294d6 100644
+--- a/packages/client/src/runtime/utils/deepCloneArgs.test.ts
++++ b/packages/client/src/runtime/utils/deepCloneArgs.test.ts
+@@ -39,6 +39,18 @@ describe('deepCloneArgs', () => {
+     expect(isSkip(cloned.data[0])).toBe(true)
+   })
+ 
++  test('preserves cross-bundle ObjectEnumValue through cloning', () => {
++    const crossBundleDbNull = Object.create(null)
++    crossBundleDbNull[Symbol.for('prisma.objectEnumValue')] = true
++    crossBundleDbNull._getName = () => 'DbNull'
++    crossBundleDbNull._getNamespace = () => 'NullTypes'
++
++    const args = { data: { field: crossBundleDbNull } }
++    const cloned = deepCloneArgs(args) as Record<string, any>
++
++    expect(cloned.data.field).toBe(crossBundleDbNull)
++  })
++
+   test('still deep clones regular objects', () => {
+     const inner = { foo: 'bar' }
+     const args = { data: inner }
+diff --git a/packages/client/src/runtime/utils/deepCloneArgs.ts b/packages/client/src/runtime/utils/deepCloneArgs.ts
+index 2843f8df71a7..baf83822e731 100644
+--- a/packages/client/src/runtime/utils/deepCloneArgs.ts
++++ b/packages/client/src/runtime/utils/deepCloneArgs.ts
+@@ -1,4 +1,4 @@
+-import { Decimal, ObjectEnumValue, Sql } from '@prisma/client-runtime-utils'
++import { Decimal, isObjectEnumValue, Sql } from '@prisma/client-runtime-utils'
+ import { assertNever } from '@prisma/internals'
+ 
+ import { isFieldRef } from '../core/model/FieldRef'
+@@ -44,7 +44,7 @@ function cloneTypedSql(rawParam: UnknownTypedSql): UnknownTypedSql {
+ 
+ // based on https://github.com/lukeed/klona/blob/v2.0.6/src/index.js
+ function deepCloneValue(x: JsInputValue): JsInputValue {
+-  if (typeof x !== 'object' || x == null || x instanceof ObjectEnumValue || isFieldRef(x) || isSkip(x)) {
++  if (typeof x !== 'object' || x == null || isObjectEnumValue(x) || isFieldRef(x) || isSkip(x)) {
+     return x
+   }
+ 
+diff --git a/packages/client/tests/functional/json-null-types/tests.ts b/packages/client/tests/functional/json-null-types/tests.ts
+index 8f715d8ec0b1..e37543a1c59b 100644
+--- a/packages/client/tests/functional/json-null-types/tests.ts
++++ b/packages/client/tests/functional/json-null-types/tests.ts
+@@ -72,15 +72,14 @@ testMatrix.setupTestSuite(
+         expect(Prisma.AnyNull).toBeInstanceOf(Prisma.NullTypes.AnyNull)
+       })
+ 
+-      test('custom instances are not allowed', async () => {
+-        await expect(
+-          prisma.requiredJsonField.create({
+-            data: {
+-              // @ts-expect-error
+-              json: new Prisma.NullTypes.JsonNull(),
+-            },
+-          }),
+-        ).rejects.toMatchPrismaErrorInlineSnapshot(`"Invalid ObjectEnumValue"`)
++      test('custom instances are accepted for cross-bundle compatibility', async () => {
++        const record = await prisma.requiredJsonField.create({
++          data: {
++            // @ts-expect-error
++            json: new Prisma.NullTypes.JsonNull(),
++          },
++        })
++        expect(record.json).toBeNull()
+       })
+     })
+   },

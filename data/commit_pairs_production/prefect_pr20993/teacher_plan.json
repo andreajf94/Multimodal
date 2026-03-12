@@ -1,0 +1,107 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "error_handling",
+      "recommendation": "Added a static helper method _get_k8s_error_hint() to analyze Kubernetes API exceptions and generate user-friendly resolution hints based on error patterns",
+      "rationale": "Kubernetes API errors often contain technical details that are confusing to users. By extracting common patterns (403 Forbidden, 404 namespace errors, quota exceeded) and providing actionable hints, we improve the developer experience without modifying the underlying error structure. The method is static to keep it pure and testable, and it handles edge cases like byte-encoded response bodies.",
+      "alternatives_considered": [
+        "Creating a separate error hint service class",
+        "Embedding hint logic directly in the exception handling block",
+        "Using regex patterns for more complex error matching"
+      ],
+      "files_affected": [
+        "src/integrations/prefect-kubernetes/prefect_kubernetes/worker.py"
+      ]
+    },
+    {
+      "dimension": "logging",
+      "recommendation": "Added INFO-level logging when Kubernetes jobs are successfully created, including job name and namespace",
+      "rationale": "Provides immediate visibility into the job creation process, helping users verify that their jobs are being submitted correctly. This follows the principle of providing positive confirmation for successful operations, which aids in debugging and monitoring.",
+      "alternatives_considered": [
+        "Using DEBUG level instead of INFO",
+        "Adding more detailed logging about job configuration",
+        "Creating a separate logging method for job creation events"
+      ],
+      "files_affected": [
+        "src/integrations/prefect-kubernetes/prefect_kubernetes/worker.py"
+      ]
+    },
+    {
+      "dimension": "api_design",
+      "recommendation": "Appended error hints to existing InfrastructureError messages using a '. Hint: ' prefix rather than creating a new exception type",
+      "rationale": "Maintains backward compatibility with existing error handling while enhancing error messages. The hint is appended to the existing error message format, ensuring that existing code that parses or displays these errors continues to work. The consistent 'Hint: ' prefix makes it easy to identify and extract these suggestions programmatically if needed.",
+      "alternatives_considered": [
+        "Creating a new exception type with separate hint and original error fields",
+        "Adding hints as a separate property on the exception",
+        "Logging hints separately from raising exceptions"
+      ],
+      "files_affected": [
+        "src/integrations/prefect-kubernetes/prefect_kubernetes/worker.py"
+      ]
+    },
+    {
+      "dimension": "testing",
+      "recommendation": "Added comprehensive test cases for the new error hint functionality, covering namespace not found and quota exceeded scenarios",
+      "rationale": "Ensures the hint generation logic works correctly for the specific error patterns we're targeting. The tests verify both that hints are generated correctly and that they're properly appended to InfrastructureError messages. This maintains the test coverage ratio and provides documentation of expected behavior.",
+      "alternatives_considered": [
+        "Only testing the happy path",
+        "Creating integration tests with actual Kubernetes API calls",
+        "Parameterizing tests to cover more edge cases"
+      ],
+      "files_affected": [
+        "src/integrations/prefect-kubernetes/tests/test_worker.py"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Add Kubernetes job creation logging",
+      "description": "Implement INFO-level logging when Kubernetes jobs are successfully created to provide visibility into the job submission process",
+      "files_to_modify": [
+        "src/integrations/prefect-kubernetes/prefect_kubernetes/worker.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-002",
+      "title": "Implement Kubernetes error hint generation",
+      "description": "Create helper method to analyze Kubernetes API exceptions and generate user-friendly resolution hints for common error patterns (403 Forbidden, 404 namespace errors, quota exceeded)",
+      "files_to_modify": [
+        "src/integrations/prefect-kubernetes/prefect_kubernetes/worker.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-003",
+      "title": "Update error handling to include hints",
+      "description": "Modify exception handling in _create_job method to append generated hints to InfrastructureError messages",
+      "files_to_modify": [
+        "src/integrations/prefect-kubernetes/prefect_kubernetes/worker.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-004",
+      "title": "Add test coverage for error hints",
+      "description": "Extend existing test suite to verify hint generation for namespace not found and quota exceeded scenarios, and update existing tests to expect hints in error messages",
+      "files_to_modify": [
+        "src/integrations/prefect-kubernetes/tests/test_worker.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    }
+  ],
+  "implementation_summary": "The implementation enhances the Kubernetes worker's logging and error handling to improve user experience when dealing with Kubernetes job creation. The approach adds positive confirmation logging when jobs are successfully created, providing immediate feedback that the submission process is working. More importantly, it introduces a sophisticated error hint system that analyzes Kubernetes API exceptions to generate actionable resolution suggestions for common failure scenarios.\n\nThe core pattern is a static helper method _get_k8s_error_hint() that examines the HTTP status code, reason, and response body to identify specific error patterns. It handles three key scenarios: quota exceeded errors (detected by searching for 'quota' or 'exceeded' in the response body), 403 Forbidden errors (typically RBAC permission issues), and 404 errors where the namespace is mentioned (suggesting the namespace doesn't exist). The hints are appended to existing InfrastructureError messages using a consistent 'Hint: ' prefix, maintaining backward compatibility while enhancing error messages.\n\nThe changes integrate seamlessly with the existing codebase by following established patterns. The logging addition is minimal and placed at the natural point where job creation is confirmed. The error hint system integrates with the existing exception handling flow in _create_job(), adding value without restructuring the error handling architecture. The test updates ensure that both the new functionality works correctly and that existing tests continue to pass with the enhanced error messages.",
+  "source_pr": "https://github.com/PrefectHQ/prefect/pull/20993",
+  "before_sha": "d1d0f4d663f4b421fccaa78fda0cd1fd70da7f0f",
+  "after_sha": "2d4828944ecc2ce2d761ae80d807a289f59e483b",
+  "diff_stats": {
+    "additions": 122,
+    "deletions": 6,
+    "files_changed": 2
+  }
+}

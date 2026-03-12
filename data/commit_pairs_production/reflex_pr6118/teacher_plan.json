@@ -1,0 +1,111 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "performance_optimization",
+      "recommendation": "Added caching to `_get_type_hints()` method using `functools.cache` decorator to memoize expensive type hint calculations",
+      "rationale": "The `_get_type_hints()` method was being called multiple times during state class initialization, particularly when checking for backend variables and computed var conflicts. Each call performs expensive reflection operations. Caching eliminates redundant calculations, significantly improving import performance for apps with complex state hierarchies.",
+      "alternatives_considered": [
+        "Manual caching with class-level dictionary",
+        "Using `lru_cache` with configurable size",
+        "Precomputing type hints during class creation"
+      ],
+      "files_affected": [
+        "reflex/state.py"
+      ]
+    },
+    {
+      "dimension": "api_design",
+      "recommendation": "Changed `_mixins()` return type from `list[type]` to `tuple[type[BaseState], ...]` and converted list comprehensions to tuple unpacking syntax",
+      "rationale": "Tuples are immutable and hashable, making them suitable for use with `functools.cache`. The cache decorator requires hashable arguments, and using tuples ensures the cached function can properly key its results. This also provides minor performance benefits and clearer intent that the mixin collection shouldn't be modified.",
+      "alternatives_considered": [
+        "Converting lists to tuples only at cache boundaries",
+        "Using frozenset for mixins",
+        "Keeping lists and using custom cache key generation"
+      ],
+      "files_affected": [
+        "reflex/state.py"
+      ]
+    },
+    {
+      "dimension": "type_safety",
+      "recommendation": "Added explicit type annotation `type[BaseState]` for the `cls` parameter in `is_backend_base_variable()` and imported BaseState in types module",
+      "rationale": "The caching optimization relies on consistent access to `_get_type_hints()` method. By tightening the type contract, we ensure the function only receives classes that guarantee this method exists. This prevents runtime errors and improves static type checking accuracy.",
+      "alternatives_considered": [
+        "Keeping generic type annotation with runtime checks",
+        "Using Protocol to define required interface",
+        "Adding defensive programming with try/except blocks"
+      ],
+      "files_affected": [
+        "reflex/utils/types.py"
+      ]
+    },
+    {
+      "dimension": "code_optimization",
+      "recommendation": "Reused cached type hints in `_check_overridden_basevars()` instead of calling `get_type_hints(cls)` directly",
+      "rationale": "The `_check_overridden_basevars()` method was making a separate call to `get_type_hints()` even though the class already had cached type hints available. By using the cached `cls._get_type_hints()` result, we eliminate another expensive reflection call during state validation.",
+      "alternatives_considered": [
+        "Passing type hints as parameter to the method",
+        "Creating a separate cached method for validation",
+        "Keeping direct get_type_hints call for isolation"
+      ],
+      "files_affected": [
+        "reflex/state.py"
+      ]
+    },
+    {
+      "dimension": "syntax_optimization",
+      "recommendation": "Changed list literals `[*cls._mixins(), cls]` to tuple unpacking syntax `(*cls._mixins(), cls)` in multiple locations",
+      "rationale": "The tuple unpacking syntax is more efficient for creating iterables when the result is immediately consumed in a comprehension. It avoids creating intermediate list objects and provides cleaner syntax. This complements the tuple return type change in `_mixins()`.",
+      "alternatives_considered": [
+        "Keeping list syntax for consistency",
+        "Using itertools.chain",
+        "Creating generator expressions"
+      ],
+      "files_affected": [
+        "reflex/state.py"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Implement type hints caching for state classes",
+      "description": "Add functools.cache decorator to _get_type_hints() method and update dependent code to use cached results, improving import performance for apps with complex state hierarchies",
+      "files_to_modify": [
+        "reflex/state.py",
+        "reflex/utils/types.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-002",
+      "title": "Refactor mixin handling for cache compatibility",
+      "description": "Change _mixins() return type from list to tuple and update all callers to use tuple unpacking syntax, ensuring hashable arguments for caching",
+      "files_to_modify": [
+        "reflex/state.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-003",
+      "title": "Improve type safety for backend variable checking",
+      "description": "Add explicit BaseState type annotation and import to ensure type hints caching works correctly across the codebase",
+      "files_to_modify": [
+        "reflex/utils/types.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation focuses on optimizing type hint resolution performance in the Reflex framework by introducing caching for expensive `get_type_hints` calls. The core change adds `@functools.cache` decorator to the `BaseState._get_type_hints()` method, which memoizes type hint calculations for each state class. This significantly reduces redundant reflection operations during state initialization, particularly beneficial for apps with complex inheritance hierarchies.\n\nTo support caching, several complementary changes were made: the `_mixins()` method now returns a tuple instead of a list, making it hashable for cache key generation. All callers were updated to use tuple unpacking syntax `(*cls._mixins(), cls)` instead of list construction. The `is_backend_base_variable()` function was tightened to accept only `BaseState` subclasses, ensuring it can safely call the cached `_get_type_hints()` method. Additionally, `_check_overridden_basevars()` was updated to reuse cached hints instead of making separate `get_type_hints()` calls.\n\nThis optimization follows a pragmatic approach: it leverages Python's built-in `functools.cache` for simplicity and reliability, makes minimal changes to the existing API, and maintains backward compatibility. The caching scope is appropriate since type hints for a class don't change after class creation. The changes integrate seamlessly with the existing state management system while providing measurable performance improvements for app import times.",
+  "source_pr": "https://github.com/reflex-dev/reflex/pull/6118",
+  "before_sha": "480d93b8c3b1a943333f239f8d3cec24ec5ac348",
+  "after_sha": "88155a7cb4a53968c30851e13c0733976a416d82",
+  "diff_stats": {
+    "additions": 13,
+    "deletions": 14,
+    "files_changed": 2
+  }
+}

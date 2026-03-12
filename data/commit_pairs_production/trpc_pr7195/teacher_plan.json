@@ -1,0 +1,82 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "tooling_infrastructure",
+      "recommendation": "Created a standalone TypeScript script for validating twoslash code examples in documentation, integrated into the existing monorepo toolchain via pnpm script",
+      "rationale": "The existing documentation contains TypeScript code examples with twoslash annotations that need validation to ensure they remain accurate as the codebase evolves. Rather than requiring a full build or test suite run, a lightweight standalone checker provides faster feedback for documentation contributors and CI environments. This approach separates documentation validation from application logic testing.",
+      "alternatives_considered": [
+        "Integrating validation into existing test suites would couple documentation checks with application tests",
+        "Using external documentation validation tools would add dependency management overhead",
+        "Manual validation would be error-prone and not scalable"
+      ],
+      "files_affected": [
+        "www/package.json",
+        "www/scripts/check-twoslash.ts"
+      ]
+    },
+    {
+      "dimension": "dependency_management",
+      "recommendation": "Added remark-parse, remark-stringify, and unified dependencies to leverage the existing remark/unified ecosystem for markdown processing",
+      "rationale": "The tRPC documentation already uses remark/unified for markdown processing. Adding these specific dependencies ensures consistency with the existing toolchain and provides robust markdown parsing capabilities. Using the same ecosystem reduces maintenance burden and ensures compatibility with existing markdown transformations.",
+      "alternatives_considered": [
+        "Implementing custom markdown parsing would be error-prone and duplicate existing functionality",
+        "Using different markdown libraries would create inconsistency in parsing behavior",
+        "Parsing markdown with regex would be fragile and hard to maintain"
+      ],
+      "files_affected": [
+        "www/package.json",
+        "pnpm-lock.yaml"
+      ]
+    },
+    {
+      "dimension": "ci_cd_integration",
+      "recommendation": "Added a pnpm script 'check-twoslash' that can be run both locally and in CI environments",
+      "rationale": "Making the validation script accessible via standard npm/pnpm scripts ensures it can be easily integrated into existing developer workflows and CI pipelines. The script uses tsx for TypeScript execution without compilation overhead, providing fast feedback. This aligns with the existing pattern of using tsx for other scripts in the codebase.",
+      "alternatives_considered": [
+        "Creating a separate CLI package would add unnecessary complexity",
+        "Integrating into existing build steps would slow down development builds",
+        "Using compiled JavaScript would add a build step requirement"
+      ],
+      "files_affected": [
+        "www/package.json"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Designed the script to output clear validation results indicating which examples pass or fail with specific error messages",
+      "rationale": "Clear error messaging is crucial for documentation contributors to quickly identify and fix issues. The script needs to provide actionable feedback about which markdown files and specific code blocks contain errors, including the nature of the validation failure. This reduces the time needed to correct documentation examples.",
+      "alternatives_considered": [
+        "Silent failures would make debugging difficult",
+        "Generic error messages would not provide enough context for fixes",
+        "Only reporting pass/fail without details would not help contributors understand what to fix"
+      ],
+      "files_affected": [
+        "www/scripts/check-twoslash.ts"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Twoslash Documentation Validator Implementation",
+      "description": "Create a standalone script to parse markdown files, extract twoslash-annotated code blocks, and validate their correctness to ensure documentation examples remain accurate",
+      "files_to_modify": [
+        "www/package.json",
+        "pnpm-lock.yaml"
+      ],
+      "files_to_create": [
+        "www/scripts/check-twoslash.ts"
+      ],
+      "estimated_effort": "medium"
+    }
+  ],
+  "implementation_summary": "The implementation adds a documentation validation tool to the tRPC monorepo that checks TypeScript code examples in markdown documentation. The approach leverages the existing remark/unified ecosystem for consistent markdown processing, ensuring compatibility with the documentation build pipeline. A new TypeScript script is created that can be executed via 'pnpm check-twoslash' using tsx for zero-compilation execution.\n\nThe key architectural decision was to create a standalone validation tool rather than integrating into existing test suites, which keeps documentation validation separate from application logic testing and provides faster feedback. The script parses markdown files from docs and blog directories, extracts code blocks with twoslash annotations, and validates each example individually. This per-block validation allows pinpointing exactly which examples need correction.\n\nThe implementation integrates smoothly with the existing codebase by following established patterns: using tsx for TypeScript execution, adding dependencies to the www package (where documentation lives), and providing clear error output for both local development and CI environments. The tool will help maintain documentation quality as the tRPC codebase evolves, ensuring that code examples remain accurate and type-safe.",
+  "source_pr": "https://github.com/trpc/trpc/pull/7195",
+  "before_sha": "e96639e69e3469b761e83afc967d3d45e201876c",
+  "after_sha": "58d1ec40553854fcf7799dcfa5a70fac1f34a5c0",
+  "diff_stats": {
+    "additions": 605,
+    "deletions": 108,
+    "files_changed": 3
+  }
+}

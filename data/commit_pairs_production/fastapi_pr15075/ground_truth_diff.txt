@@ -1,0 +1,422 @@
+diff --git a/README.md b/README.md
+index 9d7796ba30b78..0b7fcc1c51409 100644
+--- a/README.md
++++ b/README.md
+@@ -213,7 +213,7 @@ Run the server with:
+ <div class="termy">
+ 
+ ```console
+-$ fastapi dev main.py
++$ fastapi dev
+ 
+  ╭────────── FastAPI CLI - Development mode ───────────╮
+  │                                                     │
+@@ -238,9 +238,9 @@ INFO:     Application startup complete.
+ </div>
+ 
+ <details markdown="1">
+-<summary>About the command <code>fastapi dev main.py</code>...</summary>
++<summary>About the command <code>fastapi dev</code>...</summary>
+ 
+-The command `fastapi dev` reads your `main.py` file, detects the **FastAPI** app in it, and starts a server using [Uvicorn](https://www.uvicorn.dev).
++The command `fastapi dev` reads your `main.py` file automatically, detects the **FastAPI** app in it, and starts a server using [Uvicorn](https://www.uvicorn.dev).
+ 
+ By default, `fastapi dev` will start with auto-reload enabled for local development.
+ 
+@@ -459,20 +459,6 @@ You can optionally deploy your FastAPI app to [FastAPI Cloud](https://fastapiclo
+ 
+ If you already have a **FastAPI Cloud** account (we invited you from the waiting list 😉), you can deploy your application with one command.
+ 
+-Before deploying, make sure you are logged in:
+-
+-<div class="termy">
+-
+-```console
+-$ fastapi login
+-
+-You are logged in to FastAPI Cloud 🚀
+-```
+-
+-</div>
+-
+-Then deploy your app:
+-
+ <div class="termy">
+ 
+ ```console
+diff --git a/docs/en/docs/advanced/sub-applications.md b/docs/en/docs/advanced/sub-applications.md
+index cc9f67ebd092a..a391c7c24569b 100644
+--- a/docs/en/docs/advanced/sub-applications.md
++++ b/docs/en/docs/advanced/sub-applications.md
+@@ -30,12 +30,12 @@ In this case, it will be mounted at the path `/subapi`:
+ 
+ ### Check the automatic API docs { #check-the-automatic-api-docs }
+ 
+-Now, run the `fastapi` command with your file:
++Now, run the `fastapi` command:
+ 
+ <div class="termy">
+ 
+ ```console
+-$ fastapi dev main.py
++$ fastapi dev
+ 
+ <span style="color: green;">INFO</span>:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
+ ```
+diff --git a/docs/en/docs/advanced/websockets.md b/docs/en/docs/advanced/websockets.md
+index f93adfd96183f..50c5e89a43fd3 100644
+--- a/docs/en/docs/advanced/websockets.md
++++ b/docs/en/docs/advanced/websockets.md
+@@ -64,12 +64,12 @@ You can receive and send binary, text, and JSON data.
+ 
+ ## Try it { #try-it }
+ 
+-If your file is named `main.py`, run your application with:
++Put your code in a file `main.py` and then run your application:
+ 
+ <div class="termy">
+ 
+ ```console
+-$ fastapi dev main.py
++$ fastapi dev
+ 
+ <span style="color: green;">INFO</span>:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
+ ```
+@@ -121,12 +121,12 @@ You can use a closing code from the [valid codes defined in the specification](h
+ 
+ ### Try the WebSockets with dependencies { #try-the-websockets-with-dependencies }
+ 
+-If your file is named `main.py`, run your application with:
++Run your application:
+ 
+ <div class="termy">
+ 
+ ```console
+-$ fastapi dev main.py
++$ fastapi dev
+ 
+ <span style="color: green;">INFO</span>:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
+ ```
+diff --git a/docs/en/docs/fastapi-cli.md b/docs/en/docs/fastapi-cli.md
+index e0b40b5000069..17898888f1550 100644
+--- a/docs/en/docs/fastapi-cli.md
++++ b/docs/en/docs/fastapi-cli.md
+@@ -1,15 +1,15 @@
+ # FastAPI CLI { #fastapi-cli }
+ 
+-**FastAPI CLI** is a command line program that you can use to serve your FastAPI app, manage your FastAPI project, and more.
++**FastAPI <abbr title="command line interface">CLI</abbr>** is a command line program that you can use to serve your FastAPI app, manage your FastAPI project, and more.
+ 
+-When you install FastAPI (e.g. with `pip install "fastapi[standard]"`), it includes a package called `fastapi-cli`, this package provides the `fastapi` command in the terminal.
++When you install FastAPI (e.g. with `pip install "fastapi[standard]"`), it comes with a command line program you can run in the terminal.
+ 
+ To run your FastAPI app for development, you can use the `fastapi dev` command:
+ 
+ <div class="termy">
+ 
+ ```console
+-$ <font color="#4E9A06">fastapi</font> dev <u style="text-decoration-style:solid">main.py</u>
++$ <font color="#4E9A06">fastapi</font> dev
+ 
+   <span style="background-color:#009485"><font color="#D3D7CF"> FastAPI </font></span>  Starting development server 🚀
+ 
+@@ -46,14 +46,67 @@ $ <font color="#4E9A06">fastapi</font> dev <u style="text-decoration-style:solid
+ 
+ </div>
+ 
+-The command line program called `fastapi` is **FastAPI CLI**.
++/// tip
+ 
+-FastAPI CLI takes the path to your Python program (e.g. `main.py`) and automatically detects the `FastAPI` instance (commonly named `app`), determines the correct import process, and then serves it.
++For production you would use `fastapi run` instead of `fastapi dev`. 🚀
+ 
+-For production you would use `fastapi run` instead. 🚀
++///
+ 
+ Internally, **FastAPI CLI** uses [Uvicorn](https://www.uvicorn.dev), a high-performance, production-ready, ASGI server. 😎
+ 
++The `fastapi` CLI will try to detect automatically the FastAPI app to run, assuming it's an object called `app` in a file `main.py` (or a couple other variants).
++
++But you can configure explicitly the app to use.
++
++## Configure the app `entrypoint` in `pyproject.toml` { #configure-the-app-entrypoint-in-pyproject-toml }
++
++You can configure where your app is located in a `pyproject.toml` file like:
++
++```toml
++[tool.fastapi]
++entrypoint = "main:app"
++```
++
++That `entrypoint` will tell the `fastapi` command that it should import the app like:
++
++```python
++from main import app
++```
++
++If your code was structured like:
++
++```
++.
++├── backend
++│   ├── main.py
++│   ├── __init__.py
++```
++
++Then you would set the `entrypoint` as:
++
++```toml
++[tool.fastapi]
++entrypoint = "backend.main:app"
++```
++
++which would be equivalent to:
++
++```python
++from backend.main import app
++```
++
++### `fastapi dev` with path { #fastapi-dev-with-path }
++
++You can also pass the file path to the `fastapi dev` command, and it will guess the FastAPI app object to use:
++
++```console
++$ fastapi dev main.py
++```
++
++But you would have to remember to pass the correct path every time you call the `fastapi` command.
++
++Additionally, other tools might not be able to find it, for example the [VS Code Extension](editor-support.md) or [FastAPI Cloud](https://fastapicloud.com), so it is recommended to use the `entrypoint` in `pyproject.toml`.
++
+ ## `fastapi dev` { #fastapi-dev }
+ 
+ Running `fastapi dev` initiates development mode.
+@@ -62,7 +115,7 @@ By default, **auto-reload** is enabled, automatically reloading the server when
+ 
+ ## `fastapi run` { #fastapi-run }
+ 
+-Executing `fastapi run` starts FastAPI in production mode by default.
++Executing `fastapi run` starts FastAPI in production mode.
+ 
+ By default, **auto-reload** is disabled. It also listens on the IP address `0.0.0.0`, which means all the available IP addresses, this way it will be publicly accessible to anyone that can communicate with the machine. This is how you would normally run it in production, for example, in a container.
+ 
+diff --git a/docs/en/docs/index.md b/docs/en/docs/index.md
+index efe13ee4f4610..88fcc454562b6 100644
+--- a/docs/en/docs/index.md
++++ b/docs/en/docs/index.md
+@@ -210,7 +210,7 @@ Run the server with:
+ <div class="termy">
+ 
+ ```console
+-$ fastapi dev main.py
++$ fastapi dev
+ 
+  ╭────────── FastAPI CLI - Development mode ───────────╮
+  │                                                     │
+@@ -235,9 +235,9 @@ INFO:     Application startup complete.
+ </div>
+ 
+ <details markdown="1">
+-<summary>About the command <code>fastapi dev main.py</code>...</summary>
++<summary>About the command <code>fastapi dev</code>...</summary>
+ 
+-The command `fastapi dev` reads your `main.py` file, detects the **FastAPI** app in it, and starts a server using [Uvicorn](https://www.uvicorn.dev).
++The command `fastapi dev` reads your `main.py` file automatically, detects the **FastAPI** app in it, and starts a server using [Uvicorn](https://www.uvicorn.dev).
+ 
+ By default, `fastapi dev` will start with auto-reload enabled for local development.
+ 
+@@ -456,20 +456,6 @@ You can optionally deploy your FastAPI app to [FastAPI Cloud](https://fastapiclo
+ 
+ If you already have a **FastAPI Cloud** account (we invited you from the waiting list 😉), you can deploy your application with one command.
+ 
+-Before deploying, make sure you are logged in:
+-
+-<div class="termy">
+-
+-```console
+-$ fastapi login
+-
+-You are logged in to FastAPI Cloud 🚀
+-```
+-
+-</div>
+-
+-Then deploy your app:
+-
+ <div class="termy">
+ 
+ ```console
+diff --git a/docs/en/docs/tutorial/bigger-applications.md b/docs/en/docs/tutorial/bigger-applications.md
+index 73647723a93c3..675ec1b437687 100644
+--- a/docs/en/docs/tutorial/bigger-applications.md
++++ b/docs/en/docs/tutorial/bigger-applications.md
+@@ -465,6 +465,37 @@ As we cannot just isolate them and "mount" them independently of the rest, the *
+ 
+ ///
+ 
++## Configure the `entrypoint` in `pyproject.toml` { #configure-the-entrypoint-in-pyproject-toml }
++
++As your FastAPI `app` object lives in `app/main.py`, you can configure the `entrypoint` in your `pyproject.toml` file like this:
++
++```toml
++[tool.fastapi]
++entrypoint = "app.main:app"
++```
++
++that is equivalent to importing like:
++
++```python
++from app.main import app
++```
++
++That way the `fastapi` command will know where to find your app.
++
++/// Note
++
++You could also pass the path to the command, like:
++
++```console
++$ fastapi dev app/main.py
++```
++
++But you would have to remember to pass the correct path every time you call the `fastapi` command.
++
++Additionally, other tools might not be able to find it, for example the [VS Code Extension](../editor-support.md) or [FastAPI Cloud](https://fastapicloud.com), so it is recommended to use the `entrypoint` in `pyproject.toml`.
++
++///
++
+ ## Check the automatic API docs { #check-the-automatic-api-docs }
+ 
+ Now, run your app:
+@@ -472,7 +503,7 @@ Now, run your app:
+ <div class="termy">
+ 
+ ```console
+-$ fastapi dev app/main.py
++$ fastapi dev
+ 
+ <span style="color: green;">INFO</span>:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
+ ```
+diff --git a/docs/en/docs/tutorial/first-steps.md b/docs/en/docs/tutorial/first-steps.md
+index 578a17d2e4665..3355079900b38 100644
+--- a/docs/en/docs/tutorial/first-steps.md
++++ b/docs/en/docs/tutorial/first-steps.md
+@@ -11,7 +11,7 @@ Run the live server:
+ <div class="termy">
+ 
+ ```console
+-$ <font color="#4E9A06">fastapi</font> dev <u style="text-decoration-style:solid">main.py</u>
++$ <font color="#4E9A06">fastapi</font> dev
+ 
+   <span style="background-color:#009485"><font color="#D3D7CF"> FastAPI </font></span>  Starting development server 🚀
+ 
+@@ -143,6 +143,55 @@ And there are dozens of alternatives, all based on OpenAPI. You could easily add
+ 
+ You could also use it to generate code automatically, for clients that communicate with your API. For example, frontend, mobile or IoT applications.
+ 
++### Configure the app `entrypoint` in `pyproject.toml` { #configure-the-app-entrypoint-in-pyproject-toml }
++
++You can configure where your app is located in a `pyproject.toml` file like:
++
++```toml
++[tool.fastapi]
++entrypoint = "main:app"
++```
++
++That `entrypoint` will tell the `fastapi` command that it should import the app like:
++
++```python
++from main import app
++```
++
++If your code was structured like:
++
++```
++.
++├── backend
++│   ├── main.py
++│   ├── __init__.py
++```
++
++Then you would set the `entrypoint` as:
++
++```toml
++[tool.fastapi]
++entrypoint = "backend.main:app"
++```
++
++which would be equivalent to:
++
++```python
++from backend.main import app
++```
++
++### `fastapi dev` with path { #fastapi-dev-with-path }
++
++You can also pass the file path to the `fastapi dev` command, and it will guess the FastAPI app object to use:
++
++```console
++$ fastapi dev main.py
++```
++
++But you would have to remember to pass the correct path every time you call the `fastapi` command.
++
++Additionally, other tools might not be able to find it, for example the [VS Code Extension](../editor-support.md) or [FastAPI Cloud](https://fastapicloud.com), so it is recommended to use the `entrypoint` in `pyproject.toml`.
++
+ ### Deploy your app (optional) { #deploy-your-app-optional }
+ 
+ You can optionally deploy your FastAPI app to [FastAPI Cloud](https://fastapicloud.com), go and join the waiting list if you haven't. 🚀
+diff --git a/docs/en/docs/tutorial/index.md b/docs/en/docs/tutorial/index.md
+index f65fead6cd535..8a37756c703d8 100644
+--- a/docs/en/docs/tutorial/index.md
++++ b/docs/en/docs/tutorial/index.md
+@@ -10,12 +10,12 @@ It is also built to work as a future reference so you can come back and see exac
+ 
+ All the code blocks can be copied and used directly (they are actually tested Python files).
+ 
+-To run any of the examples, copy the code to a file `main.py`, and start `fastapi dev` with:
++To run any of the examples, copy the code to a file `main.py`, and start `fastapi dev`:
+ 
+ <div class="termy">
+ 
+ ```console
+-$ <font color="#4E9A06">fastapi</font> dev <u style="text-decoration-style:solid">main.py</u>
++$ <font color="#4E9A06">fastapi</font> dev
+ 
+   <span style="background-color:#009485"><font color="#D3D7CF"> FastAPI </font></span>  Starting development server 🚀
+ 
+diff --git a/docs/en/docs/tutorial/security/first-steps.md b/docs/en/docs/tutorial/security/first-steps.md
+index 9c58c782ece5f..cf19f7dbdc9e4 100644
+--- a/docs/en/docs/tutorial/security/first-steps.md
++++ b/docs/en/docs/tutorial/security/first-steps.md
+@@ -45,7 +45,7 @@ Run the example with:
+ <div class="termy">
+ 
+ ```console
+-$ fastapi dev main.py
++$ fastapi dev
+ 
+ <span style="color: green;">INFO</span>:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
+ ```
+diff --git a/docs/en/docs/tutorial/sql-databases.md b/docs/en/docs/tutorial/sql-databases.md
+index 69b174b2a8f87..b8cbac295bc74 100644
+--- a/docs/en/docs/tutorial/sql-databases.md
++++ b/docs/en/docs/tutorial/sql-databases.md
+@@ -152,7 +152,7 @@ You can run the app:
+ <div class="termy">
+ 
+ ```console
+-$ fastapi dev main.py
++$ fastapi dev
+ 
+ <span style="color: green;">INFO</span>:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
+ ```
+@@ -337,7 +337,7 @@ You can run the app again:
+ <div class="termy">
+ 
+ ```console
+-$ fastapi dev main.py
++$ fastapi dev
+ 
+ <span style="color: green;">INFO</span>:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
+ ```

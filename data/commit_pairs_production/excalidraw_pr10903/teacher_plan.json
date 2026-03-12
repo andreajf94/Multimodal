@@ -1,0 +1,115 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "state_management",
+      "recommendation": "Added session-level export theme override property on App instance to track user preferences during current session",
+      "rationale": "The export theme needs to sync with UI theme on page load but allow user overrides during the session. Storing this as a session property on the App instance ensures it persists during the session but resets on reload, without polluting the React state or localStorage.",
+      "alternatives_considered": [
+        "Store in React state (would persist across reloads)",
+        "Store in localStorage (would persist across sessions)",
+        "Use URL parameters (would complicate routing)"
+      ],
+      "files_affected": [
+        "packages/excalidraw/components/App.tsx",
+        "packages/excalidraw/types.ts"
+      ]
+    },
+    {
+      "dimension": "api_design",
+      "recommendation": "Extended actionExportWithDarkMode to accept app parameter and update sessionExportThemeOverride",
+      "rationale": "Actions in Excalidraw follow a consistent pattern where they receive app context. By passing the app instance to the perform function, we can update the session override property directly when the user toggles the export theme.",
+      "alternatives_considered": [
+        "Use a separate action handler",
+        "Update via state callback",
+        "Create a new dedicated action for session overrides"
+      ],
+      "files_affected": [
+        "packages/excalidraw/actions/actionExport.tsx"
+      ]
+    },
+    {
+      "dimension": "ui_consistency",
+      "recommendation": "Made ImageExportDialog controlled component for exportWithDarkMode, removing local state",
+      "rationale": "To ensure the export dialog always reflects the current export theme (whether synced from UI or overridden), the component should receive exportWithDarkMode as a prop rather than maintaining its own state. This prevents UI desynchronization.",
+      "alternatives_considered": [
+        "Keep local state with synchronization logic",
+        "Use context API",
+        "Subscribe to state changes via events"
+      ],
+      "files_affected": [
+        "packages/excalidraw/components/ImageExportDialog.tsx"
+      ]
+    },
+    {
+      "dimension": "performance",
+      "recommendation": "Added request ID tracking to prevent stale preview renders in ImageExportDialog",
+      "rationale": "When users quickly toggle export theme settings, multiple async preview renders can race. The request ID pattern ensures only the latest request updates the UI, preventing visual glitches and wasted computation.",
+      "alternatives_considered": [
+        "Debouncing preview updates",
+        "Cancelling previous promises",
+        "Using React's useEffect cleanup"
+      ],
+      "files_affected": [
+        "packages/excalidraw/components/ImageExportDialog.tsx"
+      ]
+    },
+    {
+      "dimension": "testing",
+      "recommendation": "Added comprehensive tests for theme synchronization and session override behavior",
+      "rationale": "Theme synchronization has subtle edge cases (initial sync, override persistence, UI theme changes). Tests verify that export theme syncs with UI theme on load, respects session overrides, and doesn't reset when UI theme changes during session.",
+      "alternatives_considered": [
+        "Manual testing only",
+        "Limited unit tests",
+        "End-to-end tests only"
+      ],
+      "files_affected": [
+        "packages/excalidraw/tests/excalidraw.test.tsx",
+        "packages/excalidraw/tests/__snapshots__/excalidraw.test.tsx.snap"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Implement session-aware export theme synchronization",
+      "description": "Add session export theme override tracking and sync export theme with UI theme on initialization",
+      "files_to_modify": [
+        "packages/excalidraw/components/App.tsx",
+        "packages/excalidraw/types.ts",
+        "packages/excalidraw/actions/actionExport.tsx"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-002",
+      "title": "Update export dialog to reflect synchronized theme",
+      "description": "Convert ImageExportDialog to controlled component for export theme and add request ID tracking for preview renders",
+      "files_to_modify": [
+        "packages/excalidraw/components/ImageExportDialog.tsx"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-003",
+      "title": "Add comprehensive theme synchronization tests",
+      "description": "Test export theme sync with UI theme, session override persistence, and proper reset behavior",
+      "files_to_modify": [
+        "packages/excalidraw/tests/excalidraw.test.tsx",
+        "packages/excalidraw/tests/__snapshots__/excalidraw.test.tsx.snap"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation introduces a session-aware export theme synchronization system that balances automatic syncing with user control. The core innovation is the `sessionExportThemeOverride` property on the App instance, which tracks user preferences during the current session without persisting across page reloads. This property is updated when users toggle the export theme via the existing action system, ensuring consistency with Excalidraw's established patterns.\n\nThe App component initializes `exportWithDarkMode` to match the UI theme and continuously syncs it during render cycles, checking whether to use the session override or default to the UI theme. This reactive approach ensures the export theme always reflects the correct state without requiring explicit synchronization calls.\n\nThe ImageExportDialog was refactored from using local state to being a controlled component for the export theme, receiving `exportWithDarkMode` as a prop. This prevents UI desynchronization and ensures the dialog always shows the current export theme setting. Additionally, request ID tracking was added to prevent race conditions in preview rendering when users quickly change settings.\n\nThe changes integrate seamlessly with Excalidraw's existing architecture: actions continue to handle user interactions, React state manages the UI, and the App instance provides session-scoped persistence. This approach maintains backward compatibility while adding the requested synchronization behavior.",
+  "source_pr": "https://github.com/excalidraw/excalidraw/pull/10903",
+  "before_sha": "499e9d64a58b5641eb1d41678d922ea3010800ce",
+  "after_sha": "a0e93b60402f543ffb5c845dafd29d95d2f0ffc6",
+  "diff_stats": {
+    "additions": 106,
+    "deletions": 25,
+    "files_changed": 6
+  }
+}

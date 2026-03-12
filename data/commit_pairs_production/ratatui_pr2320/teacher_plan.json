@@ -1,0 +1,122 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "api_design",
+      "recommendation": "Defined a clear, consistent contract for clearing operations across all backends, specifying that clears operate on character cells in the visible display area, preserve cursor position, and include the cursor cell when within the cleared region.",
+      "rationale": "The previous API documentation was ambiguous about cursor behavior and region boundaries, leading to inconsistent implementations. By explicitly defining the contract in the ClearType enum documentation and Backend trait methods, we ensure predictable behavior across all backends and prevent subtle bugs in user applications.",
+      "alternatives_considered": [
+        "Leaving the API ambiguous and letting each backend define its own behavior",
+        "Creating separate clear methods for different cursor inclusion behaviors",
+        "Making cursor movement part of the clear operation"
+      ],
+      "files_affected": [
+        "ratatui-core/src/backend.rs"
+      ]
+    },
+    {
+      "dimension": "testing",
+      "recommendation": "Updated TestBackend's ClearType::BeforeCursor and ClearType::AfterCursor implementations to be inclusive of the cursor cell, matching real terminal behavior (CSI J escape sequences).",
+      "rationale": "TestBackend is used for testing and should accurately simulate real terminal behavior. The previous exclusive behavior was inconsistent with actual terminals and caused test failures when the clear contract was enforced. Making it inclusive ensures tests reflect production behavior.",
+      "alternatives_considered": [
+        "Keeping TestBackend behavior exclusive and adjusting tests to expect different behavior",
+        "Adding a configuration flag to switch between inclusive/exclusive modes",
+        "Creating a separate test backend for the new behavior"
+      ],
+      "files_affected": [
+        "ratatui-core/src/backend/test.rs"
+      ]
+    },
+    {
+      "dimension": "performance_optimization",
+      "recommendation": "Implemented optimized clearing strategies for fixed viewports based on viewport dimensions: using ClearType::AfterCursor for full-width bottom-reaching viewports, ClearType::CurrentLine for full-width rows, and per-cell updates for non-full-width regions.",
+      "rationale": "Terminal clear commands (CSI sequences) are significantly faster than writing individual cells. By analyzing viewport geometry, we can use the most efficient clearing method: bulk clear commands when possible, falling back to per-cell updates only when necessary to avoid clearing outside the viewport.",
+      "alternatives_considered": [
+        "Always using per-cell updates for fixed viewports (simpler but slower)",
+        "Always using line clears regardless of viewport width (would clear outside viewport)",
+        "Implementing a custom CSI sequence for rectangular regions (not portable across terminals)"
+      ],
+      "files_affected": [
+        "ratatui-core/src/terminal/buffers.rs"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Preserved original cursor position across all clear operations by saving and restoring it, ensuring the API contract's cursor preservation guarantee is maintained.",
+      "rationale": "Some clear implementations (especially for fixed viewports) need to move the cursor temporarily to perform efficient clears. By restoring the original position, we maintain the contract that clear operations don't move the cursor, preventing unexpected cursor jumps in user applications.",
+      "alternatives_considered": [
+        "Documenting that cursor position may change during clears",
+        "Returning the final cursor position to the caller",
+        "Adding a parameter to control cursor behavior"
+      ],
+      "files_affected": [
+        "ratatui-core/src/terminal/buffers.rs"
+      ]
+    },
+    {
+      "dimension": "backward_compatibility",
+      "recommendation": "Updated characterization tests to reflect the new clear behavior while maintaining test coverage for edge cases like non-full-width viewports and inline viewports.",
+      "rationale": "The changes affect observable behavior, so tests needed updating. However, we maintained the same test structure and added new tests for previously untested scenarios (non-full-width fixed viewports), ensuring comprehensive coverage without breaking existing test patterns.",
+      "alternatives_considered": [
+        "Keeping old test expectations and marking them as 'expected failures'",
+        "Removing affected tests entirely",
+        "Creating a new test suite for the new behavior"
+      ],
+      "files_affected": [
+        "ratatui-core/src/terminal/buffers.rs",
+        "ratatui-core/src/terminal/inline.rs"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Define and document clear API contract",
+      "description": "Updated ClearType enum and Backend trait documentation to explicitly define the clearing contract: clears operate on visible character cells, preserve cursor position, and include cursor cell when within cleared region.",
+      "files_to_modify": [
+        "ratatui-core/src/backend.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-002",
+      "title": "Align TestBackend with real terminal behavior",
+      "description": "Modified TestBackend's ClearType::BeforeCursor and ClearType::AfterCursor implementations to be inclusive of the cursor cell, matching CSI J escape sequence behavior used by real terminals.",
+      "files_to_modify": [
+        "ratatui-core/src/backend/test.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-003",
+      "title": "Implement efficient fixed viewport clearing",
+      "description": "Rewrote Terminal::clear() to handle fixed viewports efficiently: uses ClearType::AfterCursor for full-width bottom-reaching viewports, ClearType::CurrentLine for full-width rows, and per-cell updates for non-full-width regions. Preserves cursor position throughout.",
+      "files_to_modify": [
+        "ratatui-core/src/terminal/buffers.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-004",
+      "title": "Update tests for new clear behavior",
+      "description": "Updated existing tests to expect inclusive cursor cell clearing and added new tests for edge cases like non-full-width fixed viewports. Fixed inline viewport tests affected by cursor inclusion changes.",
+      "files_to_modify": [
+        "ratatui-core/src/terminal/buffers.rs",
+        "ratatui-core/src/terminal/inline.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    }
+  ],
+  "implementation_summary": "The changes implement a consistent clearing API contract across all ratatui backends and viewports. The core insight was that terminal clear operations (via CSI escape sequences) have specific semantics: they operate on character cells in the visible display area, preserve cursor position, and include the cursor cell when it lies within the cleared region. This contract was previously implicit and inconsistently implemented, particularly in TestBackend and fixed viewport handling.\n\nKey changes include: 1) Documenting the contract explicitly in the ClearType enum and Backend trait methods; 2) Aligning TestBackend's behavior to match real terminals by making BeforeCursor/AfterCursor inclusive; 3) Rewriting fixed viewport clearing to respect viewport boundaries and use efficient clearing strategies based on viewport geometry; 4) Preserving cursor position across all clear operations by saving and restoring it.\n\nThe implementation follows ratatui's existing patterns of backend abstraction and efficient terminal operations. By analyzing viewport dimensions, we can choose optimal clearing methods: bulk CSI commands when possible (full-width regions) and falling back to per-cell updates only when necessary (non-full-width regions). This maintains performance while ensuring correct behavior. The changes integrate seamlessly with the existing codebase, as they build upon the established Backend trait and Terminal struct patterns, requiring no API breaks while significantly improving consistency and predictability.",
+  "source_pr": "https://github.com/ratatui/ratatui/pull/2320",
+  "before_sha": "5f0331ec899b9ee101f1a60a1bd8988323c85426",
+  "after_sha": "720303e806b884f37f986913c111e79a4e243ae9",
+  "diff_stats": {
+    "additions": 181,
+    "deletions": 83,
+    "files_changed": 4
+  }
+}

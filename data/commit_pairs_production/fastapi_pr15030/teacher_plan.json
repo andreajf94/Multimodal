@@ -1,0 +1,209 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "api_design",
+      "recommendation": "Created a dedicated EventSourceResponse class as a marker for SSE endpoints and ServerSentEvent model for fine-grained control over SSE fields",
+      "rationale": "SSE requires specific content type (text/event-stream) and wire format. EventSourceResponse inherits from StreamingResponse but serves as a marker for the routing layer to apply SSE-specific encoding. ServerSentEvent provides a structured way to control all SSE fields (data, event, id, retry, comment) while maintaining Pydantic validation.",
+      "alternatives_considered": [
+        "Extending StreamingResponse directly without a marker class",
+        "Using raw strings with manual formatting",
+        "Creating a separate middleware system"
+      ],
+      "files_affected": [
+        "fastapi/sse.py",
+        "fastapi/responses.py"
+      ]
+    },
+    {
+      "dimension": "data_modeling",
+      "recommendation": "Designed ServerSentEvent with mutually exclusive 'data' and 'raw_data' fields to support both JSON-serialized and raw string payloads",
+      "rationale": "SSE commonly needs both structured JSON data (for applications) and raw text (for logs, HTML, CSV). The mutual exclusivity prevents ambiguity and ensures proper wire formatting. Pydantic validators enforce null character restrictions on 'id' fields and non-negative 'retry' values.",
+      "alternatives_considered": [
+        "Single field with type discrimination",
+        "Separate classes for JSON vs raw data",
+        "Allowing both fields with precedence rules"
+      ],
+      "files_affected": [
+        "fastapi/sse.py"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Implemented proper validation for stream items when return type annotations are present, maintaining consistency with FastAPI's existing validation patterns",
+      "rationale": "When users declare return types like AsyncIterable[Item], FastAPI should validate yielded items against the Pydantic model. This reuses the existing stream_item_field validation infrastructure from JSONL streaming, ensuring consistent error behavior across streaming response types.",
+      "alternatives_considered": [
+        "No validation for SSE streams",
+        "Different validation system for SSE",
+        "Optional validation controlled by parameter"
+      ],
+      "files_affected": [
+        "fastapi/routing.py"
+      ]
+    },
+    {
+      "dimension": "performance",
+      "recommendation": "Used memory streams and task groups to decouple generator iteration from keep-alive timing, preventing cancellation errors during idle periods",
+      "rationale": "SSE connections can remain open for long periods with infrequent events. The implementation uses anyio memory streams to separate the producer (reading from generator) from consumer (sending to client), allowing keep-alive pings to be sent without cancelling the generator's __anext__ call. This prevents premature generator finalization.",
+      "alternatives_considered": [
+        "Simple while loop with timeouts",
+        "Background keep-alive tasks",
+        "Client-side reconnection without server keep-alive"
+      ],
+      "files_affected": [
+        "fastapi/routing.py",
+        "fastapi/sse.py"
+      ]
+    },
+    {
+      "dimension": "documentation",
+      "recommendation": "Added comprehensive tutorial with multiple examples covering different SSE use cases and integrated it into the existing documentation structure",
+      "rationale": "SSE has several nuanced use cases: basic streaming, named events, reconnection handling, POST requests, and raw data. The tutorial demonstrates each pattern with working code examples. Documentation follows FastAPI's established pattern of linking related topics (streaming, JSONL) and showing version-added info banners.",
+      "alternatives_considered": [
+        "Minimal API reference only",
+        "Single comprehensive example",
+        "Separate advanced guide without tutorial"
+      ],
+      "files_affected": [
+        "docs/en/docs/tutorial/server-sent-events.md",
+        "docs/en/mkdocs.yml",
+        "docs/en/docs/tutorial/stream-json-lines.md",
+        "docs/en/docs/advanced/stream-data.md"
+      ]
+    },
+    {
+      "dimension": "openapi_integration",
+      "recommendation": "Extended OpenAPI generation to properly document SSE endpoints with text/event-stream media type and appropriate schema definitions",
+      "rationale": "SSE endpoints need correct OpenAPI documentation for API consumers. The implementation adds SSE-specific content type handling and reuses the stream_item_field to generate proper schemas for the data payload when available. This maintains consistency with how JSONL endpoints are documented.",
+      "alternatives_considered": [
+        "Generic streaming response documentation",
+        "No OpenAPI support for SSE",
+        "Custom OpenAPI extensions"
+      ],
+      "files_affected": [
+        "fastapi/openapi/utils.py"
+      ]
+    },
+    {
+      "dimension": "compatibility",
+      "recommendation": "Supported both async and synchronous generators, with and without type annotations, maintaining backward compatibility with existing FastAPI patterns",
+      "rationale": "FastAPI supports multiple generator patterns for different use cases. The SSE implementation works with: 1) async generators with type annotations (best performance), 2) sync generators (run in threadpool), 3) unannotated generators (using jsonable_encoder). This mirrors the flexibility of existing JSONL streaming.",
+      "alternatives_considered": [
+        "Async-only implementation",
+        "Requiring type annotations",
+        "Different APIs for async vs sync"
+      ],
+      "files_affected": [
+        "fastapi/routing.py",
+        "docs_src/server_sent_events/tutorial001_py310.py"
+      ]
+    },
+    {
+      "dimension": "infrastructure",
+      "recommendation": "Added proper proxy and caching headers (Cache-Control: no-cache, X-Accel-Buffering: no) and automatic keep-alive pings per SSE specification",
+      "rationale": "SSE streams can be broken by proxies, load balancers, and client timeouts. The implementation follows HTML spec recommendations: sends ping comments every 15 seconds during idle periods, sets headers to prevent buffering (Nginx) and caching. These are applied automatically so users don't need to implement them.",
+      "alternatives_considered": [
+        "Leaving headers to users",
+        "Configurable keep-alive intervals",
+        "No proxy-specific headers"
+      ],
+      "files_affected": [
+        "fastapi/routing.py",
+        "fastapi/sse.py"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Core SSE implementation with response classes and event formatting",
+      "description": "Implement the foundational SSE classes: EventSourceResponse as a StreamingResponse marker and ServerSentEvent as a Pydantic model for structured event control. Include wire formatting utilities and validation logic.",
+      "files_to_modify": [],
+      "files_to_create": [
+        "fastapi/sse.py"
+      ],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-002",
+      "title": "Routing layer integration for SSE stream handling",
+      "description": "Extend FastAPI's routing system to detect SSE endpoints, handle both async/sync generators, apply validation, format events, and manage connection lifecycle with keep-alive mechanisms.",
+      "files_to_modify": [
+        "fastapi/routing.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "large"
+    },
+    {
+      "id": "T-003",
+      "title": "OpenAPI documentation generation for SSE endpoints",
+      "description": "Update OpenAPI utilities to properly document SSE endpoints with text/event-stream media type and generate appropriate schemas based on return type annotations.",
+      "files_to_modify": [
+        "fastapi/openapi/utils.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-004",
+      "title": "Comprehensive tutorial and documentation",
+      "description": "Create detailed tutorial covering all SSE use cases with working examples, integrate into documentation navigation, and update related streaming documentation.",
+      "files_to_modify": [
+        "docs/en/docs/tutorial/stream-json-lines.md",
+        "docs/en/docs/advanced/stream-data.md",
+        "docs/en/mkdocs.yml",
+        "fastapi/.agents/skills/fastapi/SKILL.md"
+      ],
+      "files_to_create": [
+        "docs/en/docs/tutorial/server-sent-events.md"
+      ],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-005",
+      "title": "Example implementations for documentation",
+      "description": "Create practical code examples demonstrating different SSE patterns: basic streaming, ServerSentEvent usage, raw data, reconnection, and POST endpoints.",
+      "files_to_modify": [],
+      "files_to_create": [
+        "docs_src/server_sent_events/tutorial001_py310.py",
+        "docs_src/server_sent_events/tutorial002_py310.py",
+        "docs_src/server_sent_events/tutorial003_py310.py",
+        "docs_src/server_sent_events/tutorial004_py310.py",
+        "docs_src/server_sent_events/tutorial005_py310.py"
+      ],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-006",
+      "title": "Testing infrastructure",
+      "description": "Implement comprehensive tests covering all SSE functionality including event formatting, routing, headers, and edge cases.",
+      "files_to_modify": [
+        "pyproject.toml"
+      ],
+      "files_to_create": [
+        "tests/test_sse.py",
+        "tests/test_tutorial/test_server_sent_events/test_tutorial001.py",
+        "tests/test_tutorial/test_server_sent_events/test_tutorial002.py"
+      ],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-007",
+      "title": "Response class exports and compatibility",
+      "description": "Ensure EventSourceResponse is properly exported through FastAPI's responses module for backward compatibility and easy imports.",
+      "files_to_modify": [
+        "fastapi/responses.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The Server-Sent Events implementation follows FastAPI's philosophy of providing robust, type-safe streaming capabilities with minimal boilerplate. The core architecture introduces two key components: EventSourceResponse as a marker class that routes use the existing StreamingResponse infrastructure with SSE-specific encoding, and ServerSentEvent as a Pydantic model giving developers fine-grained control over SSE fields (data, event, id, retry, comment).\n\nThe routing layer was extended to detect SSE endpoints through response_class checking, then applies appropriate formatting based on whether yielded items are plain objects (auto-JSON-encoded as data fields) or ServerSentEvent instances. A sophisticated keep-alive system using anyio memory streams and task groups prevents generator cancellation during idle periods while sending periodic ping comments as recommended by the SSE specification. Proxy-friendly headers are automatically added to prevent buffering and caching issues.\n\nIntegration with existing FastAPI systems is comprehensive: OpenAPI generation properly documents SSE endpoints, Pydantic validation works when return types are annotated, and both async/sync generators are supported. The implementation reuses patterns from JSONL streaming where appropriate (stream_item_field validation) while adding SSE-specific features like raw_data for non-JSON payloads and Last-Event-ID header handling for reconnection. Documentation follows FastAPI's established tutorial pattern with multiple practical examples covering common use cases from AI chat streaming to log tailing.",
+  "source_pr": "https://github.com/fastapi/fastapi/pull/15030",
+  "before_sha": "48d58ae3b6ef4ded5a4794618c00345667256d98",
+  "after_sha": "22381558446c5d1ac376680a6581dd63b3a04119",
+  "diff_stats": {
+    "additions": 1681,
+    "deletions": 37,
+    "files_changed": 23
+  }
+}

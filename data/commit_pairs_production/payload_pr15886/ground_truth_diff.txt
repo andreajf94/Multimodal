@@ -1,0 +1,334 @@
+diff --git a/packages/ui/src/elements/WhereBuilder/Condition/Relationship/index.tsx b/packages/ui/src/elements/WhereBuilder/Condition/Relationship/index.tsx
+index d6e2fd5c862..cbf2c33c0cc 100644
+--- a/packages/ui/src/elements/WhereBuilder/Condition/Relationship/index.tsx
++++ b/packages/ui/src/elements/WhereBuilder/Condition/Relationship/index.tsx
+@@ -27,12 +27,15 @@ export const RelationshipFilter: React.FC<Props> = (props) => {
+     field: { admin = {}, hasMany, relationTo },
+     filterOptions,
+     onChange,
++    operator,
+     value,
+   } = props
+ 
+   const placeholder = 'placeholder' in admin ? admin?.placeholder : undefined
+   const isSortable = admin?.isSortable
+ 
++  const isMultiValue = hasMany || ['in', 'not_in'].includes(operator)
++
+   const {
+     config: {
+       routes: { api },
+@@ -184,7 +187,7 @@ export const RelationshipFilter: React.FC<Props> = (props) => {
+ 
+   const findOptionsByValue = useCallback((): Option | Option[] => {
+     if (value) {
+-      if (hasMany) {
++      if (isMultiValue) {
+         if (Array.isArray(value)) {
+           return value.map((val) => {
+             if (hasMultipleRelations) {
+@@ -237,7 +240,7 @@ export const RelationshipFilter: React.FC<Props> = (props) => {
+     }
+ 
+     return undefined
+-  }, [hasMany, hasMultipleRelations, value, options])
++  }, [isMultiValue, hasMultipleRelations, value, options])
+ 
+   const handleInputChange = useCallback(
+     (input: string) => {
+@@ -340,7 +343,7 @@ export const RelationshipFilter: React.FC<Props> = (props) => {
+    */
+   useEffect(() => {
+     if (value && hasLoadedFirstOptions) {
+-      if (hasMany) {
++      if (isMultiValue) {
+         const matchedOptions = findOptionsByValue()
+ 
+         ;((matchedOptions as Option[]) || []).forEach((option, i) => {
+@@ -368,7 +371,7 @@ export const RelationshipFilter: React.FC<Props> = (props) => {
+   }, [
+     addOptionByID,
+     findOptionsByValue,
+-    hasMany,
++    isMultiValue,
+     hasMultipleRelations,
+     relationTo,
+     value,
+@@ -388,7 +391,7 @@ export const RelationshipFilter: React.FC<Props> = (props) => {
+       ) : (
+         <ReactSelect
+           disabled={disabled}
+-          isMulti={hasMany}
++          isMulti={isMultiValue}
+           isSortable={isSortable}
+           onChange={(selected) => {
+             if (!selected) {
+@@ -396,7 +399,7 @@ export const RelationshipFilter: React.FC<Props> = (props) => {
+               return
+             }
+ 
+-            if (hasMany && Array.isArray(selected)) {
++            if (isMultiValue && Array.isArray(selected)) {
+               onChange(
+                 selected
+                   ? selected.map((option) => {
+diff --git a/packages/ui/src/elements/WhereBuilder/field-types.tsx b/packages/ui/src/elements/WhereBuilder/field-types.tsx
+index 9c29c1c6e16..4d6009ec411 100644
+--- a/packages/ui/src/elements/WhereBuilder/field-types.tsx
++++ b/packages/ui/src/elements/WhereBuilder/field-types.tsx
+@@ -167,11 +167,8 @@ export const getValidFieldOperators = ({
+   }[] = []
+ 
+   if (field.type === 'relationship' && Array.isArray(field.relationTo)) {
+-    if ('hasMany' in field && field.hasMany) {
+-      validOperators = [...equalsOperators, exists]
+-    } else {
+-      validOperators = [...base]
+-    }
++    // Polymorphic relationships store {relationTo, value} - in/not_in only match value, not both properties
++    validOperators = [...equalsOperators, exists]
+   } else {
+     validOperators = [...fieldTypeConditions[field.type].operators]
+   }
+diff --git a/test/__helpers/e2e/filters/addListFilter.ts b/test/__helpers/e2e/filters/addListFilter.ts
+index 24afbb0dd03..07b6de88689 100644
+--- a/test/__helpers/e2e/filters/addListFilter.ts
++++ b/test/__helpers/e2e/filters/addListFilter.ts
+@@ -17,7 +17,7 @@ export const addListFilter = async ({
+   operatorLabel: string
+   page: Page
+   replaceExisting?: boolean
+-  value?: string
++  value?: string | string[]
+ }): Promise<{
+   /**
+    * A Locator pointing to the condition that was just added.
+@@ -69,23 +69,43 @@ export const addListFilter = async ({
+         response.url().includes(encodeURIComponent('where[or')) && response.status() === 200,
+     )
+     const valueLocator = condition.locator('.condition__value')
+-    const valueInput = valueLocator.locator('input')
+-    await valueInput.fill(value)
+-    await expect(valueInput).toHaveValue(value)
+-
+-    if ((await valueLocator.locator('input.rs__input').count()) > 0) {
+-      const valueOptions = condition.locator('.condition__value .rs__option')
+-      const createValue = valueOptions.locator(`text=Create "${value}"`)
+-      if ((await createValue.count()) > 0) {
+-        await createValue.click()
+-      } else {
++
++    // Check if this is a react-select input
++    const isReactSelect = (await valueLocator.locator('input.rs__input').count()) > 0
++
++    if (isReactSelect) {
++      if (Array.isArray(value)) {
++        // For multi-select with array values
+         await selectInput({
+           selectLocator: valueLocator,
+-          multiSelect: multiSelect ? undefined : false,
+-          option: value,
++          multiSelect: true,
++          options: value,
+         })
++      } else {
++        // For single select - fill input first to trigger search, then select option
++        const valueInput = valueLocator.locator('input')
++        await valueInput.fill(value)
++
++        const valueOptions = condition.locator('.condition__value .rs__option')
++        const createValue = valueOptions.locator(`text=Create "${value}"`)
++        if ((await createValue.count()) > 0) {
++          await createValue.click()
++        } else {
++          await selectInput({
++            selectLocator: valueLocator,
++            multiSelect: multiSelect ? undefined : false,
++            option: value,
++          })
++        }
+       }
++    } else {
++      // For regular input fields (non react-select)
++      const valueInput = valueLocator.locator('input')
++      const stringValue = Array.isArray(value) ? value.join(',') : value
++      await valueInput.fill(stringValue)
++      await expect(valueInput).toHaveValue(stringValue)
+     }
++
+     await networkPromise
+   }
+ 
+diff --git a/test/fields-relationship/e2e.spec.ts b/test/fields-relationship/e2e.spec.ts
+index ff7cb454f97..aae3730a322 100644
+--- a/test/fields-relationship/e2e.spec.ts
++++ b/test/fields-relationship/e2e.spec.ts
+@@ -18,21 +18,21 @@ import type {
+   VersionedRelationshipField,
+ } from './payload-types.js'
+ 
++import { assertNetworkRequests } from '../__helpers/e2e/assertNetworkRequests.js'
++import { addArrayRow } from '../__helpers/e2e/fields/array/addArrayRow.js'
++import { openCreateDocDrawer } from '../__helpers/e2e/fields/relationship/openCreateDocDrawer.js'
++import { addListFilter } from '../__helpers/e2e/filters/index.js'
++import { goToNextPage } from '../__helpers/e2e/goToNextPage.js'
+ import {
+   ensureCompilationIsDone,
+   initPageConsoleErrorCatch,
+   saveDocAndAssert,
+   // throttleTest,
+ } from '../__helpers/e2e/helpers.js'
+-import { AdminUrlUtil } from '../__helpers/shared/adminUrlUtil.js'
+-import { assertToastErrors } from '../__helpers/shared/assertToastErrors.js'
+-import { assertNetworkRequests } from '../__helpers/e2e/assertNetworkRequests.js'
+-import { addArrayRow } from '../__helpers/e2e/fields/array/addArrayRow.js'
+-import { openCreateDocDrawer } from '../__helpers/e2e/fields/relationship/openCreateDocDrawer.js'
+-import { addListFilter } from '../__helpers/e2e/filters/index.js'
+-import { goToNextPage } from '../__helpers/e2e/goToNextPage.js'
+ import { openDocControls } from '../__helpers/e2e/openDocControls.js'
+ import { openDocDrawer } from '../__helpers/e2e/toggleDocDrawer.js'
++import { AdminUrlUtil } from '../__helpers/shared/adminUrlUtil.js'
++import { assertToastErrors } from '../__helpers/shared/assertToastErrors.js'
+ import { initPayloadE2ENoConfig } from '../__helpers/shared/initPayloadE2ENoConfig.js'
+ import { TEST_TIMEOUT_LONG } from '../playwright.config.js'
+ import {
+@@ -790,8 +790,6 @@ describe('Relationship Field', () => {
+       await expect(options).toHaveCount(1) // None + 1 Unitled ID
+     })
+ 
+-    // test.todo('should paginate within the dropdown');
+-
+     test('should search within the relationship field', async () => {
+       await page.goto(url.edit(docWithExistingRelations.id))
+       await wait(300)
+@@ -1016,7 +1014,7 @@ describe('Relationship Field', () => {
+       }
+     }
+ 
+-    test('should filter on polymorphic hasMany=true relationship field', async () => {
++    test('should filter on polymorphic hasMany=true relationship field - equals', async () => {
+       const { relatedDoc, cleanup } = await createRelatedDoc()
+       await page.goto(url.list)
+       await addListFilter({
+@@ -1029,7 +1027,7 @@ describe('Relationship Field', () => {
+       await expect(tableRow).toHaveCount(1)
+       await cleanup()
+     })
+-    test('should filter on polymorphic hasMany=false relationship field', async () => {
++    test('should filter on polymorphic hasMany=false relationship field - equals', async () => {
+       const { relatedDoc, cleanup } = await createRelatedDoc()
+       await page.goto(url.list)
+       await addListFilter({
+@@ -1042,7 +1040,21 @@ describe('Relationship Field', () => {
+       await expect(tableRow).toHaveCount(1)
+       await cleanup()
+     })
+-    test('should filter on monomorphic hasMany=true relationship field', async () => {
++    test('should filter on monomorphic hasMany=false relationship field - is in', async () => {
++      const { relatedDoc, cleanup } = await createRelatedDoc()
++      await page.goto(url.list)
++      await addListFilter({
++        page,
++        fieldLabel: 'Relationship',
++        operatorLabel: 'is in',
++        value: relatedDoc.id,
++        multiSelect: true,
++      })
++      const tableRow = page.locator(tableRowLocator)
++      await expect(tableRow).toHaveCount(1)
++      await cleanup()
++    })
++    test('should filter on monomorphic hasMany=true relationship field - is in', async () => {
+       const { relatedDoc, cleanup } = await createRelatedDoc()
+       await page.goto(url.list)
+       await addListFilter({
+@@ -1056,6 +1068,58 @@ describe('Relationship Field', () => {
+       await expect(tableRow).toHaveCount(1)
+       await cleanup()
+     })
++
++    test('should filter on monomorphic hasMany=false relationship field - is in with multiple values', async () => {
++      // Create multiple related docs
++      const relatedDoc1 = await payload.create({
++        collection: relationOneSlug,
++        data: { name: 'Related Doc 1' },
++      })
++      const relatedDoc2 = await payload.create({
++        collection: relationOneSlug,
++        data: { name: 'Related Doc 2' },
++      })
++      const relatedDoc3 = await payload.create({
++        collection: relationOneSlug,
++        data: { name: 'Related Doc 3' },
++      })
++
++      // Create main docs that reference different related docs
++      const mainDoc1 = await payload.create({
++        collection: slug,
++        data: { relationship: relatedDoc1.id },
++      })
++      const mainDoc2 = await payload.create({
++        collection: slug,
++        data: { relationship: relatedDoc2.id },
++      })
++      const mainDoc3 = await payload.create({
++        collection: slug,
++        data: { relationship: relatedDoc3.id },
++      })
++
++      await page.goto(url.list)
++
++      // Filter by relatedDoc1 and relatedDoc2 (should match mainDoc1 and mainDoc2)
++      await addListFilter({
++        page,
++        fieldLabel: 'Relationship',
++        operatorLabel: 'is in',
++        value: [String(relatedDoc1.id), String(relatedDoc2.id)],
++        multiSelect: true,
++      })
++
++      const tableRow = page.locator(tableRowLocator)
++      await expect(tableRow).toHaveCount(2)
++
++      // Cleanup
++      await payload.delete({ collection: slug, id: String(mainDoc1.id) })
++      await payload.delete({ collection: slug, id: String(mainDoc2.id) })
++      await payload.delete({ collection: slug, id: String(mainDoc3.id) })
++      await payload.delete({ collection: relationOneSlug, id: String(relatedDoc1.id) })
++      await payload.delete({ collection: relationOneSlug, id: String(relatedDoc2.id) })
++      await payload.delete({ collection: relationOneSlug, id: String(relatedDoc3.id) })
++    })
+   })
+ })
+ 
+diff --git a/test/fields-relationship/payload-types.ts b/test/fields-relationship/payload-types.ts
+index 9fd14b5dd13..ff45feab375 100644
+--- a/test/fields-relationship/payload-types.ts
++++ b/test/fields-relationship/payload-types.ts
+@@ -116,6 +116,9 @@ export interface Config {
+   globals: {};
+   globalsSelect: {};
+   locale: 'en';
++  widgets: {
++    collections: CollectionsWidget;
++  };
+   user: User;
+   jobs: {
+     tasks: unknown;
+@@ -752,6 +755,16 @@ export interface PayloadMigrationsSelect<T extends boolean = true> {
+   updatedAt?: T;
+   createdAt?: T;
+ }
++/**
++ * This interface was referenced by `Config`'s JSON-Schema
++ * via the `definition` "collections_widget".
++ */
++export interface CollectionsWidget {
++  data?: {
++    [k: string]: unknown;
++  };
++  width: 'full';
++}
+ /**
+  * This interface was referenced by `Config`'s JSON-Schema
+  * via the `definition` "auth".

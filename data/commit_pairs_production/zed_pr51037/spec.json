@@ -1,0 +1,11 @@
+{
+  "feature_name": "Dirty Buffer Reload After Undo",
+  "description": "Implement a fix where buffers automatically reload from disk after undoing all edits when an external tool has modified the file while the buffer was dirty. Currently, if a file is edited externally while the user has unsaved changes, and then the user undoes all their edits, the buffer remains stale and doesn't reflect the latest disk content. The solution should detect when a buffer transitions from dirty to clean and check if the file was modified externally during that dirty period.",
+  "functional_requirements": [
+    "When a buffer transitions from dirty to clean (e.g., after an undo operation that removes all unsaved changes), check if the file's modification time changed while the buffer was dirty.",
+    "If the file's mtime changed during the dirty period and the file still exists on disk, emit a ReloadNeeded signal to trigger a reload.",
+    "Ensure this reload logic only fires for files that are present on disk (DiskState::Present) and doesn't cause double reloads by coordinating with existing file update tracking."
+  ],
+  "project_name": "zed",
+  "source_pr": "https://github.com/zed-industries/zed/pull/51037"
+}

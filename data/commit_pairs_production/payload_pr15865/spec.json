@@ -1,0 +1,11 @@
+{
+  "feature_name": "Fix contains operator for hasMany select fields in PostgreSQL",
+  "description": "Implement a fix for the 'contains' operator when used with hasMany select fields in PostgreSQL databases. Currently, the query incorrectly uses ILIKE on enum type columns, which PostgreSQL doesn't support. The solution should properly handle the array nature of hasMany select fields by checking for exact value matches rather than using pattern matching.",
+  "functional_requirements": [
+    "Modify the query builder to handle hasMany select fields with the 'contains' operator by checking for exact value equality instead of using ILIKE",
+    "Ensure the fix works specifically for PostgreSQL enum types while maintaining compatibility with other database types",
+    "Update the test suite to verify the 'contains' operator correctly filters records based on hasMany select field values"
+  ],
+  "project_name": "payload",
+  "source_pr": "https://github.com/payloadcms/payload/pull/15865"
+}

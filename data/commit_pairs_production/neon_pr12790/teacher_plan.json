@@ -1,0 +1,77 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "testing",
+      "recommendation": "Enabled previously skipped integration tests for Hadron (Lakebase mode) by removing the @pytest.mark.skip decorator and adding necessary configuration to run tests in Lakebase mode",
+      "rationale": "The tests were originally skipped because they required Lakebase mode configuration which wasn't properly set up. Instead of keeping them skipped indefinitely, we enabled them with the correct configuration to ensure the Hadron integration is properly tested. This improves test coverage and validates the integration in the CI pipeline.",
+      "alternatives_considered": [
+        "Keep tests skipped permanently (bad for test coverage)",
+        "Delete the tests entirely (loses test cases)",
+        "Create separate test suites for Lakebase mode (more maintenance overhead)"
+      ],
+      "files_affected": [
+        "test_runner/regress/test_compaction.py",
+        "test_runner/regress/test_wal_acceptor.py"
+      ]
+    },
+    {
+      "dimension": "configuration_management",
+      "recommendation": "Added explicit Lakebase mode configuration to test endpoints via config_lines parameter when creating workloads and endpoints",
+      "rationale": "The tests require specific PostgreSQL configuration (neon.lakebase_mode=true) to run correctly in the Hadron integration context. By adding this configuration explicitly at test setup, we ensure the tests run in the correct mode without affecting other tests. This is cleaner than modifying global test configuration.",
+      "alternatives_considered": [
+        "Set Lakebase mode globally in test environment (would affect other tests)",
+        "Use environment variables (less explicit, harder to debug)",
+        "Modify PostgreSQL configuration files directly (more complex, less maintainable)"
+      ],
+      "files_affected": [
+        "test_runner/regress/test_compaction.py",
+        "test_runner/regress/test_wal_acceptor.py"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Maintained existing test assertions and error handling patterns while enabling the tests",
+      "rationale": "The tests already had proper assertions for corruption detection and disk usage limits. By keeping the existing test logic intact and only removing the skip marker and adding configuration, we minimize risk and maintain the original test intent. The tests validate critical system behaviors in Lakebase mode.",
+      "alternatives_considered": [
+        "Rewrite test logic (higher risk of introducing bugs)",
+        "Simplify test assertions (would reduce test effectiveness)",
+        "Add new error handling (unnecessary since existing patterns were sufficient)"
+      ],
+      "files_affected": [
+        "test_runner/regress/test_compaction.py",
+        "test_runner/regress/test_wal_acceptor.py"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Enable Lakebase mode compaction tests",
+      "description": "Enable the test_ps_corruption_detection_feedback test that validates corruption detection during image layer creation in Lakebase mode. This test ensures that when the pageserver detects corruption during image layer creation, it properly reports this back through the circuit breaker mechanism.",
+      "files_to_modify": [
+        "test_runner/regress/test_compaction.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-002",
+      "title": "Enable Lakebase mode WAL acceptor disk usage tests",
+      "description": "Enable the test_timeline_disk_usage_limit test that validates the timeline disk usage circuit breaker works correctly in Lakebase mode. This test ensures that when disk usage exceeds limits, the system properly throttles or blocks operations.",
+      "files_to_modify": [
+        "test_runner/regress/test_wal_acceptor.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The changes enable two previously skipped integration tests that were part of the Hadron (Lakebase mode) integration work. Both tests were marked with @pytest.mark.skip(reason='Lakebase mode') and needed specific configuration to run correctly in Lakebase mode.\n\nFor the compaction test (test_ps_corruption_detection_feedback), we removed the skip decorator and added the 'neon.lakebase_mode=true' configuration to the Workload initialization. This test validates that corruption detection during image layer creation properly triggers circuit breaker feedback mechanisms.\n\nFor the WAL acceptor test (test_timeline_disk_usage_limit), we similarly removed the skip decorator and added the same Lakebase mode configuration when creating the test endpoint. This test validates that disk usage limits are properly enforced through circuit breakers.\n\nThe approach is minimal and surgical: we only removed the skip markers and added the necessary configuration, leaving all existing test logic intact. This ensures the tests run in the correct mode without affecting other tests in the suite. The changes integrate seamlessly with the existing test infrastructure, using the established patterns for endpoint and workload configuration. By enabling these tests, we improve test coverage for the Hadron integration and ensure critical system behaviors are validated in CI.",
+  "source_pr": "https://github.com/neondatabase/neon/pull/12790",
+  "before_sha": "eb2741758bbf97616746b16831a72c4531791ee9",
+  "after_sha": "e470997627b25ae6494ffe5ae4abbd35efd7acf6",
+  "diff_stats": {
+    "additions": 9,
+    "deletions": 4,
+    "files_changed": 2
+  }
+}

@@ -1,0 +1,124 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "documentation_structure",
+      "recommendation": "Transformed the Edge Function 546 error guide from a basic troubleshooting list to a comprehensive, step-by-step diagnostic workflow with visual aids and SQL queries",
+      "rationale": "The original documentation was too generic and didn't provide actionable steps for users. The new structure follows a logical debugging progression: identify \u2192 measure \u2192 analyze \u2192 fix. This mirrors how engineers actually troubleshoot problems in production systems.",
+      "alternatives_considered": [
+        "Keeping the original simple list format",
+        "Creating separate pages for each troubleshooting step",
+        "Adding only code examples without visual aids"
+      ],
+      "files_affected": [
+        "apps/docs/content/troubleshooting/edge-function-546-error-response.mdx"
+      ]
+    },
+    {
+      "dimension": "visual_aids",
+      "recommendation": "Added 5 new PNG images showing dashboard screenshots and query results to illustrate concepts and provide visual confirmation",
+      "rationale": "Visual elements help users verify they're looking at the right screens and understand complex concepts like error patterns over time. Screenshots of actual dashboard interfaces reduce cognitive load compared to textual descriptions alone.",
+      "alternatives_considered": [
+        "Using text descriptions only",
+        "Creating diagrams instead of screenshots",
+        "Linking to external image hosting"
+      ],
+      "files_affected": [
+        "apps/docs/public/img/troubleshooting/546_chart.png",
+        "apps/docs/public/img/troubleshooting/546_errors_by_hour.png",
+        "apps/docs/public/img/troubleshooting/limit_in_logs.png",
+        "apps/docs/public/img/troubleshooting/limit_logs.png",
+        "apps/docs/public/img/troubleshooting/query_results_546.png"
+      ]
+    },
+    {
+      "dimension": "interactive_documentation",
+      "recommendation": "Used Accordion components to organize advanced SQL queries, keeping the main flow clean while providing depth for power users",
+      "rationale": "The documentation serves both novice users who need basic guidance and advanced users who need detailed diagnostic queries. Accordions prevent information overload while making advanced content discoverable. The SQL queries are pre-formatted for direct copy-paste into the dashboard.",
+      "alternatives_considered": [
+        "Putting all SQL queries inline",
+        "Creating separate reference pages for queries",
+        "Using code folding without UI components"
+      ],
+      "files_affected": [
+        "apps/docs/content/troubleshooting/edge-function-546-error-response.mdx"
+      ]
+    },
+    {
+      "dimension": "error_contextualization",
+      "recommendation": "Added detailed technical context about isolates, resource limits, and error patterns before jumping to solutions",
+      "rationale": "Understanding WHY the error occurs (isolate architecture, resource constraints) helps users make better decisions about HOW to fix it. The 50% resource threshold explanation provides crucial insight into the platform's behavior that wasn't documented before.",
+      "alternatives_considered": [
+        "Keeping the error description minimal",
+        "Adding context in a separate page",
+        "Using technical jargon without explanation"
+      ],
+      "files_affected": [
+        "apps/docs/content/troubleshooting/edge-function-546-error-response.mdx"
+      ]
+    },
+    {
+      "dimension": "actionable_guidance",
+      "recommendation": "Provided concrete, prioritized solutions from refactoring code to platform migration, with specific code examples of problematic patterns",
+      "rationale": "Users need clear next steps, not just diagnosis. The solutions are ordered from most practical (code changes) to most drastic (platform migration). Real code examples of CPU-intensive recursion and memory allocation help users recognize similar patterns in their own code.",
+      "alternatives_considered": [
+        "Generic advice like 'optimize your code'",
+        "Only providing one solution path",
+        "Theoretical examples without actual code"
+      ],
+      "files_affected": [
+        "apps/docs/content/troubleshooting/edge-function-546-error-response.mdx"
+      ]
+    },
+    {
+      "dimension": "documentation_maintenance",
+      "recommendation": "Added maintainer notes and preserved backward compatibility while updating links and terminology",
+      "rationale": "The documentation includes notes for future maintainers (like the CLI setup suggestion) and updates outdated links while maintaining the same URL structure. This ensures the documentation remains useful over time without breaking existing bookmarks.",
+      "alternatives_considered": [
+        "Complete rewrite without backward compatibility",
+        "Not adding maintainer notes",
+        "Changing URL structures"
+      ],
+      "files_affected": [
+        "apps/docs/content/troubleshooting/all-about-supabase-egress-a_Sg_e.mdx",
+        "apps/docs/content/troubleshooting/edge-function-546-error-response.mdx"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Comprehensive Edge Function 546 Error Guide",
+      "description": "Complete overhaul of the Edge Function 546 error documentation to provide step-by-step diagnosis, visual aids, SQL queries for log analysis, and concrete solutions",
+      "files_to_modify": [
+        "apps/docs/content/troubleshooting/edge-function-546-error-response.mdx"
+      ],
+      "files_to_create": [
+        "apps/docs/public/img/troubleshooting/546_chart.png",
+        "apps/docs/public/img/troubleshooting/546_errors_by_hour.png",
+        "apps/docs/public/img/troubleshooting/limit_in_logs.png",
+        "apps/docs/public/img/troubleshooting/limit_logs.png",
+        "apps/docs/public/img/troubleshooting/query_results_546.png"
+      ],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-002",
+      "title": "Egress Documentation Updates",
+      "description": "Minor improvements to egress troubleshooting guide with updated links, clearer explanations, and one new visual aid",
+      "files_to_modify": [
+        "apps/docs/content/troubleshooting/all-about-supabase-egress-a_Sg_e.mdx"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation transforms two troubleshooting guides from basic reference documents into comprehensive, actionable resources. For the Edge Function 546 error, the approach completely restructures the content around a logical debugging workflow: first understanding the technical context of isolates and resource limits, then identifying the error through dashboard logs, measuring its frequency with SQL queries, analyzing patterns using advanced diagnostic queries (organized in accordions), and finally implementing concrete solutions ranging from code refactoring to platform migration.\n\nKey patterns include the use of visual aids (5 new PNG screenshots) to reduce cognitive load and provide verification points, interactive accordion components to manage information density, and copy-paste-ready SQL queries that users can directly run in their Supabase dashboards. The documentation maintains backward compatibility by keeping the same URLs while significantly enhancing content depth and usability.\n\nFor the egress guide, the changes are more incremental but follow similar principles: updating links to current dashboard locations, clarifying terminology, and adding one visual aid. Both updates integrate with the existing documentation system by using the established MDX format with embedded components and images, ensuring consistency with the rest of the Supabase documentation ecosystem. The implementation demonstrates a user-centric approach to documentation that anticipates actual troubleshooting workflows rather than just listing symptoms and solutions.",
+  "source_pr": "https://github.com/supabase/supabase/pull/43471",
+  "before_sha": "debecf3921d42c462c72ac8fd2a29ce1193dd8ba",
+  "after_sha": "77568172faa496f5800b43db3730d7aa80a048de",
+  "diff_stats": {
+    "additions": 304,
+    "deletions": 28,
+    "files_changed": 7
+  }
+}

@@ -1,0 +1,112 @@
+diff --git a/packages/server/src/adapters/fastify/fastifyTRPCPlugin.ts b/packages/server/src/adapters/fastify/fastifyTRPCPlugin.ts
+index da927d7340c..6a031516752 100644
+--- a/packages/server/src/adapters/fastify/fastifyTRPCPlugin.ts
++++ b/packages/server/src/adapters/fastify/fastifyTRPCPlugin.ts
+@@ -46,6 +46,14 @@ export function fastifyTRPCPlugin<TRouter extends AnyRouter>(
+       _done(null, body);
+     },
+   );
++  fastify.removeContentTypeParser('multipart/form-data');
++  fastify.addContentTypeParser(
++    'multipart/form-data',
++    {},
++    function (_, body, _done) {
++      _done(null, body);
++    },
++  );
+ 
+   let prefix = opts.prefix ?? '';
+ 
+diff --git a/packages/server/src/adapters/node-http/incomingMessageToRequest.ts b/packages/server/src/adapters/node-http/incomingMessageToRequest.ts
+index 3a590524c6b..4223db4cac9 100644
+--- a/packages/server/src/adapters/node-http/incomingMessageToRequest.ts
++++ b/packages/server/src/adapters/node-http/incomingMessageToRequest.ts
+@@ -1,4 +1,5 @@
+ import type * as http from 'http';
++import { IncomingMessage } from 'node:http';
+ import { TRPCError } from '../../@trpc/server';
+ import type { NodeHTTPRequest, NodeHTTPResponse } from './types';
+ 
+@@ -21,6 +22,10 @@ function createBody(
+     if (typeof req.body === 'string') {
+       return req.body;
+     }
++    // formData use
++    if (req.body instanceof IncomingMessage) {
++      return req.body as any;
++    }
+     // If body exists but isn't a string, stringify it as JSON
+     return JSON.stringify(req.body);
+   }
+diff --git a/packages/tests/server/adapters/fastify.test.ts b/packages/tests/server/adapters/fastify.test.ts
+index 29fdcbc70f8..4b7e4428263 100644
+--- a/packages/tests/server/adapters/fastify.test.ts
++++ b/packages/tests/server/adapters/fastify.test.ts
+@@ -7,6 +7,7 @@ import {
+   createWSClient,
+   httpBatchLink,
+   httpBatchStreamLink,
++  httpLink,
+   splitLink,
+   wsLink,
+ } from '@trpc/client';
+@@ -121,6 +122,19 @@ function createAppRouter() {
+         );
+         return opts.input.wait;
+       }),
++    multipartForm: publicProcedure
++      .input(
++        z.custom<FormData>((input) => {
++          // input instanceof FormData return false but is a FormData type
++          // maybe undici version
++          return input.toString() === '[object FormData]';
++        }),
++      )
++      .mutation(async ({ input }) => {
++        const result = {} as Record<string, any>;
++        result['id'] = (input as any).get('id');
++        return result;
++      }),
+   });
+ 
+   return { appRouter, ee, onNewMessageSubscription, onSubscriptionEnded };
+@@ -229,10 +243,18 @@ function createClient(opts: ClientOptions) {
+           return op.type === 'subscription';
+         },
+         true: wsLink({ client: wsClient }),
+-        false: httpBatchStreamLink({
+-          url: `http://${host}`,
+-          headers: opts.headers,
+-          fetch: fetch as any,
++        false: splitLink({
++          condition(op) {
++            return op.input instanceof FormData;
++          },
++          true: httpLink({
++            url: `http://${host}`,
++            headers: opts.headers,
++          }),
++          false: httpBatchStreamLink({
++            url: `http://${host}`,
++            headers: opts.headers,
++          }),
+         }),
+       }),
+     ],
+@@ -449,6 +471,16 @@ describe('anonymous user', () => {
+     expect(results).toEqual([3, 1, 2]);
+     expect(orderedResults).toEqual([1, 2, 3]);
+   });
++  test('multipart/formdata', async () => {
++    const fd = new FormData();
++    fd.set('id', 'bar');
++
++    expect(await app.client.multipartForm.mutate(fd)).toMatchInlineSnapshot(`
++    Object {
++      "id": "bar",
++    }
++  `);
++  });
+ });
+ 
+ describe('authorized user', () => {

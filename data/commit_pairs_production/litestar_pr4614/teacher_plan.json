@@ -1,0 +1,86 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "testing",
+      "recommendation": "Changed the picologging import from pytest.importorskip to a try/except block to handle ImportError gracefully",
+      "rationale": "The original approach used pytest.importorskip which would skip the entire test if picologging wasn't available. The new approach uses a try/except ImportError pattern to gracefully handle missing picologging without affecting test execution. This is more robust as it allows tests to run even when picologging is not installed, while still cleaning up logging handlers when it is available.",
+      "alternatives_considered": [
+        "Keep using pytest.importorskip but modify skip conditions",
+        "Remove picologging cleanup entirely",
+        "Add a configuration flag to control picologging handling"
+      ],
+      "files_affected": [
+        "tests/helpers.py"
+      ]
+    },
+    {
+      "dimension": "testing",
+      "recommendation": "Added explicit skip decorators for Python 3.13+ to specific logging-related tests",
+      "rationale": "Added @pytest.mark.skipif(sys.version_info >= (3, 13), reason=\"Broken. Skip because of pending removal in v3\") to 8 test functions across two test files. This explicitly skips these tests when running on Python 3.13 or newer, preventing test failures while maintaining test coverage for older Python versions. The skip reason clearly communicates this is temporary and related to pending removal in version 3.",
+      "alternatives_considered": [
+        "Modify the tests to work with Python 3.13 (would require deeper changes to logging system)",
+        "Use pytest.xfail() instead of skip (would still show as failure in test reports)",
+        "Create a separate test suite for Python 3.13+"
+      ],
+      "files_affected": [
+        "tests/unit/test_middleware/test_exception_handler_middleware.py",
+        "tests/unit/test_middleware/test_logging_middleware.py"
+      ]
+    },
+    {
+      "dimension": "compatibility",
+      "recommendation": "Added sys import to test files to check Python version",
+      "rationale": "Added 'import sys' to both test files to enable version checking with sys.version_info. This is the standard Python way to check runtime Python version and allows conditional test execution based on Python version. The version check (3, 13) specifically targets Python 3.13 and newer versions.",
+      "alternatives_considered": [
+        "Use platform.python_version() for version checking",
+        "Create a custom version checking utility",
+        "Use environment variables to control test skipping"
+      ],
+      "files_affected": [
+        "tests/unit/test_middleware/test_exception_handler_middleware.py",
+        "tests/unit/test_middleware/test_logging_middleware.py"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Update test helper to handle picologging import gracefully",
+      "description": "Modified the cleanup_logging_impl function in helpers.py to use try/except ImportError instead of pytest.importorskip for picologging import. This ensures tests can run even when picologging is not installed, while still performing cleanup when it is available.",
+      "files_to_modify": [
+        "tests/helpers.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-002",
+      "title": "Skip logging middleware tests on Python 3.13+",
+      "description": "Added skip decorators to 8 test functions in test_logging_middleware.py that test logging middleware functionality. These tests are temporarily skipped on Python 3.13 and newer due to compatibility issues with the logging system that will be addressed in a future refactoring.",
+      "files_to_modify": [
+        "tests/unit/test_middleware/test_logging_middleware.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-003",
+      "title": "Skip exception handler middleware tests on Python 3.13+",
+      "description": "Added skip decorators to 2 test functions in test_exception_handler_middleware.py that test exception logging behavior. These tests are temporarily skipped on Python 3.13 and newer due to compatibility issues with the logging system that will be addressed in a future refactoring.",
+      "files_to_modify": [
+        "tests/unit/test_middleware/test_exception_handler_middleware.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The changes implement a temporary workaround for Python 3.13 compatibility issues in the Litestar test suite. The approach focuses on test execution behavior rather than modifying the actual logging functionality, as requested.\n\nFirst, the cleanup_logging_impl helper function was modified to handle picologging imports more gracefully. Instead of using pytest.importorskip (which would skip entire tests if picologging wasn't available), it now uses a try/except ImportError pattern. This allows tests to run regardless of picologging availability while still performing proper cleanup when picologging is present.\n\nSecond, explicit skip decorators were added to 10 specific test functions across two test files. Each decorator uses @pytest.mark.skipif(sys.version_info >= (3, 13), reason=\"Broken. Skip because of pending removal in v3\") to conditionally skip tests when running on Python 3.13 or newer. The skip reason clearly indicates this is temporary and related to pending changes in version 3 of the framework.\n\nThe implementation follows a minimal, targeted approach: only the specific tests that fail under Python 3.13 are skipped, and the changes are isolated to test files only. This maintains test suite stability while allowing the team to work on broader logging system changes separately. The pattern used is standard Python/pytest practice for conditional test skipping based on runtime environment.",
+  "source_pr": "https://github.com/litestar-org/litestar/pull/4614",
+  "before_sha": "7470f7d93febab7ec4b347bfbf04d95dd16d94ac",
+  "after_sha": "ded682af0b269d2b070f80c8856ed4bbbf63853c",
+  "diff_stats": {
+    "additions": 19,
+    "deletions": 6,
+    "files_changed": 3
+  }
+}

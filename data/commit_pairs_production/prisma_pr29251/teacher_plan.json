@@ -1,0 +1,104 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "data_modeling",
+      "recommendation": "Added 'canAssumeStrictEquality' flag to join configuration to control type casting behavior",
+      "rationale": "MySQL BigInt view relations can return integer keys as strings or BigInts depending on the context, causing join failures when parent and child key types don't match exactly. This flag allows the system to dynamically handle type mismatches when needed while maintaining strict equality checks by default for performance.",
+      "alternatives_considered": [
+        "Always performing type casting (performance overhead)",
+        "Adding type annotations to schema (breaking change)",
+        "Database-specific workarounds (fragile)"
+      ],
+      "files_affected": [
+        "packages/client-engine-runtime/src/query-plan.ts",
+        "packages/client-engine-runtime/bench/sample-query-plans.ts"
+      ]
+    },
+    {
+      "dimension": "api_design",
+      "recommendation": "Extended getRecordKey function to accept optional type mapper functions for key transformation",
+      "rationale": "The core join logic needs to compare keys between parent and child records. By adding mapper functions to getRecordKey, we can transparently cast child keys to match parent key types without modifying the original data. This keeps the casting logic isolated to the key comparison phase.",
+      "alternatives_considered": [
+        "Modifying child records directly (side effects)",
+        "Creating separate key generation functions (code duplication)",
+        "Adding type casting at database adapter level (too low-level)"
+      ],
+      "files_affected": [
+        "packages/client-engine-runtime/src/interpreter/in-memory-processing.ts"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Implemented automatic type inference for parent keys with fallback to strict equality",
+      "rationale": "When canAssumeStrictEquality is false, the system analyzes parent records to determine the actual runtime types of join keys, then creates appropriate casting functions (Number, String, Boolean, BigInt). This handles edge cases where schema types don't match runtime types (e.g., MySQL returning BigInt as string).",
+      "alternatives_considered": [
+        "Requiring explicit type annotations (user burden)",
+        "Always trying all possible casts (performance impact)",
+        "Failing with descriptive errors (breaks existing queries)"
+      ],
+      "files_affected": [
+        "packages/client-engine-runtime/src/interpreter/query-interpreter.ts"
+      ]
+    },
+    {
+      "dimension": "testing",
+      "recommendation": "Created MySQL-specific test case for BigInt view relation handling",
+      "rationale": "The issue is specific to MySQL's handling of view relations with BigInt keys. The test creates a view that returns integer keys and verifies joins work correctly. The test is opted out of other databases since the issue is MySQL-specific.",
+      "alternatives_considered": [
+        "Generic test for all databases (unnecessary overhead)",
+        "Unit tests only (misses integration issues)",
+        "No test (risk of regression)"
+      ],
+      "files_affected": [
+        "packages/client/tests/functional/issues/29122-mysql-bigint-view-relation/_matrix.ts",
+        "packages/client/tests/functional/issues/29122-mysql-bigint-view-relation/prisma/_schema.ts",
+        "packages/client/tests/functional/issues/29122-mysql-bigint-view-relation/tests.ts"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Add flexible join key type casting configuration",
+      "description": "Extend query plan types and join configuration to support optional type casting when parent and child key types don't match exactly",
+      "files_to_modify": [
+        "packages/client-engine-runtime/src/query-plan.ts",
+        "packages/client-engine-runtime/bench/sample-query-plans.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-002",
+      "title": "Implement runtime type casting for join keys",
+      "description": "Modify in-memory join processing to infer parent key types and cast child keys accordingly when strict equality cannot be assumed",
+      "files_to_modify": [
+        "packages/client-engine-runtime/src/interpreter/in-memory-processing.ts",
+        "packages/client-engine-runtime/src/interpreter/query-interpreter.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-003",
+      "title": "Add MySQL BigInt view relation regression test",
+      "description": "Create test case that reproduces and verifies fix for MySQL-specific issue with view relations returning BigInt keys",
+      "files_to_modify": [],
+      "files_to_create": [
+        "packages/client/tests/functional/issues/29122-mysql-bigint-view-relation/_matrix.ts",
+        "packages/client/tests/functional/issues/29122-mysql-bigint-view-relation/prisma/_schema.ts",
+        "packages/client/tests/functional/issues/29122-mysql-bigint-view-relation/tests.ts"
+      ],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation addresses MySQL-specific edge cases where view relations return BigInt keys that don't strictly match parent key types. The solution introduces a 'canAssumeStrictEquality' flag in join configurations that defaults to true for backward compatibility. When this flag is false, the system automatically infers parent key types at runtime and applies appropriate casting functions (Number, String, Boolean, BigInt) to child keys during join operations.\n\nThe key architectural pattern is the separation of concerns: type inference happens once per join operation based on parent records, and the casting is applied transparently during key comparison via the enhanced getRecordKey function. This avoids modifying original data while ensuring joins work correctly across type mismatches.\n\nThe changes integrate seamlessly with the existing query interpreter by extending rather than replacing functionality. The default behavior remains unchanged (strict equality), ensuring no performance impact for typical cases. The MySQL-specific test validates the fix while being properly scoped to avoid unnecessary test overhead for other databases.",
+  "source_pr": "https://github.com/prisma/prisma/pull/29251",
+  "before_sha": "b311672669de614f2e3667484b0a0bdc2b8b85a9",
+  "after_sha": "90d119c1dd9a69bf4ac2a53976c6dc52a11686eb",
+  "diff_stats": {
+    "additions": 161,
+    "deletions": 6,
+    "files_changed": 7
+  }
+}

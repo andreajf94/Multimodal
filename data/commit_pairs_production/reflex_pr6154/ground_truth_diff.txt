@@ -1,0 +1,111 @@
+diff --git a/reflex/constants/installer.py b/reflex/constants/installer.py
+index 12edb911397..84e23e51b58 100644
+--- a/reflex/constants/installer.py
++++ b/reflex/constants/installer.py
+@@ -106,7 +106,20 @@ class Commands(SimpleNamespace):
+ 
+         DEV = "react-router dev --host"
+         EXPORT = "react-router build"
+-        PROD = "sirv ./build/client --single 404.html --host"
++
++        @staticmethod
++        def get_prod_command(frontend_path: str = "") -> str:
++            """Get the prod command with the correct 404.html path for the given frontend_path.
++
++            Args:
++                frontend_path: The frontend path prefix (e.g. "/app").
++
++            Returns:
++                The sirv command with the correct --single fallback path.
++            """
++            stripped = frontend_path.strip("/")
++            fallback = f"{stripped}/404.html" if stripped else "404.html"
++            return f"sirv ./build/client --single {fallback} --host"
+ 
+     PATH = "package.json"
+ 
+diff --git a/reflex/utils/frontend_skeleton.py b/reflex/utils/frontend_skeleton.py
+index 6084219df03..37d66fac7db 100644
+--- a/reflex/utils/frontend_skeleton.py
++++ b/reflex/utils/frontend_skeleton.py
+@@ -168,11 +168,14 @@ def _update_react_router_config(config: Config, prerender_routes: bool = False):
+ 
+ 
+ def _compile_package_json():
++    config = get_config()
+     return templates.package_json_template(
+         scripts={
+             "dev": constants.PackageJson.Commands.DEV,
+             "export": constants.PackageJson.Commands.EXPORT,
+-            "prod": constants.PackageJson.Commands.PROD,
++            "prod": constants.PackageJson.Commands.get_prod_command(
++                config.frontend_path
++            ),
+         },
+         dependencies=constants.PackageJson.DEPENDENCIES,
+         dev_dependencies=constants.PackageJson.DEV_DEPENDENCIES,
+diff --git a/tests/units/test_prerequisites.py b/tests/units/test_prerequisites.py
+index 131904e964c..cf22404bd69 100644
+--- a/tests/units/test_prerequisites.py
++++ b/tests/units/test_prerequisites.py
+@@ -6,10 +6,12 @@
+ from click.testing import CliRunner
+ 
+ from reflex.config import Config
++from reflex.constants.installer import PackageJson
+ from reflex.reflex import cli
+ from reflex.testing import chdir
+ from reflex.utils.decorator import cached_procedure
+ from reflex.utils.frontend_skeleton import (
++    _compile_package_json,
+     _compile_vite_config,
+     _update_react_router_config,
+ )
+@@ -90,6 +92,47 @@ def test_initialise_vite_config(config, expected_output):
+     assert expected_output in output
+ 
+ 
++@pytest.mark.parametrize(
++    ("frontend_path", "expected_command"),
++    [
++        ("", "sirv ./build/client --single 404.html --host"),
++        ("/", "sirv ./build/client --single 404.html --host"),
++        ("/app", "sirv ./build/client --single app/404.html --host"),
++        ("/app/", "sirv ./build/client --single app/404.html --host"),
++        ("app", "sirv ./build/client --single app/404.html --host"),
++        (
++            "/deep/nested/path",
++            "sirv ./build/client --single deep/nested/path/404.html --host",
++        ),
++    ],
++)
++def test_get_prod_command(frontend_path, expected_command):
++    assert PackageJson.Commands.get_prod_command(frontend_path) == expected_command
++
++
++@pytest.mark.parametrize(
++    ("config", "expected_prod_script"),
++    [
++        (
++            Config(app_name="test"),
++            "sirv ./build/client --single 404.html --host",
++        ),
++        (
++            Config(app_name="test", frontend_path="/app"),
++            "sirv ./build/client --single app/404.html --host",
++        ),
++        (
++            Config(app_name="test", frontend_path="/deep/nested"),
++            "sirv ./build/client --single deep/nested/404.html --host",
++        ),
++    ],
++)
++def test_compile_package_json_prod_command(config, expected_prod_script, monkeypatch):
++    monkeypatch.setattr("reflex.utils.frontend_skeleton.get_config", lambda: config)
++    output = _compile_package_json()
++    assert f'"prod": "{expected_prod_script}"' in output
++
++
+ def test_cached_procedure():
+     call_count = 0
+ 

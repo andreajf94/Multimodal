@@ -1,0 +1,80 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "api_design",
+      "recommendation": "Modified the matchPathname function to use slice() instead of replace() when handling wildcard pathname patterns to ensure proper segment boundary validation",
+      "rationale": "The original implementation using replace() would incorrectly match patterns when the prefix appeared anywhere in the path, not just at the beginning of a segment. For example, '/en/*' would incorrectly match '/evil/en/getting-started' because replace() would remove the first occurrence of '/en' anywhere in the string, not just at the segment boundary. Using slice() ensures we only check if the pathname starts with the pattern prefix, maintaining proper segment-based matching.",
+      "alternatives_considered": [
+        "Using regex with word boundaries or path segment delimiters",
+        "Splitting the pathname into segments and comparing each segment",
+        "Adding additional validation logic before the replace() operation"
+      ],
+      "files_affected": [
+        "packages/internal-helpers/src/remote.ts"
+      ]
+    },
+    {
+      "dimension": "testing",
+      "recommendation": "Added a specific test case to verify that pathname patterns don't match when the prefix appears in the middle of a path segment",
+      "rationale": "The test ensures the fix works correctly for the edge case where a pattern prefix like '/en/' appears as part of a larger segment (e.g., '/evil/en/'). This prevents regression and documents the specific bug that was fixed. The test uses a descriptive name and clear example URL to make the failure case obvious.",
+      "alternatives_considered": [
+        "Adding multiple test cases for different segment boundary scenarios",
+        "Creating a property-based test to generate random path combinations",
+        "Adding the test to an existing test case rather than creating a new one"
+      ],
+      "files_affected": [
+        "packages/astro/test/units/remote-pattern.test.js"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Added early return when the pathname doesn't start with the pattern prefix before processing additional path chunks",
+      "rationale": "By checking if url.pathname.startsWith(slicedPathname) first and returning false immediately if not, we avoid unnecessary string operations and make the logic clearer. This also ensures that the subsequent slice() operation only runs when we have a valid prefix match at the correct position.",
+      "alternatives_considered": [
+        "Keeping the original logic but adding segment boundary checks",
+        "Using a try-catch block for malformed URLs",
+        "Adding more detailed error messages for debugging"
+      ],
+      "files_affected": [
+        "packages/internal-helpers/src/remote.ts"
+      ]
+    },
+    {
+      "dimension": "documentation",
+      "recommendation": "Created a changeset file to document the patch for the internal-helpers package",
+      "rationale": "Changesets are used in this monorepo to manage versioning and changelogs. The file provides a human-readable description of the fix that will appear in release notes, helping users understand what was changed. The description focuses on the impact ('matching more paths than intended') rather than implementation details.",
+      "alternatives_considered": [
+        "Adding comments directly in the code explaining the fix",
+        "Updating existing documentation files",
+        "Creating a GitHub issue with the fix details"
+      ],
+      "files_affected": [
+        ".changeset/perky-dots-prove.md"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Fix remote pattern segment boundary validation",
+      "description": "Fix the matchPathname function to correctly validate URL segments when using wildcard patterns, preventing false positives when pattern prefixes appear in the middle of path segments",
+      "files_to_modify": [
+        "packages/internal-helpers/src/remote.ts",
+        "packages/astro/test/units/remote-pattern.test.js"
+      ],
+      "files_to_create": [
+        ".changeset/perky-dots-prove.md"
+      ],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The fix addresses a bug in the remote pattern validation where pathname patterns with wildcards (e.g., '/en/*') would incorrectly match URLs when the pattern prefix appeared anywhere in the path, not just at a segment boundary. The core issue was in the matchPathname function's handling of wildcard patterns: it used replace() to remove the pattern prefix, which would match the first occurrence anywhere in the string. For example, '/en/*' would incorrectly match '/evil/en/getting-started' because replace() would remove '/en' from the middle, leaving '/evil//getting-started' which would then pass validation.\n\nThe solution changes two key aspects: First, it adds an early check to ensure the pathname actually starts with the pattern prefix before proceeding. Second, it replaces the problematic replace() call with slice() to cleanly extract the portion of the pathname after the prefix. This ensures segment boundaries are respected. The slice() operation only removes characters from the beginning of the string, preventing mid-path matches.\n\nA test case was added to specifically document and prevent regression of this edge case, and a changeset file was created to document the patch for release management. The fix maintains backward compatibility for correctly formed patterns while fixing the false positive matches. This is a minimal, surgical change that addresses the specific bug without refactoring the broader pattern matching logic.",
+  "source_pr": "https://github.com/withastro/astro/pull/15828",
+  "before_sha": "011f06106531419f27ce53d0641a3e6ef9db5108",
+  "after_sha": "c2cd371f9f2003ab8c9ce70a24fc0af40c5de531",
+  "diff_stats": {
+    "additions": 15,
+    "deletions": 1,
+    "files_changed": 3
+  }
+}

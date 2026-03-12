@@ -1,0 +1,12 @@
+{
+  "feature_name": "Google GenAI Image Safety Settings Support",
+  "description": "Update the Google GenAI (Gemini) integration to properly handle safety settings when processing image content. Currently, the system incorrectly applies text-only harm categories to image-based requests, causing API rejection. Implement logic to detect image content and apply appropriate image-specific safety categories while maintaining backward compatibility for text-only requests.",
+  "functional_requirements": [
+    "Detect when a request contains image content and dynamically switch from text-based harm categories (HARM_CATEGORY_*) to image-specific categories (HARM_CATEGORY_IMAGE_*)",
+    "Map user-provided text safety thresholds to their corresponding image category equivalents (e.g., HARM_CATEGORY_HATE_SPEECH \u2192 HARM_CATEGORY_IMAGE_HATE)",
+    "Ensure safety settings processing occurs after message conversion and multimodal content extraction to accurately detect image presence",
+    "Maintain existing text-only safety settings behavior unchanged when no image content is present"
+  ],
+  "project_name": "instructor",
+  "source_pr": "https://github.com/567-labs/instructor/pull/2007"
+}

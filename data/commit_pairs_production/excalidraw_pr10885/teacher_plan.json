@@ -1,0 +1,89 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "ui_consistency",
+      "recommendation": "Added CSS styling for disabled dropdown menu items and conditionally disabled the snap-to-midpoint menu item when arrow-binding is turned off",
+      "rationale": "The feature requires visual feedback to users that the menu item is unavailable when arrow-binding is disabled. Adding proper disabled styling ensures consistent UI behavior across all dropdown menu items. The conditional disabling logic maintains feature parity - if arrow-binding is disabled, midpoint snapping (which depends on arrow-binding functionality) should also be unavailable.",
+      "alternatives_considered": [
+        "Hiding the menu item entirely when disabled",
+        "Showing a tooltip explaining why the item is disabled",
+        "Keeping the item enabled but showing an error when clicked"
+      ],
+      "files_affected": [
+        "packages/excalidraw/components/dropdownMenu/DropdownMenu.scss",
+        "packages/excalidraw/components/main-menu/DefaultItems.tsx"
+      ]
+    },
+    {
+      "dimension": "state_management",
+      "recommendation": "Used existing appState.bindingPreference to determine disabled state rather than creating new state",
+      "rationale": "The bindingPreference state already tracks whether arrow-binding is enabled/disabled. Reusing this existing state avoids adding unnecessary complexity and ensures the disabled state is synchronized with the actual functionality availability. This follows the principle of deriving UI state from application state rather than managing separate UI flags.",
+      "alternatives_considered": [
+        "Creating a new isMidpointSnappingAvailable state variable",
+        "Adding a separate bindingEnabled flag",
+        "Checking multiple conditions for midpoint snapping availability"
+      ],
+      "files_affected": [
+        "packages/excalidraw/components/main-menu/DefaultItems.tsx"
+      ]
+    },
+    {
+      "dimension": "user_experience",
+      "recommendation": "Kept the menu item visible but non-interactive when disabled rather than hiding it",
+      "rationale": "Maintaining visibility of disabled features helps users understand what functionality exists in the application, even when it's temporarily unavailable. This approach educates users about available features and prevents confusion about missing menu items. The visual styling (opacity, cursor) clearly indicates the item is disabled.",
+      "alternatives_considered": [
+        "Hiding the menu item completely when disabled",
+        "Moving disabled items to a separate 'unavailable features' section",
+        "Graying out but keeping clickable with error messages"
+      ],
+      "files_affected": [
+        "packages/excalidraw/components/dropdownMenu/DropdownMenu.scss",
+        "packages/excalidraw/components/main-menu/DefaultItems.tsx"
+      ]
+    },
+    {
+      "dimension": "css_styling",
+      "recommendation": "Added comprehensive disabled state styling including cursor, opacity, hover, and active states",
+      "rationale": "Complete visual feedback requires handling all interaction states. The CSS ensures disabled items: 1) Show 'not-allowed' cursor, 2) Have reduced opacity (50%), 3) Ignore pointer events, 4) Don't change background on hover, and 5) Don't show active/selected states. This creates a consistent disabled appearance across the application.",
+      "alternatives_considered": [
+        "Only changing text color without affecting hover states",
+        "Using a different visual indicator like strikethrough",
+        "Adding a disabled icon next to the text"
+      ],
+      "files_affected": [
+        "packages/excalidraw/components/dropdownMenu/DropdownMenu.scss"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Add disabled state styling to dropdown menu items",
+      "description": "Implement CSS styling for disabled dropdown menu items to provide visual feedback when menu options are unavailable",
+      "files_to_modify": [
+        "packages/excalidraw/components/dropdownMenu/DropdownMenu.scss"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-002",
+      "title": "Conditionally disable snap-to-midpoint menu item",
+      "description": "Disable the snap-to-midpoint menu item when arrow-binding functionality is turned off to maintain UI consistency",
+      "files_to_modify": [
+        "packages/excalidraw/components/main-menu/DefaultItems.tsx"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation addresses the requirement to disable the snap-to-midpoint menu item when arrow-binding is turned off through two coordinated changes. First, CSS styling was added to the dropdown menu component to properly display disabled menu items with visual cues including reduced opacity, 'not-allowed' cursor, and disabled hover/active states. This foundational change ensures all dropdown menu items can consistently show disabled states throughout the application.\n\nSecond, the snap-to-midpoint menu item component was modified to conditionally apply the disabled attribute based on the existing bindingPreference state. When bindingPreference equals 'disabled', the menu item becomes non-interactive while remaining visible. This approach leverages the existing application state rather than introducing new state variables, maintaining simplicity and ensuring the UI accurately reflects the available functionality.\n\nThe changes integrate seamlessly with the existing codebase by extending rather than rewriting existing patterns. The CSS follows the established styling conventions of the dropdown menu component, and the TypeScript change uses the existing appState and actionManager patterns. This minimal implementation achieves the desired user experience without over-engineering, keeping the code maintainable while providing clear visual feedback to users about feature availability.",
+  "source_pr": "https://github.com/excalidraw/excalidraw/pull/10885",
+  "before_sha": "d1cff91b75d48450430ec1260c498791c066b31f",
+  "after_sha": "47c254216b45b42e48a20de693ffc3ab15cff86f",
+  "diff_stats": {
+    "additions": 16,
+    "deletions": 0,
+    "files_changed": 2
+  }
+}

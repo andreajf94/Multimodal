@@ -1,0 +1,13 @@
+{
+  "feature_name": "File Change Detection with Size Tracking",
+  "description": "Enhance the buffer system's file change detection to include file size alongside modification time. This will prevent buffers from becoming stale or empty when external tools write files, particularly addressing race conditions where files briefly become 0 bytes during writes.",
+  "functional_requirements": [
+    "Extend the DiskState::Present variant to include a file size field alongside the existing mtime",
+    "Update all code that creates DiskState::Present instances to pass the file size from file metadata",
+    "Modify the buffer's file_updated() logic to compare both mtime AND size when determining if a reload is needed",
+    "Ensure the size field is properly serialized/deserialized if DiskState implements serialization",
+    "Update any test mocks that create DiskState::Present instances to include the new size parameter"
+  ],
+  "project_name": "zed",
+  "source_pr": "https://github.com/zed-industries/zed/pull/49436"
+}

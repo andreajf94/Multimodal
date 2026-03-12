@@ -1,0 +1,74 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "testing",
+      "recommendation": "Updated snapshot test file to reflect changes in CSS class naming conventions after tree-sitter dependency update",
+      "rationale": "The snapshot test captures the rendered output of TextArea with syntax highlighting. When tree-sitter was updated to v0.25.0, the syntax highlighting implementation changed, resulting in different CSS class names being generated. The snapshot needed to be updated to match the new output format to maintain test validity.",
+      "alternatives_considered": [
+        "Regenerating the snapshot from scratch using the updated code",
+        "Modifying the test to be less sensitive to CSS class naming changes",
+        "Disabling the snapshot test for this specific case"
+      ],
+      "files_affected": [
+        "tests/snapshot_tests/__snapshots__/test_snapshots/test_text_area_language_rendering[css].svg"
+      ]
+    },
+    {
+      "dimension": "dependency_management",
+      "recommendation": "Updated tree-sitter dependency from its previous version to v0.25.0, which required Python 3.10+",
+      "rationale": "Tree-sitter v0.25.0 includes important improvements and bug fixes for syntax highlighting. The breaking API change (Query.captures moved to QueryCursor.captures) necessitated code updates in the syntax highlighting implementation. The Python version requirement increase aligns with tree-sitter's own requirements for v0.24.0+.",
+      "alternatives_considered": [
+        "Staying on an older version of tree-sitter to maintain Python 3.9 compatibility",
+        "Creating a compatibility layer to support both old and new tree-sitter APIs",
+        "Removing tree-sitter dependency entirely and using a different syntax highlighting library"
+      ],
+      "files_affected": [
+        "tests/snapshot_tests/__snapshots__/test_snapshots/test_text_area_language_rendering[css].svg"
+      ]
+    },
+    {
+      "dimension": "api_design",
+      "recommendation": "Refactored code to use QueryCursor.captures() instead of the deprecated Query.captures() method",
+      "rationale": "Tree-sitter v0.25.0 moved the captures method from Query to QueryCursor class as part of API cleanup and performance improvements. This change required updating all syntax highlighting code that interacts with tree-sitter queries to use the new API pattern.",
+      "alternatives_considered": [
+        "Creating wrapper functions to maintain backward compatibility",
+        "Using feature detection to support both old and new APIs during transition",
+        "Forking tree-sitter to maintain the old API"
+      ],
+      "files_affected": [
+        "tests/snapshot_tests/__snapshots__/test_snapshots/test_text_area_language_rendering[css].svg"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Update tree-sitter dependency and fix breaking API changes",
+      "description": "Update tree-sitter from current version to v0.25.0, refactor code to use QueryCursor.captures() instead of Query.captures(), and update Python version requirements to >=3.10 for syntax highlighting features",
+      "files_to_modify": [
+        "tests/snapshot_tests/__snapshots__/test_snapshots/test_text_area_language_rendering[css].svg"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-002",
+      "title": "Update snapshot tests for new syntax highlighting output",
+      "description": "Regenerate snapshot test files to reflect changes in CSS class naming and rendering output due to tree-sitter v0.25.0 update",
+      "files_to_modify": [
+        "tests/snapshot_tests/__snapshots__/test_snapshots/test_text_area_language_rendering[css].svg"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation involved updating the tree-sitter dependency from its current version to v0.25.0, which introduced a breaking API change where the `Query.captures` method was moved to `QueryCursor.captures`. This required refactoring the syntax highlighting code in Textual's TextArea widget to use the new API pattern. Additionally, since tree-sitter v0.24.0+ requires Python 3.10 or higher, the minimum Python version for syntax highlighting features had to be updated accordingly.\n\nThe changes are reflected in the snapshot test file which shows updated CSS class names. The original class names like `terminal-2526263208-matrix` have been simplified to `terminal-matrix`, and similar changes apply to all CSS classes and clipPath IDs. This suggests that the syntax highlighting implementation now generates more deterministic or simplified class names, possibly due to changes in how tree-sitter processes and tokenizes code for highlighting.\n\nThe update maintains backward compatibility for users not using syntax highlighting features while ensuring that Textual can leverage the latest improvements in tree-sitter's parsing capabilities. The snapshot test update was necessary because the rendered output of syntax-highlighted code changed slightly due to the tree-sitter update, and tests needed to reflect the new expected output to prevent false test failures.",
+  "source_pr": "https://github.com/Textualize/textual/pull/5977",
+  "before_sha": "8df2db8b089be711b1b2efde650d66bc3c331ca5",
+  "after_sha": "1f70760f45a622c8e3ffb0e3a0215d1ee5fbac86",
+  "diff_stats": {
+    "additions": 1172,
+    "deletions": 1175,
+    "files_changed": 10
+  }
+}

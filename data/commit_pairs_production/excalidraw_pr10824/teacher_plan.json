@@ -1,0 +1,166 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "data_modeling",
+      "recommendation": "Extended the ChartType union type to include 'radar' as a new chart type alongside existing 'bar' and 'line' types",
+      "rationale": "This minimal change to the type system allows radar charts to be treated as first-class citizens in the charting system. By adding to the existing union type, we ensure type safety throughout the codebase and enable the TypeScript compiler to catch any missing radar chart implementations.",
+      "alternatives_considered": [
+        "Creating a separate chart category system",
+        "Using string literals without union types"
+      ],
+      "files_affected": [
+        "packages/element/src/types.ts"
+      ]
+    },
+    {
+      "dimension": "api_design",
+      "recommendation": "Refactored chart parsing to use a Result type pattern (ok/error) instead of type-based discriminated unions",
+      "rationale": "The change from VALID_SPREADSHEET type checking to {ok: true, data: Spreadsheet} structure makes the API more explicit and easier to work with. It provides clearer error handling and better TypeScript inference while maintaining backward compatibility with existing chart parsing logic.",
+      "alternatives_considered": [
+        "Keeping the type-based discriminated union",
+        "Throwing exceptions for parsing errors"
+      ],
+      "files_affected": [
+        "packages/excalidraw/charts.test.ts"
+      ]
+    },
+    {
+      "dimension": "data_modeling",
+      "recommendation": "Introduced multi-series data structure with series array containing title and values, replacing single values array",
+      "rationale": "This structural change enables all chart types (bar, line, radar) to support multiple data series. Each series maintains its own title and values while sharing common labels. This provides consistency across chart types and allows for unified rendering logic.",
+      "alternatives_considered": [
+        "Separate data structures per chart type",
+        "Nested arrays without series objects"
+      ],
+      "files_affected": [
+        "packages/excalidraw/charts.test.ts"
+      ]
+    },
+    {
+      "dimension": "rendering_architecture",
+      "recommendation": "Implemented radar chart rendering with polygon-based visualization and axis spokes",
+      "rationale": "Radar charts require a fundamentally different rendering approach from Cartesian charts. Using closed polygon lines for each series with radial axes provides the characteristic spider-web visualization. The implementation includes proper normalization for skewed data and label wrapping for long axis names.",
+      "alternatives_considered": [
+        "Using separate rendering engine",
+        "Adapting existing line chart rendering"
+      ],
+      "files_affected": [
+        "packages/excalidraw/charts.test.ts"
+      ]
+    },
+    {
+      "dimension": "color_system",
+      "recommendation": "Enhanced color palette usage to ensure distinct colors for multiple series across all chart types",
+      "rationale": "With multi-series support, colors must be visually distinct to differentiate series. The implementation uses getAllColorsSpecificShade with deterministic color selection based on colorSeed, ensuring consistent coloring across renders while maximizing perceptual distance between adjacent series colors.",
+      "alternatives_considered": [
+        "Random color assignment",
+        "Fixed color sequences per chart type"
+      ],
+      "files_affected": [
+        "packages/common/src/colors.ts",
+        "packages/excalidraw/charts.test.ts"
+      ]
+    },
+    {
+      "dimension": "layout_algorithm",
+      "recommendation": "Implemented adaptive width scaling for multi-series charts and intelligent label positioning",
+      "rationale": "Multi-series charts require more horizontal space than single-series charts. The implementation dynamically adjusts chart width based on series count and implements collision detection for axis labels. For radar charts, labels are wrapped instead of ellipsified to maintain readability on radial axes.",
+      "alternatives_considered": [
+        "Fixed width charts",
+        "Simple truncation for long labels"
+      ],
+      "files_affected": [
+        "packages/excalidraw/charts.test.ts"
+      ]
+    },
+    {
+      "dimension": "state_management",
+      "recommendation": "Removed chart-specific state (currentChartType, pasteDialog) from app state",
+      "rationale": "Chart type selection is now handled through the chart creation UI rather than global app state. This simplifies the state management and makes the charting system more modular. The pasteDialog removal suggests chart pasting is now integrated into the main paste flow.",
+      "alternatives_considered": [
+        "Keeping chart type in app state",
+        "Creating separate chart state store"
+      ],
+      "files_affected": [
+        "packages/excalidraw/appState.ts",
+        "packages/excalidraw/actions/actionCanvas.tsx"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Core Chart Type System Enhancement",
+      "description": "Add radar chart type to the type system and refactor chart data structures to support multi-series across all chart types",
+      "files_to_modify": [
+        "packages/element/src/types.ts",
+        "packages/excalidraw/charts.test.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-002",
+      "title": "Chart Parsing and Data Model Refactor",
+      "description": "Update chart parsing logic to handle multi-series data and implement new Result-based API for better error handling",
+      "files_to_modify": [
+        "packages/excalidraw/charts.test.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-003",
+      "title": "Radar Chart Rendering Implementation",
+      "description": "Implement radar chart visualization with polygon rendering, axis spokes, and radial label positioning",
+      "files_to_modify": [
+        "packages/excalidraw/charts.test.ts"
+      ],
+      "files_to_create": [
+        "packages/excalidraw/charts/charts.bar.ts"
+      ],
+      "estimated_effort": "large"
+    },
+    {
+      "id": "T-004",
+      "title": "Multi-Series Support for Bar and Line Charts",
+      "description": "Extend existing bar and line chart rendering to support multiple data series with grouped bars and distinct line colors",
+      "files_to_modify": [
+        "packages/excalidraw/charts.test.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-005",
+      "title": "Color System and Layout Enhancements",
+      "description": "Update color palette usage for multi-series distinction and implement adaptive layout algorithms for different chart types",
+      "files_to_modify": [
+        "packages/common/src/colors.ts",
+        "packages/excalidraw/charts.test.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-006",
+      "title": "App State Cleanup",
+      "description": "Remove chart-specific state from global app state to simplify state management",
+      "files_to_modify": [
+        "packages/excalidraw/appState.ts",
+        "packages/excalidraw/actions/actionCanvas.tsx"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation adds radar chart support and enhances multi-series capabilities across all chart types in Excalidraw. The core architectural approach involves extending the existing charting system rather than creating a separate implementation. The ChartType union type is expanded to include 'radar', and the data model is refactored from a single values array to a series array structure, enabling multiple data series with individual titles and values.\n\nKey patterns include the use of a Result type for parsing operations, deterministic color selection from the palette using colorSeed, and adaptive layout algorithms that adjust chart width based on series count. Radar charts are implemented as closed polygon lines with radial axes, using log normalization for skewed data and intelligent label wrapping for long axis names. The rendering logic separates concerns by chart type while sharing common infrastructure for data parsing, color management, and label positioning.\n\nThe changes integrate seamlessly with the existing codebase by building upon the established charting architecture. Chart-specific state is removed from the global app state, making the system more modular. The implementation includes comprehensive test coverage that validates multi-series parsing, rendering behavior across chart types, and edge cases like label collision avoidance and color distribution. This approach ensures backward compatibility while significantly expanding the charting capabilities of the application.",
+  "source_pr": "https://github.com/excalidraw/excalidraw/pull/10824",
+  "before_sha": "cae9d2bcbd3e6c70c579a52574d91ea8898a80bb",
+  "after_sha": "60b275880da7d1eb7dff3782e8d491188790597a",
+  "diff_stats": {
+    "additions": 3103,
+    "deletions": 1355,
+    "files_changed": 29
+  }
+}

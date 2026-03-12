@@ -1,0 +1,98 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "data_modeling",
+      "recommendation": "Implemented ID regeneration for clipboard paste operations to prevent duplicate ID errors in relational databases",
+      "rationale": "Postgres and SQLite databases enforce unique constraints on ID fields. When copying blocks or arrays between documents, the original IDs would cause constraint violations. The solution regenerates fresh ObjectIDs for all fields ending with '.id' while preserving all other data.",
+      "alternatives_considered": [
+        "Using UUIDs instead of ObjectIDs (would require schema changes)",
+        "Storing original IDs with a prefix or suffix (would complicate data model)",
+        "Disabling ID uniqueness constraints (would break database integrity)"
+      ],
+      "files_affected": [
+        "packages/ui/src/elements/ClipboardAction/mergeFormStateFromClipboard.ts"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Added safe access checks for ID fields and ObjectID validation before regeneration",
+      "rationale": "The original code assumed all clipboard data would have ID fields, but some fields might not. Added optional chaining (`?.`) and type checking to prevent runtime errors when pasting data without IDs or with invalid ID formats.",
+      "alternatives_considered": [
+        "Throwing errors for missing IDs (would break backward compatibility)",
+        "Silently skipping ID regeneration (would cause database errors)",
+        "Using default fallback IDs (could still cause duplicates)"
+      ],
+      "files_affected": [
+        "packages/ui/src/elements/ClipboardAction/mergeFormStateFromClipboard.ts"
+      ]
+    },
+    {
+      "dimension": "testing",
+      "recommendation": "Created comprehensive test suite covering all ID regeneration scenarios",
+      "rationale": "Clipboard paste functionality is critical for user experience. The test suite validates: 1) ID regeneration for blocks and arrays, 2) nested structures, 3) field value preservation, 4) cross-document paste operations. Tests use actual ObjectID validation to ensure compatibility with database constraints.",
+      "alternatives_considered": [
+        "Only testing happy paths (would miss edge cases)",
+        "Mocking ObjectID generation (wouldn't validate real database compatibility)",
+        "Relying on existing e2e tests only (wouldn't cover unit-level logic)"
+      ],
+      "files_affected": [
+        "packages/ui/src/elements/ClipboardAction/mergeFormStateFromClipboard.spec.ts"
+      ]
+    },
+    {
+      "dimension": "api_design",
+      "recommendation": "Maintained backward compatibility while adding ID mapping for nested structures",
+      "rationale": "The solution uses a Map to track old-to-new ID mappings, allowing parent field metadata (rows arrays) to reference the correct new IDs. This preserves the existing form state structure while ensuring internal consistency between field values and row metadata.",
+      "alternatives_considered": [
+        "Recursively traversing the entire form state (would be more complex)",
+        "Requiring clients to handle ID regeneration (would break existing implementations)",
+        "Storing mapping in a separate data structure (would complicate state management)"
+      ],
+      "files_affected": [
+        "packages/ui/src/elements/ClipboardAction/mergeFormStateFromClipboard.ts"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Implement clipboard paste ID regeneration core logic",
+      "description": "Modified the mergeFormStateFromClipboard function to detect ID fields, generate new ObjectIDs, and update parent row metadata. Added ID replacement mapping to handle nested structures and maintain data consistency.",
+      "files_to_modify": [
+        "packages/ui/src/elements/ClipboardAction/mergeFormStateFromClipboard.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-002",
+      "title": "Create comprehensive unit tests for ID regeneration",
+      "description": "Added test suite covering blocks and arrays paste scenarios, including nested structures, field preservation, and cross-document operations. Tests validate ObjectID generation and database compatibility.",
+      "files_to_modify": [],
+      "files_to_create": [
+        "packages/ui/src/elements/ClipboardAction/mergeFormStateFromClipboard.spec.ts"
+      ],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-003",
+      "title": "Add end-to-end tests for cross-document paste operations",
+      "description": "Extended existing e2e tests to verify that pasting arrays and blocks between documents generates unique IDs and doesn't cause database constraint errors. Tests ensure the feature works in real UI scenarios.",
+      "files_to_modify": [
+        "test/fields/collections/Array/e2e.spec.ts",
+        "test/fields/collections/Blocks/e2e.spec.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation addresses a critical database compatibility issue where pasting blocks or arrays between documents would cause duplicate ID errors in Postgres and SQLite databases. The core solution modifies the `mergeFormStateFromClipboard` function to detect ID fields (those ending with '.id'), validate them as ObjectIDs, and regenerate fresh IDs using the bson-objectid library.\n\nA key design pattern is the use of an `idReplacements` Map to track old-to-new ID mappings. This allows the system to update parent field metadata (the `rows` arrays that reference block/array IDs) with the newly generated IDs, maintaining internal consistency within the form state. The implementation handles both top-level and nested structures by parsing path segments to locate the appropriate parent rows.\n\nThe solution maintains backward compatibility by preserving all non-ID field values and only modifying ID fields. Comprehensive testing was added at multiple levels: unit tests for the core logic, and e2e tests that simulate real user interactions across documents. This layered approach ensures the feature works correctly while preventing regression in existing clipboard functionality.",
+  "source_pr": "https://github.com/payloadcms/payload/pull/15863",
+  "before_sha": "f71ef61e73b4bcfab7ce2981b315683194f0c6c2",
+  "after_sha": "e7d6331a2b8874906fd82bcf12ff8413363d7d4c",
+  "diff_stats": {
+    "additions": 581,
+    "deletions": 3,
+    "files_changed": 4
+  }
+}

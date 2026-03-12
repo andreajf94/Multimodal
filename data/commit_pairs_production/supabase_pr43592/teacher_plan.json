@@ -1,0 +1,171 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "state_management",
+      "recommendation": "Created a React Context (ColumnEditionContext) to manage column editing state across the schema visualizer hierarchy",
+      "rationale": "The schema visualizer has a deep component tree (SchemaGraph \u2192 ReactFlow \u2192 TableNode \u2192 Column rows). Passing callbacks through props would create prop drilling. Context provides a clean way for deeply nested column rows to trigger column editing without coupling components.",
+      "alternatives_considered": [
+        "Prop drilling through all intermediate components",
+        "Using a global state manager like Zustand/Redux",
+        "Creating a custom event bus"
+      ],
+      "files_affected": [
+        "apps/studio/components/interfaces/Database/Schemas/ColumnEditionContext.tsx"
+      ]
+    },
+    {
+      "dimension": "ui_interaction",
+      "recommendation": "Added hover-triggered edit button with proper visual feedback using CSS group-hover and Tooltip components",
+      "rationale": "The edit button should only appear on hover to avoid visual clutter. Using Tailwind's group-hover ensures the button appears when hovering anywhere on the column row. The Tooltip provides clear affordance for the button's function.",
+      "alternatives_considered": [
+        "Always visible edit button",
+        "Right-click context menu",
+        "Double-click to edit"
+      ],
+      "files_affected": [
+        "apps/studio/components/interfaces/Database/Schemas/SchemaTableNode.tsx"
+      ]
+    },
+    {
+      "dimension": "data_flow",
+      "recommendation": "Integrated with existing table editor state system (useTableEditorStateSnapshot) rather than creating parallel state",
+      "rationale": "The studio already has a well-established table editor state management system. By calling snap.onEditColumn(), we reuse existing logic for opening the column editor panel, ensuring consistency with other parts of the application.",
+      "alternatives_considered": [
+        "Creating a separate state management system for schema visualizer",
+        "Direct DOM manipulation to open the side panel"
+      ],
+      "files_affected": [
+        "apps/studio/components/interfaces/Database/Schemas/SchemaGraph.tsx"
+      ]
+    },
+    {
+      "dimension": "performance",
+      "recommendation": "Added isFirstLoad ref to prevent unnecessary view resets after column edits",
+      "rationale": "Without this optimization, editing a column would cause the ReactFlow view to reset and fitView() on every render, which is disorienting for users. The ref tracks if it's the initial load vs subsequent updates.",
+      "alternatives_considered": [
+        "Always resetting the view",
+        "Debouncing the fitView call",
+        "Using a state variable instead of ref"
+      ],
+      "files_affected": [
+        "apps/studio/components/interfaces/Database/Schemas/SchemaGraph.tsx"
+      ]
+    },
+    {
+      "dimension": "data_synchronization",
+      "recommendation": "Added query invalidation for table list queries when columns are edited to ensure schema visualizer updates",
+      "rationale": "When a column is edited via the schema visualizer, the table data needs to be refetched to show updated column information. The existing invalidation only covered table definitions, not the table list query used by the schema visualizer.",
+      "alternatives_considered": [
+        "Manual cache updates",
+        "Polling for changes",
+        "WebSocket subscriptions"
+      ],
+      "files_affected": [
+        "apps/studio/components/interfaces/TableGridEditor/SidePanelEditor/SidePanelEditor.tsx"
+      ]
+    },
+    {
+      "dimension": "testing",
+      "recommendation": "Added comprehensive end-to-end test for the new column edit functionality",
+      "rationale": "The test verifies the complete flow: hover interaction, button click, panel opening, editing, saving, and visual feedback. It also tests that the schema view refreshes correctly after edits.",
+      "alternatives_considered": [
+        "Unit tests only",
+        "No automated testing",
+        "Manual testing only"
+      ],
+      "files_affected": [
+        "e2e/studio/features/database.spec.ts"
+      ]
+    },
+    {
+      "dimension": "api_integration",
+      "recommendation": "Updated tables-query.ts to return full PostgresTable objects (including columns) when includeColumns=true",
+      "rationale": "The schema visualizer needs column data to display column information and enable editing. Previously, the query returned Omit<PostgresTable, 'columns'> when includeColumns was false, but the visualizer actually needs columns even when includeColumns is false.",
+      "alternatives_considered": [
+        "Making a separate API call for columns",
+        "Changing the includeColumns parameter default",
+        "Creating a new endpoint"
+      ],
+      "files_affected": [
+        "apps/studio/data/tables/tables-query.ts"
+      ]
+    },
+    {
+      "dimension": "accessibility",
+      "recommendation": "Added proper screen reader labels and form field IDs for better accessibility",
+      "rationale": "The edit button includes sr-only text describing which column is being edited. Form inputs in ColumnEditor now have proper id attributes, which helps with testing and accessibility.",
+      "alternatives_considered": [
+        "No accessibility considerations",
+        "Using aria-label only",
+        "Relying on visual cues only"
+      ],
+      "files_affected": [
+        "apps/studio/components/interfaces/Database/Schemas/SchemaTableNode.tsx",
+        "apps/studio/components/interfaces/TableGridEditor/SidePanelEditor/ColumnEditor/ColumnEditor.tsx"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Create Column Edition Context System",
+      "description": "Implement React Context to enable column editing from deeply nested components in the schema visualizer",
+      "files_to_modify": [],
+      "files_to_create": [
+        "apps/studio/components/interfaces/Database/Schemas/ColumnEditionContext.tsx"
+      ],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-002",
+      "title": "Add Hover Edit Button to Schema Visualizer Columns",
+      "description": "Implement UI for showing edit button on column hover and connect it to the column editor panel",
+      "files_to_modify": [
+        "apps/studio/components/interfaces/Database/Schemas/SchemaGraph.tsx",
+        "apps/studio/components/interfaces/Database/Schemas/SchemaTableNode.tsx"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-003",
+      "title": "Ensure Data Synchronization After Column Edits",
+      "description": "Update query invalidation and data fetching to ensure schema visualizer refreshes after column edits",
+      "files_to_modify": [
+        "apps/studio/components/interfaces/TableGridEditor/SidePanelEditor/SidePanelEditor.tsx",
+        "apps/studio/data/tables/tables-query.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-004",
+      "title": "Add End-to-End Tests for Column Edit Feature",
+      "description": "Create comprehensive test coverage for the new column edit functionality in schema visualizer",
+      "files_to_modify": [
+        "e2e/studio/features/database.spec.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-005",
+      "title": "Improve Accessibility and Form Usability",
+      "description": "Add accessibility labels and form improvements for better user experience",
+      "files_to_modify": [
+        "apps/studio/components/interfaces/TableGridEditor/SidePanelEditor/ColumnEditor/ColumnEditor.tsx"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation adds a column edit button to the schema visualizer by creating a clean integration with the existing table editor system. A React Context (ColumnEditionContext) was created to manage the editing state across the deep component hierarchy of the schema visualizer. This allows column rows in SchemaTableNode to trigger editing without prop drilling.\n\nThe UI shows an edit button on the right side of columns when hovered, using CSS group-hover for smooth interaction. Clicking the button calls the existing table editor state system (useTableEditorStateSnapshot.onEditColumn()), which opens the column editor panel pre-populated with the selected column's data. This approach reuses existing functionality rather than creating duplicate logic.\n\nKey technical decisions include: adding query invalidation for table list queries to ensure the schema visualizer refreshes after edits; updating the tables-query to always return column data when needed; adding a performance optimization (isFirstLoad ref) to prevent disorienting view resets; and comprehensive e2e testing. The implementation follows the existing patterns in the codebase, maintaining consistency with the studio's architecture while adding the requested feature.",
+  "source_pr": "https://github.com/supabase/supabase/pull/43592",
+  "before_sha": "dcbaaad64e552efbf777f8b5209b8bcdcd01deb4",
+  "after_sha": "f66eb3f7bd810a36fc95ed040f88597a1290ad55",
+  "diff_stats": {
+    "additions": 186,
+    "deletions": 58,
+    "files_changed": 7
+  }
+}

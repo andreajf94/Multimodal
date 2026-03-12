@@ -1,0 +1,110 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "api_design",
+      "recommendation": "Refactored Connection::open into open_with_flags to separate flag configuration from connection logic, allowing URI-specific flags to be passed for named in-memory databases.",
+      "rationale": "SQLite requires the SQLITE_OPEN_URI flag when opening database URIs (like 'file::memory:?cache=shared&name=mydb'). By extracting flag configuration into a separate method, we can pass different flags for different connection types while maintaining the existing API surface.",
+      "alternatives_considered": [
+        "Adding a boolean parameter to the existing open method",
+        "Creating separate open_uri and open_path methods",
+        "Using a builder pattern for connection configuration"
+      ],
+      "files_affected": [
+        "crates/sqlez/src/connection.rs"
+      ]
+    },
+    {
+      "dimension": "data_modeling",
+      "recommendation": "Modified open_memory to use SQLite URI syntax for named in-memory databases while preserving the default ':memory:' behavior for unnamed connections.",
+      "rationale": "SQLite's named in-memory databases require the 'file:' URI scheme with 'mode=memory&cache=shared' parameters. This allows multiple connections to share the same in-memory database instance, which is essential for thread-safe operations and testing scenarios.",
+      "alternatives_considered": [
+        "Using only the ':memory:' syntax with different connection parameters",
+        "Creating a separate API for named vs unnamed in-memory databases",
+        "Using SQLite's shared cache mode without URI syntax"
+      ],
+      "files_affected": [
+        "crates/sqlez/src/connection.rs"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Added retry logic with exponential backoff for connection initialization queries that encounter transient schema lock errors.",
+      "rationale": "When multiple threads attempt to initialize connections to the same named in-memory database simultaneously, SQLite may return 'database schema is locked' errors. These are transient and should be retried rather than treated as fatal errors.",
+      "alternatives_considered": [
+        "Increasing SQLite's busy timeout",
+        "Using a global lock for connection initialization",
+        "Letting the application layer handle retries"
+      ],
+      "files_affected": [
+        "crates/sqlez/src/thread_safe_connection.rs"
+      ]
+    },
+    {
+      "dimension": "testing",
+      "recommendation": "Added comprehensive tests for named in-memory database behavior, including verification that no backing files are created and that connections can share data.",
+      "rationale": "Named in-memory databases using URI syntax should behave like true in-memory databases without creating physical files. The tests verify this critical property while also ensuring data sharing between connections works correctly.",
+      "alternatives_considered": [
+        "Only testing basic connection functionality",
+        "Relying on existing SQLite tests",
+        "Testing at a higher abstraction level"
+      ],
+      "files_affected": [
+        "crates/sqlez/src/connection.rs"
+      ]
+    },
+    {
+      "dimension": "thread_safety",
+      "recommendation": "Added thread-safe test utilities (unique_named_memory_db, NamedMemoryPathGuard) to prevent test interference and ensure clean test isolation.",
+      "rationale": "Named in-memory databases are shared across processes and threads, so tests need unique names to avoid collisions. The guard pattern ensures cleanup even if tests fail, preventing resource leaks.",
+      "alternatives_considered": [
+        "Using random UUIDs for database names",
+        "Manual cleanup in each test",
+        "Global test coordination"
+      ],
+      "files_affected": [
+        "crates/sqlez/src/connection.rs"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "SQLite URI Support for Named In-Memory Databases",
+      "description": "Update connection logic to support SQLite URI syntax for named in-memory databases, enabling multiple connections to share the same in-memory database instance.",
+      "files_to_modify": [
+        "crates/sqlez/src/connection.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-002",
+      "title": "Connection Initialization Retry Logic",
+      "description": "Add retry mechanism for connection initialization queries that encounter transient SQLite schema lock errors, improving robustness in multi-threaded scenarios.",
+      "files_to_modify": [
+        "crates/sqlez/src/thread_safe_connection.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-003",
+      "title": "Named In-Memory Database Testing",
+      "description": "Add comprehensive tests for named in-memory database functionality, including verification of no backing file creation and data sharing between connections.",
+      "files_to_modify": [
+        "crates/sqlez/src/connection.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    }
+  ],
+  "implementation_summary": "The implementation adds support for named in-memory databases using SQLite's URI syntax, which enables multiple connections to share the same in-memory database instance. The core change refactors the connection opening logic to separate flag configuration from the opening process, allowing the SQLITE_OPEN_URI flag to be passed when opening URI-formatted database paths.\n\nFor named in-memory databases, the system now uses the 'file:{name}?mode=memory&cache=shared' URI format instead of the basic ':memory:' syntax. This allows different connections to access the same in-memory data, which is essential for thread-safe operations and testing scenarios. The implementation maintains backward compatibility by preserving the existing ':memory:' behavior for unnamed connections.\n\nA significant addition is the retry logic for connection initialization queries that encounter transient 'database schema is locked' errors. This handles race conditions when multiple threads attempt to initialize connections to the same named in-memory database simultaneously. The retry mechanism uses exponential backoff with configurable limits, making the system more robust in multi-threaded environments.\n\nThe testing infrastructure was enhanced with utilities to generate unique database names and clean up potential backing files, ensuring tests don't interfere with each other. The tests verify that named in-memory databases don't create physical backing files and that data sharing between connections works correctly, addressing the core requirements of the feature request.",
+  "source_pr": "https://github.com/zed-industries/zed/pull/50967",
+  "before_sha": "7132b67962e2827f73f8486793ab5d5dcee53862",
+  "after_sha": "9ddaee0ac2e54d27d543aa0e74001851da157944",
+  "diff_stats": {
+    "additions": 155,
+    "deletions": 49,
+    "files_changed": 2
+  }
+}

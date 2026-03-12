@@ -1,0 +1,148 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "api_design",
+      "recommendation": "Added a new HTTP POST endpoint `/v1/tenant/{tenant_id}/timeline/{timeline_id}/safekeeper_migrate_abort` to allow aborting ongoing safekeeper migrations via REST API",
+      "rationale": "Following the existing pattern for safekeeper migration operations, this provides a clean HTTP interface for operators to trigger migration abort. The endpoint uses POST method as it modifies state and returns 200 OK on success. It reuses the existing authentication/authorization middleware and rate limiting infrastructure.",
+      "alternatives_considered": [
+        "Adding abort as a parameter to existing migrate endpoint",
+        "Using PATCH method instead of POST",
+        "Creating a separate administrative API outside the main storage controller"
+      ],
+      "files_affected": [
+        "storage_controller/src/http.rs"
+      ]
+    },
+    {
+      "dimension": "cli_design",
+      "recommendation": "Extended the storage controller CLI with a new `timeline-safekeeper-migrate-abort` command that accepts tenant_id and timeline_id parameters",
+      "rationale": "Provides operators with a command-line interface to trigger migration abort, consistent with the existing `timeline-safekeeper-migrate` command. The CLI delegates to the HTTP API, maintaining separation of concerns between CLI and core logic.",
+      "alternatives_considered": [
+        "Adding abort as a subcommand to existing migrate command",
+        "Creating a separate CLI tool",
+        "Implementing direct database operations bypassing HTTP API"
+      ],
+      "files_affected": [
+        "control_plane/storcon_cli/src/main.rs"
+      ]
+    },
+    {
+      "dimension": "state_management",
+      "recommendation": "Implemented abort logic that increments generation, removes new_sk_set, and creates exclude operations for safekeepers that were added during the migration",
+      "rationale": "The abort operation must be atomic and leave the timeline in a consistent state. By incrementing the generation and removing new_sk_set, we effectively roll back to the previous safekeeper set. Creating exclude operations ensures safekeepers added during the migration are properly removed from the timeline's membership.",
+      "alternatives_considered": [
+        "Simply removing new_sk_set without generation increment",
+        "Keeping the joint configuration but marking it as aborted",
+        "Creating a separate abort state field in the timeline"
+      ],
+      "files_affected": [
+        "storage_controller/src/service/safekeeper_service.rs"
+      ]
+    },
+    {
+      "dimension": "concurrency_control",
+      "recommendation": "Reused the existing per-tenant lock (TenantOperations::TimelineSafekeeperMigrate) for abort operations to prevent race conditions with concurrent migrations",
+      "rationale": "Maintains consistency by preventing concurrent migration and abort operations on the same tenant. The TODO comment acknowledges this is a coarse-grained lock but reuses existing infrastructure rather than introducing new locking mechanisms.",
+      "alternatives_considered": [
+        "Implementing per-timeline locks",
+        "Using optimistic concurrency control with retries",
+        "Adding a separate abort-specific lock"
+      ],
+      "files_affected": [
+        "storage_controller/src/service/safekeeper_service.rs"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Implemented graceful handling of edge cases: no active migration, already finished migrations, and proper error propagation",
+      "rationale": "The abort operation should be idempotent and safe to call in various states. If there's no active migration, it retries any pending finish operations. If migration is already finished, it does nothing. This prevents operators from needing to know the exact migration state before calling abort.",
+      "alternatives_considered": [
+        "Failing with error when no migration exists",
+        "Requiring explicit migration state parameter",
+        "Implementing separate endpoints for different migration states"
+      ],
+      "files_affected": [
+        "storage_controller/src/service/safekeeper_service.rs"
+      ]
+    },
+    {
+      "dimension": "testing",
+      "recommendation": "Added comprehensive integration tests that simulate migration failures at various stages and verify abort functionality restores correct state",
+      "rationale": "Tests validate the abort mechanism works correctly by injecting failpoints at different migration steps (steps 3-8). This ensures abort handles all possible intermediate states. The test also verifies endpoint functionality persists after abort.",
+      "alternatives_considered": [
+        "Unit tests only",
+        "Testing only happy path",
+        "Manual testing without automated verification"
+      ],
+      "files_affected": [
+        "test_runner/regress/test_safekeeper_migration.py",
+        "test_runner/fixtures/neon_fixtures.py"
+      ]
+    },
+    {
+      "dimension": "observability",
+      "recommendation": "Added structured logging with generation, sk_set, and new_sk_set information for both abort initiation and retry operations",
+      "rationale": "Provides operators with visibility into abort operations through logs. The info-level logging includes key state variables to help debug issues. Tracing spans are already handled by the existing trace_shared_lock infrastructure.",
+      "alternatives_considered": [
+        "Debug-level logging only",
+        "Adding new metrics for abort operations",
+        "Creating audit logs for abort operations"
+      ],
+      "files_affected": [
+        "storage_controller/src/service/safekeeper_service.rs"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Implement HTTP API endpoint for safekeeper migration abort",
+      "description": "Add REST endpoint to storage controller for aborting ongoing safekeeper migrations with proper authentication, rate limiting, and error handling",
+      "files_to_modify": [
+        "storage_controller/src/http.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-002",
+      "title": "Add CLI command for migration abort",
+      "description": "Extend storage controller CLI with command to trigger migration abort, maintaining consistency with existing migration command interface",
+      "files_to_modify": [
+        "control_plane/storcon_cli/src/main.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-003",
+      "title": "Implement core abort logic in safekeeper service",
+      "description": "Add business logic to abort migrations by incrementing generation, removing new_sk_set, creating exclude operations, and persisting changes atomically",
+      "files_to_modify": [
+        "storage_controller/src/service/safekeeper_service.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-004",
+      "title": "Add Python test infrastructure and integration tests",
+      "description": "Extend test fixtures with abort method and create comprehensive integration tests covering various migration failure scenarios",
+      "files_to_modify": [
+        "test_runner/fixtures/neon_fixtures.py",
+        "test_runner/regress/test_safekeeper_migration.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    }
+  ],
+  "implementation_summary": "The implementation adds a comprehensive safekeeper migration abort mechanism to the Neon storage controller. The design follows existing patterns in the codebase: a new HTTP endpoint is added alongside the existing migration endpoint, a corresponding CLI command is created, and the core logic is implemented in the safekeeper service module.\n\nThe abort operation works by atomically incrementing the generation number, removing the new_sk_set from the timeline configuration, and creating exclude operations for any safekeepers that were added during the migration. This effectively rolls back to the previous safekeeper set while maintaining consistency through generation increments. The implementation handles edge cases gracefully: if no migration is active, it retries any pending finish operations; if migration is already finished, it does nothing.\n\nKey design decisions include reusing the existing per-tenant lock for consistency (with a TODO noting it's coarse-grained), maintaining idempotency for safe retries, and providing comprehensive testing through failpoint injection at various migration stages. The changes integrate seamlessly with the existing migration infrastructure, using the same persistence methods, notification mechanisms, and error handling patterns. The abort operation completes by calling the existing finish_safekeeper_migration method to notify control plane and safekeepers of the new configuration, ensuring all components remain synchronized.",
+  "source_pr": "https://github.com/neondatabase/neon/pull/12705",
+  "before_sha": "df4e37b7cc1ba9fb9b21988a3ecd5b0590f33d53",
+  "after_sha": "312a74f11fdf5a8689837834be4c5ce0cc95cebf",
+  "diff_stats": {
+    "additions": 266,
+    "deletions": 4,
+    "files_changed": 5
+  }
+}

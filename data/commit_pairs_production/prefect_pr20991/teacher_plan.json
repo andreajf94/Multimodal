@@ -1,0 +1,78 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "error_handling",
+      "recommendation": "Enhanced error reporting in ECS worker to provide actionable hints for common AWS ECS failures. Added specific error pattern matching for inactive task definitions, capacity provider issues, and network configuration problems.",
+      "rationale": "AWS ECS errors often contain technical details that aren't immediately actionable for users. By detecting specific error patterns and providing resolution hints, we improve the developer experience and reduce support burden. The patterns were chosen based on common failure modes observed in production usage.",
+      "alternatives_considered": [
+        "Creating a separate error mapping service or configuration file",
+        "Using AWS SDK's exception types directly (not possible since AWS generates them at runtime)",
+        "Returning generic error messages without specific hints"
+      ],
+      "files_affected": [
+        "src/integrations/prefect-aws/prefect_aws/workers/ecs_worker.py"
+      ]
+    },
+    {
+      "dimension": "performance_optimization",
+      "recommendation": "Refactored error reporting to compute exception string representation once and store it in variables (exc_str, exc_str_lower) for reuse throughout the method.",
+      "rationale": "The original code called str(exc) multiple times in each conditional branch, which could be inefficient for complex exception objects. Computing it once improves performance and maintains consistency across all error checks.",
+      "alternatives_considered": [
+        "Keeping repeated str(exc) calls for simplicity",
+        "Creating a helper function to extract and cache the string",
+        "Using exception attributes directly when available"
+      ],
+      "files_affected": [
+        "src/integrations/prefect-aws/prefect_aws/workers/ecs_worker.py"
+      ]
+    },
+    {
+      "dimension": "testing",
+      "recommendation": "Added comprehensive parametrized tests for all new error hint scenarios, covering each error pattern with realistic AWS error messages.",
+      "rationale": "Parametrized tests allow testing multiple error scenarios with minimal code duplication. Each test case validates that the correct error message is raised with the expected hint. This ensures the error detection logic works correctly and prevents regressions.",
+      "alternatives_considered": [
+        "Writing separate test functions for each error type",
+        "Using mock objects to simulate AWS exceptions",
+        "Skipping tests for error message formatting"
+      ],
+      "files_affected": [
+        "src/integrations/prefect-aws/tests/workers/test_ecs_worker.py"
+      ]
+    },
+    {
+      "dimension": "api_design",
+      "recommendation": "Maintained backward compatibility by keeping the same method signature and raising RuntimeError exceptions with enhanced messages rather than changing exception types.",
+      "rationale": "The _report_task_run_creation_failure method is an internal implementation detail of the ECS worker. By preserving the existing exception hierarchy (RuntimeError from exc), we ensure that existing error handling code continues to work while providing better error messages.",
+      "alternatives_considered": [
+        "Creating custom exception types for each error category",
+        "Returning structured error objects instead of raising exceptions",
+        "Adding a callback mechanism for custom error handling"
+      ],
+      "files_affected": [
+        "src/integrations/prefect-aws/prefect_aws/workers/ecs_worker.py"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Enhance ECS Worker Error Reporting with Actionable Hints",
+      "description": "Add intelligent error detection and user-friendly resolution hints for common ECS task submission failures including inactive task definitions, capacity provider issues, and network configuration errors.",
+      "files_to_modify": [
+        "src/integrations/prefect-aws/prefect_aws/workers/ecs_worker.py",
+        "src/integrations/prefect-aws/tests/workers/test_ecs_worker.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation enhances the ECS worker's error reporting by adding intelligent pattern matching for common AWS ECS failures. The core change is in the _report_task_run_creation_failure method, which now detects specific error patterns and provides actionable resolution hints to users.\n\nFirst, the code was refactored to compute the exception string representation once (exc_str and exc_str_lower) for efficiency and consistency. This avoids repeated string conversions and ensures all branches use the same string representation. Three new error patterns were added: 1) 'TaskDefinition is inactive' errors now suggest re-registering the task definition or removing the task_definition_arn, 2) capacity provider errors (detected via 'no capacity' or 'capacity provider' substrings) guide users to check their Fargate/EC2 configuration, and 3) network configuration errors (InvalidParameterException with subnet/security group/network keywords) point users to work pool network settings.\n\nThe testing approach uses parametrized tests to cover all new error scenarios efficiently. Each test case provides a realistic AWS error message and validates that the correct user-friendly hint is included in the raised RuntimeError. The tests also verify that unknown errors are re-raised unchanged, maintaining backward compatibility. This implementation follows the existing pattern of the codebase where error handling is centralized in worker methods, and it integrates seamlessly with the existing ECS worker infrastructure without requiring changes to the public API or data models.",
+  "source_pr": "https://github.com/PrefectHQ/prefect/pull/20991",
+  "before_sha": "2e50f37287b7704e98d472c6422c2199f349dfa7",
+  "after_sha": "a66aa9d5c27513a23d523a7a304105428646ff71",
+  "diff_stats": {
+    "additions": 72,
+    "deletions": 4,
+    "files_changed": 2
+  }
+}

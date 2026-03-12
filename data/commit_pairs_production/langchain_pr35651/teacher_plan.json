@@ -1,0 +1,65 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "api_design",
+      "recommendation": "Added a normalizing wrapper for custom PII detectors to ensure consistent output format",
+      "rationale": "Custom detectors were documented to return dictionaries with 'text' keys, but downstream strategies (hash, mask) expected 'value' keys. Instead of breaking existing custom detectors or requiring users to update their code, we wrap them transparently to normalize the output format. This maintains backward compatibility while fixing the KeyError issue.",
+      "alternatives_considered": [
+        "Require all custom detectors to return 'value' keys (breaking change)",
+        "Modify downstream strategies to handle both 'text' and 'value' keys (spreads logic across multiple files)",
+        "Create a new detector interface with validation (more complex, requires migration)"
+      ],
+      "files_affected": [
+        "libs/langchain_v1/langchain/agents/middleware/_redaction.py"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Implemented defensive normalization with fallback values for missing fields",
+      "rationale": "The normalization wrapper provides defaults for missing 'type' fields (using the detector's pii_type) and handles missing 'value' by falling back to 'text' or empty string. This ensures the system doesn't crash when custom detectors return incomplete data, making the API more robust to user implementation variations.",
+      "alternatives_considered": [
+        "Raise explicit errors for missing fields (stricter but less user-friendly)",
+        "Skip matches with missing fields (could silently lose detection)",
+        "Require custom detectors to implement a specific protocol (more validation overhead)"
+      ],
+      "files_affected": [
+        "libs/langchain_v1/langchain/agents/middleware/_redaction.py"
+      ]
+    },
+    {
+      "dimension": "testing",
+      "recommendation": "Added comprehensive unit tests for the normalization behavior with hash and mask strategies",
+      "rationale": "The tests verify that custom detectors returning 'text' keys work correctly with both hash and mask strategies, which were previously failing. Tests use realistic examples (Indian phone number regex) and check that redaction occurs properly. This ensures the fix addresses the reported issue and prevents regression.",
+      "alternatives_considered": [
+        "Only test one strategy (incomplete coverage)",
+        "Test with synthetic data instead of realistic PII patterns (less representative)",
+        "Rely on existing tests without adding new ones (risk of missing edge cases)"
+      ],
+      "files_affected": [
+        "libs/langchain_v1/tests/unit_tests/agents/middleware/implementations/test_pii.py"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Normalize custom PII detector output format",
+      "description": "Wrap custom callable detectors to normalize their output dictionaries, mapping 'text' to 'value' and providing default 'type' when missing, ensuring compatibility with all redaction strategies",
+      "files_to_modify": [
+        "libs/langchain_v1/langchain/agents/middleware/_redaction.py",
+        "libs/langchain_v1/tests/unit_tests/agents/middleware/implementations/test_pii.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation addresses a compatibility issue where custom PII detectors returning dictionaries with 'text' keys caused KeyError in hash and mask strategies that expected 'value' keys. Instead of modifying the downstream strategies or breaking existing custom detectors, we added a normalizing wrapper in the detector resolution function. This wrapper transparently converts detector outputs to proper PIIMatch objects, mapping 'text' to 'value' when needed and providing default 'type' values.\n\nThe key design pattern is the decorator/wrapper approach: we intercept custom detectors and wrap them with _normalizing_detector, which transforms their output before passing to downstream processing. This maintains backward compatibility while fixing the issue. The normalization logic uses m.get('value', m.get('text', '')) to prioritize 'value' but fall back to 'text', and m.get('type', pii_type) to provide a default type.\n\nTwo comprehensive unit tests were added to verify the fix works with both hash and mask strategies, using realistic Indian phone number detection patterns. The tests ensure that redaction occurs correctly and that the original PII text is properly replaced. This minimal change integrates seamlessly with the existing codebase, requiring no modifications to the PIIMatch class or redaction strategies themselves.",
+  "source_pr": "https://github.com/langchain-ai/langchain/pull/35651",
+  "before_sha": "f11a1050233b3c816ff1d3e9f82c3f0434ce1bc5",
+  "after_sha": "46fdade7e68b0532529d5ac65d907bc1873c1af7",
+  "diff_stats": {
+    "additions": 71,
+    "deletions": 1,
+    "files_changed": 2
+  }
+}

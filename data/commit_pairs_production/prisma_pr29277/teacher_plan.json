@@ -1,0 +1,68 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "dependency_management",
+      "recommendation": "Moved @types/pg from devDependencies to dependencies in adapter-pg package.json to ensure TypeScript types are available to downstream consumers",
+      "rationale": "Type definitions for runtime dependencies should be included in production dependencies when the package exports TypeScript types that reference those definitions. This ensures consumers don't need to manually install type packages separately, preventing 'Cannot find module' or 'Cannot find name' TypeScript errors when using the adapter.",
+      "alternatives_considered": [
+        "Keeping @types/pg in devDependencies and documenting the requirement for users",
+        "Using type-only imports with import type syntax",
+        "Creating a separate @types/adapter-pg package",
+        "Bundling the types directly into the adapter package"
+      ],
+      "files_affected": [
+        "packages/adapter-pg/package.json",
+        "pnpm-lock.yaml"
+      ]
+    },
+    {
+      "dimension": "api_design",
+      "recommendation": "Maintained the same version specification (8.11.11) when moving @types/pg to dependencies to ensure compatibility with the pg runtime dependency",
+      "rationale": "Keeping the exact version ensures type safety and prevents version mismatches between the pg runtime package and its type definitions. This follows the principle that type definitions should match the exact version of the runtime package they describe.",
+      "alternatives_considered": [
+        "Using a version range like ^8.11.11 for more flexibility",
+        "Using a caret range to allow minor updates",
+        "Making it a peerDependency for users to manage"
+      ],
+      "files_affected": [
+        "packages/adapter-pg/package.json",
+        "pnpm-lock.yaml"
+      ]
+    },
+    {
+      "dimension": "monorepo_management",
+      "recommendation": "Updated pnpm-lock.yaml to reflect the dependency category change while maintaining the same version and integrity hash",
+      "rationale": "In a pnpm monorepo, the lock file must accurately reflect dependency categories to ensure consistent installations across all workspaces. The lock file update ensures that @types/pg is installed as a production dependency for adapter-pg consumers, not just as a dev dependency for the package's own development.",
+      "alternatives_considered": [
+        "Not updating the lock file and relying on pnpm's automatic resolution",
+        "Using a separate lock file for each package",
+        "Using npm or yarn instead of pnpm"
+      ],
+      "files_affected": [
+        "pnpm-lock.yaml"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Fix TypeScript type resolution for adapter-pg consumers",
+      "description": "Move @types/pg from devDependencies to dependencies to ensure TypeScript types are automatically available when users install adapter-pg, eliminating the need for manual type definition installation",
+      "files_to_modify": [
+        "packages/adapter-pg/package.json",
+        "pnpm-lock.yaml"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "This change addresses a TypeScript type resolution issue in the Prisma PostgreSQL adapter by moving the @types/pg package from devDependencies to dependencies. The implementation follows a straightforward but important principle in TypeScript package development: when a library exports types that depend on external type definitions, those type definitions should be included as runtime dependencies to ensure they're available to consumers.\n\nThe change was minimal but impactful, involving only two files: the adapter-pg package.json and the monorepo's pnpm-lock.yaml. In package.json, @types/pg was moved from the devDependencies section to the dependencies section while maintaining the exact version specification (8.11.11) to ensure compatibility with the pg runtime package. The pnpm-lock.yaml was updated to reflect this dependency category change, ensuring consistent installations across the monorepo.\n\nThis approach integrates seamlessly with the existing codebase architecture, which follows a consistent pattern across all database adapters. Each adapter package maintains its own dependencies while sharing common utilities through workspace references. The change doesn't affect runtime behavior or require modifications to the adapter's source code, as it's purely a packaging improvement that enhances the developer experience for TypeScript users of the PostgreSQL adapter.",
+  "source_pr": "https://github.com/prisma/prisma/pull/29277",
+  "before_sha": "57641cb8bcfdf8246abf61cf0dc80933396bcf3c",
+  "after_sha": "fc38fb73825773025c0163336c966ffb3bfa3f93",
+  "diff_stats": {
+    "additions": 6,
+    "deletions": 6,
+    "files_changed": 2
+  }
+}

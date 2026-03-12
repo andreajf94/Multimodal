@@ -1,0 +1,1398 @@
+diff --git a/apps/studio/components/interfaces/Settings/API/ExposedFunctionSelector.tsx b/apps/studio/components/interfaces/Settings/API/ExposedFunctionSelector.tsx
+new file mode 100644
+index 0000000000000..10ec9730c523c
+--- /dev/null
++++ b/apps/studio/components/interfaces/Settings/API/ExposedFunctionSelector.tsx
+@@ -0,0 +1,305 @@
++import { keepPreviousData, useInfiniteQuery, useQuery } from '@tanstack/react-query'
++import { useDebounce, useIntersectionObserver } from '@uidotdev/usehooks'
++import { Check, ChevronsUpDown, CircleAlert, Info } from 'lucide-react'
++import { useEffect, useMemo, useRef, useState } from 'react'
++import {
++  Button,
++  cn,
++  Command_Shadcn_,
++  CommandGroup_Shadcn_,
++  CommandInput_Shadcn_,
++  CommandItem_Shadcn_,
++  CommandList_Shadcn_,
++  Popover_Shadcn_,
++  PopoverContent_Shadcn_,
++  PopoverTrigger_Shadcn_,
++  ScrollArea,
++  Tooltip,
++  TooltipContent,
++  TooltipTrigger,
++} from 'ui'
++import { ShimmeringLoader } from 'ui-patterns/ShimmeringLoader'
++
++import { exposedFunctionCountsQueryOptions } from '@/data/privileges/exposed-function-counts-query'
++import { exposedFunctionsInfiniteQueryOptions } from '@/data/privileges/exposed-functions-infinite-query'
++import { useSelectedProjectQuery } from '@/hooks/misc/useSelectedProject'
++import { pluralize } from '@/lib/helpers'
++
++interface ExposedFunctionSelectorProps {
++  disabled?: boolean
++  selectedSchemas: string[]
++  pendingAddFunctionNames: string[]
++  pendingRemoveFunctionNames: string[]
++  onTogglePendingAdd: (functionName: string) => void
++  onTogglePendingRemove: (functionName: string) => void
++}
++
++export const ExposedFunctionSelector = ({
++  disabled = false,
++  selectedSchemas,
++  pendingAddFunctionNames,
++  pendingRemoveFunctionNames,
++  onTogglePendingAdd,
++  onTogglePendingRemove,
++}: ExposedFunctionSelectorProps) => {
++  const [open, setOpen] = useState(false)
++  const [search, setSearch] = useState('')
++  const debouncedSearch = useDebounce(search, 300)
++
++  const { data: project } = useSelectedProjectQuery()
++
++  const scrollRootRef = useRef<HTMLDivElement | null>(null)
++  const [sentinelRef, entry] = useIntersectionObserver({
++    root: scrollRootRef.current,
++    threshold: 0,
++    rootMargin: '0px',
++  })
++
++  const { data: countsData, isPending: isCountsPending } = useQuery({
++    ...exposedFunctionCountsQueryOptions({
++      projectRef: project?.ref,
++      connectionString: project?.connectionString,
++      selectedSchemas,
++    }),
++    placeholderData: keepPreviousData,
++  })
++  const pendingCount = pendingAddFunctionNames.length + pendingRemoveFunctionNames.length
++
++  const totalCount = countsData?.total_count ?? 0
++  const grantsCount = countsData?.grants_count ?? 0
++
++  const { data, isPending, isError, isFetching, isFetchingNextPage, hasNextPage, fetchNextPage } =
++    useInfiniteQuery({
++      ...exposedFunctionsInfiniteQueryOptions({
++        projectRef: project?.ref,
++        connectionString: project?.connectionString,
++        search: search.length === 0 ? undefined : debouncedSearch || undefined,
++      }),
++      placeholderData: search.length > 0 ? keepPreviousData : undefined,
++    })
++
++  const functions = useMemo(
++    () => data?.pages.flatMap((page) => page.functions) ?? [],
++    [data?.pages]
++  )
++
++  const pendingAddSet = useMemo(() => new Set(pendingAddFunctionNames), [pendingAddFunctionNames])
++  const pendingRemoveSet = useMemo(
++    () => new Set(pendingRemoveFunctionNames),
++    [pendingRemoveFunctionNames]
++  )
++
++  useEffect(() => {
++    if (!isPending && !isFetching && entry?.isIntersecting && hasNextPage && !isFetchingNextPage) {
++      fetchNextPage()
++    }
++  }, [entry?.isIntersecting, hasNextPage, isFetching, isFetchingNextPage, isPending, fetchNextPage])
++
++  return (
++    <Popover_Shadcn_ open={open} onOpenChange={setOpen} modal={false}>
++      <PopoverTrigger_Shadcn_ asChild>
++        <Button
++          size="small"
++          disabled={disabled}
++          type="default"
++          className="w-full [&>span]:w-full !pr-1 space-x-1"
++          iconRight={<ChevronsUpDown className="text-foreground-muted" strokeWidth={2} size={14} />}
++        >
++          <div className="w-full flex gap-1">
++            <p className="text-foreground-lighter">
++              {isCountsPending
++                ? 'Loading functions...'
++                : totalCount === 0
++                  ? 'No functions available'
++                  : `${grantsCount} of ${totalCount} functions exposed${
++                      pendingCount > 0
++                        ? `, ${pendingCount} pending ${pluralize(pendingCount, 'change')}`
++                        : ''
++                    }`}
++            </p>
++          </div>
++        </Button>
++      </PopoverTrigger_Shadcn_>
++      <PopoverContent_Shadcn_
++        className="p-0 min-w-[200px] pointer-events-auto"
++        side="bottom"
++        align="start"
++        sameWidthAsTrigger
++      >
++        <Command_Shadcn_ shouldFilter={false}>
++          <CommandInput_Shadcn_
++            className="text-xs"
++            placeholder="Find function..."
++            value={search}
++            onValueChange={setSearch}
++          />
++          <CommandList_Shadcn_>
++            <CommandGroup_Shadcn_>
++              {isPending ? (
++                <>
++                  <div className="px-2 py-1">
++                    <ShimmeringLoader className="py-2" />
++                  </div>
++                  <div className="px-2 py-1 w-4/5">
++                    <ShimmeringLoader className="py-2" />
++                  </div>
++                </>
++              ) : isError ? (
++                <div className="flex items-center py-3 justify-center">
++                  <p className="text-xs text-foreground-lighter">Failed to retrieve functions</p>
++                </div>
++              ) : (
++                <>
++                  {functions.length === 0 && (
++                    <p className="text-xs text-center text-foreground-lighter py-3">
++                      {search.length > 0 ? 'No functions found' : 'No functions available'}
++                    </p>
++                  )}
++                  <ScrollArea
++                    ref={scrollRootRef}
++                    className={functions.length > 7 ? 'h-[210px]' : ''}
++                  >
++                    {functions.map((fn) => {
++                      const key = `${fn.schema}.${fn.name}`
++                      const isSchemaExposed = selectedSchemas.includes(fn.schema)
++                      const hasPendingAdd = pendingAddSet.has(key)
++                      const hasPendingRemove = pendingRemoveSet.has(key)
++
++                      const isCustom = fn.status === 'custom'
++                      const isGranted = fn.status === 'granted'
++
++                      const isCustomNeutral = isCustom && !hasPendingAdd && !hasPendingRemove
++                      const isExposed =
++                        isSchemaExposed &&
++                        (isCustom ? hasPendingAdd : isGranted ? !hasPendingRemove : hasPendingAdd)
++
++                      const customGrantsTooltip = getCustomGrantsTooltip({
++                        hasPendingAdd,
++                        hasPendingRemove,
++                      })
++
++                      return (
++                        <CommandItem_Shadcn_
++                          key={key}
++                          value={key}
++                          className={cn(
++                            'w-full',
++                            isSchemaExposed ? 'cursor-pointer' : 'opacity-50 !cursor-not-allowed'
++                          )}
++                          onSelect={() => {
++                            if (!isSchemaExposed) return
++
++                            if (isCustom) {
++                              if (hasPendingAdd) {
++                                onTogglePendingAdd(key)
++                                onTogglePendingRemove(key)
++                              } else if (hasPendingRemove) {
++                                onTogglePendingRemove(key)
++                                onTogglePendingAdd(key)
++                              } else {
++                                onTogglePendingAdd(key)
++                              }
++                              return
++                            }
++
++                            if (isGranted) {
++                              onTogglePendingRemove(key)
++                            } else {
++                              onTogglePendingAdd(key)
++                            }
++                          }}
++                        >
++                          <div className="w-full flex items-center gap-x-2">
++                            <div className="w-4 shrink-0 flex items-center justify-center">
++                              {isExposed && <Check size={16} className="text-brand shrink-0" />}
++                              {!isSchemaExposed && (
++                                <Tooltip>
++                                  <TooltipTrigger asChild>
++                                    <button
++                                      type="button"
++                                      tabIndex={-1}
++                                      aria-label="Schema not exposed"
++                                      className="inline-flex items-center text-foreground-muted hover:text-foreground-light"
++                                    >
++                                      <Info size={14} />
++                                    </button>
++                                  </TooltipTrigger>
++                                  <TooltipContent side="left" className="max-w-[320px] text-xs">
++                                    The schema "{fn.schema}" must be exposed before enabling this
++                                    function.
++                                  </TooltipContent>
++                                </Tooltip>
++                              )}
++                            </div>
++                            <span
++                              className={cn(
++                                'truncate',
++                                (!isSchemaExposed || isCustomNeutral) && 'text-foreground-muted',
++                                isCustomNeutral && isSchemaExposed && 'text-warning'
++                              )}
++                            >
++                              {key}
++                            </span>
++
++                            <div className="ml-auto flex items-center gap-x-2">
++                              {isCustom && (
++                                <Tooltip>
++                                  <TooltipTrigger asChild>
++                                    <div
++                                      className={cn(
++                                        'shrink-0 flex items-center justify-center hover:text-foreground-light',
++                                        isCustomNeutral && isSchemaExposed
++                                          ? 'text-warning'
++                                          : 'text-foreground-muted'
++                                      )}
++                                    >
++                                      <CircleAlert size={14} />
++                                    </div>
++                                  </TooltipTrigger>
++                                  <TooltipContent
++                                    side="right"
++                                    className="max-w-[320px] text-xs pointer-events-none"
++                                  >
++                                    {customGrantsTooltip}
++                                  </TooltipContent>
++                                </Tooltip>
++                              )}
++                            </div>
++                          </div>
++                        </CommandItem_Shadcn_>
++                      )
++                    })}
++                    <div ref={sentinelRef} className="h-1 -mt-1" />
++                    {hasNextPage && (
++                      <div className="px-2 py-1">
++                        <ShimmeringLoader className="py-2" />
++                      </div>
++                    )}
++                  </ScrollArea>
++                </>
++              )}
++            </CommandGroup_Shadcn_>
++          </CommandList_Shadcn_>
++        </Command_Shadcn_>
++      </PopoverContent_Shadcn_>
++    </Popover_Shadcn_>
++  )
++}
++
++const getCustomGrantsTooltip = ({
++  hasPendingAdd,
++  hasPendingRemove,
++}: {
++  hasPendingAdd: boolean
++  hasPendingRemove: boolean
++}) => {
++  if (hasPendingAdd) {
++    return 'This function has custom grants. Saving will override them with standard Data API grants for anon, authenticated, and service_role. Select again to revoke all grants instead.'
++  }
++
++  if (hasPendingRemove) {
++    return 'This function has custom grants. Saving will revoke all grants for anon, authenticated, and service_role. Select again to override with standard Data API grants instead.'
++  }
++
++  return 'This function has custom grants. Select it to override with standard Data API grants for anon, authenticated, and service_role.'
++}
+diff --git a/apps/studio/components/interfaces/Settings/API/ExposedTableSelector.tsx b/apps/studio/components/interfaces/Settings/API/ExposedTableSelector.tsx
+index 18371b96ad7b9..2b0bdc4082613 100644
+--- a/apps/studio/components/interfaces/Settings/API/ExposedTableSelector.tsx
++++ b/apps/studio/components/interfaces/Settings/API/ExposedTableSelector.tsx
+@@ -26,7 +26,6 @@ import { useSelectedProjectQuery } from '@/hooks/misc/useSelectedProject'
+ import { pluralize } from '@/lib/helpers'
+ 
+ interface ExposedTableSelectorProps {
+-  className?: string
+   disabled?: boolean
+   selectedSchemas: string[]
+   pendingAddTableIds: number[]
+@@ -36,7 +35,6 @@ interface ExposedTableSelectorProps {
+ }
+ 
+ export const ExposedTableSelector = ({
+-  className,
+   disabled = false,
+   selectedSchemas,
+   pendingAddTableIds,
+@@ -92,197 +90,193 @@ export const ExposedTableSelector = ({
+   }, [entry?.isIntersecting, hasNextPage, isFetching, isFetchingNextPage, isPending, fetchNextPage])
+ 
+   return (
+-    <div className={className}>
+-      <Popover_Shadcn_ open={open} onOpenChange={setOpen} modal={false}>
+-        <PopoverTrigger_Shadcn_ asChild>
+-          <Button
+-            size="small"
+-            disabled={disabled}
+-            type="default"
+-            className="w-full [&>span]:w-full !pr-1 space-x-1"
+-            iconRight={
+-              <ChevronsUpDown className="text-foreground-muted" strokeWidth={2} size={14} />
+-            }
+-          >
+-            <div className="w-full flex gap-1">
+-              <p className="text-foreground-lighter">
+-                {isCountsPending
+-                  ? 'Loading tables...'
++    <Popover_Shadcn_ open={open} onOpenChange={setOpen} modal={false}>
++      <PopoverTrigger_Shadcn_ asChild>
++        <Button
++          size="small"
++          disabled={disabled}
++          type="default"
++          className="w-full [&>span]:w-full !pr-1 space-x-1"
++          iconRight={<ChevronsUpDown className="text-foreground-muted" strokeWidth={2} size={14} />}
++        >
++          <div className="w-full flex gap-1">
++            <p className="text-foreground-lighter">
++              {isCountsPending
++                ? 'Loading tables...'
++                : totalCount === 0
++                  ? 'No tables available'
+                   : `${grantsCount} of ${totalCount} tables exposed${
+                       pendingCount > 0
+                         ? `, ${pendingCount} pending ${pluralize(pendingCount, 'change')}`
+                         : ''
+                     }`}
+-              </p>
+-            </div>
+-          </Button>
+-        </PopoverTrigger_Shadcn_>
+-        <PopoverContent_Shadcn_
+-          className="p-0 min-w-[200px] pointer-events-auto"
+-          side="bottom"
+-          align="start"
+-          sameWidthAsTrigger
+-        >
+-          <Command_Shadcn_ shouldFilter={false}>
+-            <CommandInput_Shadcn_
+-              className="text-xs"
+-              placeholder="Find table..."
+-              value={search}
+-              onValueChange={setSearch}
+-            />
+-            <CommandList_Shadcn_>
+-              <CommandGroup_Shadcn_>
+-                {isPending ? (
+-                  <>
+-                    <div className="px-2 py-1">
+-                      <ShimmeringLoader className="py-2" />
+-                    </div>
+-                    <div className="px-2 py-1 w-4/5">
+-                      <ShimmeringLoader className="py-2" />
+-                    </div>
+-                  </>
+-                ) : isError ? (
+-                  <div className="flex items-center py-3 justify-center">
+-                    <p className="text-xs text-foreground-lighter">Failed to retrieve tables</p>
++            </p>
++          </div>
++        </Button>
++      </PopoverTrigger_Shadcn_>
++      <PopoverContent_Shadcn_
++        className="p-0 min-w-[200px] pointer-events-auto"
++        side="bottom"
++        align="start"
++        sameWidthAsTrigger
++      >
++        <Command_Shadcn_ shouldFilter={false}>
++          <CommandInput_Shadcn_
++            className="text-xs"
++            placeholder="Find table..."
++            value={search}
++            onValueChange={setSearch}
++          />
++          <CommandList_Shadcn_>
++            <CommandGroup_Shadcn_>
++              {isPending ? (
++                <>
++                  <div className="px-2 py-1">
++                    <ShimmeringLoader className="py-2" />
+                   </div>
+-                ) : (
+-                  <>
+-                    {search.length > 0 && tables.length === 0 && (
+-                      <p className="text-xs text-center text-foreground-lighter py-3">
+-                        No tables found
+-                      </p>
+-                    )}
+-                    <ScrollArea
+-                      ref={scrollRootRef}
+-                      className={tables.length > 7 ? 'h-[210px]' : ''}
+-                    >
+-                      {tables.map((table) => {
+-                        const isSchemaExposed = selectedSchemas.includes(table.schema)
+-                        const hasPendingAdd = pendingAddSet.has(table.id)
+-                        const hasPendingRemove = pendingRemoveSet.has(table.id)
+-
+-                        const isCustomTable = table.status === 'custom'
+-                        const isGranted = table.status === 'granted'
++                  <div className="px-2 py-1 w-4/5">
++                    <ShimmeringLoader className="py-2" />
++                  </div>
++                </>
++              ) : isError ? (
++                <div className="flex items-center py-3 justify-center">
++                  <p className="text-xs text-foreground-lighter">Failed to retrieve tables</p>
++                </div>
++              ) : (
++                <>
++                  {tables.length === 0 && (
++                    <p className="text-xs text-center text-foreground-lighter py-3">
++                      {search.length > 0 ? 'No tables found' : 'No tables available'}
++                    </p>
++                  )}
++                  <ScrollArea ref={scrollRootRef} className={tables.length > 7 ? 'h-[210px]' : ''}>
++                    {tables.map((table) => {
++                      const isSchemaExposed = selectedSchemas.includes(table.schema)
++                      const hasPendingAdd = pendingAddSet.has(table.id)
++                      const hasPendingRemove = pendingRemoveSet.has(table.id)
+ 
+-                        const isCustomNeutral = isCustomTable && !hasPendingAdd && !hasPendingRemove
+-                        const isExposed =
+-                          isSchemaExposed &&
+-                          (isCustomTable
+-                            ? hasPendingAdd
+-                            : isGranted
+-                              ? !hasPendingRemove
+-                              : hasPendingAdd)
++                      const isCustomTable = table.status === 'custom'
++                      const isGranted = table.status === 'granted'
+ 
+-                        const customGrantsTooltip = getCustomGrantsTooltip({
+-                          hasPendingAdd,
+-                          hasPendingRemove,
+-                        })
++                      const isCustomNeutral = isCustomTable && !hasPendingAdd && !hasPendingRemove
++                      const isExposed =
++                        isSchemaExposed &&
++                        (isCustomTable
++                          ? hasPendingAdd
++                          : isGranted
++                            ? !hasPendingRemove
++                            : hasPendingAdd)
+ 
+-                        return (
+-                          <CommandItem_Shadcn_
+-                            key={table.id}
+-                            value={`${table.schema}.${table.name}-${table.id}`}
+-                            className={cn(
+-                              'w-full',
+-                              isSchemaExposed ? 'cursor-pointer' : 'opacity-50 !cursor-not-allowed'
+-                            )}
+-                            onSelect={() => {
+-                              if (!isSchemaExposed) return
++                      const customGrantsTooltip = getCustomGrantsTooltip({
++                        hasPendingAdd,
++                        hasPendingRemove,
++                      })
+ 
+-                              if (isCustomTable) {
+-                                if (hasPendingAdd) {
+-                                  onTogglePendingAdd(table.id)
+-                                  onTogglePendingRemove(table.id)
+-                                } else if (hasPendingRemove) {
+-                                  onTogglePendingRemove(table.id)
+-                                  onTogglePendingAdd(table.id)
+-                                } else {
+-                                  onTogglePendingAdd(table.id)
+-                                }
+-                                return
+-                              }
++                      return (
++                        <CommandItem_Shadcn_
++                          key={table.id}
++                          value={`${table.schema}.${table.name}-${table.id}`}
++                          className={cn(
++                            'w-full',
++                            isSchemaExposed ? 'cursor-pointer' : 'opacity-50 !cursor-not-allowed'
++                          )}
++                          onSelect={() => {
++                            if (!isSchemaExposed) return
+ 
+-                              if (isGranted) {
++                            if (isCustomTable) {
++                              if (hasPendingAdd) {
++                                onTogglePendingAdd(table.id)
+                                 onTogglePendingRemove(table.id)
++                              } else if (hasPendingRemove) {
++                                onTogglePendingRemove(table.id)
++                                onTogglePendingAdd(table.id)
+                               } else {
+                                 onTogglePendingAdd(table.id)
+                               }
+-                            }}
+-                          >
+-                            <div className="w-full flex items-center gap-x-2">
+-                              <div className="w-4 shrink-0 flex items-center justify-center">
+-                                {isExposed && <Check size={16} className="text-brand shrink-0" />}
+-                              </div>
+-                              <span
+-                                className={cn(
+-                                  'truncate',
+-                                  (!isSchemaExposed || isCustomNeutral) && 'text-foreground-muted',
+-                                  isCustomNeutral && isSchemaExposed && 'text-warning'
+-                                )}
+-                              >
+-                                {`${table.schema}.${table.name}`}
+-                              </span>
++                              return
++                            }
++
++                            if (isGranted) {
++                              onTogglePendingRemove(table.id)
++                            } else {
++                              onTogglePendingAdd(table.id)
++                            }
++                          }}
++                        >
++                          <div className="w-full flex items-center gap-x-2">
++                            <div className="w-4 shrink-0 flex items-center justify-center">
++                              {isExposed && <Check size={16} className="text-brand shrink-0" />}
++                              {!isSchemaExposed && (
++                                <Tooltip>
++                                  <TooltipTrigger asChild>
++                                    <button
++                                      type="button"
++                                      tabIndex={-1}
++                                      aria-label="Schema not exposed"
++                                      className="inline-flex items-center text-foreground-muted hover:text-foreground-light"
++                                    >
++                                      <Info size={14} />
++                                    </button>
++                                  </TooltipTrigger>
++                                  <TooltipContent side="left" className="max-w-[320px] text-xs">
++                                    The schema "{table.schema}" must be exposed before enabling this
++                                    table.
++                                  </TooltipContent>
++                                </Tooltip>
++                              )}
++                            </div>
++                            <span
++                              className={cn(
++                                'truncate',
++                                (!isSchemaExposed || isCustomNeutral) && 'text-foreground-muted',
++                                isCustomNeutral && isSchemaExposed && 'text-warning'
++                              )}
++                            >
++                              {`${table.schema}.${table.name}`}
++                            </span>
+ 
+-                              <div className="ml-auto flex items-center gap-x-2">
+-                                {isCustomTable && (
+-                                  <Tooltip>
+-                                    <TooltipTrigger asChild>
+-                                      <div
+-                                        className={cn(
+-                                          'shrink-0 flex items-center justify-center hover:text-foreground-light',
+-                                          isCustomNeutral && isSchemaExposed
+-                                            ? 'text-warning'
+-                                            : 'text-foreground-muted'
+-                                        )}
+-                                      >
+-                                        <CircleAlert size={14} />
+-                                      </div>
+-                                    </TooltipTrigger>
+-                                    <TooltipContent
+-                                      side="right"
+-                                      className="max-w-[320px] text-xs pointer-events-none"
++                            <div className="ml-auto flex items-center gap-x-2">
++                              {isCustomTable && (
++                                <Tooltip>
++                                  <TooltipTrigger asChild>
++                                    <div
++                                      className={cn(
++                                        'shrink-0 flex items-center justify-center hover:text-foreground-light',
++                                        isCustomNeutral && isSchemaExposed
++                                          ? 'text-warning'
++                                          : 'text-foreground-muted'
++                                      )}
+                                     >
+-                                      {customGrantsTooltip}
+-                                    </TooltipContent>
+-                                  </Tooltip>
+-                                )}
+-                                {!isSchemaExposed && (
+-                                  <Tooltip>
+-                                    <TooltipTrigger asChild>
+-                                      <button
+-                                        type="button"
+-                                        tabIndex={-1}
+-                                        aria-label="Schema not exposed"
+-                                        className="inline-flex items-center text-foreground-muted hover:text-foreground-light"
+-                                      >
+-                                        <Info size={14} />
+-                                      </button>
+-                                    </TooltipTrigger>
+-                                    <TooltipContent side="right" className="max-w-[320px] text-xs">
+-                                      {`The schema "${table.schema}" must be exposed before enabling this table.`}
+-                                    </TooltipContent>
+-                                  </Tooltip>
+-                                )}
+-                              </div>
++                                      <CircleAlert size={14} />
++                                    </div>
++                                  </TooltipTrigger>
++                                  <TooltipContent
++                                    side="right"
++                                    className="max-w-[320px] text-xs pointer-events-none"
++                                  >
++                                    {customGrantsTooltip}
++                                  </TooltipContent>
++                                </Tooltip>
++                              )}
+                             </div>
+-                          </CommandItem_Shadcn_>
+-                        )
+-                      })}
+-                      <div ref={sentinelRef} className="h-1 -mt-1" />
+-                      {hasNextPage && (
+-                        <div className="px-2 py-1">
+-                          <ShimmeringLoader className="py-2" />
+-                        </div>
+-                      )}
+-                    </ScrollArea>
+-                  </>
+-                )}
+-              </CommandGroup_Shadcn_>
+-            </CommandList_Shadcn_>
+-          </Command_Shadcn_>
+-        </PopoverContent_Shadcn_>
+-      </Popover_Shadcn_>
+-    </div>
++                          </div>
++                        </CommandItem_Shadcn_>
++                      )
++                    })}
++                    <div ref={sentinelRef} className="h-1 -mt-1" />
++                    {hasNextPage && (
++                      <div className="px-2 py-1">
++                        <ShimmeringLoader className="py-2" />
++                      </div>
++                    )}
++                  </ScrollArea>
++                </>
++              )}
++            </CommandGroup_Shadcn_>
++          </CommandList_Shadcn_>
++        </Command_Shadcn_>
++      </PopoverContent_Shadcn_>
++    </Popover_Shadcn_>
+   )
+ }
+ 
+diff --git a/apps/studio/components/interfaces/Settings/API/PostgrestConfig.tsx b/apps/studio/components/interfaces/Settings/API/PostgrestConfig.tsx
+index 24df32ed98682..6be3920537515 100644
+--- a/apps/studio/components/interfaces/Settings/API/PostgrestConfig.tsx
++++ b/apps/studio/components/interfaces/Settings/API/PostgrestConfig.tsx
+@@ -35,6 +35,7 @@ import { z } from 'zod'
+ 
+ import { ExposedSchemaSelector } from './ExposedSchemaSelector'
+ import { HardenAPIModal } from './HardenAPIModal'
++import { ExposedFunctionSelector } from '@/components/interfaces/Settings/API/ExposedFunctionSelector'
+ import { ExposedTableSelector } from '@/components/interfaces/Settings/API/ExposedTableSelector'
+ import { FormActions } from '@/components/ui/Forms/FormActions'
+ import { useProjectPostgrestConfigQuery } from '@/data/config/project-postgrest-config-query'
+@@ -42,7 +43,7 @@ import { useProjectPostgrestConfigUpdateMutation } from '@/data/config/project-p
+ import { useDatabaseExtensionsQuery } from '@/data/database-extensions/database-extensions-query'
+ import { useSchemasQuery } from '@/data/database/schemas-query'
+ import { privilegeKeys } from '@/data/privileges/keys'
+-import { useUpdateExposedTablesMutation } from '@/data/privileges/update-exposed-tables-mutation'
++import { useUpdateExposedEntitiesMutation } from '@/data/privileges/update-exposed-entities-mutation'
+ import { useAsyncCheckPermissions } from '@/hooks/misc/useCheckPermissions'
+ import { useDataApiGrantTogglesEnabled } from '@/hooks/misc/useDataApiGrantTogglesEnabled'
+ import useLatest from '@/hooks/misc/useLatest'
+@@ -66,6 +67,8 @@ const formSchema = z.object({
+   // Fields for expose toggles
+   tableIdsToAdd: z.array(z.number()),
+   tableIdsToRemove: z.array(z.number()),
++  functionNamesToAdd: z.array(z.string()),
++  functionNamesToRemove: z.array(z.string()),
+ })
+ 
+ export const PostgrestConfig = () => {
+@@ -119,7 +122,7 @@ export const PostgrestConfig = () => {
+ 
+   const { mutateAsync: updatePostgrestConfig } = useProjectPostgrestConfigUpdateMutation()
+ 
+-  const { mutateAsync: updateExposedTables } = useUpdateExposedTablesMutation()
++  const { mutateAsync: updateExposedEntities } = useUpdateExposedEntitiesMutation()
+ 
+   const [isUpdating, setIsUpdating] = useState(false)
+ 
+@@ -143,6 +146,8 @@ export const PostgrestConfig = () => {
+       dbPool: config?.db_pool,
+       tableIdsToAdd: [] as number[],
+       tableIdsToRemove: [] as number[],
++      functionNamesToAdd: [] as string[],
++      functionNamesToRemove: [] as string[],
+     }
+   }, [config, configDbSchemas])
+ 
+@@ -165,11 +170,13 @@ export const PostgrestConfig = () => {
+       let dbSchema = values.dbSchema.join(',')
+ 
+       if (isApiGrantTogglesEnabled) {
+-        await updateExposedTables({
++        await updateExposedEntities({
+           projectRef,
+           connectionString: project?.connectionString,
+           tableIdsToAdd: values.tableIdsToAdd,
+           tableIdsToRemove: values.tableIdsToRemove,
++          functionNamesToAdd: values.functionNamesToAdd,
++          functionNamesToRemove: values.functionNamesToRemove,
+         })
+       }
+ 
+@@ -191,6 +198,12 @@ export const PostgrestConfig = () => {
+         queryClient.invalidateQueries({
+           queryKey: privilegeKeys.exposedTableCounts(projectRef, watchedDbSchema),
+         }),
++        queryClient.invalidateQueries({
++          queryKey: privilegeKeys.exposedFunctionsInfinite(projectRef),
++        }),
++        queryClient.invalidateQueries({
++          queryKey: privilegeKeys.exposedFunctionCounts(projectRef, watchedDbSchema),
++        }),
+       ])
+ 
+       toast.success('Successfully saved settings')
+@@ -204,6 +217,8 @@ export const PostgrestConfig = () => {
+         dbPool: values.dbPool,
+         tableIdsToAdd: [],
+         tableIdsToRemove: [],
++        functionNamesToAdd: [],
++        functionNamesToRemove: [],
+       })
+     } catch (error) {
+       toast.error('Failed to save settings: ' + (error as ResponseError).message || 'Unknown error')
+@@ -227,6 +242,14 @@ export const PostgrestConfig = () => {
+     control: form.control,
+     name: 'tableIdsToRemove',
+   })
++  const watchedFunctionNamesToAdd = useWatch_Shadcn_({
++    control: form.control,
++    name: 'functionNamesToAdd',
++  })
++  const watchedFunctionNamesToRemove = useWatch_Shadcn_({
++    control: form.control,
++    name: 'functionNamesToRemove',
++  })
+   return (
+     <PageSection id="postgrest-config" className="first:pt-0">
+       <PageSectionContent>
+@@ -312,6 +335,47 @@ export const PostgrestConfig = () => {
+                         />
+                       </FormItemLayout>
+ 
++                      <FormItemLayout
++                        isReactForm={false}
++                        layout="flex-row-reverse"
++                        label="Exposed functions"
++                        description="Toggle Data API access for individual functions."
++                      >
++                        <ExposedFunctionSelector
++                          selectedSchemas={watchedDbSchema}
++                          pendingAddFunctionNames={watchedFunctionNamesToAdd}
++                          pendingRemoveFunctionNames={watchedFunctionNamesToRemove}
++                          onTogglePendingAdd={(functionName) => {
++                            const current = form.getValues('functionNamesToAdd')
++                            if (current.includes(functionName)) {
++                              form.setValue(
++                                'functionNamesToAdd',
++                                current.filter((x) => x !== functionName),
++                                { shouldDirty: true }
++                              )
++                            } else {
++                              form.setValue('functionNamesToAdd', [...current, functionName], {
++                                shouldDirty: true,
++                              })
++                            }
++                          }}
++                          onTogglePendingRemove={(functionName) => {
++                            const current = form.getValues('functionNamesToRemove')
++                            if (current.includes(functionName)) {
++                              form.setValue(
++                                'functionNamesToRemove',
++                                current.filter((x) => x !== functionName),
++                                { shouldDirty: true }
++                              )
++                            } else {
++                              form.setValue('functionNamesToRemove', [...current, functionName], {
++                                shouldDirty: true,
++                              })
++                            }
++                          }}
++                        />
++                      </FormItemLayout>
++
+                       {watchedDbSchema.length === 0 && (
+                         <Admonition
+                           type="warning"
+diff --git a/apps/studio/data/privileges/exposed-function-counts-query.ts b/apps/studio/data/privileges/exposed-function-counts-query.ts
+new file mode 100644
+index 0000000000000..4a031f9cecdbc
+--- /dev/null
++++ b/apps/studio/data/privileges/exposed-function-counts-query.ts
+@@ -0,0 +1,62 @@
++import { queryOptions } from '@tanstack/react-query'
++import { executeSql } from 'data/sql/execute-sql-query'
++import type { ResponseError } from 'types'
++
++import { privilegeKeys } from './keys'
++import { getExposedFunctionCountsSql } from './privileges.sql'
++
++export type ExposedFunctionCountsVariables = {
++  projectRef?: string
++  connectionString?: string | null
++  selectedSchemas: string[]
++}
++
++export type ExposedFunctionCountsResponse = {
++  total_count: number
++  grants_count: number
++}
++
++export async function getExposedFunctionCounts(
++  { projectRef, connectionString, selectedSchemas }: ExposedFunctionCountsVariables,
++  signal?: AbortSignal
++): Promise<ExposedFunctionCountsResponse> {
++  if (!projectRef) throw new Error('projectRef is required')
++  if (!selectedSchemas) throw new Error('selectedSchemas is required')
++
++  const sql = getExposedFunctionCountsSql({ selectedSchemas })
++
++  const { result } = await executeSql(
++    {
++      projectRef,
++      connectionString,
++      sql,
++      queryKey: ['exposed-function-counts', selectedSchemas],
++    },
++    signal
++  )
++
++  return result[0] as ExposedFunctionCountsResponse
++}
++
++export type ExposedFunctionCountsData = Awaited<ReturnType<typeof getExposedFunctionCounts>>
++export type ExposedFunctionCountsError = ResponseError
++
++export const exposedFunctionCountsQueryOptions = (
++  { projectRef, connectionString, selectedSchemas }: ExposedFunctionCountsVariables,
++  { enabled = true }: { enabled?: boolean } = {}
++) => {
++  return queryOptions({
++    // eslint-disable-next-line @tanstack/query/exhaustive-deps -- connection string doesn't change the result of the query
++    queryKey: privilegeKeys.exposedFunctionCounts(projectRef, selectedSchemas),
++    queryFn: ({ signal }) =>
++      getExposedFunctionCounts(
++        {
++          projectRef,
++          connectionString,
++          selectedSchemas,
++        },
++        signal
++      ),
++    enabled: enabled && typeof projectRef !== 'undefined',
++  })
++}
+diff --git a/apps/studio/data/privileges/exposed-functions-infinite-query.ts b/apps/studio/data/privileges/exposed-functions-infinite-query.ts
+new file mode 100644
+index 0000000000000..dda8ec5151a4d
+--- /dev/null
++++ b/apps/studio/data/privileges/exposed-functions-infinite-query.ts
+@@ -0,0 +1,90 @@
++import { infiniteQueryOptions } from '@tanstack/react-query'
++import { executeSql } from 'data/sql/execute-sql-query'
++import type { ResponseError } from 'types'
++
++import { privilegeKeys } from './keys'
++import { getExposedFunctionsSql } from './privileges.sql'
++
++export const EXPOSED_FUNCTIONS_PAGE_LIMIT = 50
++
++export type ExposedFunctionsVariables = {
++  projectRef?: string
++  connectionString?: string | null
++  search?: string
++}
++
++export type ExposedFunction = {
++  schema: string
++  name: string
++  status: 'granted' | 'revoked' | 'custom'
++}
++
++export type ExposedFunctionsResponse = {
++  total_count: number
++  functions: ExposedFunction[]
++}
++
++export async function getExposedFunctions(
++  {
++    projectRef,
++    connectionString,
++    search,
++    page = 0,
++    limit = EXPOSED_FUNCTIONS_PAGE_LIMIT,
++  }: ExposedFunctionsVariables & { page?: number; limit?: number },
++  signal?: AbortSignal
++): Promise<ExposedFunctionsResponse> {
++  if (!projectRef) throw new Error('projectRef is required')
++
++  const offset = page * limit
++
++  const sql = getExposedFunctionsSql({ search, offset, limit })
++
++  const { result } = await executeSql(
++    {
++      projectRef,
++      connectionString,
++      sql,
++      queryKey: ['exposed-functions', page],
++    },
++    signal
++  )
++
++  return result[0] as ExposedFunctionsResponse
++}
++
++export type ExposedFunctionsData = Awaited<ReturnType<typeof getExposedFunctions>>
++export type ExposedFunctionsError = ResponseError
++
++export const exposedFunctionsInfiniteQueryOptions = (
++  { projectRef, connectionString, search }: ExposedFunctionsVariables,
++  { enabled = true }: { enabled?: boolean } = {}
++) => {
++  return infiniteQueryOptions({
++    // eslint-disable-next-line @tanstack/query/exhaustive-deps -- connection string doesn't change the result of the query
++    queryKey: privilegeKeys.exposedFunctionsInfinite(projectRef, search),
++    queryFn: ({ signal, pageParam }) =>
++      getExposedFunctions(
++        {
++          projectRef,
++          connectionString,
++          search,
++          page: pageParam,
++        },
++        signal
++      ),
++    enabled: enabled && typeof projectRef !== 'undefined',
++    initialPageParam: 0,
++    getNextPageParam(lastPage, pages) {
++      const page = pages.length
++      const currentTotalCount = page * EXPOSED_FUNCTIONS_PAGE_LIMIT
++      const totalCount = lastPage.total_count ?? 0
++
++      if (currentTotalCount >= totalCount) {
++        return undefined
++      }
++
++      return page
++    },
++  })
++}
+diff --git a/apps/studio/data/privileges/keys.ts b/apps/studio/data/privileges/keys.ts
+index 328e39c325f00..95f1b3519b1bb 100644
+--- a/apps/studio/data/privileges/keys.ts
++++ b/apps/studio/data/privileges/keys.ts
+@@ -13,4 +13,14 @@ export const privilegeKeys = {
+     ] as const,
+   exposedTableCounts: (projectRef: string | undefined, selectedSchemas: string[]) =>
+     ['projects', projectRef, 'privileges', 'exposed-table-counts', ...selectedSchemas] as const,
++  exposedFunctionsInfinite: (projectRef: string | undefined, search?: string) =>
++    [
++      'projects',
++      projectRef,
++      'privileges',
++      'exposed-functions-infinite',
++      ...(search ? ([{ search }] as const) : []),
++    ] as const,
++  exposedFunctionCounts: (projectRef: string | undefined, selectedSchemas: string[]) =>
++    ['projects', projectRef, 'privileges', 'exposed-function-counts', ...selectedSchemas] as const,
+ }
+diff --git a/apps/studio/data/privileges/privileges.sql.ts b/apps/studio/data/privileges/privileges.sql.ts
+index 2f72c9699f25f..46e08d894ffa2 100644
+--- a/apps/studio/data/privileges/privileges.sql.ts
++++ b/apps/studio/data/privileges/privileges.sql.ts
+@@ -121,42 +121,164 @@ export function getExposedTableCountsSql({ selectedSchemas }: { selectedSchemas:
+ 
+   return /* SQL */ `
+     with ${getTableGrantsCTEs()}
+- select
++    select
+       count(*)::int as total_count,
+       (count(*) filter (where status = 'granted' and schema_name in (${schemasList})))::int as grants_count
+-  from table_grants
++    from table_grants
+   `
+ }
+ 
+-export function getExposedSchemasSql() {
++/**
++ * Builds the shared `function_privileges` and `function_grants` CTEs used by
++ * both the exposed-functions list query and the counts-only query.
++ *
++ * Returns SQL text meant to follow `WITH` (no leading `WITH` keyword).
++ * Callers that append additional CTEs should add a comma after interpolation.
++ */
++function getFunctionGrantsCTEs({ search }: { search?: string } = {}) {
+   return /* SQL */ `
+-    select coalesce(
+-      (
+-        select jsonb_agg(distinct schema_name order by schema_name)
+-        from (
+-          select n.nspname as schema_name
+-          from pg_class c
+-          join pg_namespace n on n.oid = c.relnamespace
+-          left join lateral aclexplode(coalesce(c.relacl, acldefault('r', c.relowner))) as acl on true
+-          where c.relkind in ('r', 'p', 'v', 'm', 'f')
+-            and n.nspname not in (${IGNORED_SCHEMAS_LIST})
+-          group by c.oid, n.nspname
+-          having
+-            bool_or(
+-              pg_catalog.pg_get_userbyid(acl.grantee) = 'anon'
+-              and acl.privilege_type in ('SELECT', 'INSERT', 'UPDATE', 'DELETE')
+-            )
+-            and bool_or(
+-              pg_catalog.pg_get_userbyid(acl.grantee) = 'authenticated'
+-              and acl.privilege_type in ('SELECT', 'INSERT', 'UPDATE', 'DELETE')
+-            )
+-            and bool_or(
+-              pg_catalog.pg_get_userbyid(acl.grantee) = 'service_role'
+-              and acl.privilege_type in ('SELECT', 'INSERT', 'UPDATE', 'DELETE')
++    function_privileges as (
++      select
++        n.nspname as schema_name,
++        p.proname as name,
++
++        -- Aggregate EXECUTE across all overloads + all 3 roles
++        bool_or(pr.rolname = 'anon' and acl.privilege_type = 'EXECUTE') as anon_execute,
++        bool_or(pr.rolname = 'authenticated' and acl.privilege_type = 'EXECUTE') as auth_execute,
++        bool_or(pr.rolname = 'service_role' and acl.privilege_type = 'EXECUTE') as srv_execute
++
++      from pg_proc p
++      join pg_namespace n
++        on n.oid = p.pronamespace
++      left join lateral aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) as acl
++        on true
++      left join pg_roles pr
++        on pr.oid = acl.grantee
++      where p.prokind in ('f', 'w')
++        and n.nspname not in (${IGNORED_SCHEMAS_LIST})
++        ${search ? `and (n.nspname || '.' || p.proname) ilike '%${search}%'` : ''}
++      group by n.nspname, p.proname
++    ),
++    function_grants as (
++      select
++        schema_name,
++        name,
++        case
++          when anon_execute and auth_execute and srv_execute then 'granted'
++          when not (anon_execute or auth_execute or srv_execute) then 'revoked'
++          else 'custom'
++        end as status
++      from function_privileges
++    )
++  `
++}
++
++export function getExposedFunctionsSql({
++  search,
++  offset,
++  limit,
++}: {
++  search?: string
++  offset: number
++  limit: number
++}) {
++  return /* SQL */ `
++    with ${getFunctionGrantsCTEs({ search })}
++    select
++      (select count(*)::int from function_grants) as total_count,
++      coalesce(
++        (
++          select jsonb_agg(
++            jsonb_build_object(
++              'schema', fg.schema_name,
++              'name', fg.name,
++              'status', fg.status
+             )
+-        ) t
+-      ),
+-      '[]'::jsonb
+-    ) as schemas;
++          )
++          from (
++            select *
++            from function_grants
++            order by schema_name, name
++            offset ${offset}
++            limit ${limit}
++          ) fg
++        ),
++        '[]'::jsonb
++      ) as functions;
++  `
++}
++
++export function getExposedFunctionCountsSql({ selectedSchemas }: { selectedSchemas: string[] }) {
++  const schemasList =
++    selectedSchemas.length > 0 ? selectedSchemas.map((s) => `'${s}'`).join(', ') : "''"
++
++  return /* SQL */ `
++    with ${getFunctionGrantsCTEs()}
++    select
++      count(*)::int as total_count,
++      (count(*) filter (where status = 'granted' and schema_name in (${schemasList})))::int as grants_count
++    from function_grants
++  `
++}
++
++export const buildTablePrivilegesSql = (oids: number[], action: 'grant' | 'revoke') => {
++  if (oids.length === 0) return ''
++
++  const privilegeClause =
++    action === 'grant'
++      ? 'grant select, insert, update, delete on table %I.%I to anon, authenticated, service_role'
++      : 'revoke all on table %I.%I from anon, authenticated, service_role'
++
++  return /* SQL */ `
++    do $$
++    declare
++      nspname name;
++      relname name;
++    begin
++      for nspname, relname in
++        select n.nspname, c.relname
++        from pg_class c
++        join pg_namespace n on n.oid = c.relnamespace
++        where c.oid in (${oids.join(', ')})
++      loop
++        execute format('${privilegeClause}', nspname, relname);
++      end loop;
++    end $$;
++  `
++}
++
++export const buildFunctionPrivilegesSql = (schemaNames: string[], action: 'grant' | 'revoke') => {
++  if (schemaNames.length === 0) return ''
++
++  const tuples = schemaNames
++    .map((sn) => {
++      const dotIdx = sn.indexOf('.')
++      const schema = sn.slice(0, dotIdx)
++      const name = sn.slice(dotIdx + 1)
++      return `('${schema}','${name}')`
++    })
++    .join(', ')
++
++  const privilegeClause =
++    action === 'grant'
++      ? 'grant execute on function %I.%I(%s) to anon, authenticated, service_role'
++      : 'revoke all on function %I.%I(%s) from anon, authenticated, service_role'
++
++  return /* SQL */ `
++    do $$
++    declare
++      nspname name;
++      proname name;
++      arg_types text;
++    begin
++      for nspname, proname, arg_types in
++        select n.nspname, p.proname, pg_get_function_identity_arguments(p.oid)
++        from pg_proc p
++        join pg_namespace n on n.oid = p.pronamespace
++        where (n.nspname, p.proname) in (${tuples})
++      loop
++        execute format('${privilegeClause}', nspname, proname, arg_types);
++      end loop;
++    end $$;
+   `
+ }
+diff --git a/apps/studio/data/privileges/update-exposed-entities-mutation.ts b/apps/studio/data/privileges/update-exposed-entities-mutation.ts
+new file mode 100644
+index 0000000000000..85671da179578
+--- /dev/null
++++ b/apps/studio/data/privileges/update-exposed-entities-mutation.ts
+@@ -0,0 +1,70 @@
++import { useMutation } from '@tanstack/react-query'
++import { executeSql } from 'data/sql/execute-sql-query'
++import { toast } from 'sonner'
++import type { UseCustomMutationOptions } from 'types'
++
++import type { ConnectionVars } from '../common.types'
++import { buildFunctionPrivilegesSql, buildTablePrivilegesSql } from './privileges.sql'
++
++export type UpdateExposedEntitiesVariables = ConnectionVars & {
++  tableIdsToAdd: number[]
++  tableIdsToRemove: number[]
++  functionNamesToAdd: string[]
++  functionNamesToRemove: string[]
++}
++
++export async function updateExposedEntities({
++  projectRef,
++  connectionString,
++  tableIdsToAdd,
++  tableIdsToRemove,
++  functionNamesToAdd,
++  functionNamesToRemove,
++}: UpdateExposedEntitiesVariables): Promise<void> {
++  if (!projectRef) throw new Error('projectRef is required')
++
++  const sqlParts: string[] = []
++
++  if (tableIdsToAdd.length > 0) {
++    sqlParts.push(buildTablePrivilegesSql(tableIdsToAdd, 'grant'))
++  }
++
++  if (tableIdsToRemove.length > 0) {
++    sqlParts.push(buildTablePrivilegesSql(tableIdsToRemove, 'revoke'))
++  }
++
++  if (functionNamesToAdd.length > 0) {
++    sqlParts.push(buildFunctionPrivilegesSql(functionNamesToAdd, 'grant'))
++  }
++
++  if (functionNamesToRemove.length > 0) {
++    sqlParts.push(buildFunctionPrivilegesSql(functionNamesToRemove, 'revoke'))
++  }
++
++  await executeSql({
++    projectRef,
++    connectionString,
++    sql: sqlParts.join('\n'),
++    queryKey: ['update-exposed-entities'],
++  })
++}
++
++type UpdateExposedEntitiesData = Awaited<ReturnType<typeof updateExposedEntities>>
++
++export const useUpdateExposedEntitiesMutation = ({
++  onSuccess,
++  onError,
++  ...options
++}: Omit<
++  UseCustomMutationOptions<UpdateExposedEntitiesData, Error, UpdateExposedEntitiesVariables>,
++  'mutationFn'
++> = {}) => {
++  return useMutation<UpdateExposedEntitiesData, Error, UpdateExposedEntitiesVariables>({
++    mutationFn: (vars: UpdateExposedEntitiesVariables) => updateExposedEntities(vars),
++    onError(error: Error) {
++      toast.error(`Failed to update entity access: ${error.message}`)
++    },
++    ...(onError ? { onError } : {}),
++    ...options,
++  })
++}
+diff --git a/apps/studio/data/privileges/update-exposed-tables-mutation.ts b/apps/studio/data/privileges/update-exposed-tables-mutation.ts
+deleted file mode 100644
+index 47b576d0209d7..0000000000000
+--- a/apps/studio/data/privileges/update-exposed-tables-mutation.ts
++++ /dev/null
+@@ -1,88 +0,0 @@
+-import { useMutation } from '@tanstack/react-query'
+-import { executeSql } from 'data/sql/execute-sql-query'
+-import { toast } from 'sonner'
+-import type { UseCustomMutationOptions } from 'types'
+-
+-import type { ConnectionVars } from '../common.types'
+-import { getExposedSchemasSql } from './privileges.sql'
+-
+-export type UpdateExposedTablesVariables = ConnectionVars & {
+-  tableIdsToAdd: number[]
+-  tableIdsToRemove: number[]
+-}
+-
+-const buildTablePrivilegesSql = (oids: number[], action: 'grant' | 'revoke') => {
+-  if (oids.length === 0) return ''
+-
+-  const privilegeClause =
+-    action === 'grant'
+-      ? 'grant select, insert, update, delete on table %I.%I to anon, authenticated, service_role'
+-      : 'revoke all on table %I.%I from anon, authenticated, service_role'
+-
+-  return /* SQL */ `
+-    do $$
+-    declare
+-      relname name;
+-      nspname name;
+-    begin
+-      for nspname, relname in
+-        select n.nspname, c.relname
+-        from pg_class c
+-        join pg_namespace n on n.oid = c.relnamespace
+-        where c.oid in (${oids.join(', ')})
+-      loop
+-        execute format('${privilegeClause}', relname, nspname);
+-      end loop;
+-    end $$;
+-  `
+-}
+-
+-export async function updateExposedTables({
+-  projectRef,
+-  connectionString,
+-  tableIdsToAdd,
+-  tableIdsToRemove,
+-}: UpdateExposedTablesVariables): Promise<string[]> {
+-  if (!projectRef) throw new Error('projectRef is required')
+-
+-  const sqlParts: string[] = []
+-
+-  if (tableIdsToAdd.length > 0) {
+-    sqlParts.push(buildTablePrivilegesSql(tableIdsToAdd, 'grant'))
+-  }
+-
+-  if (tableIdsToRemove.length > 0) {
+-    sqlParts.push(buildTablePrivilegesSql(tableIdsToRemove, 'revoke'))
+-  }
+-
+-  sqlParts.push(getExposedSchemasSql())
+-
+-  const { result } = await executeSql({
+-    projectRef,
+-    connectionString,
+-    sql: sqlParts.join('\n'),
+-    queryKey: ['update-exposed-tables'],
+-  })
+-
+-  return (result[0] as { schemas: string[] }).schemas
+-}
+-
+-type UpdateExposedTablesData = Awaited<ReturnType<typeof updateExposedTables>>
+-
+-export const useUpdateExposedTablesMutation = ({
+-  onSuccess,
+-  onError,
+-  ...options
+-}: Omit<
+-  UseCustomMutationOptions<UpdateExposedTablesData, Error, UpdateExposedTablesVariables>,
+-  'mutationFn'
+-> = {}) => {
+-  return useMutation<UpdateExposedTablesData, Error, UpdateExposedTablesVariables>({
+-    mutationFn: (vars: UpdateExposedTablesVariables) => updateExposedTables(vars),
+-    onError(error: Error) {
+-      toast.error(`Failed to update table access: ${error.message}`)
+-    },
+-    ...(onError ? { onError } : {}),
+-    ...options,
+-  })
+-}

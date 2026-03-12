@@ -1,0 +1,133 @@
+diff --git a/Dockerfile b/Dockerfile
+index 63cc954873b0..91576a8ee6c1 100644
+--- a/Dockerfile
++++ b/Dockerfile
+@@ -78,6 +78,7 @@ WORKDIR /home/nonroot
+ ARG GIT_VERSION=local
+ ARG BUILD_TAG
+ ARG ADDITIONAL_RUSTFLAGS=""
++ARG IO_ALIGNMENT=512
+ ENV CARGO_FEATURES="default"
+ 
+ # 3. Build cargo dependencies. Note that this step doesn't depend on anything else than
+@@ -101,7 +102,12 @@ COPY --chown=nonroot --from=plan     /home/nonroot/Cargo.lock               Carg
+ RUN  --mount=type=secret,uid=1000,id=SUBZERO_ACCESS_TOKEN \
+     set -e \
+     && if [ -s /run/secrets/SUBZERO_ACCESS_TOKEN ]; then \
+-        export CARGO_FEATURES="rest_broker"; \
++        export CARGO_FEATURES="${CARGO_FEATURES},rest_broker"; \
++    fi \
++    && if [ "$IO_ALIGNMENT" = "4k" ]; then \
++        export CARGO_FEATURES="${CARGO_FEATURES},io-align-4k"; \
++    elif [ "$IO_ALIGNMENT" = "512" ]; then \
++        export CARGO_FEATURES="${CARGO_FEATURES},io-align-512"; \
+     fi \
+     && RUSTFLAGS="-Clinker=clang -Clink-arg=-fuse-ld=mold -Clink-arg=-Wl,--no-rosegment -Cforce-frame-pointers=yes ${ADDITIONAL_RUSTFLAGS}" cargo auditable build \
+       --features $CARGO_FEATURES \
+diff --git a/libs/pageserver_api/Cargo.toml b/libs/pageserver_api/Cargo.toml
+index 7accbdabcaad..35fdb2dacbf1 100644
+--- a/libs/pageserver_api/Cargo.toml
++++ b/libs/pageserver_api/Cargo.toml
+@@ -5,8 +5,12 @@ edition = "2024"
+ license.workspace = true
+ 
+ [features]
++default = ["io-align-512"]
+ # See pageserver/Cargo.toml
+ testing = ["dep:nix"]
++# Direct IO alignment options (mutually exclusive)
++io-align-512 = []
++io-align-4k = []
+ 
+ [dependencies]
+ serde.workspace = true
+diff --git a/libs/pageserver_api/src/config.rs b/libs/pageserver_api/src/config.rs
+index 2a8d05f51ec6..c6fd3757c604 100644
+--- a/libs/pageserver_api/src/config.rs
++++ b/libs/pageserver_api/src/config.rs
+@@ -703,6 +703,11 @@ pub mod defaults {
+ 
+     pub const DEFAULT_EPHEMERAL_BYTES_PER_MEMORY_KB: usize = 0;
+ 
++    #[cfg(feature = "io-align-4k")]
++    pub const DEFAULT_IO_BUFFER_ALIGNMENT: usize = 4096;
++    #[cfg(all(feature = "io-align-512", not(feature = "io-align-4k")))]
++    pub const DEFAULT_IO_BUFFER_ALIGNMENT: usize = 512;
++    #[cfg(not(any(feature = "io-align-512", feature = "io-align-4k")))]
+     pub const DEFAULT_IO_BUFFER_ALIGNMENT: usize = 512;
+ 
+     pub const DEFAULT_SSL_KEY_FILE: &str = "server.key";
+diff --git a/pageserver/Cargo.toml b/pageserver/Cargo.toml
+index 1fd0dccff052..ceab5e1b446f 100644
+--- a/pageserver/Cargo.toml
++++ b/pageserver/Cargo.toml
+@@ -10,6 +10,10 @@ default = []
+ # which adds some runtime cost to run tests on outage conditions
+ testing = ["fail/failpoints", "pageserver_api/testing", "wal_decoder/testing", "pageserver_client/testing"]
+ 
++# Direct IO alignment options (propagated to pageserver_api)
++io-align-512 = ["pageserver_api/io-align-512"]
++io-align-4k = ["pageserver_api/io-align-4k"]
++
+ fuzz-read-path = ["testing"]
+ 
+ # Enables benchmarking only APIs
+diff --git a/pageserver/src/bin/pageserver.rs b/pageserver/src/bin/pageserver.rs
+index b1566c2d6e67..34749adb39f1 100644
+--- a/pageserver/src/bin/pageserver.rs
++++ b/pageserver/src/bin/pageserver.rs
+@@ -353,6 +353,10 @@ fn start_pageserver(
+         launch_ts.to_string(),
+         BUILD_TAG,
+     );
++    info!(
++        "IO buffer alignment: {} bytes",
++        pageserver_api::config::defaults::DEFAULT_IO_BUFFER_ALIGNMENT
++    );
+     set_build_info_metric(GIT_VERSION, BUILD_TAG);
+     set_launch_timestamp_metric(launch_ts);
+     #[cfg(target_os = "linux")]
+diff --git a/pageserver/src/tenant/storage_layer/inmemory_layer/vectored_dio_read.rs b/pageserver/src/tenant/storage_layer/inmemory_layer/vectored_dio_read.rs
+index 84f438608735..bb3d6b2bef73 100644
+--- a/pageserver/src/tenant/storage_layer/inmemory_layer/vectored_dio_read.rs
++++ b/pageserver/src/tenant/storage_layer/inmemory_layer/vectored_dio_read.rs
+@@ -73,7 +73,7 @@ pub trait Buffer: std::ops::Deref<Target = [u8]> {
+ }
+ 
+ /// The minimum alignment and size requirement for disk offsets and memory buffer size for direct IO.
+-const DIO_CHUNK_SIZE: usize = 512;
++const DIO_CHUNK_SIZE: usize = crate::virtual_file::get_io_buffer_alignment();
+ 
+ /// If multiple chunks need to be read, merge adjacent chunk reads into batches of max size `MAX_CHUNK_BATCH_SIZE`.
+ /// (The unit is the number of chunks.)
+diff --git a/pageserver/src/virtual_file.rs b/pageserver/src/virtual_file.rs
+index a7f0c5914a22..3362291ca913 100644
+--- a/pageserver/src/virtual_file.rs
++++ b/pageserver/src/virtual_file.rs
+@@ -852,7 +852,7 @@ impl VirtualFileInner {
+         // Because the alloctor might return _more_ aligned addresses than requested,
+         // there is a chance that testing would not catch violations of a runtime requirement stricter than 512.
+         {
+-            let requirement = 512;
++            let requirement = get_io_buffer_alignment();
+             let remainder = addr % requirement;
+             assert!(
+                 remainder == 0,
+@@ -866,7 +866,7 @@ impl VirtualFileInner {
+         // So enforce just that and not anything more restrictive.
+         // Even the shallowest testing will expose more restrictive requirements if those ever arise.
+         {
+-            let requirement = 512;
++            let requirement = get_io_buffer_alignment() as u64;
+             let remainder = offset % requirement;
+             assert!(
+                 remainder == 0,
+@@ -879,7 +879,7 @@ impl VirtualFileInner {
+         // The requirement in Linux 6.1 is bdev_logical_block_size().
+         // On our production systems, that is 512.
+         {
+-            let requirement = 512;
++            let requirement = get_io_buffer_alignment();
+             let remainder = size % requirement;
+             assert!(
+                 remainder == 0,

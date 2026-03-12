@@ -1,0 +1,14 @@
+{
+  "feature_name": "Subscription Timeout Signal Propagation",
+  "description": "Implement proper timeout signal propagation for GraphQL subscriptions using maxDurationMs. Currently, subscription handlers don't receive the timeout signal, causing subscriptions that wait for abort signals to hang indefinitely. We need to create a combined abort signal that includes both client disconnect and maxDurationMs timeout, then pass this signal to subscription handlers.",
+  "functional_requirements": [
+    "Create a combined AbortController that aborts when either the original request signal aborts OR the maxDurationMs timeout fires",
+    "Pass the combined abort signal to subscription handlers via opts.signal parameter",
+    "Ensure subscription handlers can detect timeout by checking opts.signal.aborted or listening for 'abort' events",
+    "Use AbortController.abort() with AbortError instead of AbortSignal.timeout() to maintain consistent error types",
+    "Remove any stream-level timeout wrapping in favor of the shared request-level cancellation signal",
+    "Add test coverage for subscriptions that should abort when maxDurationMs is reached without yielding values"
+  ],
+  "project_name": "trpc",
+  "source_pr": "https://github.com/trpc/trpc/pull/7037"
+}

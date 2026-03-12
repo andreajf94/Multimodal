@@ -1,0 +1,45 @@
+diff --git a/storage_controller/src/persistence.rs b/storage_controller/src/persistence.rs
+index 619b5f69b84e..c61ef9ff5d2d 100644
+--- a/storage_controller/src/persistence.rs
++++ b/storage_controller/src/persistence.rs
+@@ -471,11 +471,17 @@ impl Persistence {
+         &self,
+         input_node_id: NodeId,
+         input_https_port: Option<u16>,
++        input_grpc_addr: Option<String>,
++        input_grpc_port: Option<u16>,
+     ) -> DatabaseResult<()> {
+         use crate::schema::nodes::dsl::*;
+         self.update_node(
+             input_node_id,
+-            listen_https_port.eq(input_https_port.map(|x| x as i32)),
++            (
++                listen_https_port.eq(input_https_port.map(|x| x as i32)),
++                listen_grpc_addr.eq(input_grpc_addr),
++                listen_grpc_port.eq(input_grpc_port.map(|x| x as i32)),
++            ),
+         )
+         .await
+     }
+diff --git a/storage_controller/src/service.rs b/storage_controller/src/service.rs
+index 37380b8fbea1..2c7e4ee2def6 100644
+--- a/storage_controller/src/service.rs
++++ b/storage_controller/src/service.rs
+@@ -7813,7 +7813,7 @@ impl Service {
+             register_req.listen_https_port,
+             register_req.listen_pg_addr,
+             register_req.listen_pg_port,
+-            register_req.listen_grpc_addr,
++            register_req.listen_grpc_addr.clone(),
+             register_req.listen_grpc_port,
+             register_req.availability_zone_id.clone(),
+             self.config.use_https_pageserver_api,
+@@ -7848,6 +7848,8 @@ impl Service {
+                     .update_node_on_registration(
+                         register_req.node_id,
+                         register_req.listen_https_port,
++                        register_req.listen_grpc_addr,
++                        register_req.listen_grpc_port,
+                     )
+                     .await?
+             }

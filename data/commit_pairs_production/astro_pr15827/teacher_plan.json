@@ -1,0 +1,66 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "user_experience",
+      "recommendation": "Added a diff preview box showing tsconfig changes before user confirmation in `astro add` command",
+      "rationale": "The previous implementation only described changes verbally but didn't show the actual diff. This creates uncertainty for users about what will be modified. By displaying the computed diff directly in the CLI, users can see exactly which lines will be added/removed before confirming, improving transparency and reducing anxiety about configuration changes.",
+      "alternatives_considered": [
+        "Writing diff to a temporary file and opening it in an editor",
+        "Using a simpler console.log instead of formatted box",
+        "Adding a verbose flag to show diff only when requested"
+      ],
+      "files_affected": [
+        "packages/astro/src/cli/add/index.ts"
+      ]
+    },
+    {
+      "dimension": "cli_design",
+      "recommendation": "Used clack.box() with specific formatting options to present the diff cleanly",
+      "rationale": "The clack library provides consistent, styled CLI components. Using `box()` creates a visually distinct container for the diff that separates it from other output. The options (`rounded: true`, `withGuide: false`, `width: 'auto'`) ensure the diff is readable regardless of terminal width while maintaining the existing CLI aesthetic.",
+      "alternatives_considered": [
+        "Custom ASCII border formatting",
+        "Using clack.log or console.log with separators",
+        "Different box styling options"
+      ],
+      "files_affected": [
+        "packages/astro/src/cli/add/index.ts"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Placed diff display immediately after calculation but before confirmation logic",
+      "rationale": "The diff is computed earlier in the function and stored in the `diff` variable. By displaying it right after the introductory message but before the framework-specific logic about `jsxImportSource`, users see the changes in context. This maintains the existing confirmation flow while enhancing it with visual feedback.",
+      "alternatives_considered": [
+        "Moving diff display after all explanatory text",
+        "Creating a separate confirmation step just for tsconfig changes",
+        "Integrating diff into the existing confirmation prompt"
+      ],
+      "files_affected": [
+        "packages/astro/src/cli/add/index.ts"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Add tsconfig diff preview to astro add command",
+      "description": "Display computed diff between current and modified tsconfig.json before asking user for confirmation when adding integrations",
+      "files_to_modify": [
+        "packages/astro/src/cli/add/index.ts"
+      ],
+      "files_to_create": [
+        ".changeset/green-dingos-care.md"
+      ],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "This change enhances the user experience of the `astro add` command by adding a visual preview of tsconfig.json changes before users confirm modifications. The implementation is minimal and surgical, inserting just 6 lines of code at the optimal point in the existing `updateTSConfig` function.\n\nThe key insight was that the diff was already being computed (stored in the `diff` variable) but wasn't being shown to users. By adding a `clack.box()` call with appropriate formatting options, users now see exactly what will change in their TypeScript configuration. This addresses a common pain point where users hesitate to run `astro add` because they're unsure what configuration changes will be made.\n\nThe change maintains backward compatibility and doesn't alter the existing confirmation flow. The diff is displayed immediately after the introductory message, providing context before the framework-specific explanations about `jsxImportSource` conflicts. This follows the principle of showing rather than telling, giving users concrete information to make informed decisions about their project configuration.",
+  "source_pr": "https://github.com/withastro/astro/pull/15827",
+  "before_sha": "2cfe935db452fce91553784157e31c26bb3b2a05",
+  "after_sha": "a4c0d0b4df540b23fa85bf926f9cc97470737fa1",
+  "diff_stats": {
+    "additions": 11,
+    "deletions": 0,
+    "files_changed": 2
+  }
+}

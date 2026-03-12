@@ -1,0 +1,150 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "dependency_management",
+      "recommendation": "Added critical-section as a dependency for layout-cache feature, making it optional and workspace-wide",
+      "rationale": "The critical-section crate provides synchronization primitives that work in both std and no_std environments. By making it an optional dependency tied to the layout-cache feature, we avoid adding overhead to builds that don't need caching. The workspace-wide version ensures consistent dependency management across the crate hierarchy.",
+      "alternatives_considered": [
+        "Implementing custom synchronization primitives",
+        "Using conditional compilation with different synchronization strategies per platform",
+        "Making critical-section a required dependency"
+      ],
+      "files_affected": [
+        "Cargo.lock",
+        "Cargo.toml",
+        "ratatui-core/Cargo.toml"
+      ]
+    },
+    {
+      "dimension": "conditional_compilation",
+      "recommendation": "Implemented separate cache types and implementations for std vs no_std environments using #[cfg] attributes",
+      "rationale": "std environments can use thread_local! with Rc for zero-cost cloning, while no_std environments need Send-safe types (Vec) and critical-section::Mutex for synchronization. This dual implementation maximizes performance in each environment while maintaining the same API surface.",
+      "alternatives_considered": [
+        "Using only Vec for both environments (less efficient for std)",
+        "Using only Rc for both environments (not Send-safe for no_std)",
+        "Creating a trait-based abstraction layer"
+      ],
+      "files_affected": [
+        "ratatui-core/src/layout/layout.rs"
+      ]
+    },
+    {
+      "dimension": "performance_optimization",
+      "recommendation": "Separated cache lookup from computation in no_std implementation to minimize time spent in critical sections",
+      "rationale": "In embedded systems, blocking interrupts during expensive layout computations is unacceptable. By checking the cache inside the critical section but computing layouts outside, we ensure interrupt handlers can run during computation. This maintains the 300-500fps target while providing thread safety.",
+      "alternatives_considered": [
+        "Computing entirely inside critical section (blocks interrupts too long)",
+        "Using lock-free data structures (more complex, not needed for single-core embedded)",
+        "Disabling caching for no_std (wouldn't meet performance requirements)"
+      ],
+      "files_affected": [
+        "ratatui-core/src/layout/layout.rs"
+      ]
+    },
+    {
+      "dimension": "api_design",
+      "recommendation": "Maintained identical public API for split_with_spacers() while changing internal implementation",
+      "rationale": "Backward compatibility is crucial for a library. By keeping the same method signatures and behavior, existing code continues to work without modification. The implementation details (caching strategy) are hidden behind feature flags and conditional compilation.",
+      "alternatives_considered": [
+        "Changing the return type to accommodate different storage strategies",
+        "Adding new methods for no_std environments",
+        "Requiring users to choose between std/no_std versions at compile time"
+      ],
+      "files_affected": [
+        "ratatui-core/src/layout/layout.rs"
+      ]
+    },
+    {
+      "dimension": "testing",
+      "recommendation": "Added separate test implementations for std and no_std cache functionality",
+      "rationale": "The cache behaves differently in std vs no_std environments (thread_local vs critical-section::Mutex). Separate test implementations ensure both code paths work correctly. The #[cfg] attributes on tests prevent compilation errors when features are disabled.",
+      "alternatives_considered": [
+        "Skipping no_std testing (risky for embedded targets)",
+        "Using mock dependencies for testing",
+        "Creating integration tests that run in both environments"
+      ],
+      "files_affected": [
+        "ratatui-core/src/layout/layout.rs"
+      ]
+    },
+    {
+      "dimension": "build_configuration",
+      "recommendation": "Modified feature flag dependencies to decouple layout-cache from std requirement",
+      "rationale": "Previously, layout-cache required std, preventing no_std usage. By changing the dependency chain, layout-cache now works with or without std. The ratatui crate's layout-cache feature only depends on ratatui-core's equivalent feature, not on std.",
+      "alternatives_considered": [
+        "Creating a separate no_std-layout-cache feature",
+        "Making std optional for layout-cache",
+        "Requiring users to manually enable both features"
+      ],
+      "files_affected": [
+        "ratatui-core/Cargo.toml",
+        "ratatui/Cargo.toml"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Add critical-section dependency for no_std synchronization",
+      "description": "Added critical-section crate as an optional dependency for the layout-cache feature, configured to work in both std and no_std environments",
+      "files_to_modify": [
+        "Cargo.lock",
+        "Cargo.toml",
+        "ratatui-core/Cargo.toml"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-002",
+      "title": "Implement dual cache strategy for std vs no_std",
+      "description": "Created separate cache type definitions and implementations for std (thread_local + Rc) and no_std (critical-section::Mutex + Vec) environments",
+      "files_to_modify": [
+        "ratatui-core/src/layout/layout.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-003",
+      "title": "Optimize no_std cache access pattern",
+      "description": "Implemented cache lookup/computation separation to minimize time spent in critical sections, ensuring interrupt handlers can run during expensive layout computations",
+      "files_to_modify": [
+        "ratatui-core/src/layout/layout.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-004",
+      "title": "Update feature flag dependencies",
+      "description": "Modified Cargo.toml files to decouple layout-cache feature from std requirement, enabling no_std usage while maintaining backward compatibility",
+      "files_to_modify": [
+        "ratatui-core/Cargo.toml",
+        "ratatui/Cargo.toml"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-005",
+      "title": "Fix test compilation for no_std",
+      "description": "Added extern crate std declarations in test modules to ensure tests compile correctly when std feature is disabled",
+      "files_to_modify": [
+        "ratatui-core/src/buffer/buffer.rs",
+        "ratatui-core/src/text/line.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation enables layout caching in no_std environments by introducing a dual-strategy approach that adapts to the available runtime environment. For std builds, the existing thread_local cache with Rc references is maintained for maximum performance. For no_std builds, a critical-section::Mutex protects a shared cache storing Vec<Rect> instead of Rc<[Rect]>, as Vec is Send-safe for synchronization across interrupt contexts.\n\nKey design decisions include separating cache lookup from computation in no_std environments to minimize interrupt blocking, maintaining identical public APIs for backward compatibility, and using conditional compilation to select the appropriate implementation at compile time. The critical-section crate provides the synchronization primitive that works in both environments, avoiding the need for platform-specific code.\n\nThe changes integrate seamlessly with the existing codebase by preserving all existing APIs and behavior while extending functionality to embedded systems. The layout-cache feature now works independently of the std feature, allowing embedded applications to benefit from 30-50x performance improvements (10fps to 300-500fps) without sacrificing compatibility for desktop applications.",
+  "source_pr": "https://github.com/ratatui/ratatui/pull/2399",
+  "before_sha": "b85c91bd34e22bc2873e1b8932a1104331d35a62",
+  "after_sha": "5fc6ab881aba8f0bad30f05730673a15ed64858f",
+  "diff_stats": {
+    "additions": 118,
+    "deletions": 13,
+    "files_changed": 7
+  }
+}

@@ -1,0 +1,74 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "data_modeling",
+      "recommendation": "Modified bigint-to-JSON conversion logic to preserve numeric values when safe, enabling proper Date object construction from millisecond timestamps",
+      "rationale": "The original implementation always converted bigint values to strings, which prevented JavaScript's Date constructor from correctly parsing millisecond timestamps. By converting to numbers when within safe integer range (Number.isSafeInteger), we ensure DateTime fields with millisecond precision can be properly instantiated as Date objects. This maintains backward compatibility for large integers outside the safe range by falling back to string representation.",
+      "alternatives_considered": [
+        "Always convert bigint to number (risks precision loss for values > 2^53-1)",
+        "Add special handling only for DateTime fields (would require type context in conversion function)",
+        "Modify the Date parsing logic elsewhere in the stack (more invasive change)"
+      ],
+      "files_affected": [
+        "packages/adapter-better-sqlite3/src/conversion.ts"
+      ]
+    },
+    {
+      "dimension": "testing",
+      "recommendation": "Added comprehensive regression tests covering multiple query patterns with millisecond timestamps",
+      "rationale": "Added three distinct test scenarios to ensure the fix works across different query types: 1) findUnique with raw SQL insertion, 2) aggregate queries with min/max operations, and 3) manual table creation with INTEGER columns. Each test validates that Date instances are created correctly and are not 'Invalid Date'. This approach tests both the happy path and edge cases while ensuring the fix works consistently across the ORM's API surface.",
+      "alternatives_considered": [
+        "Only test the basic find operation (insufficient coverage)",
+        "Create separate test files for each scenario (would fragment test organization)",
+        "Mock the database layer (less realistic, wouldn't catch actual conversion issues)"
+      ],
+      "files_affected": [
+        "packages/client/tests/functional/unixepoch-ms-datetime/tests.ts"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Used Number.isSafeInteger() to prevent precision loss when converting large bigint values",
+      "rationale": "JavaScript's Number type can only safely represent integers up to 2^53-1. The implementation checks if the bigint conversion would lose precision before converting to number. For values outside the safe range, it falls back to string representation, preventing silent data corruption while fixing the DateTime issue for typical timestamp values (which are well within the safe range).",
+      "alternatives_considered": [
+        "Use BigInt throughout (would require changes to Prisma's entire type system)",
+        "Always use strings and fix Date parsing elsewhere (more complex solution)",
+        "Throw an error for unsafe conversions (would break existing functionality)"
+      ],
+      "files_affected": [
+        "packages/adapter-better-sqlite3/src/conversion.ts"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Fix DateTime parsing for millisecond timestamps in SQLite adapter",
+      "description": "Modify the bigint conversion logic in the SQLite adapter to preserve numeric values when safe, enabling proper Date object construction from millisecond-precision timestamps stored as integers",
+      "files_to_modify": [
+        "packages/adapter-better-sqlite3/src/conversion.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-002",
+      "title": "Add comprehensive tests for unixepoch-ms DateTime handling",
+      "description": "Create regression tests covering findUnique, aggregate, and manual table creation scenarios to ensure DateTime values with millisecond timestamps are correctly parsed and returned as valid Date instances",
+      "files_to_modify": [
+        "packages/client/tests/functional/unixepoch-ms-datetime/tests.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    }
+  ],
+  "implementation_summary": "The fix addresses a bug where DateTime fields returned 'Invalid Date' when using millisecond-precision timestamps (unixepoch-ms) in SQLite. The core issue was in the adapter's conversion layer, which always converted bigint values to strings for JSON serialization. This prevented JavaScript's Date constructor from correctly parsing millisecond timestamps, as Date('1234567890123') works but Date('1234567890123') (as a string) doesn't.\n\nThe solution modifies the conversion logic to preserve numeric values when they fall within JavaScript's safe integer range (Number.isSafeInteger). For typical timestamp values (which are well within this range), this allows proper Date object construction. For extremely large values outside the safe range, the implementation falls back to string representation to prevent precision loss, maintaining backward compatibility.\n\nComplementing the fix, comprehensive tests were added to verify the behavior across different query patterns: raw SQL insertion followed by find operations, aggregate queries with min/max functions, and manual table creation with INTEGER columns. These tests ensure the fix works consistently across Prisma's API surface and guards against regression. The approach is minimally invasive, focusing only on the conversion layer rather than changing Prisma's core type system or requiring modifications to multiple adapters.",
+  "source_pr": "https://github.com/prisma/prisma/pull/29274",
+  "before_sha": "bee450265aaa2e8bab7320fdbe4ce83d11289ac0",
+  "after_sha": "7a1f497e9afa699732919d3c559db900455faa8d",
+  "diff_stats": {
+    "additions": 94,
+    "deletions": 2,
+    "files_changed": 2
+  }
+}

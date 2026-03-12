@@ -1,0 +1,107 @@
+diff --git a/litestar/dto/_backend.py b/litestar/dto/_backend.py
+index 710899544e..c6411636ab 100644
+--- a/litestar/dto/_backend.py
++++ b/litestar/dto/_backend.py
+@@ -208,7 +208,16 @@ def create_transfer_model_type(
+         Returns:
+             A ``BackendT`` class.
+         """
+-        struct_name = self.dto_factory.__schema_name__ or self._create_transfer_model_name(model_name)
++        # Only apply the custom __schema_name__ to the root transfer model.
++        # Nested models get their own generated name to avoid child $refs
++        # pointing to the parent's schema.
++        # model_name only equals model_type.__name__ for the root model.
++        # Nested models have a different name, so __schema_name__ won't
++        # override their generated schema name.
++        if model_name == self.model_type.__name__ and self.dto_factory.__schema_name__:
++            struct_name = self.dto_factory.__schema_name__
++        else:
++            struct_name = self._create_transfer_model_name(model_name)
+ 
+         struct = _create_struct_for_field_definitions(
+             model_name=struct_name,
+diff --git a/tests/unit/test_dto/test_factory/test_backends/test_base_dto.py b/tests/unit/test_dto/test_factory/test_backends/test_base_dto.py
+index 6878610579..29d8f6fe4b 100644
+--- a/tests/unit/test_dto/test_factory/test_backends/test_base_dto.py
++++ b/tests/unit/test_dto/test_factory/test_backends/test_base_dto.py
+@@ -92,7 +92,9 @@ def generate_field_definitions(
+ 
+     class _Backend(backend_cls):  # type: ignore[valid-type,misc]
+         def create_transfer_model_type(
+-            self, model_name: str, field_definitions: tuple[TransferDTOFieldDefinition, ...]
++            self,
++            model_name: str,
++            field_definitions: tuple[TransferDTOFieldDefinition, ...],
+         ) -> type[Any]:
+             """Create a model for data transfer.
+ 
+diff --git a/tests/unit/test_openapi/test_integration.py b/tests/unit/test_openapi/test_integration.py
+index 1c3006cefb..2cf8e49a26 100644
+--- a/tests/unit/test_openapi/test_integration.py
++++ b/tests/unit/test_openapi/test_integration.py
+@@ -11,10 +11,12 @@
+ 
+ from litestar import Controller, Litestar, delete, get, patch, post
+ from litestar._openapi.plugin import OpenAPIPlugin
++from litestar.dto import DataclassDTO, DTOConfig
+ from litestar.enums import MediaType, OpenAPIMediaType, ParamType
+ from litestar.openapi import OpenAPIConfig
+ from litestar.openapi.plugins import YamlRenderPlugin
+ from litestar.openapi.spec import Parameter as OpenAPIParameter
++from litestar.openapi.spec import Schema
+ from litestar.params import Parameter
+ from litestar.serialization.msgspec_hooks import decode_json, encode_json, get_serializer
+ from litestar.status_codes import HTTP_200_OK, HTTP_404_NOT_FOUND
+@@ -360,6 +362,52 @@ def handler_b() -> module_b.Model:  # type: ignore[name-defined]
+     # TODO: expand this test to cover more cases
+ 
+ 
++@dataclass
++class _SchemaNameChild:
++    name: str
++
++
++@dataclass
++class _SchemaNamePerson:
++    name: str
++    age: int
++    child: _SchemaNameChild
++
++
++def test_dto_schema_name_with_nested_model() -> None:
++    """__schema_name__ should only apply to the root DTO, not nested child models."""
++
++    class PersonDTO(DataclassDTO[_SchemaNamePerson]):
++        __schema_name__ = "PersonPublic"
++        config = DTOConfig(exclude={"age"})
++
++    @get("/person", return_dto=PersonDTO, sync_to_thread=False)
++    def get_person() -> _SchemaNamePerson:
++        return _SchemaNamePerson(name="test", age=30, child=_SchemaNameChild(name="kid"))
++
++    app = Litestar(route_handlers=[get_person])
++    openapi_plugin = app.plugins.get(OpenAPIPlugin)
++    schemas = openapi_plugin.provide_openapi().components.schemas
++
++    # parent should use the custom name
++    assert schemas is not None
++    assert "PersonPublic" in schemas
++
++    # child should NOT use the parent's custom name
++    # it should have its own schema
++    person_schema = schemas["PersonPublic"]
++    assert isinstance(person_schema, Schema)
++    assert person_schema.properties is not None
++    child_ref = person_schema.properties["child"].ref  # type: ignore[union-attr]
++    assert child_ref != "#/components/schemas/PersonPublic", (
++        "child $ref should not point to the parent's __schema_name__"
++    )
++
++    # a separate child schema should exist
++    child_schema_name = child_ref.split("/")[-1]
++    assert child_schema_name in schemas
++
++
+ def test_multiple_handlers_for_same_route() -> None:
+     @post("/", sync_to_thread=False)
+     def post_handler() -> None: ...

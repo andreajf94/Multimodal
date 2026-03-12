@@ -1,0 +1,152 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "feature_flag_implementation",
+      "recommendation": "Used client-side PostHog feature flag evaluation instead of server-side for www pages, with support for local development overrides via cookies",
+      "rationale": "Server-side PostHog evaluation lacks full person context for www pages, which are primarily client-rendered. Client-side evaluation ensures accurate targeting and respects DevToolbar overrides in local development. The implementation queues callbacks before initialization to handle race conditions.",
+      "alternatives_considered": [
+        "Server-side feature flag evaluation with Next.js middleware",
+        "Edge Config-based feature flags",
+        "Custom A/B testing service"
+      ],
+      "files_affected": [
+        "apps/www/app/pricing/PricingContent.tsx",
+        "packages/common/posthog-client.ts"
+      ]
+    },
+    {
+      "dimension": "experiment_architecture",
+      "recommendation": "Implemented a clean A/B testing pattern with control/test variants, experiment exposure tracking, and component composition",
+      "rationale": "The experiment is isolated to the pricing page with minimal impact on existing code. Using a ternary operator to switch between components keeps the control path unchanged. Experiment exposure is tracked only when users are actually bucketed into the experiment.",
+      "alternatives_considered": [
+        "Separate route for test variant",
+        "Conditional rendering based on URL parameters",
+        "Feature flag-driven component injection"
+      ],
+      "files_affected": [
+        "apps/www/app/pricing/PricingContent.tsx",
+        "packages/common/telemetry-constants.ts"
+      ]
+    },
+    {
+      "dimension": "component_design",
+      "recommendation": "Created new, self-contained calculator components that reuse existing data structures and UI patterns",
+      "rationale": "The new calculator maintains consistency with the existing design system while adding interactive features. It uses the same pricing data (PricingAddOnTable.json) and UI components (ComputeBadge, InfoTooltip, Slider_Shadcn_) as the existing implementation. This ensures visual consistency and reduces maintenance overhead.",
+      "alternatives_considered": [
+        "Modifying the existing PricingComputeSection component",
+        "Creating a completely separate pricing page",
+        "Building a standalone calculator application"
+      ],
+      "files_affected": [
+        "apps/www/components/Pricing/NewComputePricingCalculator.tsx",
+        "apps/www/components/Pricing/NewPricingComputeSection.tsx"
+      ]
+    },
+    {
+      "dimension": "state_management",
+      "recommendation": "Used React state hooks for interactive calculator features with proper dependency management",
+      "rationale": "Local component state is sufficient for the calculator's interactive features (sliders, project management, pricing calculations). The state is lifted to the appropriate level - instance management in NewComputePricingCalculator and plan selection in NewPricingComputeSection. useEffect hooks handle derived state calculations.",
+      "alternatives_considered": [
+        "Redux or Zustand for global state",
+        "React Context for calculator state",
+        "URL parameters for state persistence"
+      ],
+      "files_affected": [
+        "apps/www/components/Pricing/NewComputePricingCalculator.tsx",
+        "apps/www/components/Pricing/NewPricingComputeSection.tsx"
+      ]
+    },
+    {
+      "dimension": "data_flow",
+      "recommendation": "Maintained existing data structures while enhancing the calculator's data processing capabilities",
+      "rationale": "The new calculator uses the same PricingAddOnTable.json data source but adds parsing utilities and aggregation logic. This ensures data consistency across both calculator variants. The plans data is filtered and mapped to match the new component's expected shape.",
+      "alternatives_considered": [
+        "Creating a new pricing data structure",
+        "Fetching pricing data from an API",
+        "Hardcoding pricing values in the component"
+      ],
+      "files_affected": [
+        "apps/www/components/Pricing/NewComputePricingCalculator.tsx",
+        "apps/www/components/Pricing/NewPricingComputeSection.tsx",
+        "packages/shared-data/plans.ts"
+      ]
+    },
+    {
+      "dimension": "environment_configuration",
+      "recommendation": "Added PostHog environment variables to support feature flag evaluation",
+      "rationale": "PostHog client-side SDK requires API host and key configuration. Adding these to .env.local.example ensures consistent setup across development environments. The IS_PLATFORM and ENVIRONMENT variables help with conditional logic in the PostHog client.",
+      "alternatives_considered": [
+        "Hardcoded PostHog configuration",
+        "Runtime configuration via API",
+        "Build-time configuration injection"
+      ],
+      "files_affected": [
+        "apps/www/.env.local.example"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "PostHog Feature Flag Integration",
+      "description": "Extend PostHog client to support client-side feature flag evaluation with local development overrides and callback queuing",
+      "files_to_modify": [
+        "packages/common/posthog-client.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-002",
+      "title": "Experiment Telemetry and Configuration",
+      "description": "Add experiment exposure tracking to telemetry constants and update environment configuration for PostHog",
+      "files_to_modify": [
+        "packages/common/telemetry-constants.ts",
+        "apps/www/.env.local.example"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-003",
+      "title": "New Interactive Pricing Calculator",
+      "description": "Create new calculator components with interactive sliders, multi-project support, and real-time cost calculations",
+      "files_to_modify": [],
+      "files_to_create": [
+        "apps/www/components/Pricing/NewComputePricingCalculator.tsx",
+        "apps/www/components/Pricing/NewPricingComputeSection.tsx"
+      ],
+      "estimated_effort": "large"
+    },
+    {
+      "id": "T-004",
+      "title": "Pricing Page Experiment Integration",
+      "description": "Integrate feature flag evaluation and component switching logic into the main pricing page",
+      "files_to_modify": [
+        "apps/www/app/pricing/PricingContent.tsx"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-005",
+      "title": "Content and Data Updates",
+      "description": "Update RSS feed with new blog post and clarify plan descriptions regarding compute credits",
+      "files_to_modify": [
+        "apps/www/public/rss.xml",
+        "packages/shared-data/plans.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation follows a clean A/B testing architecture that integrates with PostHog's feature flag system while maintaining the existing pricing calculator as the control variant. The key decision was to use client-side PostHog evaluation for www pages, as server-side evaluation lacks the full person context needed for accurate targeting. This approach respects local development overrides via the x-ph-flag-overrides cookie, ensuring developers can test both variants easily.\n\nThe new calculator components are built as self-contained units that reuse existing data structures (PricingAddOnTable.json) and UI patterns from the design system. The NewComputePricingCalculator handles interactive instance sizing with sliders, multi-project management, and real-time cost aggregation, while NewPricingComputeSection provides the overall layout with plan selection and detailed pricing breakdowns. State management uses React hooks appropriately, with derived state calculated in useEffect hooks to maintain consistency.\n\nThe experiment is cleanly integrated into the pricing page with minimal impact on existing code. The ternary operator switching between components ensures the control path remains unchanged, and experiment exposure is only tracked when users are actually bucketed into the experiment. This architecture allows for easy rollback if needed and provides clear separation between the experiment logic and the core pricing functionality.",
+  "source_pr": "https://github.com/supabase/supabase/pull/42451",
+  "before_sha": "c734078800d31c97d6be83c0556e388527151f3e",
+  "after_sha": "af47a2d010efbd4db29f0b631ec6ba230e56eb2e",
+  "diff_stats": {
+    "additions": 556,
+    "deletions": 7,
+    "files_changed": 8
+  }
+}

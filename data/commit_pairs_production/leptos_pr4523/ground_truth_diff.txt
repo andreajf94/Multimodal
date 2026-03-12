@@ -1,0 +1,250 @@
+diff --git a/reactive_graph/src/into_reactive_value.rs b/reactive_graph/src/into_reactive_value.rs
+index 51da40850f..ea42b4032e 100644
+--- a/reactive_graph/src/into_reactive_value.rs
++++ b/reactive_graph/src/into_reactive_value.rs
+@@ -34,14 +34,28 @@ mod tests {
+         let owner = Owner::new();
+         owner.set();
+ 
+-        #[cfg(not(feature = "nightly"))]
+         let _: Signal<usize> = (|| 2).into_reactive_value();
+         let _: Signal<usize, LocalStorage> = 2.into_reactive_value();
+-        #[cfg(not(feature = "nightly"))]
+         let _: Signal<usize, LocalStorage> = (|| 2).into_reactive_value();
+         let _: Signal<String> = "str".into_reactive_value();
+         let _: Signal<String, LocalStorage> = "str".into_reactive_value();
+ 
++        // Confirm doesn't affect nightly function syntax:
++        #[cfg(all(rustc_nightly, feature = "nightly"))]
++        {
++            let sig: Signal<usize> = Signal::stored(2).into_reactive_value();
++            assert_eq!(sig(), 2);
++        }
++
++        // Confirm can be used in more complex expressions:
++        {
++            use crate::traits::Get;
++            let a: Signal<usize> = (|| 2).into_reactive_value();
++            let b: Signal<usize> = Signal::stored(2).into_reactive_value();
++            let _: Signal<usize> =
++                (move || a.get() + b.get()).into_reactive_value();
++        }
++
+         #[derive(TypedBuilder)]
+         struct Foo {
+             #[builder(setter(
+@@ -53,7 +67,6 @@ mod tests {
+         }
+ 
+         assert_eq!(Foo::builder().sig(2).build().sig.get_untracked(), 2);
+-        #[cfg(not(feature = "nightly"))]
+         assert_eq!(Foo::builder().sig(|| 2).build().sig.get_untracked(), 2);
+         assert_eq!(
+             Foo::builder()
+diff --git a/reactive_graph/src/nightly.rs b/reactive_graph/src/nightly.rs
+index d20e2d1883..61fbc2a142 100644
+--- a/reactive_graph/src/nightly.rs
++++ b/reactive_graph/src/nightly.rs
+@@ -145,16 +145,90 @@ macro_rules! impl_get_fn_traits_get_arena {
+     };
+ }
+ 
++macro_rules! impl_get_fn_traits_get_arena_with_readable_deref_impl {
++    ($($ty:ident),*) => {
++        $(
++            /// Allow calling $ty() syntax
++            impl<T: Clone + 'static, S: Storage<T> + 'static> std::ops::Deref
++                for $ty<T, S>
++            where
++                $ty<T, S>: crate::traits::Get<Value = T>,
++                $ty<T, S>: Get, S: Storage<T> + Storage<Option<T>> + Storage<SignalTypes<Option<T>, S>>
++            {
++                type Target = dyn Fn() -> T;
++
++                fn deref(&self) -> &Self::Target {
++                    unsafe { readable_deref_impl::ReadableDerefImpl::deref_impl(self) }
++                }
++            }
++
++            impl<T: Clone + 'static, S: Storage<T> + 'static> readable_deref_impl::ReadableDerefImpl for $ty<T, S>
++            where
++                $ty<T, S>: crate::traits::Get<Value = T>,
++                $ty<T, S>: Get, S: Storage<T> + Storage<Option<T>> + Storage<SignalTypes<Option<T>, S>>
++            {
++            }
++
++        )*
++    };
++}
++
+ impl_get_fn_traits_get![ArcReadSignal, ArcRwSignal];
+ impl_get_fn_traits_get_arena![
+     ReadSignal,
+     RwSignal,
+     ArcMemo,
+-    ArcSignal,
+-    Signal,
+     MaybeSignal,
+     Memo,
+     MaybeProp
+ ];
++impl_get_fn_traits_get_arena_with_readable_deref_impl![ArcSignal, Signal];
+ impl_set_fn_traits![ArcRwSignal, ArcWriteSignal];
+ impl_set_fn_traits_arena![RwSignal, WriteSignal, SignalSetter];
++
++mod readable_deref_impl {
++    /// Derived from the implementation and original creaters at dioxus
++    /// https://docs.rs/dioxus-signals/0.6.3/src/dioxus_signals/signal.rs.html#485-494
++    pub trait ReadableDerefImpl: crate::traits::Get {
++        /// SAFETY: You must call this function directly with `self` as the argument.
++        /// This function relies on the size of the object you return from the deref
++        /// being the same as the object you pass in
++        #[doc(hidden)]
++        unsafe fn deref_impl<'a>(&self) -> &'a dyn Fn() -> Self::Value
++        where
++            Self: Sized + 'a,
++            Self::Value: Clone + 'static,
++        {
++            // https://github.com/dtolnay/case-studies/tree/master/callable-types
++
++            // First we create a closure that captures something with the Same in memory layout as Self (MaybeUninit<Self>).
++            let uninit_callable = std::mem::MaybeUninit::<Self>::uninit();
++            // Then move that value into the closure. We assume that the closure now has a in memory layout of Self.
++            let uninit_closure =
++                move || Self::get(unsafe { &*uninit_callable.as_ptr() });
++
++            // Check that the size of the closure is the same as the size of Self in case the compiler changed the layout of the closure.
++            let size_of_closure = std::mem::size_of_val(&uninit_closure);
++            assert_eq!(size_of_closure, std::mem::size_of::<Self>());
++
++            // Then cast the lifetime of the closure to the lifetime of &self.
++            fn cast_lifetime<'a, T>(_a: &T, b: &'a T) -> &'a T {
++                b
++            }
++            let reference_to_closure = cast_lifetime(
++                {
++                    // The real closure that we will never use.
++                    &uninit_closure
++                },
++                #[allow(clippy::missing_transmute_annotations)]
++                // We transmute self into a reference to the closure. This is safe because we know that the closure has the same memory layout as Self so &Closure == &Self.
++                unsafe {
++                    std::mem::transmute(self)
++                },
++            );
++
++            // Cast the closure to a trait object.
++            reference_to_closure as &_
++        }
++    }
++}
+diff --git a/reactive_graph/src/wrappers.rs b/reactive_graph/src/wrappers.rs
+index 10af055366..1c7acf4f61 100644
+--- a/reactive_graph/src/wrappers.rs
++++ b/reactive_graph/src/wrappers.rs
+@@ -1118,17 +1118,13 @@ pub mod read {
+         }
+     }
+ 
+-    #[cfg(not(feature = "nightly"))]
+     #[doc(hidden)]
+     pub struct __IntoReactiveValueMarkerSignalFromReactiveClosure;
+-    #[cfg(not(feature = "nightly"))]
+     #[doc(hidden)]
+     pub struct __IntoReactiveValueMarkerSignalStrOutputToString;
+-    #[cfg(not(feature = "nightly"))]
+     #[doc(hidden)]
+     pub struct __IntoReactiveValueMarkerOptionalSignalFromReactiveClosureAlways;
+ 
+-    #[cfg(not(feature = "nightly"))]
+     impl<T, F>
+         crate::IntoReactiveValue<
+             Signal<T, SyncStorage>,
+@@ -1143,7 +1139,6 @@ pub mod read {
+         }
+     }
+ 
+-    #[cfg(not(feature = "nightly"))]
+     impl<T, F>
+         crate::IntoReactiveValue<
+             ArcSignal<T, SyncStorage>,
+@@ -1158,7 +1153,6 @@ pub mod read {
+         }
+     }
+ 
+-    #[cfg(not(feature = "nightly"))]
+     impl<T, F>
+         crate::IntoReactiveValue<
+             Signal<T, LocalStorage>,
+@@ -1173,7 +1167,6 @@ pub mod read {
+         }
+     }
+ 
+-    #[cfg(not(feature = "nightly"))]
+     impl<T, F>
+         crate::IntoReactiveValue<
+             ArcSignal<T, LocalStorage>,
+@@ -1188,7 +1181,6 @@ pub mod read {
+         }
+     }
+ 
+-    #[cfg(not(feature = "nightly"))]
+     impl<F>
+         crate::IntoReactiveValue<
+             Signal<String, SyncStorage>,
+@@ -1202,7 +1194,6 @@ pub mod read {
+         }
+     }
+ 
+-    #[cfg(not(feature = "nightly"))]
+     impl<F>
+         crate::IntoReactiveValue<
+             ArcSignal<String, SyncStorage>,
+@@ -1216,7 +1207,6 @@ pub mod read {
+         }
+     }
+ 
+-    #[cfg(not(feature = "nightly"))]
+     impl<F>
+         crate::IntoReactiveValue<
+             Signal<String, LocalStorage>,
+@@ -1230,7 +1220,6 @@ pub mod read {
+         }
+     }
+ 
+-    #[cfg(not(feature = "nightly"))]
+     impl<F>
+         crate::IntoReactiveValue<
+             ArcSignal<String, LocalStorage>,
+@@ -1244,7 +1233,6 @@ pub mod read {
+         }
+     }
+ 
+-    #[cfg(not(feature = "nightly"))]
+     impl<T, F>
+         crate::IntoReactiveValue<
+             Signal<Option<T>, SyncStorage>,
+@@ -1259,7 +1247,6 @@ pub mod read {
+         }
+     }
+ 
+-    #[cfg(not(feature = "nightly"))]
+     impl<T, F>
+         crate::IntoReactiveValue<
+             ArcSignal<Option<T>, SyncStorage>,
+@@ -1274,7 +1261,6 @@ pub mod read {
+         }
+     }
+ 
+-    #[cfg(not(feature = "nightly"))]
+     impl<T, F>
+         crate::IntoReactiveValue<
+             Signal<Option<T>, LocalStorage>,
+@@ -1289,7 +1275,6 @@ pub mod read {
+         }
+     }
+ 
+-    #[cfg(not(feature = "nightly"))]
+     impl<T, F>
+         crate::IntoReactiveValue<
+             ArcSignal<Option<T>, LocalStorage>,

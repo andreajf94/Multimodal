@@ -1,0 +1,274 @@
+diff --git a/examples/apps/canvas/src/main.rs b/examples/apps/canvas/src/main.rs
+index 146c29d67d..9ee43620b2 100644
+--- a/examples/apps/canvas/src/main.rs
++++ b/examples/apps/canvas/src/main.rs
+@@ -125,7 +125,8 @@ impl App {
+             Marker::HalfBlock => Marker::Quadrant,
+             Marker::Quadrant => Marker::Sextant,
+             Marker::Sextant => Marker::Octant,
+-            Marker::Octant => Marker::Bar,
++            Marker::Octant => Marker::Custom('×'),
++            Marker::Custom('×') => Marker::Bar,
+             Marker::Bar => Marker::Dot,
+             _ => unreachable!(),
+         };
+diff --git a/examples/apps/chart/src/main.rs b/examples/apps/chart/src/main.rs
+index 110ad26867..5ccfcffe56 100644
+--- a/examples/apps/chart/src/main.rs
++++ b/examples/apps/chart/src/main.rs
+@@ -247,13 +247,13 @@ fn render_scatter(frame: &mut Frame, area: Rect) {
+             .data(&HEAVY_PAYLOAD_DATA),
+         Dataset::default()
+             .name("Medium".underlined())
+-            .marker(Marker::Braille)
++            .marker(Marker::Custom('×'))
+             .graph_type(GraphType::Scatter)
+             .style(Style::new().magenta())
+             .data(&MEDIUM_PAYLOAD_DATA),
+         Dataset::default()
+             .name("Small")
+-            .marker(Marker::Dot)
++            .marker(Marker::Custom('+'))
+             .graph_type(GraphType::Scatter)
+             .style(Style::new().cyan())
+             .data(&SMALL_PAYLOAD_DATA),
+diff --git a/ratatui-core/src/symbols/marker.rs b/ratatui-core/src/symbols/marker.rs
+index 9fedb77b1f..90da29e1b5 100644
+--- a/ratatui-core/src/symbols/marker.rs
++++ b/ratatui-core/src/symbols/marker.rs
+@@ -53,6 +53,8 @@ pub enum Marker {
+     /// unicode that is less broadly supported than Braille dots. If your terminal does not support
+     /// this, you will see unicode replacement characters (`�`) instead of octants (`𜴇`, `𜷀`, `𜴷`).
+     Octant,
++    /// Custom marker where the supplied char is applied once per cell
++    Custom(char),
+ }
+ 
+ #[cfg(test)]
+@@ -69,6 +71,7 @@ mod tests {
+         assert_eq!(Marker::Block.to_string(), "Block");
+         assert_eq!(Marker::Bar.to_string(), "Bar");
+         assert_eq!(Marker::Braille.to_string(), "Braille");
++        assert_eq!(Marker::Custom('+').to_string(), "Custom");
+     }
+ 
+     #[test]
+diff --git a/ratatui-widgets/src/canvas.rs b/ratatui-widgets/src/canvas.rs
+index 886ff692d0..6707b9fe69 100644
+--- a/ratatui-widgets/src/canvas.rs
++++ b/ratatui-widgets/src/canvas.rs
+@@ -587,6 +587,7 @@ impl<'a> Context<'a> {
+             Marker::Quadrant => Box::new(PatternGrid::<2, 2>::new(width, height, &QUADRANTS)),
+             Marker::Sextant => Box::new(PatternGrid::<2, 3>::new(width, height, &SEXTANTS)),
+             Marker::Octant => Box::new(PatternGrid::<2, 4>::new(width, height, &OCTANTS)),
++            Marker::Custom(char) => Box::new(CharGrid::new(width, height, char)),
+             Marker::Dot | _ => Box::new(CharGrid::new(width, height, dot)),
+         }
+     }
+@@ -997,6 +998,22 @@ mod tests {
+                 ▌xxxx
+                 𜷀▂▂▂▂"
+             ))]
++    #[case::x_sign(Marker::Custom('×'), indoc!(
++                "
++                ×xxxx
++                ×xxxx
++                ×xxxx
++                ×xxxx
++                ×××××"
++            ))]
++    #[case::plus_sign(Marker::Custom('+'), indoc!(
++                "
++                +xxxx
++                +xxxx
++                +xxxx
++                +xxxx
++                +++++"
++            ))]
+     #[case::dot(Marker::Dot, indoc!(
+                 "
+                 •xxxx
+@@ -1090,6 +1107,22 @@ mod tests {
+                 x▞x▚x
+                 ▞xxx▚"
+             ))]
++    #[case::x_sign(Marker::Custom('×'), indoc!(
++                "
++                ×xxx×
++                x×x×x
++                xx×xx
++                x×x×x
++                ×xxx×"
++            ))]
++    #[case::plus_sign(Marker::Custom('+'), indoc!(
++                "
++                +xxx+
++                x+x+x
++                xx+xx
++                x+x+x
++                +xxx+"
++            ))]
+     #[case::dot(Marker::Dot, indoc!(
+                 "
+                 •xxx•
+diff --git a/ratatui-widgets/src/canvas/rectangle.rs b/ratatui-widgets/src/canvas/rectangle.rs
+index 262daf1e40..296049022e 100644
+--- a/ratatui-widgets/src/canvas/rectangle.rs
++++ b/ratatui-widgets/src/canvas/rectangle.rs
+@@ -88,21 +88,6 @@ mod tests {
+ 
+     #[test]
+     fn draw_block_lines() {
+-        let mut buffer = Buffer::empty(Rect::new(0, 0, 10, 10));
+-        let canvas = Canvas::default()
+-            .marker(Marker::Block)
+-            .x_bounds([0.0, 10.0])
+-            .y_bounds([0.0, 10.0])
+-            .paint(|context| {
+-                context.draw(&Rectangle {
+-                    x: 0.0,
+-                    y: 0.0,
+-                    width: 10.0,
+-                    height: 10.0,
+-                    color: Color::Red,
+-                });
+-            });
+-        canvas.render(buffer.area, &mut buffer);
+         let mut expected = Buffer::with_lines([
+             "██████████",
+             "█        █",
+@@ -115,28 +100,15 @@ mod tests {
+             "█        █",
+             "██████████",
+         ]);
+-        expected.set_style(buffer.area, Style::new().red().on_red());
+-        expected.set_style(buffer.area.inner(Margin::new(1, 1)), Style::reset());
+-        assert_eq!(buffer, expected);
++        let rect = Rect::new(0, 0, 10, 10);
++        expected.set_style(rect, Style::new().red().on_red());
++        expected.set_style(rect.inner(Margin::new(1, 1)), Style::reset());
++        let rendered = render_rectangle(Marker::Block, rect);
++        assert_eq!(expected, rendered);
+     }
+ 
+     #[test]
+     fn draw_half_block_lines() {
+-        let mut buffer = Buffer::empty(Rect::new(0, 0, 10, 10));
+-        let canvas = Canvas::default()
+-            .marker(Marker::HalfBlock)
+-            .x_bounds([0.0, 10.0])
+-            .y_bounds([0.0, 10.0])
+-            .paint(|context| {
+-                context.draw(&Rectangle {
+-                    x: 0.0,
+-                    y: 0.0,
+-                    width: 10.0,
+-                    height: 10.0,
+-                    color: Color::Red,
+-                });
+-            });
+-        canvas.render(buffer.area, &mut buffer);
+         let mut expected = Buffer::with_lines([
+             "█▀▀▀▀▀▀▀▀█",
+             "█        █",
+@@ -149,10 +121,12 @@ mod tests {
+             "█        █",
+             "█▄▄▄▄▄▄▄▄█",
+         ]);
+-        expected.set_style(buffer.area, Style::new().red().on_red());
+-        expected.set_style(buffer.area.inner(Margin::new(1, 0)), Style::reset().red());
+-        expected.set_style(buffer.area.inner(Margin::new(1, 1)), Style::reset());
+-        assert_eq!(buffer, expected);
++        let rect = Rect::new(0, 0, 10, 10);
++        expected.set_style(rect, Style::new().red().on_red());
++        expected.set_style(rect.inner(Margin::new(1, 0)), Style::reset().red());
++        expected.set_style(rect.inner(Margin::new(1, 1)), Style::reset());
++        let rendered = render_rectangle(Marker::HalfBlock, rect);
++        assert_eq!(expected, rendered);
+     }
+ 
+     #[test]
+@@ -199,4 +173,67 @@ mod tests {
+         expected.set_style(buffer.area.inner(Margin::new(3, 3)), Style::reset());
+         assert_eq!(buffer, expected);
+     }
++
++    #[test]
++    fn draw_x_lines() {
++        let mut expected = Buffer::with_lines([
++            "××××××××××",
++            "×        ×",
++            "×        ×",
++            "×        ×",
++            "×        ×",
++            "×        ×",
++            "×        ×",
++            "×        ×",
++            "×        ×",
++            "××××××××××",
++        ]);
++        let rect = Rect::new(0, 0, 10, 10);
++        expected.set_style(rect, Style::new().red());
++        expected.set_style(rect.inner(Margin::new(1, 0)), Style::reset().red());
++        expected.set_style(rect.inner(Margin::new(1, 1)), Style::reset());
++        let rendered = render_rectangle(Marker::Custom('×'), rect);
++        assert_eq!(expected, rendered);
++    }
++
++    #[test]
++    fn draw_plus_lines() {
++        let mut expected = Buffer::with_lines([
++            "++++++++++",
++            "+        +",
++            "+        +",
++            "+        +",
++            "+        +",
++            "+        +",
++            "+        +",
++            "+        +",
++            "+        +",
++            "++++++++++",
++        ]);
++        let rect = Rect::new(0, 0, 10, 10);
++        expected.set_style(rect, Style::new().red());
++        expected.set_style(rect.inner(Margin::new(1, 0)), Style::reset().red());
++        expected.set_style(rect.inner(Margin::new(1, 1)), Style::reset());
++        let rendered = render_rectangle(Marker::Custom('+'), rect);
++        assert_eq!(expected, rendered);
++    }
++
++    fn render_rectangle(marker: Marker, rect: Rect) -> Buffer {
++        let mut buffer = Buffer::empty(rect);
++        let canvas = Canvas::default()
++            .marker(marker)
++            .x_bounds([0.0, 10.0])
++            .y_bounds([0.0, 10.0])
++            .paint(|context| {
++                context.draw(&Rectangle {
++                    x: 0.0,
++                    y: 0.0,
++                    width: 10.0,
++                    height: 10.0,
++                    color: Color::Red,
++                });
++            });
++        canvas.render(buffer.area, &mut buffer);
++        buffer
++    }
+ }
+diff --git a/ratatui-widgets/src/chart.rs b/ratatui-widgets/src/chart.rs
+index 52aadcbc7b..b223c28cbb 100644
+--- a/ratatui-widgets/src/chart.rs
++++ b/ratatui-widgets/src/chart.rs
+@@ -368,8 +368,9 @@ impl<'a> Dataset<'a> {
+ 
+     /// Sets the kind of character to use to display this dataset
+     ///
+-    /// You can use dots (`•`), blocks (`█`), bars (`▄`), braille (`⠓`, `⣇`, `⣿`) or half-blocks
+-    /// (`█`, `▄`, and `▀`). See [`symbols::Marker`] for more details.
++    /// You can use dots (`•`), blocks (`█`), bars (`▄`), braille (`⠓`, `⣇`, `⣿`), half-blocks
++    /// (`█`, `▄`, and `▀`) or if you need custom chars use
++    /// [`Marker::Custom`](symbols::Marker::Custom). See [`symbols::Marker`] for more details.
+     ///
+     /// Note [`Marker::Braille`](symbols::Marker::Braille) requires a font that supports Unicode
+     /// Braille Patterns.

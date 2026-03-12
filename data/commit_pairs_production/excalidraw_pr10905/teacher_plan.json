@@ -1,0 +1,94 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "performance_optimization",
+      "recommendation": "Simplified throttleRAF implementation to always use the latest arguments without a trailing option, ensuring argument preservation during animation frame throttling",
+      "rationale": "The original implementation had a complex dual-argument tracking system (lastArgs and lastArgsTrailing) that was unnecessary for the use cases in the codebase. By always using the latest arguments and removing the trailing option, we simplify the logic while maintaining the desired behavior of executing with the most recent arguments on the next animation frame.",
+      "alternatives_considered": [
+        "Keeping the trailing option but fixing the argument preservation logic",
+        "Creating two separate throttle functions (one with trailing, one without)",
+        "Using a more complex argument caching system"
+      ],
+      "files_affected": [
+        "packages/common/src/utils.ts"
+      ]
+    },
+    {
+      "dimension": "api_design",
+      "recommendation": "Removed the trailing option parameter from throttleRAF function signature since it's no longer needed",
+      "rationale": "The trailing option was causing confusion and wasn't being used correctly in the codebase. All callers were passing { trailing: true }, making it a default behavior that should be baked into the function. Removing the option simplifies the API and reduces cognitive load for developers.",
+      "alternatives_considered": [
+        "Keeping the option but defaulting it to true",
+        "Deprecating the option first before removal",
+        "Creating a separate throttleRAFWithTrailing function"
+      ],
+      "files_affected": [
+        "packages/common/src/utils.ts",
+        "excalidraw-app/components/DebugCanvas.tsx",
+        "packages/excalidraw/renderer/renderNewElementScene.ts",
+        "packages/excalidraw/renderer/staticScene.ts"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Fixed race condition in argument handling by ensuring lastArgs is captured before the animation frame callback executes",
+      "rationale": "The original implementation had a potential race condition where lastArgs could be modified between the time the animation frame was scheduled and when it executed. The new implementation captures the arguments in a closure and ensures they're only used once per execution cycle.",
+      "alternatives_considered": [
+        "Using a deep copy of arguments (performance overhead)",
+        "Adding a lock mechanism (complexity)",
+        "Keeping the race condition but documenting it (not acceptable for production)"
+      ],
+      "files_affected": [
+        "packages/common/src/utils.ts"
+      ]
+    },
+    {
+      "dimension": "code_maintainability",
+      "recommendation": "Updated all throttleRAF callers to remove the now-unnecessary trailing option",
+      "rationale": "Consistency across the codebase is important for maintainability. By updating all callers to use the simplified API, we ensure there are no leftover configuration options that no longer have any effect, reducing confusion for future developers.",
+      "alternatives_considered": [
+        "Keeping the option in callers but ignoring it (would cause confusion)",
+        "Using a codemod to automatically update all callers",
+        "Adding a deprecation warning before removal"
+      ],
+      "files_affected": [
+        "excalidraw-app/components/DebugCanvas.tsx",
+        "packages/excalidraw/renderer/renderNewElementScene.ts",
+        "packages/excalidraw/renderer/staticScene.ts"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Fix throttleRAF argument preservation",
+      "description": "Update the throttleRAF utility function to properly preserve and use the latest arguments when executing throttled functions. The original implementation had issues with argument tracking and an unnecessary trailing option.",
+      "files_to_modify": [
+        "packages/common/src/utils.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-002",
+      "title": "Update throttleRAF callers to remove trailing option",
+      "description": "Remove the { trailing: true } option from all throttleRAF calls since the option is no longer supported and the behavior is now the default.",
+      "files_to_modify": [
+        "excalidraw-app/components/DebugCanvas.tsx",
+        "packages/excalidraw/renderer/renderNewElementScene.ts",
+        "packages/excalidraw/renderer/staticScene.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The changes address a bug in the throttleRAF utility function where arguments weren't being properly preserved during animation frame throttling. The core issue was in the implementation of the throttleRAF function in packages/common/src/utils.ts, which had a complex dual-argument tracking system (lastArgs and lastArgsTrailing) that didn't work correctly.\n\nThe fix simplifies the implementation by removing the trailing option entirely and ensuring that the function always uses the latest arguments. When throttleRAF is called, it now captures the arguments in the lastArgs variable. If an animation frame is already scheduled, it updates lastArgs with the new arguments. When the animation frame executes, it uses whatever arguments were last captured. This ensures that the throttled function always executes with the most recent arguments, which is the desired behavior for rendering operations in Excalidraw.\n\nThe simplification also involved updating all callers of throttleRAF to remove the { trailing: true } option, since this behavior is now the default and the option is no longer supported. This change affects rendering components across the application, including debug rendering, new element scene rendering, and static scene rendering. The approach maintains backward compatibility in terms of behavior while simplifying the API and fixing the argument preservation bug.",
+  "source_pr": "https://github.com/excalidraw/excalidraw/pull/10905",
+  "before_sha": "a0e93b60402f543ffb5c845dafd29d95d2f0ffc6",
+  "after_sha": "757dfeb6ad64c2c58db8ce356a54e3f440e433c4",
+  "diff_stats": {
+    "additions": 11,
+    "deletions": 21,
+    "files_changed": 4
+  }
+}

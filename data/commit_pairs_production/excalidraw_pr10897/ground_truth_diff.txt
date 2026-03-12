@@ -1,0 +1,1800 @@
+diff --git a/excalidraw-app/vite.config.mts b/excalidraw-app/vite.config.mts
+index a24d0939a699..fa8d63d9562c 100644
+--- a/excalidraw-app/vite.config.mts
++++ b/excalidraw-app/vite.config.mts
+@@ -106,6 +106,10 @@ export default defineConfig(({ mode }) => {
+             if (id.includes("@excalidraw/mermaid-to-excalidraw")) {
+               return "mermaid-to-excalidraw";
+             }
++
++            if (id.includes("@codemirror/") || id.includes("@lezer/")) {
++              return "codemirror.chunk";
++            }
+           },
+         },
+       },
+@@ -150,6 +154,11 @@ export default defineConfig(({ mode }) => {
+             "**/locales/**",
+             "service-worker.js",
+             "**/*.chunk-*.js",
++            // CodeMirrorEditor can't be assigned a `.chunk` name via
++            // manualChunks because Rollup would hoist shared deps (React)
++            // via a static import from the main bundle, defeating lazy
++            // loading. So we exclude it by name instead.
++            "**/CodeMirrorEditor-*.js",
+           ],
+           runtimeCaching: [
+             {
+@@ -189,7 +198,7 @@ export default defineConfig(({ mode }) => {
+               },
+             },
+             {
+-              urlPattern: new RegExp(".chunk-.+.js"),
++              urlPattern: new RegExp("(.chunk-.+|CodeMirrorEditor-.+)\\.js"),
+               handler: "CacheFirst",
+               options: {
+                 cacheName: "chunk",
+diff --git a/packages/common/src/utils.ts b/packages/common/src/utils.ts
+index 5bafa41813f9..6d3858a00de7 100644
+--- a/packages/common/src/utils.ts
++++ b/packages/common/src/utils.ts
+@@ -88,7 +88,8 @@ export const isWritableElement = (
+     (target.type === "text" ||
+       target.type === "number" ||
+       target.type === "password" ||
+-      target.type === "search"));
++      target.type === "search")) ||
++  (target instanceof HTMLElement && target.closest(".cm-editor") !== null);
+ 
+ export const getFontFamilyString = ({
+   fontFamily,
+diff --git a/packages/excalidraw/components/TTDDialog/CodeMirrorEditor.tsx b/packages/excalidraw/components/TTDDialog/CodeMirrorEditor.tsx
+new file mode 100644
+index 000000000000..d6866a612158
+--- /dev/null
++++ b/packages/excalidraw/components/TTDDialog/CodeMirrorEditor.tsx
+@@ -0,0 +1,239 @@
++import { useEffect, useRef } from "react";
++import {
++  Decoration,
++  EditorView,
++  keymap,
++  lineNumbers,
++  placeholder as cmPlaceholder,
++  drawSelection,
++} from "@codemirror/view";
++import { Compartment, EditorState, type Extension } from "@codemirror/state";
++import {
++  defaultKeymap,
++  history,
++  historyKeymap,
++  redo,
++} from "@codemirror/commands";
++import { syntaxHighlighting, HighlightStyle } from "@codemirror/language";
++import { tags } from "@lezer/highlight";
++
++import type { Theme } from "@excalidraw/element/types";
++
++import { mermaidLite } from "./mermaid-lang-lite";
++
++export interface CodeMirrorEditorProps {
++  value: string;
++  onChange: (value: string) => void;
++  onKeyboardSubmit?: () => void;
++  placeholder?: string;
++  theme: Theme;
++  errorLine?: number | null;
++}
++
++// ---- Dark theme ----
++
++const darkTheme = EditorView.theme(
++  {
++    "&": {
++      backgroundColor: "#1e1e1e",
++      color: "#d4d4d4",
++    },
++    ".cm-content": { caretColor: "#fff" },
++    ".cm-cursor": { borderLeftColor: "#fff" },
++    ".cm-gutters": {
++      backgroundColor: "#1e1e1e",
++      color: "#858585",
++      border: "none",
++    },
++    ".cm-activeLineGutter": { backgroundColor: "#2a2a2a" },
++    ".cm-activeLine": { backgroundColor: "#2a2a2a" },
++    ".cm-errorLine": { backgroundColor: "rgba(255, 0, 0, 0.15)" },
++  },
++  { dark: true },
++);
++
++const darkHighlight = HighlightStyle.define([
++  { tag: tags.keyword, color: "#569cd6" },
++  { tag: tags.string, color: "#ce9178" },
++  { tag: tags.comment, color: "#6a9955" },
++  { tag: tags.number, color: "#b5cea8" },
++  { tag: tags.operator, color: "#d4d4d4" },
++  { tag: tags.punctuation, color: "#d4d4d4" },
++  { tag: tags.variableName, color: "#9cdcfe" },
++  { tag: tags.bracket, color: "#ffd700" },
++]);
++
++// ---- Light theme ----
++
++const lightTheme = EditorView.theme({
++  "&": {
++    backgroundColor: "#ffffff",
++    color: "#1e1e1e",
++  },
++  ".cm-content": { caretColor: "#000" },
++  ".cm-cursor": { borderLeftColor: "#000" },
++  ".cm-gutters": {
++    backgroundColor: "#fff",
++    color: "#999",
++    border: "none",
++  },
++  ".cm-activeLineGutter": { backgroundColor: "#e8e8e8" },
++  ".cm-activeLine": { backgroundColor: "#e8e8e8" },
++  ".cm-errorLine": { backgroundColor: "rgba(255, 0, 0, 0.1)" },
++});
++
++const lightHighlight = HighlightStyle.define([
++  { tag: tags.keyword, color: "#0000ff" },
++  { tag: tags.string, color: "#a31515" },
++  { tag: tags.comment, color: "#008000" },
++  { tag: tags.number, color: "#098658" },
++  { tag: tags.operator, color: "#1e1e1e" },
++  { tag: tags.punctuation, color: "#1e1e1e" },
++  { tag: tags.variableName, color: "#001080" },
++  { tag: tags.bracket, color: "#af00db" },
++]);
++
++// ---- Error line decoration ----
++
++const errorLineDeco = Decoration.line({ class: "cm-errorLine" });
++
++const getErrorLineExtension = (
++  errorLine: number | null | undefined,
++  doc: { line(n: number): { from: number }; lines: number },
++): Extension => {
++  if (!errorLine || errorLine < 1 || errorLine > doc.lines) {
++    return EditorView.decorations.of(Decoration.none);
++  }
++  const line = doc.line(errorLine);
++  return EditorView.decorations.of(
++    Decoration.set([errorLineDeco.range(line.from)]),
++  );
++};
++
++// ---- Helpers ----
++
++const getThemeExtensions = (theme: Theme) => {
++  if (theme === "dark") {
++    return [darkTheme, syntaxHighlighting(darkHighlight)];
++  }
++  return [lightTheme, syntaxHighlighting(lightHighlight)];
++};
++
++const CodeMirrorEditor = ({
++  value,
++  onChange,
++  onKeyboardSubmit,
++  placeholder,
++  theme,
++  errorLine,
++}: CodeMirrorEditorProps) => {
++  const containerRef = useRef<HTMLDivElement>(null);
++  const viewRef = useRef<EditorView | null>(null);
++  const onChangeRef = useRef(onChange);
++  const onKeyboardSubmitRef = useRef(onKeyboardSubmit);
++  const themeCompartmentRef = useRef(new Compartment());
++  const errorLineCompartmentRef = useRef(new Compartment());
++
++  onChangeRef.current = onChange;
++  onKeyboardSubmitRef.current = onKeyboardSubmit;
++
++  useEffect(() => {
++    if (!containerRef.current) {
++      return;
++    }
++
++    const themeCompartment = themeCompartmentRef.current;
++
++    const view = new EditorView({
++      state: EditorState.create({
++        doc: value,
++        extensions: [
++          keymap.of([
++            {
++              key: "Mod-Enter",
++              run: () => {
++                onKeyboardSubmitRef.current?.();
++                return true;
++              },
++            },
++            // historyKeymap binds Mod-Shift-z only on Mac; add it for all platforms
++            { key: "Mod-Shift-z", run: redo, preventDefault: true },
++          ]),
++          EditorView.updateListener.of((update) => {
++            if (update.docChanged) {
++              onChangeRef.current(update.state.doc.toString());
++            }
++          }),
++          history(),
++          keymap.of([...defaultKeymap, ...historyKeymap]),
++          lineNumbers(),
++          EditorView.lineWrapping,
++          themeCompartment.of(getThemeExtensions(theme)),
++          errorLineCompartmentRef.current.of([]),
++          mermaidLite(),
++          drawSelection({ drawRangeCursor: true }),
++          ...(placeholder ? [cmPlaceholder(placeholder)] : []),
++        ],
++      }),
++      parent: containerRef.current,
++    });
++
++    viewRef.current = view;
++    view.focus();
++
++    return () => {
++      view.destroy();
++      viewRef.current = null;
++    };
++    // eslint-disable-next-line react-hooks/exhaustive-deps
++  }, []);
++
++  // Swap theme dynamically via compartment
++  useEffect(() => {
++    const view = viewRef.current;
++    if (!view) {
++      return;
++    }
++    view.dispatch({
++      effects: themeCompartmentRef.current.reconfigure(
++        getThemeExtensions(theme),
++      ),
++    });
++  }, [theme]);
++
++  // Update error line highlight
++  useEffect(() => {
++    const view = viewRef.current;
++    if (!view) {
++      return;
++    }
++    view.dispatch({
++      effects: errorLineCompartmentRef.current.reconfigure(
++        getErrorLineExtension(errorLine, view.state.doc),
++      ),
++    });
++  }, [errorLine]);
++
++  // Sync external value changes into EditorView
++  useEffect(() => {
++    const view = viewRef.current;
++    if (!view) {
++      return;
++    }
++    const currentDoc = view.state.doc.toString();
++    if (value !== currentDoc) {
++      view.dispatch({
++        changes: { from: 0, to: currentDoc.length, insert: value },
++      });
++    }
++  }, [value]);
++
++  return (
++    <div
++      ref={containerRef}
++      className="ttd-dialog-input ttd-dialog-input--codemirror"
++    />
++  );
++};
++
++export default CodeMirrorEditor;
+diff --git a/packages/excalidraw/components/TTDDialog/MermaidToExcalidraw.tsx b/packages/excalidraw/components/TTDDialog/MermaidToExcalidraw.tsx
+index baa1298026db..5f98637f47e2 100644
+--- a/packages/excalidraw/components/TTDDialog/MermaidToExcalidraw.tsx
++++ b/packages/excalidraw/components/TTDDialog/MermaidToExcalidraw.tsx
+@@ -17,6 +17,11 @@ import { TTDDialogOutput } from "./TTDDialogOutput";
+ import { TTDDialogPanel } from "./TTDDialogPanel";
+ import { TTDDialogPanels } from "./TTDDialogPanels";
+ import { TTDDialogSubmitShortcut } from "./TTDDialogSubmitShortcut";
++import {
++  getMermaidErrorLineNumber,
++  isMermaidAutoFixableError,
++} from "./utils/mermaidError";
++import { getMermaidAutoFixCandidates } from "./utils/mermaidAutoFix";
+ import {
+   convertMermaidToExcalidraw,
+   insertToEditor,
+@@ -33,6 +38,27 @@ const MERMAID_EXAMPLE =
+   "flowchart TD\n A[Christmas] -->|Get money| B(Go shopping)\n B --> C{Let me think}\n C -->|One| D[Laptop]\n C -->|Two| E[iPhone]\n C -->|Three| F[Car]";
+ 
+ const debouncedSaveMermaidDefinition = debounce(saveMermaidDataToStorage, 300);
++const AUTO_FIX_DEBOUNCE_MS = 500;
++const AUTO_FIX_MAX_DEPTH = 4;
++const AUTO_FIX_MAX_CANDIDATES = 30;
++
++const getErrorMessage = (error: unknown): string => {
++  if (error instanceof Error) {
++    return error.message;
++  }
++  if (typeof error === "string") {
++    return error;
++  }
++  if (
++    error &&
++    typeof error === "object" &&
++    "message" in error &&
++    typeof (error as { message?: unknown }).message === "string"
++  ) {
++    return (error as { message: string }).message;
++  }
++  return "";
++};
+ 
+ const MermaidToExcalidraw = ({
+   mermaidToExcalidrawLib,
+@@ -46,8 +72,16 @@ const MermaidToExcalidraw = ({
+       EditorLocalStorage.get<string>(EDITOR_LS_KEYS.MERMAID_TO_EXCALIDRAW) ||
+       MERMAID_EXAMPLE,
+   );
+-  const deferredText = useDeferredValue(text.trim());
++  const deferredText = useDeferredValue(text);
+   const [error, setError] = useState<Error | null>(null);
++  const [autoFixCandidate, setAutoFixCandidate] = useState<string | null>(null);
++
++  const errorLine = (() => {
++    if (!error?.message) {
++      return null;
++    }
++    return getMermaidErrorLineNumber(error.message, deferredText);
++  })();
+ 
+   const canvasRef = useRef<HTMLDivElement>(null);
+   const data = useRef<{
+@@ -61,7 +95,7 @@ const MermaidToExcalidraw = ({
+   useEffect(() => {
+     const doRender = async () => {
+       try {
+-        if (!deferredText) {
++        if (!deferredText.trim()) {
+           resetPreview({ canvasRef, setError });
+           return;
+         }
+@@ -98,6 +132,88 @@ const MermaidToExcalidraw = ({
+     [],
+   );
+ 
++  useEffect(() => {
++    const errorMessage = error?.message ?? "";
++    const sourceText = deferredText;
++    const shouldTryAutoFix =
++      isActive &&
++      isMermaidAutoFixableError(errorMessage) &&
++      !!sourceText.trim() &&
++      mermaidToExcalidrawLib.loaded;
++
++    if (!shouldTryAutoFix) {
++      setAutoFixCandidate(null);
++      return;
++    }
++
++    const candidates = getMermaidAutoFixCandidates(sourceText, errorMessage);
++    if (!candidates.length) {
++      setAutoFixCandidate(null);
++      return;
++    }
++
++    let cancelled = false;
++    const timer = setTimeout(async () => {
++      try {
++        const api = await mermaidToExcalidrawLib.api;
++        const seen = new Set<string>([sourceText]);
++        const queue = candidates.map((candidate) => ({
++          text: candidate,
++          depth: 1,
++        }));
++
++        let triedCandidates = 0;
++
++        while (queue.length > 0 && triedCandidates < AUTO_FIX_MAX_CANDIDATES) {
++          const current = queue.shift();
++          if (!current || seen.has(current.text)) {
++            continue;
++          }
++          seen.add(current.text);
++          triedCandidates += 1;
++
++          try {
++            await api.parseMermaidToExcalidraw(current.text);
++            if (!cancelled) {
++              setAutoFixCandidate(current.text);
++            }
++            return;
++          } catch (candidateError) {
++            if (current.depth >= AUTO_FIX_MAX_DEPTH) {
++              continue;
++            }
++            const nextErrorMessage = getErrorMessage(candidateError);
++            if (!nextErrorMessage) {
++              continue;
++            }
++            const nextCandidates = getMermaidAutoFixCandidates(
++              current.text,
++              nextErrorMessage,
++            );
++            for (const nextCandidate of nextCandidates) {
++              if (!seen.has(nextCandidate)) {
++                queue.push({
++                  text: nextCandidate,
++                  depth: current.depth + 1,
++                });
++              }
++            }
++          }
++        }
++      } catch {
++        // ignore auto-fix probe errors
++      }
++      if (!cancelled) {
++        setAutoFixCandidate(null);
++      }
++    }, AUTO_FIX_DEBOUNCE_MS);
++
++    return () => {
++      cancelled = true;
++      clearTimeout(timer);
++    };
++  }, [deferredText, error?.message, isActive, mermaidToExcalidrawLib]);
++
+   const onInsertToEditor = () => {
+     insertToEditor({
+       app,
+@@ -107,6 +223,13 @@ const MermaidToExcalidraw = ({
+     });
+   };
+ 
++  const onApplyAutoFix = () => {
++    if (!autoFixCandidate) {
++      return;
++    }
++    setText(autoFixCandidate);
++  };
++
+   return (
+     <>
+       <div className="ttd-dialog-desc">
+@@ -130,7 +253,8 @@ const MermaidToExcalidraw = ({
+           <TTDDialogInput
+             input={text}
+             placeholder={t("mermaid.inputPlaceholder")}
+-            onChange={(event) => setText(event.target.value)}
++            onChange={(value) => setText(value)}
++            errorLine={errorLine}
+             onKeyboardSubmit={() => {
+               onInsertToEditor();
+             }}
+@@ -153,6 +277,9 @@ const MermaidToExcalidraw = ({
+             canvasRef={canvasRef}
+             loaded={mermaidToExcalidrawLib.loaded}
+             error={error}
++            sourceText={text}
++            autoFixAvailable={!!autoFixCandidate}
++            onApplyAutoFix={onApplyAutoFix}
+           />
+         </TTDDialogPanel>
+       </TTDDialogPanels>
+diff --git a/packages/excalidraw/components/TTDDialog/TTDDialog.scss b/packages/excalidraw/components/TTDDialog/TTDDialog.scss
+index 3d133c5baf07..e2ba3d1a8e0b 100644
+--- a/packages/excalidraw/components/TTDDialog/TTDDialog.scss
++++ b/packages/excalidraw/components/TTDDialog/TTDDialog.scss
+@@ -219,6 +219,49 @@ $fullScreenModalBreakpoint: 600px;
+     }
+   }
+ 
++  .ttd-dialog-input--loading {
++    display: flex;
++    align-items: center;
++    justify-content: center;
++  }
++
++  .ttd-dialog-input--codemirror {
++    padding: 0;
++    overflow: hidden;
++    // Override height:100% from .ttd-dialog-input — use flex sizing
++    // so the editor fills remaining space without overflowing the panel
++    height: 0;
++    flex: 1 1 0;
++    min-height: 0;
++
++    .cm-editor {
++      height: 100%;
++      font-family: monospace;
++
++      &.cm-focused {
++        outline: none;
++      }
++    }
++
++    .cm-scroller {
++      padding: 0.85rem 0;
++      overflow: auto;
++    }
++
++    .cm-gutters {
++      padding-left: 0.25rem;
++    }
++
++    .cm-content {
++      padding: 0;
++    }
++
++    .cm-placeholder {
++      color: var(--color-gray-40);
++      font-style: italic;
++    }
++  }
++
+   .ttd-dialog-output-wrapper {
+     display: flex;
+     flex-direction: column;
+@@ -331,14 +374,55 @@ $fullScreenModalBreakpoint: 600px;
+       margin-top: 0.25rem;
+     }
+ 
++    .ttd-dialog-output-error-summary {
++      width: 100%;
++      max-width: 640px;
++      color: var(--color-gray-50);
++      font-size: 0.9rem;
++      text-align: left;
++
++      &__headline {
++        font-weight: 600;
++        color: var(--color-gray-60);
++      }
++
++      &__label {
++        margin-top: 0.35rem;
++        font-weight: 500;
++      }
++
++      &__causes {
++        margin: 0.35rem 0 0;
++        padding-left: 2rem;
++      }
++    }
++
+     .ttd-dialog-output-error-message {
+       text-align: left;
+       font-weight: 400;
+       color: var(--color-gray-50);
+       word-break: break-word;
+       white-space: pre-wrap;
+-      max-width: 100%;
++      max-width: 640px;
++      width: 100%;
+       font-family: monospace;
++
++      &__caret {
++        color: var(--color-danger);
++      }
++    }
++
++    .ttd-dialog-output-error-autofix-slot {
++      align-self: flex-start;
++      margin-top: 0.35rem;
++      min-height: 2.5rem;
++      display: flex;
++      align-items: flex-start;
++    }
++
++    .ttd-dialog-output-error-autofix {
++      margin-top: 0;
++      white-space: nowrap;
+     }
+   }
+ 
+diff --git a/packages/excalidraw/components/TTDDialog/TTDDialogInput.tsx b/packages/excalidraw/components/TTDDialog/TTDDialogInput.tsx
+index 24427d52d59d..3a14a9fd56b5 100644
+--- a/packages/excalidraw/components/TTDDialog/TTDDialogInput.tsx
++++ b/packages/excalidraw/components/TTDDialog/TTDDialogInput.tsx
+@@ -1,28 +1,84 @@
+-import { useEffect, useRef } from "react";
++import { useEffect, useRef, useState } from "react";
+ 
+ import { EVENT, KEYS } from "@excalidraw/common";
+ 
+-import type { ChangeEventHandler } from "react";
++import Spinner from "../Spinner";
++
++import { useUIAppState } from "../../context/ui-appState";
++
++import type { ComponentType } from "react";
++import type { CodeMirrorEditorProps } from "./CodeMirrorEditor";
+ 
+ interface TTDDialogInputProps {
+   input: string;
+   placeholder: string;
+-  onChange: ChangeEventHandler<HTMLTextAreaElement>;
++  onChange: (value: string) => void;
+   onKeyboardSubmit?: () => void;
++  errorLine?: number | null;
+ }
+ 
++type EditorState =
++  | { type: "loading" }
++  | { type: "ready"; component: ComponentType<CodeMirrorEditorProps> }
++  | { type: "fallback" };
++
++const SPINNER_DELAY_MS = 300;
++
+ export const TTDDialogInput = ({
+   input,
+   placeholder,
+   onChange,
+   onKeyboardSubmit,
++  errorLine,
+ }: TTDDialogInputProps) => {
+   const ref = useRef<HTMLTextAreaElement>(null);
+ 
+   const callbackRef = useRef(onKeyboardSubmit);
+   callbackRef.current = onKeyboardSubmit;
+ 
++  const [editorState, setEditorState] = useState<EditorState>({
++    type: "loading",
++  });
++  const [showSpinner, setShowSpinner] = useState(false);
++
++  const { theme } = useUIAppState();
++
++  // Lazy-load CodeMirror editor
++  useEffect(() => {
++    let cancelled = false;
++
++    const spinnerTimer = setTimeout(() => {
++      if (!cancelled) {
++        setShowSpinner(true);
++      }
++    }, SPINNER_DELAY_MS);
++
++    import("./CodeMirrorEditor")
++      .then((mod) => {
++        if (!cancelled) {
++          setEditorState({ type: "ready", component: mod.default });
++        }
++      })
++      .catch(() => {
++        if (!cancelled) {
++          setEditorState({ type: "fallback" });
++        }
++      })
++      .finally(() => {
++        clearTimeout(spinnerTimer);
++      });
++
++    return () => {
++      cancelled = true;
++      clearTimeout(spinnerTimer);
++    };
++  }, []);
++
++  // Keyboard shortcut + focus for textarea fallback
+   useEffect(() => {
++    if (editorState.type !== "fallback") {
++      return;
++    }
+     if (!callbackRef.current) {
+       return;
+     }
+@@ -40,15 +96,42 @@ export const TTDDialogInput = ({
+         textarea.removeEventListener(EVENT.KEYDOWN, handleKeyDown);
+       };
+     }
+-  }, []);
++  }, [editorState.type]);
++
++  if (editorState.type === "ready") {
++    const CodeMirrorEditor = editorState.component;
++    return (
++      <CodeMirrorEditor
++        value={input}
++        onChange={onChange}
++        onKeyboardSubmit={onKeyboardSubmit}
++        placeholder={placeholder}
++        theme={theme}
++        errorLine={errorLine}
++      />
++    );
++  }
++
++  if (editorState.type === "fallback") {
++    return (
++      <textarea
++        className="ttd-dialog-input"
++        onChange={(e) => onChange(e.target.value)}
++        value={input}
++        placeholder={placeholder}
++        ref={ref}
++      />
++    );
++  }
++
++  // Loading state
++  if (showSpinner) {
++    return (
++      <div className="ttd-dialog-input ttd-dialog-input--loading">
++        <Spinner />
++      </div>
++    );
++  }
+ 
+-  return (
+-    <textarea
+-      className="ttd-dialog-input"
+-      onChange={onChange}
+-      value={input}
+-      placeholder={placeholder}
+-      ref={ref}
+-    />
+-  );
++  return null;
+ };
+diff --git a/packages/excalidraw/components/TTDDialog/TTDDialogOutput.tsx b/packages/excalidraw/components/TTDDialog/TTDDialogOutput.tsx
+index 443ccc4d3ead..4d730187176f 100644
+--- a/packages/excalidraw/components/TTDDialog/TTDDialogOutput.tsx
++++ b/packages/excalidraw/components/TTDDialog/TTDDialogOutput.tsx
+@@ -1,14 +1,24 @@
+ import clsx from "clsx";
+ 
++import { Button } from "../Button";
+ import Spinner from "../Spinner";
+ import { t } from "../../i18n";
+ import { alertTriangleIcon } from "../icons";
+ 
++import {
++  formatMermaidParseErrorMessage,
++  getMermaidSyntaxErrorGuidance,
++  isMermaidCaretLine,
++} from "./utils/mermaidError";
++
+ interface TTDDialogOutputProps {
+   error: Error | null;
+   canvasRef: React.RefObject<HTMLDivElement | null>;
+   loaded: boolean;
+   hideErrorDetails?: boolean;
++  sourceText?: string;
++  autoFixAvailable?: boolean;
++  onApplyAutoFix?: () => void;
+ }
+ 
+ export const TTDDialogOutput = ({
+@@ -16,7 +26,24 @@ export const TTDDialogOutput = ({
+   canvasRef,
+   loaded,
+   hideErrorDetails,
++  sourceText,
++  autoFixAvailable,
++  onApplyAutoFix,
+ }: TTDDialogOutputProps) => {
++  const errorMessage = error
++    ? hideErrorDetails
++      ? t("chat.errors.mermaidParseError")
++      : formatMermaidParseErrorMessage(error.message)
++    : null;
++  const syntaxGuidance =
++    error && !hideErrorDetails
++      ? getMermaidSyntaxErrorGuidance(error.message, sourceText)
++      : null;
++  const showAutoFixButton =
++    !!autoFixAvailable && !!onApplyAutoFix && !hideErrorDetails;
++
++  const errorMessageLines = errorMessage?.split(/\r?\n/) ?? [];
++
+   return (
+     <div
+       className={`ttd-dialog-output-wrapper ${
+@@ -33,14 +60,48 @@ export const TTDDialogOutput = ({
+             <div className="ttd-dialog-output-error-icon">
+               {alertTriangleIcon}
+             </div>
+-            <div className="ttd-dialog-output-error-title">
+-              {t("ttd.error")}
+-            </div>
++            {syntaxGuidance && (
++              <div className="ttd-dialog-output-error-summary">
++                <div className="ttd-dialog-output-error-summary__headline">
++                  {syntaxGuidance.summary}
++                </div>
++                <div className="ttd-dialog-output-error-summary__label">
++                  Likely causes:
++                </div>
++                <ul className="ttd-dialog-output-error-summary__causes">
++                  {syntaxGuidance.likelyCauses.map((cause) => (
++                    <li key={cause}>{cause}</li>
++                  ))}
++                </ul>
++              </div>
++            )}
+             <div className="ttd-dialog-output-error-message">
+-              {hideErrorDetails
+-                ? t("chat.errors.mermaidParseError")
+-                : error.message}
++              {errorMessageLines.map((line, index) => (
++                <span
++                  key={`error-line-${index}`}
++                  className={
++                    isMermaidCaretLine(line)
++                      ? "ttd-dialog-output-error-message__caret"
++                      : undefined
++                  }
++                >
++                  {line}
++                  {index < errorMessageLines.length - 1 ? "\n" : ""}
++                </span>
++              ))}
+             </div>
++            {!hideErrorDetails && (
++              <div className="ttd-dialog-output-error-autofix-slot">
++                {showAutoFixButton ? (
++                  <Button
++                    className="ttd-dialog-panel-button ttd-dialog-output-error-autofix"
++                    onSelect={onApplyAutoFix}
++                  >
++                    {t("mermaid.autoFixAvailable")}
++                  </Button>
++                ) : null}
++              </div>
++            )}
+           </div>
+         </div>
+       )}
+diff --git a/packages/excalidraw/components/TTDDialog/common.test.ts b/packages/excalidraw/components/TTDDialog/common.test.ts
+new file mode 100644
+index 000000000000..907c347e2253
+--- /dev/null
++++ b/packages/excalidraw/components/TTDDialog/common.test.ts
+@@ -0,0 +1,89 @@
++import { describe, expect, it, vi } from "vitest";
++
++import { convertMermaidToExcalidraw } from "./common";
++
++type ConvertMermaidArgs = Parameters<typeof convertMermaidToExcalidraw>[0];
++type ParseMermaidToExcalidraw = Awaited<
++  ConvertMermaidArgs["mermaidToExcalidrawLib"]["api"]
++>["parseMermaidToExcalidraw"];
++
++const createConvertArgs = (
++  mermaidDefinition: string,
++  parseMermaidToExcalidraw: ParseMermaidToExcalidraw,
++): ConvertMermaidArgs => {
++  const parent = document.createElement("div");
++  const canvas = document.createElement("div");
++  parent.appendChild(canvas);
++
++  return {
++    canvasRef: { current: canvas },
++    mermaidToExcalidrawLib: {
++      loaded: true,
++      api: Promise.resolve({ parseMermaidToExcalidraw }),
++    },
++    mermaidDefinition,
++    setError: vi.fn(),
++    data: {
++      current: {
++        elements: [],
++        files: null,
++      },
++    },
++    theme: "light",
++  };
++};
++
++describe("convertMermaidToExcalidraw", () => {
++  it("returns the original parse error when quote-normalized fallback also fails", async () => {
++    const originalError = new Error("Parse error on line 9: ...");
++    const fallbackError = new Error("Parse error on line 6: ...");
++
++    const parseMermaidToExcalidraw = vi
++      .fn<ParseMermaidToExcalidraw>()
++      .mockRejectedValueOnce(originalError)
++      .mockRejectedValueOnce(fallbackError);
++
++    const mermaidDefinition =
++      'graph TD\nA["One"]\nB["Two"]x\nC["Three"]\nD["Four"]';
++
++    const result = await convertMermaidToExcalidraw(
++      createConvertArgs(mermaidDefinition, parseMermaidToExcalidraw),
++    );
++
++    expect(parseMermaidToExcalidraw).toHaveBeenCalledTimes(2);
++    expect(parseMermaidToExcalidraw).toHaveBeenNthCalledWith(
++      1,
++      mermaidDefinition,
++    );
++    expect(parseMermaidToExcalidraw).toHaveBeenNthCalledWith(
++      2,
++      mermaidDefinition.replace(/"/g, "'"),
++    );
++
++    expect(result.success).toBe(false);
++    if (!result.success) {
++      expect(result.error).toBe(originalError);
++    }
++  });
++
++  it("does not retry quote normalization when the input has no double quotes", async () => {
++    const originalError = new Error("Parse error on line 9: ...");
++    const parseMermaidToExcalidraw = vi
++      .fn<ParseMermaidToExcalidraw>()
++      .mockRejectedValueOnce(originalError);
++
++    const mermaidDefinition = "graph TD\nA[One]\nB[Two]x";
++
++    const result = await convertMermaidToExcalidraw(
++      createConvertArgs(mermaidDefinition, parseMermaidToExcalidraw),
++    );
++
++    expect(parseMermaidToExcalidraw).toHaveBeenCalledTimes(1);
++    expect(parseMermaidToExcalidraw).toHaveBeenCalledWith(mermaidDefinition);
++
++    expect(result.success).toBe(false);
++    if (!result.success) {
++      expect(result.error).toBe(originalError);
++    }
++  });
++});
+diff --git a/packages/excalidraw/components/TTDDialog/common.ts b/packages/excalidraw/components/TTDDialog/common.ts
+index f00f409132dc..f31987bc9bef 100644
+--- a/packages/excalidraw/components/TTDDialog/common.ts
++++ b/packages/excalidraw/components/TTDDialog/common.ts
+@@ -72,15 +72,23 @@ export const convertMermaidToExcalidraw = async ({
+     const api = await mermaidToExcalidrawLib.api;
+ 
+     try {
++      ret = await api.parseMermaidToExcalidraw(mermaidDefinition);
++    } catch (err: unknown) {
++      const originalParseError = err as Error;
++
++      if (!mermaidDefinition.includes('"')) {
++        return { success: false, error: originalParseError };
++      }
++
+       try {
+-        ret = await api.parseMermaidToExcalidraw(mermaidDefinition);
+-      } catch (err: unknown) {
+         ret = await api.parseMermaidToExcalidraw(
+           mermaidDefinition.replace(/"/g, "'"),
+         );
++      } catch {
++        // Keep the original error so line/column references stay aligned with
++        // the user's unmodified input.
++        return { success: false, error: originalParseError };
+       }
+-    } catch (err: unknown) {
+-      return { success: false, error: err as Error };
+     }
+ 
+     const { elements, files } = ret;
+diff --git a/packages/excalidraw/components/TTDDialog/mermaid-lang-lite.ts b/packages/excalidraw/components/TTDDialog/mermaid-lang-lite.ts
+new file mode 100644
+index 000000000000..42d5ceb00ec8
+--- /dev/null
++++ b/packages/excalidraw/components/TTDDialog/mermaid-lang-lite.ts
+@@ -0,0 +1,82 @@
++import { StreamLanguage } from "@codemirror/language";
++
++const mermaidStreamParser = StreamLanguage.define({
++  token(stream) {
++    // Comments: %%...
++    if (stream.match(/^%%.*$/)) {
++      return "comment";
++    }
++
++    // Strings
++    if (stream.match(/^"(?:[^"\\]|\\.)*"/)) {
++      return "string";
++    }
++
++    // Diagram type keywords (at start of line or after whitespace)
++    if (
++      stream.match(
++        /^(flowchart|graph|sequenceDiagram|classDiagram|stateDiagram|erDiagram|gantt|pie|mindmap|journey|gitGraph|timeline|quadrantChart|sankey|xychart)\b/i,
++      )
++    ) {
++      return "keyword";
++    }
++
++    // Direction keywords
++    if (stream.match(/^(TB|TD|BT|RL|LR)\b/)) {
++      return "keyword";
++    }
++
++    // Keywords
++    if (
++      stream.match(
++        /^(subgraph|end|participant|actor|loop|alt|else|opt|par|critical|break|rect|note|over|activate|deactivate|title|section|class|style|linkStyle|classDef|click)\b/i,
++      )
++    ) {
++      return "keyword";
++    }
++
++    // Arrows: -->, ---, -.->, ===>, etc.
++    if (stream.match(/^[-.=<>|ox]+>/)) {
++      return "operator";
++    }
++    if (stream.match(/^<[-.=<>|ox]+/)) {
++      return "operator";
++    }
++    if (stream.match(/^--+|\.\.+|==+/)) {
++      return "operator";
++    }
++
++    // Labels in brackets/parens: [text], (text), {text}, ((text)), etc.
++    if (stream.match(/^[[\](){}|<>]/)) {
++      return "bracket";
++    }
++
++    // Node IDs (alphanumeric)
++    if (stream.match(/^[A-Za-z_][A-Za-z0-9_]*/)) {
++      return "variableName";
++    }
++
++    // Numbers
++    if (stream.match(/^\d+(\.\d+)?/)) {
++      return "number";
++    }
++
++    // Punctuation
++    if (stream.match(/^[,:;]/)) {
++      return "punctuation";
++    }
++
++    // Skip whitespace
++    if (stream.eatSpace()) {
++      return null;
++    }
++
++    // Skip any other character
++    stream.next();
++    return null;
++  },
++});
++
++export function mermaidLite() {
++  return mermaidStreamParser;
++}
+diff --git a/packages/excalidraw/components/TTDDialog/utils/mermaidAutoFix.test.ts b/packages/excalidraw/components/TTDDialog/utils/mermaidAutoFix.test.ts
+new file mode 100644
+index 000000000000..51c10af353b4
+--- /dev/null
++++ b/packages/excalidraw/components/TTDDialog/utils/mermaidAutoFix.test.ts
+@@ -0,0 +1,116 @@
++import { describe, expect, it } from "vitest";
++
++import { getMermaidAutoFixCandidates } from "./mermaidAutoFix";
++
++describe("getMermaidAutoFixCandidates", () => {
++  it("suggests removing trailing token after a closed label shape", () => {
++    const sourceText = `graph TD
++  L3_TCP["TCP (Transmission Control Protocol)"]x
++  L3_UDP["UDP (User Datagram Protocol)"]`;
++
++    const errorMessage = `Parse error on line 2:
++...ission Control Protocol)"]x
++-----------------------------^
++Expecting 'SEMI', got 'NODE_STRING'`;
++
++    const candidates = getMermaidAutoFixCandidates(sourceText, errorMessage);
++
++    expect(candidates).toContain(`graph TD
++  L3_TCP["TCP (Transmission Control Protocol)"]
++  L3_UDP["UDP (User Datagram Protocol)"]`);
++  });
++
++  it("suggests appending missing end statements", () => {
++    const sourceText = `graph TD
++subgraph A
++  A1[Start]`;
++
++    const errorMessage = `Parse error on line 3:
++... A1[Start]
++-------------^
++Expecting 'end'`;
++
++    const candidates = getMermaidAutoFixCandidates(sourceText, errorMessage);
++
++    expect(candidates).toContain(`graph TD
++subgraph A
++  A1[Start]
++end`);
++  });
++
++  it("returns empty list for non-parse errors", () => {
++    expect(
++      getMermaidAutoFixCandidates("graph TD\nA-->B", "Network error"),
++    ).toEqual([]);
++  });
++
++  it("extracts line index from lexical error format too", () => {
++    const sourceText = `graph TD
++  subgraph Layers["X"]x
++  direction TB`;
++
++    const errorMessage = `Lexical error on line 2. Unrecognized text.
++...  subgraph Layers["X"]x        direction
++-----------------------^`;
++
++    const candidates = getMermaidAutoFixCandidates(sourceText, errorMessage);
++
++    expect(candidates).toContain(`graph TD
++  subgraph Layers["X"]
++  direction TB`);
++  });
++
++  it("removes extra > after edge label", () => {
++    const sourceText = `flowchart TD
++  A["User Input"] -->|text|> B["Tokenization"]
++  A["User Input"] -->|text|> B["Tokenization"]`;
++
++    const errorMessage = `Parse error on line 2:
++...A["User Input"] -->|text|> B["Tokenization"]
++---------------------------^
++Expecting 'NODE_STRING', got 'GT'`;
++
++    const candidates = getMermaidAutoFixCandidates(sourceText, errorMessage);
++
++    expect(candidates).toContain(`flowchart TD
++  A["User Input"] -->|text| B["Tokenization"]
++  A["User Input"] -->|text| B["Tokenization"]`);
++  });
++
++  it("suggests removing the last invalid deactivate for participant errors", () => {
++    const sourceText = `sequenceDiagram
++  participant QAEngineer as QA
++  activate QA
++  QA->>QA: Verifies Fix
++  deactivate QA
++  QA->>QA: Verifies Again
++  deactivate QA`;
++
++    const errorMessage = "Trying to inactivate an inactive participant (QA)";
++
++    const candidates = getMermaidAutoFixCandidates(sourceText, errorMessage);
++
++    expect(candidates).toContain(`sequenceDiagram
++  participant QAEngineer as QA
++  activate QA
++  QA->>QA: Verifies Fix
++  deactivate QA
++  QA->>QA: Verifies Again`);
++  });
++
++  it("adds a fallback candidate that removes all invalid deactivations", () => {
++    const sourceText = `sequenceDiagram
++  participant QAEngineer as QA
++  deactivate QA
++  QA->>QA: Verifies Fix
++  deactivate QA`;
++
++    const errorMessage = "Trying to inactivate an inactive participant (QA)";
++
++    const candidates = getMermaidAutoFixCandidates(sourceText, errorMessage);
++
++    expect(candidates).toContain(`sequenceDiagram
++  participant QAEngineer as QA
++  QA->>QA: Verifies Fix`);
++  });
++});
+diff --git a/packages/excalidraw/components/TTDDialog/utils/mermaidAutoFix.ts b/packages/excalidraw/components/TTDDialog/utils/mermaidAutoFix.ts
+new file mode 100644
+index 000000000000..0d92795dbef2
+--- /dev/null
++++ b/packages/excalidraw/components/TTDDialog/utils/mermaidAutoFix.ts
+@@ -0,0 +1,175 @@
++import {
++  getMermaidErrorLineNumber,
++  getMermaidInactiveParticipant,
++  isMermaidAutoFixableError,
++  isMermaidParseSyntaxError,
++} from "./mermaidError";
++
++const getErrorLineIndex = (message: string, sourceText: string) => {
++  const lineNumber = getMermaidErrorLineNumber(message, sourceText);
++  if (lineNumber == null) {
++    return null;
++  }
++  return lineNumber - 1;
++};
++
++const replaceLineAt = (
++  lines: string[],
++  index: number,
++  transform: (line: string) => string,
++) => {
++  if (index < 0 || index >= lines.length) {
++    return null;
++  }
++  const nextLine = transform(lines[index]);
++  if (nextLine === lines[index]) {
++    return null;
++  }
++  const nextLines = [...lines];
++  nextLines[index] = nextLine;
++  return nextLines.join("\n");
++};
++
++const stripTrailingTokenAfterShape = (line: string) => {
++  const alphaTailMatch = line.match(
++    /^(.*(?:\[[^\]]*]|\([^)]*\)|\{[^}]*}|"(?:[^"]*)"|'(?:[^']*)'))([A-Za-z]+)\s*$/,
++  );
++  if (alphaTailMatch) {
++    return alphaTailMatch[1];
++  }
++
++  const punctuationTailMatch = line.match(
++    /^(.*(?:\[[^\]]*]|\([^)]*\)|\{[^}]*}|"(?:[^"]*)"|'(?:[^']*)'))([,;:])\s*$/,
++  );
++  if (punctuationTailMatch) {
++    return punctuationTailMatch[1];
++  }
++
++  return line;
++};
++
++const removeExtraArrowheadAfterEdgeLabel = (line: string) => {
++  // Common typo in generated Mermaid: `-->|label|> Target` (extra `>`).
++  // Convert it to `-->|label| Target`.
++  return line.replace(/(\|[^|\n]+\|)\s*>\s*(?=[A-Za-z0-9_("[{'`])/g, "$1 ");
++};
++
++const escapeRegExp = (value: string) =>
++  value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
++
++const removeLastDeactivateForParticipant = (
++  sourceText: string,
++  participant: string,
++) => {
++  const pattern = new RegExp(
++    `^\\s*deactivate\\s+${escapeRegExp(participant)}(?:\\s+%%.*)?\\s*$`,
++  );
++  const lines = sourceText.split(/\r?\n/);
++
++  for (let index = lines.length - 1; index >= 0; index--) {
++    if (pattern.test(lines[index])) {
++      return lines.filter((_, lineIndex) => lineIndex !== index).join("\n");
++    }
++  }
++
++  return null;
++};
++
++const removeAllDeactivateForParticipant = (
++  sourceText: string,
++  participant: string,
++) => {
++  const pattern = new RegExp(
++    `^\\s*deactivate\\s+${escapeRegExp(participant)}(?:\\s+%%.*)?\\s*$`,
++  );
++  const lines = sourceText.split(/\r?\n/);
++  let removedAny = false;
++  const remainingLines = lines.filter((line) => {
++    if (!pattern.test(line)) {
++      return true;
++    }
++    removedAny = true;
++    return false;
++  });
++
++  return removedAny ? remainingLines.join("\n") : null;
++};
++
++const appendMissingEnds = (sourceText: string) => {
++  const subgraphCount = (sourceText.match(/^\s*subgraph\b/gm) || []).length;
++  const endCount = (sourceText.match(/^\s*end\s*$/gm) || []).length;
++  const missingCount = subgraphCount - endCount;
++
++  if (missingCount <= 0) {
++    return null;
++  }
++
++  const endings = Array.from({ length: missingCount }, () => "end").join("\n");
++  return `${sourceText.trimEnd()}\n${endings}`;
++};
++
++const normalizeSmartQuotes = (sourceText: string) =>
++  sourceText.replace(/[“”]/g, '"').replace(/[‘’]/g, "'");
++
++export const getMermaidAutoFixCandidates = (
++  sourceText: string,
++  errorMessage: string,
++) => {
++  if (!isMermaidAutoFixableError(errorMessage) || !sourceText.trim()) {
++    return [];
++  }
++
++  const candidates: string[] = [];
++  const seen = new Set<string>();
++  const addCandidate = (candidate: string | null) => {
++    if (!candidate || candidate === sourceText || seen.has(candidate)) {
++      return;
++    }
++    seen.add(candidate);
++    candidates.push(candidate);
++  };
++
++  const inactiveParticipant = getMermaidInactiveParticipant(errorMessage);
++  if (inactiveParticipant) {
++    addCandidate(
++      removeLastDeactivateForParticipant(sourceText, inactiveParticipant),
++    );
++    // Fallback for repeated invalid inactivations in one diagram.
++    addCandidate(
++      removeAllDeactivateForParticipant(sourceText, inactiveParticipant),
++    );
++  }
++
++  if (isMermaidParseSyntaxError(errorMessage)) {
++    const lines = sourceText.split(/\r?\n/);
++    const errorLineIndex = getErrorLineIndex(errorMessage, sourceText);
++    const lineIndexesToTry =
++      errorLineIndex == null
++        ? []
++        : [errorLineIndex, errorLineIndex - 1, errorLineIndex + 1];
++
++    for (const lineIndex of lineIndexesToTry) {
++      addCandidate(
++        replaceLineAt(lines, lineIndex, (line) =>
++          stripTrailingTokenAfterShape(line),
++        ),
++      );
++      addCandidate(
++        replaceLineAt(lines, lineIndex, (line) =>
++          removeExtraArrowheadAfterEdgeLabel(line),
++        ),
++      );
++    }
++
++    // Also try full-text replacement so repeated occurrences on other lines
++    // are fixed together in a single candidate.
++    addCandidate(removeExtraArrowheadAfterEdgeLabel(sourceText));
++
++    addCandidate(appendMissingEnds(sourceText));
++
++    const normalizedQuotes = normalizeSmartQuotes(sourceText);
++    addCandidate(normalizedQuotes === sourceText ? null : normalizedQuotes);
++  }
++
++  return candidates;
++};
+diff --git a/packages/excalidraw/components/TTDDialog/utils/mermaidError.test.ts b/packages/excalidraw/components/TTDDialog/utils/mermaidError.test.ts
+new file mode 100644
+index 000000000000..04962ea13350
+--- /dev/null
++++ b/packages/excalidraw/components/TTDDialog/utils/mermaidError.test.ts
+@@ -0,0 +1,155 @@
++import { describe, expect, it } from "vitest";
++
++import {
++  formatMermaidParseErrorMessage,
++  getMermaidErrorLineNumber,
++  getMermaidInactiveParticipant,
++  getMermaidSyntaxErrorGuidance,
++  isMermaidAutoFixableError,
++  isMermaidParseSyntaxError,
++  isMermaidCaretLine,
++} from "./mermaidError";
++
++describe("formatMermaidParseErrorMessage", () => {
++  it("strips the noisy Expecting clause from Mermaid parse errors", () => {
++    const message = `Parse error on line 6:
++... Control Protocol)"]x          L3_UDP
++----------------------^
++Expecting 'SEMI', 'NEWLINE', 'SPACE', got 'NODE_STRING'`;
++
++    expect(formatMermaidParseErrorMessage(message)).toBe(`Parse error on line 6:
++... Control Protocol)"]x          L3_UDP
++----------------------^`);
++  });
++
++  it("keeps Mermaid parse errors unchanged when no Expecting clause exists", () => {
++    const message = `Parse error on line 3:
++... some snippet
++----^`;
++
++    expect(formatMermaidParseErrorMessage(message)).toBe(message);
++  });
++
++  it("does not modify non-Mermaid parse messages", () => {
++    const message =
++      "Unexpected token while parsing JSON. Expecting value at position 10.";
++
++    expect(formatMermaidParseErrorMessage(message)).toBe(message);
++  });
++});
++
++describe("isMermaidCaretLine", () => {
++  it("returns true for Mermaid caret lines", () => {
++    expect(isMermaidCaretLine("-----------------------^")).toBe(true);
++  });
++
++  it("returns false for regular lines", () => {
++    expect(isMermaidCaretLine(`... Control Protocol)"]x`)).toBe(false);
++  });
++});
++
++describe("isMermaidParseSyntaxError", () => {
++  it("returns true for Mermaid parser syntax errors", () => {
++    expect(isMermaidParseSyntaxError("Parse error on line 6: ...")).toBe(true);
++  });
++
++  it("returns true for Mermaid lexical syntax errors", () => {
++    expect(
++      isMermaidParseSyntaxError("Lexical error on line 2. Unrecognized text."),
++    ).toBe(true);
++  });
++
++  it("returns false for non-parse errors", () => {
++    expect(isMermaidParseSyntaxError("Network error")).toBe(false);
++  });
++});
++
++describe("isMermaidAutoFixableError", () => {
++  it("returns true for Mermaid parser syntax errors", () => {
++    expect(isMermaidAutoFixableError("Parse error on line 6: ...")).toBe(true);
++  });
++
++  it("returns true for inactive participant runtime errors", () => {
++    expect(
++      isMermaidAutoFixableError(
++        "Trying to inactivate an inactive participant (QA)",
++      ),
++    ).toBe(true);
++  });
++
++  it("returns false for non-fixable errors", () => {
++    expect(isMermaidAutoFixableError("Network error")).toBe(false);
++  });
++});
++
++describe("getMermaidInactiveParticipant", () => {
++  it("extracts the participant id from inactive participant errors", () => {
++    expect(
++      getMermaidInactiveParticipant(
++        "Trying to inactivate an inactive participant (QA)",
++      ),
++    ).toBe("QA");
++  });
++
++  it("returns null for unrelated errors", () => {
++    expect(
++      getMermaidInactiveParticipant("Parse error on line 3: ..."),
++    ).toBeNull();
++  });
++});
++
++describe("getMermaidErrorLineNumber", () => {
++  it("extracts line number from parse error format", () => {
++    expect(getMermaidErrorLineNumber("Parse error on line 6: ...")).toBe(6);
++  });
++
++  it("extracts line number from lexical error format", () => {
++    expect(
++      getMermaidErrorLineNumber("Lexical error on line 2. Unrecognized text."),
++    ).toBe(2);
++  });
++
++  it("returns null for messages without Mermaid line details", () => {
++    expect(getMermaidErrorLineNumber("Network error")).toBeNull();
++  });
++
++  it("infers line from inactive participant errors when source text is provided", () => {
++    const sourceText = `sequenceDiagram
++  participant QA
++  deactivate QA
++  QA->>QA: Verifies Fix
++  deactivate QA`;
++
++    expect(
++      getMermaidErrorLineNumber(
++        "Trying to inactivate an inactive participant (QA)",
++        sourceText,
++      ),
++    ).toBe(5);
++  });
++});
++
++describe("getMermaidSyntaxErrorGuidance", () => {
++  it("returns summary and likely causes for Mermaid parse errors", () => {
++    const message = `Parse error on line 6:
++... Control Protocol)"]x
++----------------------^`;
++
++    const source = `graph TD
++subgraph Layers["X"]
++  L3_TCP["TCP (Transmission Control Protocol)"]x`;
++
++    expect(getMermaidSyntaxErrorGuidance(message, source)).toEqual({
++      summary: "Syntax error near line 6.",
++      likelyCauses: expect.arrayContaining([
++        "A block is missing an `end` statement.",
++      ]),
++    });
++  });
++
++  it("returns null for non-parse errors", () => {
++    expect(
++      getMermaidSyntaxErrorGuidance("Network error", "graph TD"),
++    ).toBeNull();
++  });
++});
+diff --git a/packages/excalidraw/components/TTDDialog/utils/mermaidError.ts b/packages/excalidraw/components/TTDDialog/utils/mermaidError.ts
+new file mode 100644
+index 000000000000..343cc9b57bee
+--- /dev/null
++++ b/packages/excalidraw/components/TTDDialog/utils/mermaidError.ts
+@@ -0,0 +1,133 @@
++const MERMAID_SYNTAX_ERROR_LINE = /(?:Parse|Lexical) error on line (\d+)[.:]/i;
++const MERMAID_INACTIVE_PARTICIPANT_ERROR =
++  /Trying to inactivate an inactive participant \((.+)\)/i;
++const MERMAID_CARET_LINE = /^\s*-+\^\s*$/;
++
++export const isMermaidParseSyntaxError = (message: string) =>
++  MERMAID_SYNTAX_ERROR_LINE.test(message);
++
++export const isMermaidAutoFixableError = (message: string) =>
++  isMermaidParseSyntaxError(message) ||
++  MERMAID_INACTIVE_PARTICIPANT_ERROR.test(message);
++
++export const isMermaidCaretLine = (line: string) =>
++  MERMAID_CARET_LINE.test(line);
++
++export const getMermaidInactiveParticipant = (
++  message: string,
++): string | null => {
++  const match = message.match(MERMAID_INACTIVE_PARTICIPANT_ERROR);
++  if (!match?.[1]) {
++    return null;
++  }
++  return match[1].trim();
++};
++
++const escapeRegExp = (value: string) =>
++  value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
++
++const getInactiveParticipantLineNumber = (
++  message: string,
++  sourceText: string,
++): number | null => {
++  const participant = getMermaidInactiveParticipant(message);
++  if (!participant) {
++    return null;
++  }
++
++  const deactivatePattern = new RegExp(
++    `^\\s*deactivate\\s+${escapeRegExp(participant)}(?:\\s+%%.*)?\\s*$`,
++  );
++  const lines = sourceText.split(/\r?\n/);
++  for (let index = lines.length - 1; index >= 0; index--) {
++    if (deactivatePattern.test(lines[index])) {
++      return index + 1;
++    }
++  }
++  return null;
++};
++
++export const getMermaidErrorLineNumber = (
++  message: string,
++  sourceText?: string,
++): number | null => {
++  const match = message.match(MERMAID_SYNTAX_ERROR_LINE);
++  if (!match) {
++    if (!sourceText) {
++      return null;
++    }
++    return getInactiveParticipantLineNumber(message, sourceText);
++  }
++  return Number.parseInt(match[1], 10);
++};
++
++const countMatches = (text: string, re: RegExp) =>
++  (text.match(re) || []).length;
++
++export const getMermaidSyntaxErrorGuidance = (
++  message: string,
++  sourceText?: string,
++): { summary: string; likelyCauses: string[] } | null => {
++  if (!isMermaidParseSyntaxError(message)) {
++    return null;
++  }
++
++  const errorLine = getMermaidErrorLineNumber(message, sourceText);
++  const summary = errorLine
++    ? `Syntax error near line ${errorLine}.`
++    : "Syntax error in Mermaid diagram.";
++
++  const likelyCauses: string[] = [];
++
++  if (sourceText) {
++    const openBrackets = countMatches(sourceText, /\[/g);
++    const closeBrackets = countMatches(sourceText, /\]/g);
++    if (openBrackets !== closeBrackets) {
++      likelyCauses.push("Unbalanced square brackets in a node label.");
++    }
++
++    const openParens = countMatches(sourceText, /\(/g);
++    const closeParens = countMatches(sourceText, /\)/g);
++    if (openParens !== closeParens) {
++      likelyCauses.push("Unbalanced parentheses in a node shape.");
++    }
++
++    const openBraces = countMatches(sourceText, /\{/g);
++    const closeBraces = countMatches(sourceText, /\}/g);
++    if (openBraces !== closeBraces) {
++      likelyCauses.push("Unbalanced braces in a decision node.");
++    }
++
++    const subgraphCount = countMatches(sourceText, /^\s*subgraph\b/gm);
++    const endCount = countMatches(sourceText, /^\s*end\s*$/gm);
++    if (subgraphCount > endCount) {
++      likelyCauses.push("A block is missing an `end` statement.");
++    }
++  }
++
++  if (/got 'NODE_STRING'/.test(message) || /got 'PS'/.test(message)) {
++    likelyCauses.push(
++      "An extra character/token may appear after a node or label definition.",
++    );
++  }
++
++  if (likelyCauses.length === 0) {
++    likelyCauses.push(
++      "A node or edge line is malformed (missing/extra delimiters).",
++    );
++    likelyCauses.push("A block (`subgraph`, `class`, etc.) may be incomplete.");
++  }
++
++  return {
++    summary,
++    likelyCauses: [...new Set(likelyCauses)],
++  };
++};
++
++export const formatMermaidParseErrorMessage = (message: string) => {
++  if (!isMermaidParseSyntaxError(message)) {
++    return message;
++  }
++
++  return message.replace(/\n\s*Expecting[\s\S]*$/, "").trimEnd();
++};
+diff --git a/packages/excalidraw/locales/en.json b/packages/excalidraw/locales/en.json
+index 7a2a7294f8a5..66402f3fb713 100644
+--- a/packages/excalidraw/locales/en.json
++++ b/packages/excalidraw/locales/en.json
+@@ -624,7 +624,8 @@
+     "syntax": "Mermaid Syntax",
+     "preview": "Preview",
+     "label": "Mermaid",
+-    "inputPlaceholder": "Write Mermaid diagram defintion here..."
++    "inputPlaceholder": "Write Mermaid diagram defintion here...",
++    "autoFixAvailable": "Auto-fix is available"
+   },
+   "ttd": {
+     "error": "Error!"
+diff --git a/packages/excalidraw/package.json b/packages/excalidraw/package.json
+index 2f12bf6041ba..d3be66cb37ba 100644
+--- a/packages/excalidraw/package.json
++++ b/packages/excalidraw/package.json
+@@ -79,11 +79,16 @@
+   },
+   "dependencies": {
+     "@braintree/sanitize-url": "6.0.2",
++    "@codemirror/commands": "^6.0.0",
++    "@codemirror/language": "^6.0.0",
++    "@codemirror/state": "^6.0.0",
++    "@codemirror/view": "^6.0.0",
++    "@lezer/highlight": "^1.0.0",
+     "@excalidraw/common": "0.18.0",
+     "@excalidraw/element": "0.18.0",
+     "@excalidraw/laser-pointer": "1.3.1",
+     "@excalidraw/math": "0.18.0",
+-    "@excalidraw/mermaid-to-excalidraw": "2.0.0-rfc3",
++    "@excalidraw/mermaid-to-excalidraw": "2.0.0-rc4",
+     "@excalidraw/random-username": "1.1.0",
+     "radix-ui": "1.4.3",
+     "browser-fs-access": "0.29.1",
+diff --git a/packages/excalidraw/tests/MermaidToExcalidraw.test.tsx b/packages/excalidraw/tests/MermaidToExcalidraw.test.tsx
+index 6043fc0aeb49..df5d21319aa1 100644
+--- a/packages/excalidraw/tests/MermaidToExcalidraw.test.tsx
++++ b/packages/excalidraw/tests/MermaidToExcalidraw.test.tsx
+@@ -1,5 +1,4 @@
+-import React from "react";
+-import { expect } from "vitest";
++import { expect, vi } from "vitest";
+ 
+ import { Excalidraw } from "../index";
+ 
+@@ -7,6 +6,13 @@ import { mockMermaidToExcalidraw } from "./helpers/mocks";
+ import { getTextEditor, updateTextEditor } from "./queries/dom";
+ import { render, waitFor } from "./test-utils";
+ 
++// Mock CodeMirror deps so the dynamic import of CodeMirrorEditor fails,
++// causing TTDDialogInput to fall back to <textarea> in tests.
++vi.mock("@codemirror/view", () => ({}));
++vi.mock("@codemirror/state", () => ({}));
++vi.mock("@codemirror/language", () => ({}));
++vi.mock("@lezer/highlight", () => ({}));
++
+ mockMermaidToExcalidraw({
+   mockRef: true,
+   parseMermaidToExcalidraw: async (definition) => {
+diff --git a/packages/excalidraw/tests/__snapshots__/MermaidToExcalidraw.test.tsx.snap b/packages/excalidraw/tests/__snapshots__/MermaidToExcalidraw.test.tsx.snap
+index f07f05497765..294f32f86d17 100644
+--- a/packages/excalidraw/tests/__snapshots__/MermaidToExcalidraw.test.tsx.snap
++++ b/packages/excalidraw/tests/__snapshots__/MermaidToExcalidraw.test.tsx.snap
+@@ -1,13 +1,6 @@
+ // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+ 
+-exports[`Test <MermaidToExcalidraw/> > should open mermaid popup when active tool is mermaid 1`] = `
+-"<div class="Modal Dialog ttd-dialog" role="dialog" aria-modal="true" aria-labelledby="dialog-title"><div class="Modal__background"></div><div class="Modal__content" style="--max-width: 1520px;" tabindex="0"><div class="Island"><div class="Dialog__content"><div dir="ltr" data-orientation="horizontal" class="ttd-dialog-tabs-root"><p class="dialog-mermaid-title">Mermaid to Excalidraw</p><div data-state="active" data-orientation="horizontal" role="tabpanel" aria-labelledby="radix-:r4:-trigger-mermaid" id="radix-:r4:-content-mermaid" tabindex="0" class="ttd-dialog-content" style=""><div class="ttd-dialog-desc">Currently only <a href="https://mermaid.js.org/syntax/flowchart.html">Flowchart</a>,<a href="https://mermaid.js.org/syntax/sequenceDiagram.html"> Sequence, </a> and <a href="https://mermaid.js.org/syntax/classDiagram.html">Class </a>Diagrams are supported. The other types will be rendered as image in Excalidraw.</div><div class="ttd-dialog-panels"><div class="ttd-dialog-panel"><textarea class="ttd-dialog-input" placeholder="Write Mermaid diagram defintion here...">flowchart TD
+- A[Christmas] --&gt;|Get money| B(Go shopping)
+- B --&gt; C{Let me think}
+- C --&gt;|One| D[Laptop]
+- C --&gt;|Two| E[iPhone]
+- C --&gt;|Three| F[Car]</textarea><div class="ttd-dialog-panel-button-container invisible" style="justify-content: flex-start;"></div></div><div class="ttd-dialog-panel"><div class="ttd-dialog-output-wrapper "><div class="ttd-dialog-output-canvas-container"><div class="ttd-dialog-output-canvas-content"><canvas width="89" height="158" dir="ltr"></canvas></div></div></div><div class="ttd-dialog-panel-button-container" style="justify-content: flex-start;"><button type="button" class="excalidraw-button ttd-dialog-panel-button"><div class="">Insert<span><svg aria-hidden="true" focusable="false" role="img" viewBox="0 0 20 20" class="" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><g stroke-width="1.25"><path d="M4.16602 10H15.8327"></path><path d="M12.5 13.3333L15.8333 10"></path><path d="M12.5 6.66666L15.8333 9.99999"></path></g></svg></span></div></button><div class="ttd-dialog-submit-shortcut"><div class="ttd-dialog-submit-shortcut__key">Ctrl</div><div class="ttd-dialog-submit-shortcut__key">Enter</div></div></div></div></div></div></div></div></div></div></div>"
+-`;
++exports[`Test <MermaidToExcalidraw/> > should open mermaid popup when active tool is mermaid 1`] = `"<div class="Modal Dialog ttd-dialog" role="dialog" aria-modal="true" aria-labelledby="dialog-title"><div class="Modal__background"></div><div class="Modal__content" style="--max-width: 1520px;" tabindex="0"><div class="Island"><div class="Dialog__content"><div dir="ltr" data-orientation="horizontal" class="ttd-dialog-tabs-root"><p class="dialog-mermaid-title">Mermaid to Excalidraw</p><div data-state="active" data-orientation="horizontal" role="tabpanel" aria-labelledby="radix-:r4:-trigger-mermaid" id="radix-:r4:-content-mermaid" tabindex="0" class="ttd-dialog-content" style=""><div class="ttd-dialog-desc">Currently only <a href="https://mermaid.js.org/syntax/flowchart.html">Flowchart</a>,<a href="https://mermaid.js.org/syntax/sequenceDiagram.html"> Sequence, </a> and <a href="https://mermaid.js.org/syntax/classDiagram.html">Class </a>Diagrams are supported. The other types will be rendered as image in Excalidraw.</div><div class="ttd-dialog-panels"><div class="ttd-dialog-panel"><div class="ttd-dialog-panel-button-container invisible" style="justify-content: flex-start;"></div></div><div class="ttd-dialog-panel"><div class="ttd-dialog-output-wrapper "><div class="ttd-dialog-output-canvas-container"><div class="ttd-dialog-output-canvas-content"><canvas width="89" height="158" dir="ltr"></canvas></div></div></div><div class="ttd-dialog-panel-button-container" style="justify-content: flex-start;"><button type="button" class="excalidraw-button ttd-dialog-panel-button"><div class="">Insert<span><svg aria-hidden="true" focusable="false" role="img" viewBox="0 0 20 20" class="" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><g stroke-width="1.25"><path d="M4.16602 10H15.8327"></path><path d="M12.5 13.3333L15.8333 10"></path><path d="M12.5 6.66666L15.8333 9.99999"></path></g></svg></span></div></button><div class="ttd-dialog-submit-shortcut"><div class="ttd-dialog-submit-shortcut__key">Ctrl</div><div class="ttd-dialog-submit-shortcut__key">Enter</div></div></div></div></div></div></div></div></div></div></div>"`;
+ 
+ exports[`Test <MermaidToExcalidraw/> > should show error in preview when mermaid library throws error 1`] = `
+ "flowchart TD
+diff --git a/yarn.lock b/yarn.lock
+index 11de59df7d5f..5259da6288d0 100644
+--- a/yarn.lock
++++ b/yarn.lock
+@@ -1095,6 +1095,45 @@
+   resolved "https://registry.yarnpkg.com/@chevrotain/utils/-/utils-11.0.3.tgz#e39999307b102cff3645ec4f5b3665f5297a2224"
+   integrity sha512-YslZMgtJUyuMbZ+aKvfF3x1f5liK4mWNxghFRv7jqRR9C3R3fAOGTTKvxXDa2Y1s9zSbcpuO0cAxDYsc9SrXoQ==
+ 
++"@codemirror/commands@^6.0.0":
++  version "6.10.2"
++  resolved "https://registry.yarnpkg.com/@codemirror/commands/-/commands-6.10.2.tgz#338bf53ab146de7bb26da4a1d32c6a6ff4d36b39"
++  integrity sha512-vvX1fsih9HledO1c9zdotZYUZnE4xV0m6i3m25s5DIfXofuprk6cRcLUZvSk3CASUbwjQX21tOGbkY2BH8TpnQ==
++  dependencies:
++    "@codemirror/language" "^6.0.0"
++    "@codemirror/state" "^6.4.0"
++    "@codemirror/view" "^6.27.0"
++    "@lezer/common" "^1.1.0"
++
++"@codemirror/language@^6.0.0":
++  version "6.12.2"
++  resolved "https://registry.yarnpkg.com/@codemirror/language/-/language-6.12.2.tgz#7db5a46757411cf251e8f450474c05710c27d42c"
++  integrity sha512-jEPmz2nGGDxhRTg3lTpzmIyGKxz3Gp3SJES4b0nAuE5SWQoKdT5GoQ69cwMmFd+wvFUhYirtDTr0/DRHpQAyWg==
++  dependencies:
++    "@codemirror/state" "^6.0.0"
++    "@codemirror/view" "^6.23.0"
++    "@lezer/common" "^1.5.0"
++    "@lezer/highlight" "^1.0.0"
++    "@lezer/lr" "^1.0.0"
++    style-mod "^4.0.0"
++
++"@codemirror/state@^6.0.0", "@codemirror/state@^6.4.0", "@codemirror/state@^6.5.0":
++  version "6.5.4"
++  resolved "https://registry.yarnpkg.com/@codemirror/state/-/state-6.5.4.tgz#f5be4b8c0d2310180d5f15a9f641c21ca69faf19"
++  integrity sha512-8y7xqG/hpB53l25CIoit9/ngxdfoG+fx+V3SHBrinnhOtLvKHRyAJJuHzkWrR4YXXLX8eXBsejgAAxHUOdW1yw==
++  dependencies:
++    "@marijn/find-cluster-break" "^1.0.0"
++
++"@codemirror/view@^6.0.0", "@codemirror/view@^6.23.0", "@codemirror/view@^6.27.0":
++  version "6.39.16"
++  resolved "https://registry.yarnpkg.com/@codemirror/view/-/view-6.39.16.tgz#e9d876aba20b31df7858abd7c2a845319c70b302"
++  integrity sha512-m6S22fFpKtOWhq8HuhzsI1WzUP/hB9THbDj0Tl5KX4gbO6Y91hwBl7Yky33NdvB6IffuRFiBxf1R8kJMyXmA4Q==
++  dependencies:
++    "@codemirror/state" "^6.5.0"
++    crelt "^1.0.6"
++    style-mod "^4.1.0"
++    w3c-keyname "
+
+... [truncated, 64959 chars total]

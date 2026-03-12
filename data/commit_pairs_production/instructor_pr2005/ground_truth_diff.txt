@@ -1,0 +1,221 @@
+diff --git a/instructor/providers/gemini/utils.py b/instructor/providers/gemini/utils.py
+index 3d9cade73..b78081d77 100644
+--- a/instructor/providers/gemini/utils.py
++++ b/instructor/providers/gemini/utils.py
+@@ -330,11 +330,13 @@ def update_genai_kwargs(
+             }
+         )
+ 
+-    # Extract thinking_config from user's config object if provided
+-    # This ensures thinking_config inside config parameter is not ignored
++    # Extract thinking_config from user's config if provided (dict or object)
++    # This ensures thinking_config inside config parameter is not ignored.
+     user_config = new_kwargs.get("config")
+     user_thinking_config = None
+-    if user_config is not None and hasattr(user_config, "thinking_config"):
++    if isinstance(user_config, dict):
++        user_thinking_config = user_config.get("thinking_config")
++    elif user_config is not None and hasattr(user_config, "thinking_config"):
+         user_thinking_config = user_config.thinking_config
+ 
+     # Handle thinking_config parameter - prioritize kwarg over config.thinking_config
+@@ -345,8 +347,9 @@ def update_genai_kwargs(
+     if thinking_config is not None:
+         base_config["thinking_config"] = thinking_config
+ 
+-    # Extract other relevant fields from user's config object
+-    # This ensures fields like automatic_function_calling are not ignored
++    # Extract other relevant fields from user's config (dict or object).
++    # This ensures fields like automatic_function_calling / labels / cached_content
++    # are not ignored when config is passed as a dict.
+     if user_config is not None:
+         config_fields_to_merge = [
+             "automatic_function_calling",
+@@ -354,10 +357,15 @@ def update_genai_kwargs(
+             "cached_content",
+         ]
+         for field in config_fields_to_merge:
+-            if hasattr(user_config, field):
++            if isinstance(user_config, dict):
++                field_value = user_config.get(field)
++            elif hasattr(user_config, field):
+                 field_value = getattr(user_config, field)
+-                if field_value is not None and field not in base_config:
+-                    base_config[field] = field_value
++            else:
++                field_value = None
++
++            if field_value is not None and field not in base_config:
++                base_config[field] = field_value
+ 
+     return base_config
+ 
+@@ -882,12 +890,16 @@ def handle_genai_structured_outputs(
+     if new_kwargs.get("stream", False) and not issubclass(response_model, PartialBase):
+         response_model = Partial[response_model]
+ 
+-    # Extract thinking_config from user-provided config object if present
+-    # This fixes issue #1966 where thinking_config inside config was ignored
++    # Extract thinking_config and cached_content from user-provided config (dict or object).
++    # This fixes issue #1966 (thinking_config ignored) and ensures cached_content
++    # is detected even when config is provided as a dict.
+     user_config = new_kwargs.get("config")
+     user_thinking_config = None
+     user_cached_content = None
+-    if user_config is not None:
++    if isinstance(user_config, dict):
++        user_thinking_config = user_config.get("thinking_config")
++        user_cached_content = user_config.get("cached_content")
++    elif user_config is not None:
+         if hasattr(user_config, "thinking_config"):
+             user_thinking_config = user_config.thinking_config
+         if hasattr(user_config, "cached_content"):
+@@ -965,12 +977,16 @@ def handle_genai_tools(
+     if new_kwargs.get("stream", False) and not issubclass(response_model, PartialBase):
+         response_model = Partial[response_model]
+ 
+-    # Extract thinking_config and cached_content from user-provided config object if present
+-    # This fixes issue #1966 where thinking_config inside config was ignored
++    # Extract thinking_config and cached_content from user-provided config (dict or object).
++    # This fixes issue #1966 (thinking_config ignored) and ensures cached_content
++    # is detected even when config is provided as a dict.
+     user_config = new_kwargs.get("config")
+     user_thinking_config = None
+     user_cached_content = None
+-    if user_config is not None:
++    if isinstance(user_config, dict):
++        user_thinking_config = user_config.get("thinking_config")
++        user_cached_content = user_config.get("cached_content")
++    elif user_config is not None:
+         if hasattr(user_config, "thinking_config"):
+             user_thinking_config = user_config.thinking_config
+         if hasattr(user_config, "cached_content"):
+diff --git a/tests/test_genai_config_merging.py b/tests/test_genai_config_merging.py
+index 6aab780bb..7216ff73a 100644
+--- a/tests/test_genai_config_merging.py
++++ b/tests/test_genai_config_merging.py
+@@ -397,3 +397,124 @@ class TestModel(BaseModel):
+     assert result_config.tools is not None
+     assert result_config.tool_config is not None
+     assert result_config.system_instruction is not None
++
++
++def test_update_genai_kwargs_config_dict_labels():
++    """Test that labels is merged when config is provided as a dict (issue #1759)."""
++    kwargs = {"config": {"labels": {"env": "prod", "team": "ml"}}}
++    base_config: dict[str, object] = {}
++
++    result = update_genai_kwargs(kwargs, base_config)
++
++    assert result["labels"] == {"env": "prod", "team": "ml"}
++
++
++def test_update_genai_kwargs_config_dict_cached_content():
++    """Test that cached_content is merged when config is provided as a dict."""
++    kwargs = {"config": {"cached_content": "caches/dict123"}}
++    base_config: dict[str, object] = {}
++
++    result = update_genai_kwargs(kwargs, base_config)
++
++    assert result["cached_content"] == "caches/dict123"
++
++
++def test_update_genai_kwargs_config_dict_thinking_config():
++    """Test that thinking_config is merged when config is provided as a dict."""
++    thinking_config = {"thinking_budget": 1234}
++    kwargs = {"config": {"thinking_config": thinking_config}}
++    base_config: dict[str, object] = {}
++
++    result = update_genai_kwargs(kwargs, base_config)
++
++    assert result["thinking_config"] == thinking_config
++
++
++def test_handle_genai_structured_outputs_preserves_labels_from_config_dict():
++    """Test that labels are preserved when config is provided as a dict (issue #1759)."""
++    from pydantic import BaseModel
++
++    from instructor.providers.gemini.utils import handle_genai_structured_outputs
++
++    class TestModel(BaseModel):
++        name: str
++
++    new_kwargs = {
++        "messages": [{"role": "user", "content": "Hello"}],
++        "config": {"labels": {"tenant": "acme", "cost-center": "123"}},
++    }
++
++    _, result_kwargs = handle_genai_structured_outputs(TestModel, new_kwargs)
++
++    result_config = result_kwargs["config"]
++    assert result_config.labels == {"tenant": "acme", "cost-center": "123"}
++
++
++def test_handle_genai_tools_preserves_labels_from_config_dict():
++    """Test that labels are preserved in tools mode when config is a dict (issue #1759)."""
++    from pydantic import BaseModel
++
++    from instructor.providers.gemini.utils import handle_genai_tools
++
++    class TestModel(BaseModel):
++        name: str
++
++    new_kwargs = {
++        "messages": [{"role": "user", "content": "Hello"}],
++        "config": {"labels": {"tenant": "acme", "cost-center": "123"}},
++    }
++
++    _, result_kwargs = handle_genai_tools(TestModel, new_kwargs)
++
++    result_config = result_kwargs["config"]
++    assert result_config.labels == {"tenant": "acme", "cost-center": "123"}
++
++
++def test_handle_genai_structured_outputs_skips_system_instruction_with_cached_content_dict():
++    """Test cached_content dict config disables system_instruction in structured outputs."""
++    from pydantic import BaseModel
++
++    from instructor.providers.gemini.utils import handle_genai_structured_outputs
++
++    class TestModel(BaseModel):
++        name: str
++
++    new_kwargs = {
++        "messages": [
++            {"role": "system", "content": "You are a helpful assistant."},
++            {"role": "user", "content": "Hello"},
++        ],
++        "config": {"cached_content": "caches/dict-cache-1"},
++    }
++
++    _, result_kwargs = handle_genai_structured_outputs(TestModel, new_kwargs)
++
++    result_config = result_kwargs["config"]
++    assert result_config.cached_content == "caches/dict-cache-1"
++    assert result_config.system_instruction is None
++
++
++def test_handle_genai_tools_skips_tools_and_system_instruction_with_cached_content_dict():
++    """Test cached_content dict config disables tools/tool_config/system_instruction in tools mode."""
++    from pydantic import BaseModel
++
++    from instructor.providers.gemini.utils import handle_genai_tools
++
++    class TestModel(BaseModel):
++        name: str
++
++    new_kwargs = {
++        "messages": [
++            {"role": "system", "content": "You are a helpful assistant."},
++            {"role": "user", "content": "Hello"},
++        ],
++        "config": {"cached_content": "caches/dict-cache-2"},
++    }
++
++    _, result_kwargs = handle_genai_tools(TestModel, new_kwargs)
++
++    result_config = result_kwargs["config"]
++    assert result_config.cached_content == "caches/dict-cache-2"
++    assert result_config.system_instruction is None
++    assert result_config.tools is None
++    assert result_config.tool_config is None

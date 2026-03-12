@@ -1,0 +1,78 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "error_handling",
+      "recommendation": "Added defensive filtering to skip non-tool-call items during response reasking",
+      "rationale": "When using reasoning models with OpenAI's responses API, the output may contain ResponseReasoningItem objects that lack tool call arguments. Directly accessing `.arguments` on these items causes AttributeError crashes. The solution filters the output list to only include valid tool call items before processing.",
+      "alternatives_considered": [
+        "Try/except blocks around each tool call access",
+        "Adding type checking with isinstance() for each item",
+        "Modifying the response structure to separate reasoning items from tool calls"
+      ],
+      "files_affected": [
+        "instructor/providers/openai/utils.py"
+      ]
+    },
+    {
+      "dimension": "api_design",
+      "recommendation": "Created helper functions for tool call filtering and formatting to improve code organization",
+      "rationale": "Extracted tool call filtering and formatting logic into separate functions (_filter_responses_tool_calls and _format_responses_tool_call_details) to maintain single responsibility principle and improve testability. This keeps the main reask_responses_tools function focused on orchestration while delegating specific concerns to helper functions.",
+      "alternatives_considered": [
+        "Keeping all logic inline within reask_responses_tools",
+        "Creating a separate class for tool call processing",
+        "Using Pydantic models to validate tool call structure"
+      ],
+      "files_affected": [
+        "instructor/providers/openai/utils.py"
+      ]
+    },
+    {
+      "dimension": "testing",
+      "recommendation": "Added comprehensive test coverage for the responses reask logic with reasoning models",
+      "rationale": "Created mock objects (MockResponsesToolCall, MockResponsesReasoningItem, MockResponsesResponse) to simulate the OpenAI responses API structure and test the filtering behavior. The test verifies that reasoning items are properly skipped and tool call details are correctly formatted in reask messages.",
+      "alternatives_considered": [
+        "Using real OpenAI API calls in tests",
+        "Testing only the happy path without edge cases",
+        "Relying on existing integration tests"
+      ],
+      "files_affected": [
+        "tests/test_streaming_reask_bug.py"
+      ]
+    },
+    {
+      "dimension": "backward_compatibility",
+      "recommendation": "Maintained existing behavior for standard tool calls while adding support for reasoning models",
+      "rationale": "The _filter_responses_tool_calls function uses flexible attribute checking (type in {\"function_call\", \"tool_call\"} or hasattr(item, \"arguments\")) to support both current and potential future tool call representations. This ensures existing code continues to work while adding the safety check.",
+      "alternatives_considered": [
+        "Breaking changes to require specific tool call types",
+        "Adding a configuration flag to enable/disable reasoning support",
+        "Creating a separate reask function for reasoning models"
+      ],
+      "files_affected": [
+        "instructor/providers/openai/utils.py"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Fix Response Reasking Crash with Reasoning Models",
+      "description": "Implement safety checks to prevent AttributeError when processing OpenAI responses API output containing ResponseReasoningItem objects during validation error retries",
+      "files_to_modify": [
+        "instructor/providers/openai/utils.py",
+        "tests/test_streaming_reask_bug.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation addresses a critical bug where the OpenAI responses reasking logic would crash when encountering ResponseReasoningItem objects in the output list. These reasoning items, used by models like o1-preview, lack the 'arguments' attribute that standard tool call items have, causing AttributeError during validation error retry attempts.\n\nThe solution introduces two helper functions in the OpenAI provider utilities: _filter_responses_tool_calls() safely filters the output list to include only valid tool call items, and _format_responses_tool_call_details() extracts and formats tool metadata for inclusion in reask messages. The main reask_responses_tools() function now uses these helpers, ensuring that only items with tool call arguments are processed while reasoning items are gracefully skipped.\n\nThis approach maintains backward compatibility with existing tool call processing while adding robust handling for mixed output types. The accompanying test suite was expanded with mock objects that simulate the OpenAI responses API structure, verifying that reasoning items are properly filtered out and that tool call details (name and ID) are correctly included in reask messages. The changes are minimal and focused, addressing the specific safety issue without altering the broader reasking architecture.",
+  "source_pr": "https://github.com/567-labs/instructor/pull/2002",
+  "before_sha": "a937635109868711a8b3e788eb7a7a99871ef640",
+  "after_sha": "3b8681207679c10c283ac73de8a16b3eaae99dd0",
+  "diff_stats": {
+    "additions": 97,
+    "deletions": 2,
+    "files_changed": 2
+  }
+}

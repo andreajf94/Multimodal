@@ -1,0 +1,358 @@
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index 5286dedb6..fac7e68bb 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -12,10 +12,12 @@ All notable changes to this project will be documented in this file. The format
+ - Simplified `JsonCompleteness` by using `jiter` parsing and a sibling-based completeness heuristic (#2000)
+ 
+ ### Fixed
++
++- Fixed Google GenAI `safety_settings` causing `400 INVALID_ARGUMENT` when requests include image content by using image-specific harm categories when needed (#1773)
++- Fixed `create_with_completion()` crashing for `list[T]` response models (where `T` is a Pydantic model) by preserving `_raw_response` on list outputs (#1303)
+ - Fixed Responses API retries crashing on reasoning items by skipping non-tool-call items in `reask_responses_tools` (#2002)
+ - Fixed Google GenAI dict-style `config` handling to preserve `labels` and other settings like `cached_content` and `thinking_config` (#2005)
+-- Fixed Google GenAI `safety_settings` causing `400 INVALID_ARGUMENT` when requests include image content by using image-specific harm categories when needed (#2007, #1773)
+-- Fixed `create_with_completion()` crashing when using `list[T]` response models by preserving `_raw_response` on list outputs, and hardened optional `vertexai` imports (#2011, #1303)
++
+ 
+ ## [1.14.3] - 2026-01-13
+ 
+diff --git a/instructor/dsl/__init__.py b/instructor/dsl/__init__.py
+index ef4365b6e..c4bf94d74 100644
+--- a/instructor/dsl/__init__.py
++++ b/instructor/dsl/__init__.py
+@@ -2,8 +2,8 @@
+ from .maybe import Maybe
+ from .partial import Partial
+ from .citation import CitationMixin
+-from .response_list import ListResponse
+ from .simple_type import is_simple_type, ModelAdapter
++from .response_list import ListResponse, ResponseList
+ from . import validators  # Backwards compatibility module
+ 
+ __all__ = [  # noqa: F405
+@@ -12,6 +12,7 @@
+     "ListResponse",
+     "Maybe",
+     "Partial",
++    "ResponseList",
+     "is_simple_type",
+     "ModelAdapter",
+     "validators",
+diff --git a/instructor/dsl/response_list.py b/instructor/dsl/response_list.py
+index 2b5c1f956..2041dcb39 100644
+--- a/instructor/dsl/response_list.py
++++ b/instructor/dsl/response_list.py
+@@ -1,3 +1,9 @@
++"""List-like response wrapper.
++
++When a response model returns a list (for example `list[User]`), we still want to
++attach the provider's raw response so `create_with_completion()` can return it.
++"""
++
+ from __future__ import annotations
+ 
+ from typing import Any, Generic, TypeVar
+@@ -31,3 +37,7 @@ def __getitem__(self, key):  # type: ignore[no-untyped-def]
+         if isinstance(key, slice):
+             return type(self)(value, _raw_response=self._raw_response)
+         return value
++
++
++# Backwards-friendly alias
++ResponseList = ListResponse
+diff --git a/instructor/processing/response.py b/instructor/processing/response.py
+index 8a87b23bc..e1022df7c 100644
+--- a/instructor/processing/response.py
++++ b/instructor/processing/response.py
+@@ -178,7 +178,7 @@ async def process_response_async(
+     validation_context: dict[str, Any] | None = None,
+     strict: bool | None = None,
+     mode: Mode = Mode.TOOLS,
+-) -> T_Model | ChatCompletion:
++) -> Any:
+     """Asynchronously process and transform LLM responses into structured models.
+ 
+     This function is the async entry point for converting raw LLM responses into validated
+@@ -227,14 +227,23 @@ async def process_response_async(
+ 
+     if (
+         inspect.isclass(response_model)
+-        and issubclass(response_model, (IterableBase, PartialBase))
++        and issubclass(response_model, IterableBase)
+         and stream
+     ):
+-        # from_streaming_response_async returns an AsyncGenerator
+-        # Yield each item as it comes in
+-        # Note: response type varies by mode (ChatCompletion, AsyncGenerator, etc.)
+-        return response_model.from_streaming_response_async(  # type: ignore[return-value]
+-            cast(AsyncGenerator[Any, None], response),  # type: ignore[arg-type]
++        # Preserve streaming behavior for `create_iterable()` (async for).
++        return response_model.from_streaming_response_async(  # type: ignore[return-value,arg-type]
++            cast(AsyncGenerator[Any, None], response),
++            mode=mode,
++        )
++
++    if (
++        inspect.isclass(response_model)
++        and issubclass(response_model, PartialBase)
++        and stream
++    ):
++        # Return the AsyncGenerator directly for streaming Partial responses.
++        return response_model.from_streaming_response_async(  # type: ignore[return-value,arg-type]
++            cast(AsyncGenerator[Any, None], response),
+             mode=mode,
+         )
+ 
+@@ -256,6 +265,7 @@ async def process_response_async(
+ 
+     if isinstance(response_model, ParallelBase):
+         logger.debug(f"Returning model from ParallelBase")
++        model._raw_response = response
+         return model
+ 
+     if isinstance(model, AdapterBase):
+@@ -274,7 +284,7 @@ def process_response(
+     validation_context: dict[str, Any] | None = None,
+     strict=None,
+     mode: Mode = Mode.TOOLS,
+-) -> T_Model | list[T_Model] | None:
++) -> Any:
+     """Process and transform LLM responses into structured models (synchronous).
+ 
+     This is the main entry point for converting raw LLM responses into validated Pydantic
+@@ -333,18 +343,27 @@ class to parse the response into. Special DSL types supported:
+ 
+     if (
+         inspect.isclass(response_model)
+-        and issubclass(response_model, (IterableBase, PartialBase))
++        and issubclass(response_model, IterableBase)
++        and stream
++    ):
++        # Preserve streaming behavior for `create_iterable()` (for/async for).
++        return response_model.from_streaming_response(  # type: ignore[return-value]
++            response,
++            mode=mode,
++        )
++
++    if (
++        inspect.isclass(response_model)
++        and issubclass(response_model, PartialBase)
+         and stream
+     ):
+-        # from_streaming_response returns a Generator
+-        # Collect all yielded values into a list
+-        tasks = list(
++        # Collect partial stream to surface validation errors inside retry logic.
++        return list(
+             response_model.from_streaming_response(  # type: ignore
+                 response,
+                 mode=mode,
+             )
+         )
+-        return tasks
+ 
+     model = response_model.from_response(  # type: ignore
+         response,
+@@ -364,6 +383,7 @@ class to parse the response into. Special DSL types supported:
+ 
+     if isinstance(response_model, ParallelBase):
+         logger.debug(f"Returning model from ParallelBase")
++        model._raw_response = response
+         return model
+ 
+     if isinstance(model, AdapterBase):
+diff --git a/instructor/utils/core.py b/instructor/utils/core.py
+index 6db6c4b58..73e76a0a5 100644
+--- a/instructor/utils/core.py
++++ b/instructor/utils/core.py
+@@ -596,11 +596,13 @@ def prepare_response_model(response_model: type[T] | None) -> type[T] | None:
+     if response_model is None:
+         return None
+ 
+-    # `list[int | str]` and similar scalar lists are treated as simple types and should
+-    # be adapted, not converted into an IterableModel.
+     origin = get_origin(response_model)
++
++    # For `list[int | str]` and other scalar lists, keep the simple-type adapter path.
++    # However, for `list[User]` (or `list[Union[User, Other]]`) we want IterableModel.
+     if origin is list and is_simple_type(response_model):
+         args = get_args(response_model)
++        inner = args[0] if args else None
+ 
+         def _is_model_type(t: Any) -> bool:
+             if inspect.isclass(t) and issubclass(t, BaseModel):
+@@ -609,26 +611,30 @@ def _is_model_type(t: Any) -> bool:
+                 inspect.isclass(m) and issubclass(m, BaseModel) for m in get_args(t)
+             )
+ 
+-        # If the list element is a Pydantic model (or union of models), this is a
+-        # structured "iterable extraction" response model, not a simple scalar list.
+-        if args and _is_model_type(args[0]):
+-            origin = None
++        if inner is not None and _is_model_type(inner):
++            # Treat as structured iterable extraction.
++            origin = list
+         else:
+             from instructor.dsl.simple_type import ModelAdapter
+ 
+-            response_model = ModelAdapter[response_model]  # type: ignore[invalid-type-form]
++            # Avoid `ModelAdapter[response_model]` so type checkers don't treat this
++            # as a type expression. This is a runtime wrapper.
++            response_model = ModelAdapter.__class_getitem__(response_model)  # type: ignore[arg-type]
+             origin = get_origin(response_model)
+ 
++    # Convert TypedDict -> BaseModel
+     if is_typed_dict(response_model):
++        model_name = getattr(response_model, "__name__", "TypedDictModel")
++        annotations = getattr(response_model, "__annotations__", {})
+         response_model = cast(
+             type[BaseModel],
+             create_model(
+-                response_model.__name__,
+-                **{k: (v, ...) for k, v in response_model.__annotations__.items()},
++                model_name,
++                **{k: (v, ...) for k, v in annotations.items()},
+             ),
+         )
+ 
+-    # Recompute after potential wrapping/conversion above.
++    # Convert Iterable[T] or list[T] (where T is a model) -> IterableModel(T)
+     origin = get_origin(response_model)
+     if origin in {Iterable, list}:
+         from instructor.dsl.iterable import IterableModel
+@@ -643,10 +649,12 @@ def _is_model_type(t: Any) -> bool:
+             iterable_element_class = cast(
+                 type[BaseModel],
+                 create_model(
+-                    iterable_element_class.__name__,
++                    getattr(iterable_element_class, "__name__", "TypedDictModel"),
+                     **{
+                         k: (v, ...)
+-                        for k, v in iterable_element_class.__annotations__.items()
++                        for k, v in getattr(
++                            iterable_element_class, "__annotations__", {}
++                        ).items()
+                     },
+                 ),
+             )
+@@ -655,7 +663,9 @@ def _is_model_type(t: Any) -> bool:
+     if is_simple_type(response_model):
+         from instructor.dsl.simple_type import ModelAdapter
+ 
+-        response_model = ModelAdapter[response_model]  # type: ignore[invalid-type-form]
++        # Avoid `ModelAdapter[response_model]` so type checkers don't treat this as
++        # a type expression. This is a runtime wrapper.
++        response_model = ModelAdapter.__class_getitem__(response_model)  # type: ignore[arg-type]
+ 
+     # Import here to avoid circular dependency
+     from ..processing.function_calls import OpenAISchema, openai_schema
+diff --git a/tests/test_list_response_wrapper.py b/tests/test_list_response_wrapper.py
+new file mode 100644
+index 000000000..94b1420e6
+--- /dev/null
++++ b/tests/test_list_response_wrapper.py
+@@ -0,0 +1,103 @@
++from __future__ import annotations
++
++from collections.abc import AsyncGenerator, Generator
++
++import pytest
++from pydantic import BaseModel
++
++from instructor.dsl.iterable import IterableBase
++from instructor.dsl.response_list import ListResponse
++from instructor.mode import Mode
++from instructor.processing.response import process_response, process_response_async
++from instructor.utils.core import prepare_response_model
++
++
++class DummyIterableModel(BaseModel, IterableBase):
++    tasks: list[int]
++
++    @classmethod
++    def from_response(cls, completion, **kwargs):  # noqa: ANN001,ARG003
++        return cls(tasks=[1, 2])
++
++    @classmethod
++    def from_streaming_response(  # noqa: ANN001
++        cls, _completion, mode: Mode, **_kwargs
++    ) -> Generator[int, None, None]:
++        del mode
++        yield 1
++        yield 2
++
++    @classmethod
++    def from_streaming_response_async(  # noqa: ANN001
++        cls, _completion: AsyncGenerator[object, None], mode: Mode, **_kwargs
++    ) -> AsyncGenerator[int, None]:
++        del mode
++
++        async def gen() -> AsyncGenerator[int, None]:
++            yield 1
++            yield 2
++
++        return gen()
++
++
++class DummyCompletion(BaseModel):
++    """Minimal stand-in for a provider completion object."""
++
++
++def test_process_response_returns_list_response_for_iterable_model():
++    raw = DummyCompletion()
++
++    result = process_response(
++        raw,
++        response_model=DummyIterableModel,
++        stream=False,
++        mode=Mode.TOOLS,
++    )
++
++    assert isinstance(result, ListResponse)
++    assert list(result) == [1, 2]
++    assert result._raw_response == raw
++
++
++def test_process_response_streaming_returns_list_response_for_iterable_model():
++    raw = DummyCompletion()
++
++    result = process_response(
++        raw,
++        response_model=DummyIterableModel,
++        stream=True,
++        mode=Mode.TOOLS,
++    )
++
++    # Streaming IterableBase should preserve generator behavior (used by create_iterable()).
++    assert list(result) == [1, 2]
++
++
++@pytest.mark.asyncio
++async def test_process_response_async_streaming_returns_list_response_for_iterable_model():
++    async def completion_stream() -> AsyncGenerator[object, None]:
++        yield object()
++
++    raw = completion_stream()
++
++    result = await process_response_async(
++        raw,  # type: ignore[arg-type]
++        response_model=DummyIterableModel,
++        stream=True,
++        mode=Mode.TOOLS,
++    )
++
++    # Streaming IterableBase should preserve async generator behavior (used by create_iterable()).
++    collected: list[int] = []
++    async for item in result:
++        collected.append(item)
++    assert collected == [1, 2]
++
++
++def test_prepare_response_model_treats_list_as_iterable_model():
++    class User(BaseModel):
++        name: str
++
++    prepared = prepare_response_model(list[User])
++    assert prepared is not None
++    assert issubclass(prepared, IterableBase)

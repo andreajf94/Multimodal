@@ -1,0 +1,78 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "api_design",
+      "recommendation": "Added two new props to the DataEditor component: `show_search` (boolean) and `on_search_close` (event handler) to expose the underlying Glide Data Grid's search functionality",
+      "rationale": "The Glide Data Grid already has built-in search capabilities. Rather than reimplementing search logic, we expose the existing functionality through the Reflex component API. This follows the framework's pattern of wrapping React component features with Python-friendly interfaces.",
+      "alternatives_considered": [
+        "Building a custom search implementation separate from the grid",
+        "Adding a separate SearchBar component that would need to coordinate with the DataEditor",
+        "Making search always enabled without user control"
+      ],
+      "files_affected": [
+        "reflex/components/datadisplay/dataeditor.py"
+      ]
+    },
+    {
+      "dimension": "component_integration",
+      "recommendation": "Maintained backward compatibility by adding optional props rather than modifying existing ones",
+      "rationale": "The DataEditor is likely used in many existing Reflex applications. Adding new optional props ensures existing code continues to work without modification, following semantic versioning principles. The `show_search` defaults to not showing the search bar, and `on_search_close` is an optional event handler.",
+      "alternatives_considered": [
+        "Making search enabled by default (would break existing layouts)",
+        "Creating a new component variant (DataEditorWithSearch)",
+        "Using a configuration object parameter"
+      ],
+      "files_affected": [
+        "reflex/components/datadisplay/dataeditor.py"
+      ]
+    },
+    {
+      "dimension": "type_safety",
+      "recommendation": "Used proper type annotations: `Var[bool]` for `show_search` and `EventHandler[no_args_event_spec]` for `on_search_close`",
+      "rationale": "Consistent with the existing DataEditor prop typing patterns. `Var[bool]` allows both static booleans and reactive state variables. `no_args_event_spec` indicates the search close event doesn't pass any data back to the handler, matching the underlying grid's API.",
+      "alternatives_considered": [
+        "Using plain Python types without Var wrappers",
+        "Creating a custom event spec for search events",
+        "Passing search query data in the close event"
+      ],
+      "files_affected": [
+        "reflex/components/datadisplay/dataeditor.py"
+      ]
+    },
+    {
+      "dimension": "documentation_maintenance",
+      "recommendation": "Updated the pyi_hashes.json file to reflect the changed type stub signature",
+      "rationale": "The pyi_hashes.json tracks checksums of type stub files to ensure consistency between the Python implementation and type hints. When component APIs change, the corresponding .pyi file must be regenerated, requiring a hash update.",
+      "alternatives_considered": [
+        "Not updating the hash (would cause type checking inconsistencies)",
+        "Manually updating the .pyi file instead of relying on generation",
+        "Removing the hash checking mechanism entirely"
+      ],
+      "files_affected": [
+        "pyi_hashes.json"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Expose Glide Data Grid search functionality in DataEditor",
+      "description": "Add support for the built-in search bar in the DataEditor component by exposing the underlying grid's search props through the Reflex API",
+      "files_to_modify": [
+        "reflex/components/datadisplay/dataeditor.py",
+        "pyi_hashes.json"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation adds search functionality to the DataEditor component by exposing two new props from the underlying Glide Data Grid React component. The `show_search` prop (Var[bool]) controls the visibility of the search bar, while `on_search_close` provides an event handler for when users close the search interface. This minimal change leverages existing functionality in the grid library rather than implementing custom search logic.\n\nThe approach follows Reflex's component design patterns: wrapping React component features with typed Python props and event handlers. By adding optional props, backward compatibility is maintained\u2014existing DataEditor usage continues to work unchanged. The implementation integrates cleanly with the component's existing prop structure and type system.\n\nThe pyi_hashes.json update reflects that the component's type signature has changed, ensuring type checking tools remain accurate. This change demonstrates the framework's extensibility model: when underlying React components gain features, they can be exposed through the Python API with minimal code changes while maintaining type safety and backward compatibility.",
+  "source_pr": "https://github.com/reflex-dev/reflex/pull/6113",
+  "before_sha": "70467857b268f7fbde1a9b2bdb6729a865824804",
+  "after_sha": "252223fe2c36f83608c1793b8b8e25ba57dbbba5",
+  "diff_stats": {
+    "additions": 7,
+    "deletions": 1,
+    "files_changed": 2
+  }
+}

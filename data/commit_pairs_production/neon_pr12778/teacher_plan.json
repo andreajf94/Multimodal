@@ -1,0 +1,123 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "data_modeling",
+      "recommendation": "Changed advancement comparison ordering from (epoch, term, flush_lsn, commit_lsn) to (epoch, flush_lsn, term, commit_lsn) to prioritize flush_lsn over term when selecting the most advanced safekeeper",
+      "rationale": "The original ordering could incorrectly select a safekeeper with higher term but lower flush_lsn, potentially causing data loss during timeline pulls. By making flush_lsn the primary advancement metric after epoch, we ensure we pull from the node with the most actual data, not just the highest term.",
+      "alternatives_considered": [
+        "Keeping original ordering with additional validation",
+        "Using a weighted scoring system",
+        "Adding a separate validation step after selection"
+      ],
+      "files_affected": [
+        "safekeeper/src/pull_timeline.rs"
+      ]
+    },
+    {
+      "dimension": "api_design",
+      "recommendation": "Modified TimelineMembershipSwitchResponse to return last_log_term from the specific LSN position instead of current term, and added get_sync_position function to calculate quorum-based sync positions",
+      "rationale": "During membership switching, we need to know which term was active at each LSN position, not just the current term. This prevents data loss when a safekeeper has a higher current term but lower last_log_term at the commit position. The sync position calculation uses quorum semantics to guarantee no committed WAL is lost.",
+      "alternatives_considered": [
+        "Using current term with additional metadata",
+        "Storing term history per LSN range",
+        "Adding a separate term-LSN mapping API"
+      ],
+      "files_affected": [
+        "safekeeper/src/timeline.rs",
+        "storage_controller/src/service/safekeeper_service.rs"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Added retry logic with exponential backoff for safekeeper synchronization operations in compute node initialization",
+      "rationale": "Safekeeper synchronization can fail transiently during cluster operations. Exponential backoff with 5 retries provides resilience without blocking startup indefinitely. This is particularly important during migration/restore operations where safekeepers might be temporarily unavailable.",
+      "alternatives_considered": [
+        "Infinite retries with circuit breaker",
+        "Fail-fast with manual intervention",
+        "Configurable retry policies"
+      ],
+      "files_affected": [
+        "compute_tools/src/compute.rs"
+      ]
+    },
+    {
+      "dimension": "testing",
+      "recommendation": "Added comprehensive integration tests for safekeeper migration edge cases including stale timelines and advancement comparison",
+      "rationale": "The bugs fixed were subtle and required testing specific scenarios: 1) migration with stale timelines having same last_log_term but different flush_lsn, 2) ensuring we don't pull from lagging safekeepers with artificially high terms. These tests validate both the term/LSN ordering fix and the membership switch logic.",
+      "alternatives_considered": [
+        "Unit tests only",
+        "Property-based testing",
+        "Fuzzing"
+      ],
+      "files_affected": [
+        "test_runner/regress/test_safekeeper_migration.py"
+      ]
+    },
+    {
+      "dimension": "consistency_guarantees",
+      "recommendation": "Added validation in pull_timeline to reject safekeepers with lower term than the maximum term when wait_for_peer_timeline_status is true",
+      "rationale": "During timeline restore operations, we must pull from the safekeeper with the highest term to maintain consistency. This prevents a scenario where two computes could run on the same term if they pull from different safekeepers. The check is Hadron-specific but addresses a critical consistency issue.",
+      "alternatives_considered": [
+        "Automatic term bumping after pull",
+        "Quorum-based term selection",
+        "Leader election before pull"
+      ],
+      "files_affected": [
+        "safekeeper/src/pull_timeline.rs"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Fix safekeeper advancement comparison logic",
+      "description": "Modify safekeeper selection algorithm to prioritize flush_lsn over term when determining the most advanced node, preventing data loss during timeline pulls",
+      "files_to_modify": [
+        "safekeeper/src/pull_timeline.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-002",
+      "title": "Fix membership switching term handling",
+      "description": "Update membership switch logic to use last_log_term at specific LSN positions instead of current term, and implement proper sync position calculation using quorum semantics",
+      "files_to_modify": [
+        "safekeeper/src/timeline.rs",
+        "storage_controller/src/service/safekeeper_service.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-003",
+      "title": "Add retry logic for safekeeper synchronization",
+      "description": "Implement exponential backoff retry mechanism for safekeeper sync operations during compute node initialization to handle transient failures",
+      "files_to_modify": [
+        "compute_tools/src/compute.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-004",
+      "title": "Add comprehensive migration test coverage",
+      "description": "Create integration tests for safekeeper migration edge cases including stale timelines, term manipulation, and advancement comparison validation",
+      "files_to_modify": [
+        "test_runner/fixtures/neon_fixtures.py",
+        "test_runner/regress/test_safekeeper_migration.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "large"
+    }
+  ],
+  "implementation_summary": "The changes address two critical bugs in safekeeper advancement logic that could cause data loss during migration or restore operations. The core fix involves reordering the advancement comparison tuple from (epoch, term, flush_lsn, commit_lsn) to (epoch, flush_lsn, term, commit_lsn), ensuring that flush_lsn (actual data advancement) takes precedence over term (logical time) when selecting the most advanced safekeeper to pull from. This prevents scenarios where a node with higher term but lower data could be incorrectly selected.\n\nA second major fix modifies the membership switching logic to use last_log_term (the term at a specific LSN position) instead of current term when calculating sync positions. This is crucial because a safekeeper might have a high current term but lower last_log_term at the commit position, potentially causing committed WAL to be lost during migration. The implementation adds a get_sync_position function that uses quorum semantics to determine a safe sync position guaranteed to be at or beyond all committed data.\n\nThe changes also add defensive programming measures: retry logic with exponential backoff for safekeeper synchronization during compute startup, and validation in pull_timeline to reject safekeepers with lower terms during restore operations. Comprehensive integration tests validate both the term/LSN ordering fix and the membership switch logic, including edge cases with stale timelines and artificially manipulated terms. These changes maintain Neon's strong consistency guarantees while fixing subtle bugs in the distributed consensus protocol implementation.",
+  "source_pr": "https://github.com/neondatabase/neon/pull/12778",
+  "before_sha": "975b95f4cd9db3d25587f265f0587ba4fa123ce5",
+  "after_sha": "edd60730c89433dd8b6990bdaf9fdad34213c411",
+  "diff_stats": {
+    "additions": 275,
+    "deletions": 12,
+    "files_changed": 6
+  }
+}

@@ -1,0 +1,116 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "documentation_structure",
+      "recommendation": "Refactored monolithic skill documentation into a modular reference architecture with a main SKILL.md file and categorized reference files",
+      "rationale": "The original SKILL.md had grown to ~440 lines with mixed concerns, making it difficult to navigate and maintain. By separating detailed technical content into focused reference files, we achieve better information architecture where the main document provides high-level guidance while detailed implementations are available in dedicated sections.",
+      "alternatives_considered": [
+        "Keeping everything in one file",
+        "Creating multiple top-level skill documents",
+        "Using a hierarchical folder structure with more nesting"
+      ],
+      "files_affected": [
+        "fastapi/.agents/skills/fastapi/SKILL.md",
+        "fastapi/.agents/skills/fastapi/references/dependencies.md",
+        "fastapi/.agents/skills/fastapi/references/other-tools.md",
+        "fastapi/.agents/skills/fastapi/references/streaming.md"
+      ]
+    },
+    {
+      "dimension": "content_organization",
+      "recommendation": "Grouped related technical content into logical categories: dependencies, streaming, and other tools",
+      "rationale": "Each category represents a distinct technical domain with its own patterns and best practices. Dependencies cover injection patterns, streaming covers response streaming techniques, and other tools covers ecosystem utilities. This separation allows developers to find specific information faster and reduces cognitive load when reading the main document.",
+      "alternatives_considered": [
+        "Organizing by feature complexity",
+        "Grouping by use case frequency",
+        "Alphabetical organization"
+      ],
+      "files_affected": [
+        "fastapi/.agents/skills/fastapi/SKILL.md",
+        "fastapi/.agents/skills/fastapi/references/dependencies.md",
+        "fastapi/.agents/skills/fastapi/references/other-tools.md",
+        "fastapi/.agents/skills/fastapi/references/streaming.md"
+      ]
+    },
+    {
+      "dimension": "cross_referencing",
+      "recommendation": "Implemented clear cross-references from the main document to detailed reference files using markdown links",
+      "rationale": "Maintains navigability while separating concerns. The main SKILL.md now contains concise summaries with links to detailed implementations, allowing users to quickly understand concepts and drill down when needed. This follows the principle of progressive disclosure in documentation design.",
+      "alternatives_considered": [
+        "Duplicating content with summaries",
+        "Using tooltips or popovers",
+        "Creating a separate index file"
+      ],
+      "files_affected": [
+        "fastapi/.agents/skills/fastapi/SKILL.md"
+      ]
+    },
+    {
+      "dimension": "content_preservation",
+      "recommendation": "Moved detailed content verbatim from the main document to reference files without modification",
+      "rationale": "Ensures no information loss during the refactor. The detailed code examples, explanations, and patterns were transferred exactly as they appeared in the original, maintaining their correctness and completeness. Only the organizational structure changed, not the technical content.",
+      "alternatives_considered": [
+        "Rewriting content during the move",
+        "Summarizing detailed content",
+        "Removing redundant examples"
+      ],
+      "files_affected": [
+        "fastapi/.agents/skills/fastapi/SKILL.md",
+        "fastapi/.agents/skills/fastapi/references/dependencies.md",
+        "fastapi/.agents/skills/fastapi/references/other-tools.md",
+        "fastapi/.agents/skills/fastapi/references/streaming.md"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Refactor main skill document structure",
+      "description": "Extract detailed technical content from the main SKILL.md file into categorized reference files, leaving concise summaries and cross-references in the main document",
+      "files_to_modify": [
+        "fastapi/.agents/skills/fastapi/SKILL.md"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-002",
+      "title": "Create dependencies reference documentation",
+      "description": "Create a dedicated reference file for dependency injection patterns including yield/scope usage and class dependency best practices",
+      "files_to_modify": [],
+      "files_to_create": [
+        "fastapi/.agents/skills/fastapi/references/dependencies.md"
+      ],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-003",
+      "title": "Create streaming reference documentation",
+      "description": "Create a dedicated reference file for streaming patterns including JSON Lines, Server-Sent Events, and byte streaming implementations",
+      "files_to_modify": [],
+      "files_to_create": [
+        "fastapi/.agents/skills/fastapi/references/streaming.md"
+      ],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-004",
+      "title": "Create other tools reference documentation",
+      "description": "Create a dedicated reference file for ecosystem tools including uv, Ruff, ty, Asyncer, SQLModel, and HTTPX with usage patterns and recommendations",
+      "files_to_modify": [],
+      "files_to_create": [
+        "fastapi/.agents/skills/fastapi/references/other-tools.md"
+      ],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation follows a modular documentation architecture pattern where a main guidance document references detailed technical content in categorized reference files. The main SKILL.md file was reduced from ~440 lines to a more concise version by extracting three major technical sections: dependency injection patterns, streaming implementations, and ecosystem tool recommendations.\n\nEach extracted section was moved to its own dedicated reference file in a new 'references' subdirectory, maintaining all original code examples, explanations, and patterns. The main document now provides high-level summaries with clear cross-references using markdown links, enabling users to quickly understand concepts and drill down into details when needed.\n\nThis approach integrates well with the existing FastAPI documentation structure, which already uses extensive example-driven documentation in the docs_src directory. The refactoring improves maintainability by separating concerns, reduces cognitive load for readers, and establishes a scalable pattern for future documentation additions. All technical content was preserved exactly as it appeared in the original, ensuring no information loss while significantly improving the information architecture.",
+  "source_pr": "https://github.com/fastapi/fastapi/pull/15031",
+  "before_sha": "12ea7be0bed9dc13a4dd859a7c96970355140333",
+  "after_sha": "924a535a4f5d74b3e2bd4696085070ff7d8f4aa5",
+  "diff_stats": {
+    "additions": 336,
+    "deletions": 295,
+    "files_changed": 4
+  }
+}

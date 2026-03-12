@@ -1,0 +1,94 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "documentation",
+      "recommendation": "Added `all-features = true` to `package.metadata.docs.rs` sections in all Cargo.toml files to ensure feature-gated functions appear in docs.rs documentation",
+      "rationale": "docs.rs builds documentation with default features only by default. Functions behind feature flags like `hydrate` were not appearing in public documentation. Setting `all-features = true` ensures all conditional compilation features are enabled during docs.rs builds, making feature-gated APIs visible to users.",
+      "alternatives_considered": [
+        "Manually listing specific features in each Cargo.toml",
+        "Using `--cfg` flags for specific features only",
+        "Leaving as-is and accepting incomplete documentation"
+      ],
+      "files_affected": [
+        "integrations/actix/Cargo.toml",
+        "integrations/axum/Cargo.toml",
+        "integrations/utils/Cargo.toml",
+        "leptos/Cargo.toml",
+        "leptos_config/Cargo.toml",
+        "leptos_dom/Cargo.toml",
+        "leptos_macro/Cargo.toml",
+        "leptos_server/Cargo.toml",
+        "meta/Cargo.toml",
+        "router/Cargo.toml",
+        "server_fn_macro/Cargo.toml"
+      ]
+    },
+    {
+      "dimension": "api_design",
+      "recommendation": "Standardized ordering of `package.metadata.docs.rs` configuration by placing `all-features = true` before `rustdoc-args` in all files",
+      "rationale": "Consistent ordering improves maintainability and readability. The pattern established is: `all-features = true` first, then `rustdoc-args`. This standardization makes it easier to scan and compare configurations across the codebase.",
+      "alternatives_considered": [
+        "Leaving existing ordering as-is",
+        "Using alphabetical ordering",
+        "Grouping by semantic purpose"
+      ],
+      "files_affected": [
+        "leptos/Cargo.toml",
+        "leptos_server/Cargo.toml"
+      ]
+    },
+    {
+      "dimension": "configuration_management",
+      "recommendation": "Added `--cfg \"erase_components\"` to leptos's rustdoc-args to ensure proper conditional compilation during documentation generation",
+      "rationale": "The `erase_components` feature affects API visibility and needs to be enabled during docs.rs builds to show the correct API surface. This ensures documentation matches what users will see when they enable this feature in their own projects.",
+      "alternatives_considered": [
+        "Relying solely on `all-features = true`",
+        "Adding `erase_components` to the default features list",
+        "Creating a separate `docsrs` feature flag"
+      ],
+      "files_affected": [
+        "leptos/Cargo.toml"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Enable all-features for docs.rs across all crates",
+      "description": "Add `all-features = true` to package.metadata.docs.rs sections to ensure feature-gated functions appear in public documentation",
+      "files_to_modify": [
+        "integrations/actix/Cargo.toml",
+        "integrations/axum/Cargo.toml",
+        "integrations/utils/Cargo.toml",
+        "leptos_config/Cargo.toml",
+        "leptos_dom/Cargo.toml",
+        "leptos_macro/Cargo.toml",
+        "meta/Cargo.toml",
+        "router/Cargo.toml",
+        "server_fn_macro/Cargo.toml"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-002",
+      "title": "Fix and standardize existing docs.rs configurations",
+      "description": "Reorder existing configurations to follow consistent pattern and add missing cfg flags for proper conditional compilation",
+      "files_to_modify": [
+        "leptos/Cargo.toml",
+        "leptos_server/Cargo.toml"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The changes implement a systematic fix for documentation generation on docs.rs across the Leptos framework. The core issue was that functions behind feature flags (particularly `hydrate`) weren't appearing in public documentation because docs.rs builds with default features only by default.\n\nThe solution adds `all-features = true` to the `package.metadata.docs.rs` section of every Cargo.toml file in the workspace. This ensures that all conditional compilation features are enabled during documentation generation, making feature-gated APIs visible to users. This is especially important for Leptos since features like `hydrate`, `ssr`, and various integration features expose significant portions of the API surface.\n\nAdditionally, the changes standardize the configuration format by consistently placing `all-features = true` before `rustdoc-args` in all files. In the `leptos` crate specifically, the `--cfg \"erase_components\"` flag was added to ensure proper conditional compilation for that feature. The `leptos_server` crate had its configuration reordered to match the new standard pattern. This approach balances completeness (showing all APIs) with maintainability (consistent configuration patterns) while requiring minimal changes to the existing codebase structure.",
+  "source_pr": "https://github.com/leptos-rs/leptos/pull/4526",
+  "before_sha": "7bcaecfbc0e91b1f9ccae6f0fcd2522ec718826c",
+  "after_sha": "e5c8d52c6dcd2c795e474a5a03dd2691c96dfcee",
+  "diff_stats": {
+    "additions": 12,
+    "deletions": 2,
+    "files_changed": 11
+  }
+}

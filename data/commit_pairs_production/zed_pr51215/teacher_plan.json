@@ -1,0 +1,68 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "configuration_management",
+      "recommendation": "Changed the default value of 'diff_stats' from false to true in both the JSON settings file and the Rust struct definition",
+      "rationale": "The feature needs to be enabled by default for all users while maintaining backward compatibility. Changing the default in both the JSON configuration and the Rust struct ensures consistency between the static configuration file and the runtime type system. This approach allows existing users who have explicitly set this value to false to retain their preference (due to user settings overriding defaults), while new users and those who haven't modified the setting will get the new default behavior.",
+      "alternatives_considered": [
+        "Adding migration logic to update existing user settings",
+        "Creating a separate feature flag or environment variable",
+        "Making the change only in the UI layer without updating defaults"
+      ],
+      "files_affected": [
+        "assets/settings/default.json",
+        "crates/settings_content/src/settings_content.rs"
+      ]
+    },
+    {
+      "dimension": "documentation_maintenance",
+      "recommendation": "Updated the inline documentation comments to reflect the new default value",
+      "rationale": "Keeping documentation synchronized with code changes prevents confusion for developers and maintainers. The comments serve as the primary source of truth for understanding default behavior without needing to trace through the code. This is especially important for settings that affect user experience across the application.",
+      "alternatives_considered": [
+        "Leaving outdated documentation which would cause confusion",
+        "Moving documentation to a separate file",
+        "Using automated documentation generation tools"
+      ],
+      "files_affected": [
+        "assets/settings/default.json",
+        "crates/settings_content/src/settings_content.rs"
+      ]
+    },
+    {
+      "dimension": "backward_compatibility",
+      "recommendation": "Used the existing settings override mechanism rather than forcing the change on all users",
+      "rationale": "The settings system already has a hierarchy where user settings override defaults. By only changing the default value, we ensure that users who have explicitly disabled diff_stats (by setting it to false in their user settings) will not be affected. This respects user preferences while enabling the feature for everyone else. The Option<bool> type in the Rust struct naturally supports this three-state behavior (default/true/false).",
+      "alternatives_considered": [
+        "Forcing the setting to true for all users regardless of previous preferences",
+        "Adding a migration that asks users to opt-in",
+        "Creating a completely new setting with different semantics"
+      ],
+      "files_affected": [
+        "assets/settings/default.json",
+        "crates/settings_content/src/settings_content.rs"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Enable Git Panel Diff Stats by Default",
+      "description": "Update the default configuration to show addition/deletion change counts in the Git panel for all users who haven't explicitly disabled this feature",
+      "files_to_modify": [
+        "assets/settings/default.json",
+        "crates/settings_content/src/settings_content.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation to enable Git panel diff statistics by default was straightforward and leveraged the existing settings infrastructure. The change involved modifying only two files: the default JSON settings configuration and the corresponding Rust struct definition. This minimal approach ensures consistency between the static configuration and the type system while maintaining backward compatibility.\n\nThe key insight was that the settings system already supports user preferences overriding defaults, so changing the default value from false to true automatically enables the feature for new installations and existing users who haven't modified this setting, while preserving the preferences of users who have explicitly disabled it. This pattern follows the principle of least surprise - users get the improved experience by default, but those who have made a conscious choice to disable it retain their preference.\n\nThe documentation updates in both files ensure that developers understand the new default behavior. This change demonstrates how to evolve user-facing features in a mature application with minimal disruption, using the existing configuration hierarchy rather than introducing new mechanisms or complex migration logic.",
+  "source_pr": "https://github.com/zed-industries/zed/pull/51215",
+  "before_sha": "e4b3c0fa84c668def9db2c1827c834b4391012b6",
+  "after_sha": "074ca4cadf7390b77eb3ca6979632a6582d25e2b",
+  "diff_stats": {
+    "additions": 3,
+    "deletions": 3,
+    "files_changed": 2
+  }
+}

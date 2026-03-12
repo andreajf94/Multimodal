@@ -1,0 +1,61 @@
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index bae955432..5286dedb6 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -6,9 +6,16 @@ All notable changes to this project will be documented in this file. The format
+ 
+ <!-- Add upcoming changes here -->
+ 
++## [1.14.4] - 2026-01-16
++
++### Changed
++- Simplified `JsonCompleteness` by using `jiter` parsing and a sibling-based completeness heuristic (#2000)
++
+ ### Fixed
+-- Fixed Google GenAI `safety_settings` causing `400 INVALID_ARGUMENT` when requests include image content by using image-specific harm categories when needed (#1773)
+-- Fixed `create_with_completion()` crashing when using `list[T]` response models by preserving `_raw_response` on list outputs (#1303)
++- Fixed Responses API retries crashing on reasoning items by skipping non-tool-call items in `reask_responses_tools` (#2002)
++- Fixed Google GenAI dict-style `config` handling to preserve `labels` and other settings like `cached_content` and `thinking_config` (#2005)
++- Fixed Google GenAI `safety_settings` causing `400 INVALID_ARGUMENT` when requests include image content by using image-specific harm categories when needed (#2007, #1773)
++- Fixed `create_with_completion()` crashing when using `list[T]` response models by preserving `_raw_response` on list outputs, and hardened optional `vertexai` imports (#2011, #1303)
+ 
+ ## [1.14.3] - 2026-01-13
+ 
+diff --git a/instructor/__init__.py b/instructor/__init__.py
+index f93946989..21eeb4bd2 100644
+--- a/instructor/__init__.py
++++ b/instructor/__init__.py
+@@ -1,5 +1,7 @@
+ import importlib.util
+ 
++__version__ = "1.14.4"
++
+ from .mode import Mode
+ from .processing.multimodal import Image, Audio
+ 
+diff --git a/pyproject.toml b/pyproject.toml
+index 7227eeffe..e31781940 100644
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -19,7 +19,7 @@ dependencies = [
+     "ty>=0.0.1a23",
+ ]
+ name = "instructor"
+-version = "1.14.3"
++version = "1.14.4"
+ description = "structured outputs for llm"
+ readme = "README.md"
+ 
+diff --git a/uv.lock b/uv.lock
+index 3e41da3cb..02d1435f8 100644
+--- a/uv.lock
++++ b/uv.lock
+@@ -1766,7 +1766,7 @@ wheels = [
+ 
+ [[package]]
+ name = "instructor"
+-version = "1.14.3"
++version = "1.14.4"
+ source = { editable = "." }
+ dependencies = [
+     { name = "aiohttp" },

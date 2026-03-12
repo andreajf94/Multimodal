@@ -1,0 +1,122 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "performance_optimization",
+      "recommendation": "Centralized toolbar state computation via useToolbarStates hook to reduce main thread blocking",
+      "rationale": "Previously each toolbar component (ToolbarButton, ToolbarDropdown) had its own update listener subscription and state computation, causing O(n) re-renders on every editor update. The new approach computes all toolbar states in a single pass during one editor.read() call, dramatically reducing React re-renders and JavaScript execution time.",
+      "alternatives_considered": [
+        "Memoizing individual component states with useMemo",
+        "Using React.memo with deep equality checks",
+        "Debouncing editor update listeners"
+      ],
+      "files_affected": [
+        "packages/richtext-lexical/src/features/toolbars/shared/useToolbarStates.ts",
+        "packages/richtext-lexical/src/features/toolbars/fixed/client/Toolbar/index.tsx",
+        "packages/richtext-lexical/src/features/toolbars/inline/client/Toolbar/index.tsx"
+      ]
+    },
+    {
+      "dimension": "component_design",
+      "recommendation": "Convert ToolbarButton and ToolbarDropdown to stateless presentational components",
+      "rationale": "By removing internal state management and making components receive active/enabled states as props, we eliminate redundant state computations and enable better performance optimization through centralized state management. This follows the 'dumb component' pattern where presentation logic is separated from business logic.",
+      "alternatives_considered": [
+        "Keeping stateful components with optimized update listeners",
+        "Using React context for toolbar state",
+        "Implementing a Redux-like store for toolbar state"
+      ],
+      "files_affected": [
+        "packages/richtext-lexical/src/features/toolbars/shared/ToolbarButton/index.tsx",
+        "packages/richtext-lexical/src/features/toolbars/shared/ToolbarDropdown/index.tsx"
+      ]
+    },
+    {
+      "dimension": "state_management",
+      "recommendation": "Use Map data structures for O(1) lookups of toolbar item and group states",
+      "rationale": "Maps provide constant-time lookups for toolbar items by key, which is critical when computing states for potentially dozens of toolbar items. This is more efficient than array.find() operations that would be O(n) for each item lookup.",
+      "alternatives_considered": [
+        "Plain objects with string keys",
+        "Arrays with memoized indexes",
+        "Immutable.js data structures"
+      ],
+      "files_affected": [
+        "packages/richtext-lexical/src/features/toolbars/shared/useToolbarStates.ts"
+      ]
+    },
+    {
+      "dimension": "performance_measurement",
+      "recommendation": "Add comprehensive benchmark suite with CPU-throttled typing tests",
+      "rationale": "To validate performance improvements and prevent regressions, we need real-world metrics under simulated slow devices. The benchmark measures input lag, DOM mutations, and long tasks during typing with 6x CPU throttling, providing quantitative data on the optimization's impact.",
+      "alternatives_considered": [
+        "Simple timing measurements",
+        "Manual performance profiling",
+        "Using existing Playwright performance APIs"
+      ],
+      "files_affected": [
+        "test/lexical/benchmarks/perf.spec.ts",
+        "test/lexical/collections/LexicalBenchmark/index.ts"
+      ]
+    },
+    {
+      "dimension": "api_design",
+      "recommendation": "Maintain backward compatibility while refactoring internal implementation",
+      "rationale": "The public API of toolbar components remains unchanged - they still accept the same props and render the same UI. Only the internal state management has been refactored, ensuring existing code using these components continues to work without modification.",
+      "alternatives_considered": [
+        "Breaking API changes for cleaner implementation",
+        "Creating new component versions alongside old ones",
+        "Deprecating old API gradually"
+      ],
+      "files_affected": [
+        "packages/richtext-lexical/src/features/toolbars/shared/ToolbarButton/index.tsx",
+        "packages/richtext-lexical/src/features/toolbars/shared/ToolbarDropdown/index.tsx"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Implement centralized toolbar state management hook",
+      "description": "Create useToolbarStates hook that computes all toolbar item and group states in a single pass during editor updates, replacing per-component state management",
+      "files_to_modify": [],
+      "files_to_create": [
+        "packages/richtext-lexical/src/features/toolbars/shared/useToolbarStates.ts"
+      ],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-002",
+      "title": "Refactor toolbar components to be stateless",
+      "description": "Convert ToolbarButton and ToolbarDropdown to receive active/enabled states as props instead of managing their own state, and update toolbar group components to use the centralized state",
+      "files_to_modify": [
+        "packages/richtext-lexical/src/features/toolbars/fixed/client/Toolbar/index.tsx",
+        "packages/richtext-lexical/src/features/toolbars/inline/client/Toolbar/index.tsx",
+        "packages/richtext-lexical/src/features/toolbars/shared/ToolbarButton/index.tsx",
+        "packages/richtext-lexical/src/features/toolbars/shared/ToolbarDropdown/index.tsx"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-003",
+      "title": "Add performance benchmarking infrastructure",
+      "description": "Create benchmark collection and comprehensive performance test suite with CPU throttling to measure input lag, DOM mutations, and long tasks during typing",
+      "files_to_modify": [
+        "test/lexical/baseConfig.ts",
+        "test/lexical/collections/Lexical/e2e/main/e2e.spec.ts"
+      ],
+      "files_to_create": [
+        "test/lexical/benchmarks/perf.spec.ts",
+        "test/lexical/collections/LexicalBenchmark/index.ts"
+      ],
+      "estimated_effort": "large"
+    }
+  ],
+  "implementation_summary": "The implementation addresses performance bottlenecks in the lexical editor's toolbar by moving from a distributed state management model to a centralized one. Previously, each toolbar component (buttons, dropdowns) independently subscribed to editor updates and computed its own active/enabled states, causing O(n) re-renders and JavaScript execution on every keystroke.\n\nThe key change is the introduction of the `useToolbarStates` hook, which subscribes once to the editor's update listener and computes all toolbar states in a single pass. This hook returns two Map structures: `itemStates` for individual toolbar items and `groupStates` for dropdown groups. The computation happens within a single `editor.getEditorState().read()` call, minimizing the performance impact of reading editor state.\n\nToolbar components were refactored to become stateless presentational components. `ToolbarButton` now receives `active` and `enabled` as props instead of computing them internally. `ToolbarDropdown` receives a complete `groupState` object with pre-computed active items and enabled states. This separation of concerns allows the centralized hook to optimize state computation while components focus solely on rendering.\n\nTo validate the improvements, a comprehensive benchmark suite was added with CPU-throttled typing tests that simulate real-world conditions on slower devices. The benchmark measures key metrics like input lag, DOM mutations per keystroke, and long task counts, providing quantitative data to track performance improvements and prevent regressions. The implementation maintains full backward compatibility while delivering significant performance gains for user interactions with the lexical editor.",
+  "source_pr": "https://github.com/payloadcms/payload/pull/15832",
+  "before_sha": "fba24380578f513209a5f4811e2836a2317c33d2",
+  "after_sha": "2bdf7ce006d8b42729a534c2f825eb4519c2be2a",
+  "diff_stats": {
+    "additions": 690,
+    "deletions": 267,
+    "files_changed": 14
+  }
+}

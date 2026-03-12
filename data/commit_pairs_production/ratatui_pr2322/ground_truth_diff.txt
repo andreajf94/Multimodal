@@ -1,0 +1,918 @@
+diff --git a/Cargo.lock b/Cargo.lock
+index ff649182c6..f05ea063b1 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -508,6 +508,15 @@ version = "1.0.4"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "b05b61dc5112cbb17e4b6cd61790d9845d13888356391624cbe7e41efeac1e75"
+ 
++[[package]]
++name = "colorgrad"
++version = "0.7.2"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "faedab4fd8670120c2be7f49225fbdb8b6db6d46f04ce4f864b1f1cdd55e6400"
++dependencies = [
++ "csscolorparser 0.7.2",
++]
++
+ [[package]]
+ name = "colors-rgb"
+ version = "0.0.0"
+@@ -747,6 +756,15 @@ dependencies = [
+  "phf",
+ ]
+ 
++[[package]]
++name = "csscolorparser"
++version = "0.7.2"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "5fda6aace1fbef3aa217b27f4c8d7d071ef2a70a5ca51050b1f17d40299d3f16"
++dependencies = [
++ "phf",
++]
++
+ [[package]]
+ name = "curve25519-dalek"
+ version = "4.1.3"
+@@ -4052,6 +4070,17 @@ version = "0.9.5"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
+ 
++[[package]]
++name = "volatility-surface"
++version = "0.0.0"
++dependencies = [
++ "color-eyre",
++ "colorgrad",
++ "crossterm 0.29.0",
++ "rand 0.9.2",
++ "ratatui",
++]
++
+ [[package]]
+ name = "vtparse"
+ version = "0.6.2"
+@@ -4214,7 +4243,7 @@ version = "0.3.0"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "7de81ef35c9010270d63772bebef2f2d6d1f2d20a983d27505ac850b8c4b4296"
+ dependencies = [
+- "csscolorparser",
++ "csscolorparser 0.6.2",
+  "deltae",
+  "lazy_static",
+  "serde",
+diff --git a/examples/apps/volatility-surface/Cargo.toml b/examples/apps/volatility-surface/Cargo.toml
+new file mode 100644
+index 0000000000..472bfbe9e2
+--- /dev/null
++++ b/examples/apps/volatility-surface/Cargo.toml
+@@ -0,0 +1,16 @@
++[package]
++name = "volatility-surface"
++publish = false
++license.workspace = true
++edition.workspace = true
++rust-version.workspace = true
++
++[dependencies]
++color-eyre.workspace = true
++colorgrad = "0.7"
++crossterm.workspace = true
++rand.workspace = true
++ratatui.workspace = true
++
++[lints]
++workspace = true
+diff --git a/examples/apps/volatility-surface/README.md b/examples/apps/volatility-surface/README.md
+new file mode 100644
+index 0000000000..0a84a13b3e
+--- /dev/null
++++ b/examples/apps/volatility-surface/README.md
+@@ -0,0 +1,31 @@
++# Volatility Surface
++
++Demonstrates 3D perspective projection in the terminal using Braille canvas for high-resolution rendering.
++
++To run this demo:
++
++```shell
++cargo run -p volatility-surface
++```
++
++## What it shows
++
++This example visualizes an implied volatility surface as an interactive 3D wireframe. It demonstrates:
++
++- 3D-to-2D perspective projection with rotation matrices
++- Braille canvas rendering for smooth curves (8x resolution vs blocks)
++- Real-time animation and interactive controls
++
++## How it works
++
++Objects further away appear smaller—that's perspective. The math is simple: divide x and y coordinates by distance. Add rotation matrices to spin the object in 3D space, and you can explore it from any angle.
++
++The result: a 500-point surface rendered at 30fps using basic trigonometry and perspective division.
++
++## Controls
++
++- **Arrow Keys** - Rotate the surface
++- **Z/X** - Zoom in/out
++- **P** - Cycle color palettes
++- **Space** - Pause/resume
++- **Q** - Quit
+diff --git a/examples/apps/volatility-surface/src/display.rs b/examples/apps/volatility-surface/src/display.rs
+new file mode 100644
+index 0000000000..8d4fda9a81
+--- /dev/null
++++ b/examples/apps/volatility-surface/src/display.rs
+@@ -0,0 +1,5 @@
++mod palette;
++mod surface_3d;
++
++pub use palette::Palette;
++pub use surface_3d::{Surface3D, VolatilitySurface};
+diff --git a/examples/apps/volatility-surface/src/display/palette.rs b/examples/apps/volatility-surface/src/display/palette.rs
+new file mode 100644
+index 0000000000..8cc52101a8
+--- /dev/null
++++ b/examples/apps/volatility-surface/src/display/palette.rs
+@@ -0,0 +1,88 @@
++//! Color palette module for the volatility surface visualization.
++//!
++//! This module provides color gradients using the colorgrad library,
++//! including perceptually uniform colormaps and custom gradients.
++
++use colorgrad::{Color as GradColor, Gradient, LinearGradient};
++use ratatui::style::Color;
++
++#[derive(Debug, Clone, Copy)]
++pub enum Palette {
++    Viridis,
++    Plasma,
++    Phosphor,
++    Fear,
++    Calm,
++    Inferno,
++}
++
++impl Palette {
++    pub const fn name(self) -> &'static str {
++        match self {
++            Self::Viridis => "viridis",
++            Self::Plasma => "plasma",
++            Self::Phosphor => "phosphor",
++            Self::Fear => "fear",
++            Self::Calm => "calm",
++            Self::Inferno => "inferno",
++        }
++    }
++
++    pub const fn next(self) -> Self {
++        match self {
++            Self::Viridis => Self::Plasma,
++            Self::Plasma => Self::Phosphor,
++            Self::Phosphor => Self::Fear,
++            Self::Fear => Self::Calm,
++            Self::Calm => Self::Inferno,
++            Self::Inferno => Self::Viridis,
++        }
++    }
++
++    /// Get color for a normalized value (0.0 to 1.0)
++    pub fn get_color(self, t: f64) -> Color {
++        let t = t.clamp(0.0, 1.0);
++
++        let grad: Box<dyn Gradient> = match self {
++            Self::Viridis => Box::new(colorgrad::preset::viridis()),
++            Self::Plasma => Box::new(colorgrad::preset::plasma()),
++            Self::Inferno => Box::new(colorgrad::preset::inferno()),
++            Self::Phosphor => Box::new(Self::custom_phosphor()),
++            Self::Fear => Box::new(Self::custom_fear()),
++            Self::Calm => Box::new(Self::custom_calm()),
++        };
++
++        let rgba = grad.at(t as f32).to_rgba8();
++        Color::Rgb(rgba[0], rgba[1], rgba[2])
++    }
++
++    fn custom_phosphor() -> LinearGradient {
++        colorgrad::GradientBuilder::new()
++            .colors(&[
++                GradColor::from_rgba8(0, 40, 0, 255),
++                GradColor::from_rgba8(38, 255, 63, 255),
++            ])
++            .build()
++            .unwrap()
++    }
++
++    fn custom_fear() -> LinearGradient {
++        colorgrad::GradientBuilder::new()
++            .colors(&[
++                GradColor::from_rgba8(127, 0, 0, 255),
++                GradColor::from_rgba8(255, 76, 0, 255),
++            ])
++            .build()
++            .unwrap()
++    }
++
++    fn custom_calm() -> LinearGradient {
++        colorgrad::GradientBuilder::new()
++            .colors(&[
++                GradColor::from_rgba8(51, 76, 127, 255),
++                GradColor::from_rgba8(102, 204, 255, 255),
++            ])
++            .build()
++            .unwrap()
++    }
++}
+diff --git a/examples/apps/volatility-surface/src/display/surface_3d.rs b/examples/apps/volatility-surface/src/display/surface_3d.rs
+new file mode 100644
+index 0000000000..13bc861b13
+--- /dev/null
++++ b/examples/apps/volatility-surface/src/display/surface_3d.rs
+@@ -0,0 +1,327 @@
++//! 3D surface rendering module for the volatility surface visualization.
++//!
++//! This module implements perspective projection and rotation to render a 3D volatility surface
++//! on a 2D canvas using Braille characters for high-resolution output.
++
++use std::f64::consts::{PI, TAU};
++
++use ratatui::buffer::Buffer;
++use ratatui::layout::Rect;
++use ratatui::style::Color;
++use ratatui::symbols::Marker;
++use ratatui::widgets::canvas::{Canvas, Context, Line, Points};
++use ratatui::widgets::{StatefulWidget, Widget};
++
++use super::Palette;
++
++/// Distance from the camera to the projection plane
++const CAMERA_DISTANCE: f64 = 4.0;
++
++/// A 3D surface renderer that maintains rotation, zoom, and color palette state.
++///
++/// This struct serves as the state for the [`VolatilitySurface`] widget. It maintains the
++/// current view orientation (rotation around X and Z axes), zoom level, and the active color
++/// palette. Use this with [`VolatilitySurface`] via the [`StatefulWidget`] trait.
++pub struct Surface3D {
++    rotation_x: f64,
++    rotation_z: f64,
++    zoom: f64,
++    palette: Palette,
++}
++
++impl Surface3D {
++    pub const fn new() -> Self {
++        Self {
++            rotation_x: 0.6, // Tilt forward for better view
++            rotation_z: 0.3, // Slight rotation
++            zoom: 1.0,
++            palette: Palette::Plasma,
++        }
++    }
++
++    /// Rotate the surface around the X axis (tilt up/down).
++    pub fn rotate_x(&mut self, delta: f64) {
++        self.rotation_x = (self.rotation_x + delta).clamp(-PI / 2.0, PI / 2.0);
++    }
++
++    /// Rotate the surface around the Z axis (spin left/right).
++    pub fn rotate_z(&mut self, delta: f64) {
++        self.rotation_z += delta;
++        if self.rotation_z > TAU {
++            self.rotation_z -= TAU;
++        }
++        if self.rotation_z < 0.0 {
++            self.rotation_z += TAU;
++        }
++    }
++
++    /// Adjust the zoom level by the given factor.
++    pub fn zoom(&mut self, factor: f64) {
++        self.zoom = (self.zoom * factor).clamp(0.3, 3.0);
++    }
++
++    /// Get the current palette name for display.
++    pub const fn palette_name(&self) -> &'static str {
++        self.palette.name()
++    }
++
++    /// Project a 3D point to 2D screen coordinates using perspective projection.
++    ///
++    /// This method applies rotation matrices and perspective division to transform
++    /// 3D coordinates into 2D screen space while maintaining depth information.
++    fn project(&self, x: f64, y: f64, z: f64) -> (f64, f64) {
++        // Apply rotations
++        let (sin_x, cos_x) = self.rotation_x.sin_cos();
++        let (sin_z, cos_z) = self.rotation_z.sin_cos();
++
++        // Rotate around Z axis
++        let x1 = x * cos_z - y * sin_z;
++        let y1 = x * sin_z + y * cos_z;
++        let z1 = z;
++
++        // Rotate around X axis
++        let y2 = y1 * cos_x - z1 * sin_x;
++        let z2 = y1 * sin_x + z1 * cos_x;
++
++        // Perspective projection
++        let perspective = CAMERA_DISTANCE / (CAMERA_DISTANCE + z2);
++
++        (x1 * perspective * self.zoom, y2 * perspective * self.zoom)
++    }
++
++    /// Render the 3D volatility surface with the given data.
++    ///
++    /// The surface data is expected to be a 2D grid of volatility values, where the first
++    /// dimension represents expiration times and the second dimension represents strike prices.
++    fn render(&self, area: Rect, buf: &mut Buffer, surface_data: &[Vec<f64>]) {
++        let n_exp = surface_data.len();
++        let n_strike = surface_data.first().map_or(0, std::vec::Vec::len);
++
++        if n_exp == 0 || n_strike == 0 {
++            return;
++        }
++
++        let (min_vol, max_vol) = Self::find_volatility_range(surface_data);
++
++        let canvas = Canvas::default()
++            .marker(Marker::Braille)
++            .x_bounds([-2.0, 2.0]) // Canvas viewport slightly larger than surface bounds
++            .y_bounds([-1.5, 1.5]) // Narrower vertically to match terminal aspect ratio
++            .paint(|ctx| {
++                self.draw_strike_grid_lines(ctx, surface_data, n_exp, n_strike, min_vol, max_vol);
++                self.draw_expiry_grid_lines(ctx, surface_data, n_exp, n_strike, min_vol, max_vol);
++                self.draw_peak_highlights(ctx, surface_data, n_exp, n_strike, min_vol, max_vol);
++            });
++
++        canvas.render(area, buf);
++    }
++
++    /// Find the minimum and maximum volatility values in the surface data.
++    fn find_volatility_range(surface_data: &[Vec<f64>]) -> (f64, f64) {
++        let mut min_vol = f64::MAX;
++        let mut max_vol = f64::MIN;
++
++        for row in surface_data {
++            for &vol in row {
++                min_vol = min_vol.min(vol);
++                max_vol = max_vol.max(vol);
++            }
++        }
++
++        (min_vol, max_vol)
++    }
++
++    /// Draw grid lines along the strike dimension (horizontal lines).
++    fn draw_strike_grid_lines(
++        &self,
++        ctx: &mut Context,
++        surface_data: &[Vec<f64>],
++        n_exp: usize,
++        n_strike: usize,
++        min_vol: f64,
++        max_vol: f64,
++    ) {
++        for (i, row) in surface_data.iter().enumerate() {
++            let points = self.project_row_to_points(row, i, n_exp, n_strike, min_vol, max_vol);
++            // Map to [0.3, 1.0] range to avoid too-dark colors at the edges
++            let color = self
++                .palette
++                .get_color((i as f64 / n_exp as f64 * 0.7 + 0.3).min(1.0));
++            Self::draw_line_strip(ctx, &points, color);
++        }
++    }
++
++    /// Draw grid lines along the expiry dimension (vertical lines).
++    fn draw_expiry_grid_lines(
++        &self,
++        ctx: &mut Context,
++        surface_data: &[Vec<f64>],
++        n_exp: usize,
++        n_strike: usize,
++        min_vol: f64,
++        max_vol: f64,
++    ) {
++        // Draw every other line to reduce visual clutter, got better results with this
++        for j in (0..n_strike).step_by(2) {
++            let points =
++                self.project_column_to_points(surface_data, j, n_exp, n_strike, min_vol, max_vol);
++            let strike_norm = f64::from(j as u32) / f64::from((n_strike - 1) as u32);
++            let color = self.palette.get_color((strike_norm * 0.7 + 0.3).min(1.0));
++            Self::draw_line_strip(ctx, &points, color);
++        }
++    }
++
++    /// Draw highlighted points at volatility peaks.
++    fn draw_peak_highlights(
++        &self,
++        ctx: &mut Context,
++        surface_data: &[Vec<f64>],
++        n_exp: usize,
++        n_strike: usize,
++        min_vol: f64,
++        max_vol: f64,
++    ) {
++        // Sample every other point to avoid overcrowding
++        let peak_points: Vec<(f64, f64)> = (0..n_exp)
++            .step_by(2)
++            .flat_map(|i| {
++                (0..n_strike).step_by(2).filter_map(move |j| {
++                    let vol = surface_data[i][j];
++                    let vol_norm = (vol - min_vol) / (max_vol - min_vol);
++
++                    // Only highlight top 30% of volatility values
++                    if vol_norm > 0.7 {
++                        Some(self.project_normalized_point(
++                            f64::from(j as u32) / f64::from((n_strike - 1) as u32),
++                            f64::from(i as u32) / f64::from((n_exp - 1) as u32),
++                            vol_norm,
++                        ))
++                    } else {
++                        None
++                    }
++                })
++            })
++            .collect();
++
++        if !peak_points.is_empty() {
++            ctx.draw(&Points {
++                coords: &peak_points,
++                color: self.palette.get_color(0.9),
++            });
++        }
++    }
++
++    /// Project a row of data to 2D screen points.
++    fn project_row_to_points(
++        &self,
++        row: &[f64],
++        row_idx: usize,
++        n_exp: usize,
++        n_strike: usize,
++        min_vol: f64,
++        max_vol: f64,
++    ) -> Vec<(f64, f64)> {
++        let exp_norm = f64::from(row_idx as u32) / f64::from((n_exp - 1) as u32);
++
++        row.iter()
++            .enumerate()
++            .take(n_strike)
++            .map(|(j, &vol)| {
++                let strike_norm = f64::from(j as u32) / f64::from((n_strike - 1) as u32);
++                let vol_norm = (vol - min_vol) / (max_vol - min_vol);
++                self.project_normalized_point(strike_norm, exp_norm, vol_norm)
++            })
++            .collect()
++    }
++
++    /// Project a column of data to 2D screen points.
++    fn project_column_to_points(
++        &self,
++        surface_data: &[Vec<f64>],
++        col_idx: usize,
++        n_exp: usize,
++        n_strike: usize,
++        min_vol: f64,
++        max_vol: f64,
++    ) -> Vec<(f64, f64)> {
++        let strike_norm = f64::from(col_idx as u32) / f64::from((n_strike - 1) as u32);
++
++        surface_data
++            .iter()
++            .enumerate()
++            .map(|(i, row)| {
++                let exp_norm = f64::from(i as u32) / f64::from((n_exp - 1) as u32);
++                let vol = row[col_idx];
++                let vol_norm = (vol - min_vol) / (max_vol - min_vol);
++                self.project_normalized_point(strike_norm, exp_norm, vol_norm)
++            })
++            .collect()
++    }
++
++    /// Project normalized coordinates (0.0-1.0) to 2D screen space.
++    fn project_normalized_point(
++        &self,
++        strike_norm: f64,
++        exp_norm: f64,
++        vol_norm: f64,
++    ) -> (f64, f64) {
++        // Center the surface at origin by subtracting 0.5, then scale to world space
++        let x = (strike_norm - 0.5) * 3.0; // Strike: ±1.5 units
++        let y = (exp_norm - 0.5) * 3.0; // Expiry: ±1.5 units
++        let z = (vol_norm - 0.5) * 2.0; // Height: ±1.0 units (less tall to avoid distortion)
++        self.project(x, y, z)
++    }
++
++    /// Draw a series of connected line segments.
++    fn draw_line_strip(ctx: &mut Context, points: &[(f64, f64)], color: Color) {
++        for window in points.windows(2) {
++            ctx.draw(&Line {
++                x1: window[0].0,
++                y1: window[0].1,
++                x2: window[1].0,
++                y2: window[1].1,
++                color,
++            });
++        }
++    }
++
++    /// Cycle to the next color palette.
++    pub const fn cycle_palette(&mut self) {
++        self.palette = self.palette.next();
++    }
++}
++
++/// A widget that displays a 3D volatility surface using perspective projection.
++///
++/// This widget renders a 2D grid of volatility data as an interactive 3D wireframe surface
++/// using Braille characters for high resolution. It should be rendered with [`Surface3D`] as
++/// the state via the [`StatefulWidget`] trait.
++///
++/// # Example
++///
++/// ```ignore
++/// let surface_data = vec![vec![0.2, 0.25, 0.3], vec![0.22, 0.27, 0.32]];
++/// let mut state = Surface3D::new();
++/// frame.render_stateful_widget(VolatilitySurface::new(&surface_data), area, &mut state);
++/// ```
++pub struct VolatilitySurface<'a> {
++    surface_data: &'a [Vec<f64>],
++}
++
++impl<'a> VolatilitySurface<'a> {
++    /// Create a new volatility surface widget with the given data.
++    ///
++    /// The surface data should be a 2D grid where the first dimension represents
++    /// expiration times and the second dimension represents strike prices.
++    pub const fn new(surface_data: &'a [Vec<f64>]) -> Self {
++        Self { surface_data }
++    }
++}
++
++impl StatefulWidget for VolatilitySurface<'_> {
++    type State = Surface3D;
++
++    fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
++        state.render(area, buf, self.surface_data);
++    }
++}
+diff --git a/examples/apps/volatility-surface/src/main.rs b/examples/apps/volatility-surface/src/main.rs
+new file mode 100644
+index 0000000000..a164b4f0e3
+--- /dev/null
++++ b/examples/apps/volatility-surface/src/main.rs
+@@ -0,0 +1,189 @@
++//! A Ratatui example that demonstrates 3D perspective projection in the terminal.
++//!
++//! This example visualizes an implied volatility surface as an interactive 3D wireframe
++//! using Braille canvas for high-resolution rendering. It demonstrates rotation matrices,
++//! perspective projection, and real-time animation.
++
++mod display;
++mod volatility;
++
++use std::time::{Duration, Instant};
++
++use color_eyre::Result;
++use crossterm::event::{self, KeyCode, KeyEventKind, KeyModifiers};
++use display::{Surface3D, VolatilitySurface};
++use ratatui::layout::{Constraint, Layout, Rect};
++use ratatui::style::palette::tailwind::SLATE;
++use ratatui::style::{Style, Stylize};
++use ratatui::text::Line;
++use ratatui::widgets::Paragraph;
++use ratatui::{DefaultTerminal, Frame};
++use volatility::VolatilityEngine;
++
++fn main() -> Result<()> {
++    color_eyre::install()?;
++    ratatui::run(|terminal| App::new().run(terminal))
++}
++
++struct App {
++    paused: bool,
++    fps_counter: FpsCounter,
++    vol_engine: VolatilityEngine,
++    surface_3d: Surface3D,
++}
++
++struct FpsCounter {
++    frame_count: usize,
++    last_instant: Instant,
++    fps: f64,
++}
++
++impl FpsCounter {
++    fn new() -> Self {
++        Self {
++            frame_count: 0,
++            last_instant: Instant::now(),
++            fps: 0.0,
++        }
++    }
++
++    fn update(&mut self) {
++        self.frame_count += 1;
++        let elapsed = self.last_instant.elapsed();
++        // Update FPS calculation every second
++        if elapsed >= Duration::from_secs(1) {
++            self.fps = self.frame_count as f64 / elapsed.as_secs_f64();
++            self.frame_count = 0;
++            self.last_instant = Instant::now();
++        }
++    }
++
++    const fn fps(&self) -> usize {
++        self.fps as usize
++    }
++}
++
++impl App {
++    fn new() -> Self {
++        Self {
++            paused: false,
++            fps_counter: FpsCounter::new(),
++            vol_engine: VolatilityEngine::new(),
++            surface_3d: Surface3D::new(),
++        }
++    }
++
++    fn run(mut self, terminal: &mut DefaultTerminal) -> Result<()> {
++        let tick_rate = Duration::from_secs_f64(1.0 / 50.0); // 50 FPS (better for gifs)
++        let mut last_tick = Instant::now();
++
++        loop {
++            terminal.draw(|frame| self.render(frame))?;
++            self.fps_counter.update();
++
++            let timeout = tick_rate.saturating_sub(last_tick.elapsed());
++            if event::poll(timeout)? {
++                // Only handle key press events, not repeat or release
++                if let event::Event::Key(key) = event::read()? {
++                    if key.kind == KeyEventKind::Press && self.handle_key(key.code, key.modifiers) {
++                        break;
++                    }
++                }
++            }
++
++            if last_tick.elapsed() >= tick_rate {
++                if !self.paused {
++                    self.update();
++                }
++                last_tick = Instant::now();
++            }
++        }
++
++        Ok(())
++    }
++
++    fn update(&mut self) {
++        self.vol_engine.update();
++    }
++
++    fn handle_key(&mut self, code: KeyCode, modifiers: KeyModifiers) -> bool {
++        match code {
++            KeyCode::Char('q') | KeyCode::Esc => return true,
++            KeyCode::Char(' ') => self.paused = !self.paused,
++            KeyCode::Char('r') if modifiers.contains(KeyModifiers::CONTROL) => {
++                self.vol_engine.reset();
++            }
++            KeyCode::Up | KeyCode::Char('k') => self.surface_3d.rotate_x(0.1),
++            KeyCode::Down | KeyCode::Char('j') => self.surface_3d.rotate_x(-0.1),
++            KeyCode::Left | KeyCode::Char('h') => self.surface_3d.rotate_z(0.1),
++            KeyCode::Right | KeyCode::Char('l') => self.surface_3d.rotate_z(-0.1),
++            KeyCode::Char('z') => self.surface_3d.zoom(1.1),
++            KeyCode::Char('x') => self.surface_3d.zoom(0.9),
++            KeyCode::Char('p') => self.surface_3d.cycle_palette(),
++            _ => {}
++        }
++        false
++    }
++
++    fn render(&mut self, frame: &mut Frame) {
++        let chunks = Layout::vertical([
++            Constraint::Length(1),
++            Constraint::Min(0),
++            Constraint::Length(1),
++        ])
++        .split(frame.area());
++
++        self.render_header(frame, chunks[0]);
++        self.render_surface(frame, chunks[1]);
++        Self::render_footer(frame, chunks[2]);
++    }
++
++    fn render_header(&self, frame: &mut Frame, area: Rect) {
++        let status = if self.paused { "Paused" } else { "Live" };
++        let palette_name = self.surface_3d.palette_name();
++        let title = format!(
++            "volatility-surface - Status: {}, Palette: {}, FPS: {}",
++            status,
++            palette_name,
++            self.fps_counter.fps()
++        );
++
++        let header = Paragraph::new(title)
++            .centered()
++            .style(Style::default().bg(SLATE.c100).fg(SLATE.c800));
++
++        frame.render_widget(header, area);
++    }
++
++    fn render_surface(&mut self, frame: &mut Frame, area: Rect) {
++        let surface_data = self.vol_engine.get_surface();
++        frame.render_stateful_widget(
++            VolatilitySurface::new(surface_data),
++            area,
++            &mut self.surface_3d,
++        );
++    }
++
++    fn render_footer(frame: &mut Frame, area: Rect) {
++        let controls = Line::from(vec![
++            "↑↓←→/hjkl".cyan(),
++            " Rotate | ".into(),
++            "zx".cyan(),
++            " Zoom | ".into(),
++            "p".cyan(),
++            " Palette | ".into(),
++            "space".cyan(),
++            " Pause | ".into(),
++            "ctrl-r".cyan(),
++            " Reset | ".into(),
++            "q".cyan(),
++            " Quit".into(),
++        ]);
++
++        let footer = Paragraph::new(controls)
++            .centered()
++            .style(Style::default().fg(SLATE.c400).bg(SLATE.c950));
++
++        frame.render_widget(footer, area);
++    }
++}
+diff --git a/examples/apps/volatility-surface/src/volatility.rs b/examples/apps/volatility-surface/src/volatility.rs
+new file mode 100644
+index 0000000000..d28c336a4d
+--- /dev/null
++++ b/examples/apps/volatility-surface/src/volatility.rs
+@@ -0,0 +1,115 @@
++use rand::Rng;
++
++/// Generates realistic implied volatility surface data with animation
++pub struct VolatilityEngine {
++    strikes: Vec<f64>,      // Moneyness (0.8 to 1.2)
++    expirations: Vec<f64>,  // Time to expiration in years
++    surface: Vec<Vec<f64>>, // IV surface [expiry][strike]
++    base_vol: f64,
++    skew: f64,
++    term_structure: Vec<f64>,
++    time: f64,
++}
++
++impl VolatilityEngine {
++    pub fn new() -> Self {
++        let strikes: Vec<f64> = (0..25).map(|i| 0.7 + f64::from(i) * 0.025).collect(); // 70% to 130%
++        let expirations: Vec<f64> = (0..20).map(|i| 0.02 + f64::from(i) * 0.1).collect(); // 1W to 2Y
++
++        let mut engine = Self {
++            strikes,
++            expirations,
++            surface: Vec::new(),
++            base_vol: 20.0,
++            skew: 0.3,
++            term_structure: Vec::new(),
++            time: 0.0,
++        };
++
++        engine.initialize();
++        engine
++    }
++
++    fn initialize(&mut self) {
++        // Generate term structure (volatility term structure)
++        self.term_structure = self
++            .expirations
++            .iter()
++            .map(|&t| {
++                // Typical volatility term structure with contango/backwardation
++                let base = self.base_vol;
++                let term_effect = 5.0 * (1.0 - (-t * 2.0).exp());
++                base + term_effect
++            })
++            .collect();
++
++        // Generate full surface
++        self.regenerate_surface(0.0);
++    }
++
++    pub fn update(&mut self) {
++        self.time += 0.05;
++        self.regenerate_surface(self.time);
++    }
++
++    pub fn reset(&mut self) {
++        self.time = 0.0;
++        self.regenerate_surface(self.time);
++    }
++
++    fn regenerate_surface(&mut self, time: f64) {
++        let mut rng = rand::rng();
++        self.surface.clear();
++
++        for (exp_idx, &expiry) in self.expirations.iter().enumerate() {
++            let mut row = Vec::new();
++            let term_vol = self.term_structure[exp_idx];
++
++            // Add some time-based variation
++            let time_wave = (time * 0.5 + exp_idx as f64 * 0.1).sin() * 20.0;
++            let vol_shock = (time * 0.3).sin() * 1.5; // Market-wide vol shock
++
++            for &strike in &self.strikes {
++                let moneyness = strike;
++
++                // Classic volatility smile/skew model
++                let log_moneyness = (moneyness).ln();
++
++                // Skew component (negative for put skew)
++                let skew_component = -self.skew * log_moneyness * 100.0 / expiry.sqrt();
++
++                // Smile component (convexity)
++                let smile_component = 5.0 * log_moneyness.powi(2) / expiry.sqrt();
++
++                // Wings (out-of-the-money options have higher vol)
++                let wing_component = if (0.95..=1.05).contains(&moneyness) {
++                    0.0
++                } else {
++                    ((moneyness - 1.0).abs() - 0.05) * 20.0
++                };
++
++                // Realized volatility clustering effect
++                let cluster = (time * 2.0 + strike * 10.0).sin().abs() * 1.5;
++
++                // Random noise
++                let noise = (rng.random::<f64>() - 0.5) * 0.5;
++
++                let iv = term_vol
++                    + skew_component
++                    + smile_component
++                    + wing_component
++                    + time_wave
++                    + vol_shock
++                    + cluster
++                    + noise;
++
++                row.push(iv.clamp(5.0, 80.0)); // Clamp to reasonable range
++            }
++            self.surface.push(row);
++        }
++    }
++
++    pub const fn get_surface(&self) -> &Vec<Vec<f64>> {
++        &self.surface
++    }
++}
+diff --git a/examples/vhs/volatility-surface.tape b/examples/vhs/volatility-surface.tape
+new file mode 100644
+index 0000000000..30bcd4ae87
+--- /dev/null
++++ b/examples/vhs/volatility-surface.tape
+@@ -0,0 +1,36 @@
++# This is a vhs script. See https://github.com/charmbracelet/vhs for more info.
++# To run this script, install vhs and run `vhs ./examples/vhs/volatility-surface.tape`
++Output "target/volatility-surface.gif"
++Set Theme "Aardvark Blue"
++Set Width 1080
++Set Height 720
++Set Framerate 18
++Hide
++Type "cargo run -p volatility-surface"
++Enter
++Sleep 2s
++Show
++# Show initial 3D surface
++Sleep 1.5s
++Screenshot "target/volatility-surface-1.png"
++# Rotate around
++Sleep 0.5s
++Right@400ms 3
++Sleep 0.5s
++Up@400ms 2
++Sleep 0.5s
++Screenshot "target/volatility-surface-2.png"
++# Zoom
++Sleep 0.5s
++Type "z"
++Sleep 0.3s
++Type "z"
++Sleep 0.5s
++# Pause
++Type " "
++Sleep 0.8s
++Screenshot "target/volatility-surface-3.png"
++# Resume
++Type " "
++Sleep 1s
++Type "q"

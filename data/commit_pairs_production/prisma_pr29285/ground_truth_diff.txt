@@ -1,0 +1,239 @@
+diff --git a/packages/adapter-mariadb/src/mariadb.ts b/packages/adapter-mariadb/src/mariadb.ts
+index 92ef04b232a7..7c1f1ac7f194 100644
+--- a/packages/adapter-mariadb/src/mariadb.ts
++++ b/packages/adapter-mariadb/src/mariadb.ts
+@@ -63,7 +63,8 @@ class MariaDbQueryable<Connection extends mariadb.Pool | mariadb.Connection> imp
+         typeCast,
+       }
+       const values = args.map((arg, i) => mapArg(arg, query.argTypes[i]))
+-      return await this.client.query(req, values)
++      // We intentionally use `execute` here, because it uses the binary protocol, unlike `query`.
++      return await this.client.execute(req, values)
+     } catch (e) {
+       const error = e as Error
+       this.onError(error)
+@@ -76,9 +77,11 @@ class MariaDbQueryable<Connection extends mariadb.Pool | mariadb.Connection> imp
+   }
+ }
+ 
++// All transaction operations use `client.query` instead of `client.execute` to avoid using the
++// binary protocol, which does not support transactions in the MariaDB driver.
+ class MariaDbTransaction extends MariaDbQueryable<mariadb.Connection> implements Transaction {
+   constructor(
+-    conn: mariadb.Connection,
++    readonly conn: mariadb.Connection,
+     readonly options: TransactionOptions,
+     readonly cleanup?: () => void,
+   ) {
+@@ -88,27 +91,39 @@ class MariaDbTransaction extends MariaDbQueryable<mariadb.Connection> implements
+   async commit(): Promise<void> {
+     debug(`[js::commit]`)
+ 
+-    this.cleanup?.()
+-    await this.client.end()
++    try {
++      await this.client.query({ sql: 'COMMIT' })
++    } catch (err) {
++      this.onError(err)
++    } finally {
++      this.cleanup?.()
++      await this.client.end()
++    }
+   }
+ 
+   async rollback(): Promise<void> {
+     debug(`[js::rollback]`)
+ 
+-    this.cleanup?.()
+-    await this.client.end()
++    try {
++      await this.client.query({ sql: 'ROLLBACK' })
++    } catch (err) {
++      this.onError(err)
++    } finally {
++      this.cleanup?.()
++      await this.client.end()
++    }
+   }
+ 
+   async createSavepoint(name: string): Promise<void> {
+-    await this.executeRaw({ sql: `SAVEPOINT ${name}`, args: [], argTypes: [] })
++    await this.client.query({ sql: `SAVEPOINT ${name}` }).catch(this.onError.bind(this))
+   }
+ 
+   async rollbackToSavepoint(name: string): Promise<void> {
+-    await this.executeRaw({ sql: `ROLLBACK TO ${name}`, args: [], argTypes: [] })
++    await this.client.query({ sql: `ROLLBACK TO ${name}` }).catch(this.onError.bind(this))
+   }
+ 
+   async releaseSavepoint(name: string): Promise<void> {
+-    await this.executeRaw({ sql: `RELEASE SAVEPOINT ${name}`, args: [], argTypes: [] })
++    await this.client.query({ sql: `RELEASE SAVEPOINT ${name}` }).catch(this.onError.bind(this))
+   }
+ }
+ 
+@@ -143,7 +158,7 @@ export class PrismaMariaDbAdapter extends MariaDbQueryable<mariadb.Pool> impleme
+ 
+   async startTransaction(isolationLevel?: IsolationLevel): Promise<Transaction> {
+     const options: TransactionOptions = {
+-      usePhantomQuery: false,
++      usePhantomQuery: true,
+     }
+ 
+     const tag = '[js::startTransaction]'
+@@ -169,7 +184,8 @@ export class PrismaMariaDbAdapter extends MariaDbQueryable<mariadb.Pool> impleme
+           argTypes: [],
+         })
+       }
+-      await tx.executeRaw({ sql: 'BEGIN', args: [], argTypes: [] })
++      // Uses `query` instead of `execute` to avoid the binary protocol.
++      await tx.conn.query({ sql: 'BEGIN' }).catch(this.onError.bind(this))
+       return tx
+     } catch (error) {
+       await conn.end()
+diff --git a/packages/client/tests/functional/issues/29160-mysql-precision-loss/_matrix.ts b/packages/client/tests/functional/issues/29160-mysql-precision-loss/_matrix.ts
+new file mode 100644
+index 000000000000..3585f7b579f9
+--- /dev/null
++++ b/packages/client/tests/functional/issues/29160-mysql-precision-loss/_matrix.ts
+@@ -0,0 +1,4 @@
++import { defineMatrix } from '../../_utils/defineMatrix'
++import { Providers } from '../../_utils/providers'
++
++export default defineMatrix(() => [[{ provider: Providers.MYSQL }]])
+diff --git a/packages/client/tests/functional/issues/29160-mysql-precision-loss/prisma/_schema.ts b/packages/client/tests/functional/issues/29160-mysql-precision-loss/prisma/_schema.ts
+new file mode 100644
+index 000000000000..58773d11ad84
+--- /dev/null
++++ b/packages/client/tests/functional/issues/29160-mysql-precision-loss/prisma/_schema.ts
+@@ -0,0 +1,19 @@
++import { idForProvider } from '../../../_utils/idForProvider'
++import testMatrix from '../_matrix'
++
++export default testMatrix.setupSchema(({ provider }) => {
++  return /* Prisma */ `
++    generator client {
++      provider = "prisma-client-js"
++    }
++
++    datasource db {
++      provider = "${provider}"
++    }
++
++    model AssetAccount {
++      assetId ${idForProvider(provider)}
++      amount Decimal @default(0) @db.Decimal(30, 0)
++    }
++  `
++})
+diff --git a/packages/client/tests/functional/issues/29160-mysql-precision-loss/tests.ts b/packages/client/tests/functional/issues/29160-mysql-precision-loss/tests.ts
+new file mode 100644
+index 000000000000..4a55c815b097
+--- /dev/null
++++ b/packages/client/tests/functional/issues/29160-mysql-precision-loss/tests.ts
+@@ -0,0 +1,61 @@
++import testMatrix from './_matrix'
++// @ts-ignore
++import type { Prisma as PrismaNamespace, PrismaClient } from './generated/prisma/client'
++
++declare let prisma: PrismaClient
++declare let Prisma: typeof PrismaNamespace
++
++testMatrix.setupTestSuite(
++  () => {
++    test('preserves precision for large decimal values', async () => {
++      await prisma.assetAccount.create({
++        data: {
++          assetId: '1',
++          amount: new Prisma.Decimal('0'),
++        },
++      })
++
++      await expect(
++        prisma.assetAccount.update({
++          where: { assetId: '1' },
++          data: { amount: { increment: new Prisma.Decimal('5000000000000000000000000000') } },
++        }),
++      ).resolves.toMatchObject({
++        assetId: '1',
++        amount: new Prisma.Decimal('5000000000000000000000000000'),
++      })
++
++      // First withdrawal
++      await expect(
++        prisma.assetAccount.update({
++          where: { assetId: '1' },
++          data: { amount: { decrement: new Prisma.Decimal('1000000000000000000000') } },
++        }),
++      ).resolves.toMatchObject({
++        assetId: '1',
++        amount: new Prisma.Decimal('4999999000000000000000000000'),
++      })
++
++      await expect(
++        prisma.assetAccount.update({
++          where: { assetId: '1' },
++          data: { amount: { decrement: new Prisma.Decimal('1000000000000000000000') } },
++        }),
++      ).resolves.toMatchObject({
++        assetId: '1',
++        amount: new Prisma.Decimal('4999998000000000000000000000'),
++      })
++    })
++  },
++  {
++    optOut: {
++      from: ['sqlserver', 'cockroachdb', 'mongodb', 'postgresql', 'sqlite'],
++      reason:
++        'This test is specific to MySQL/MariaDB and the precision loss issue with large decimal values. It does not apply to other databases that do not have this issue.',
++    },
++    skipDriverAdapter: {
++      from: ['js_planetscale'],
++      reason: 'This issue currently cannot be addressed in Planetscale due to limitations of their API',
++    },
++  },
++)
+diff --git a/packages/client/tests/functional/tracing/tests.ts b/packages/client/tests/functional/tracing/tests.ts
+index fc296012a44e..469b0086417f 100644
+--- a/packages/client/tests/functional/tracing/tests.ts
++++ b/packages/client/tests/functional/tracing/tests.ts
+@@ -123,8 +123,9 @@ testMatrix.setupTestSuite(
+     const usesJsDrivers = driverAdapter !== undefined || clientEngineExecutor === 'remote'
+ 
+     const usesSyntheticTxQueries =
+-      (driverAdapter !== undefined && ['js_d1', 'js_libsql', 'js_planetscale', 'js_mssql'].includes(driverAdapter)) ||
+-      (clientEngineExecutor === 'remote' && provider === Providers.SQLSERVER)
++      (driverAdapter !== undefined &&
++        ['js_d1', 'js_libsql', 'js_planetscale', 'js_mssql', 'js_mariadb'].includes(driverAdapter)) ||
++      (clientEngineExecutor === 'remote' && [Providers.SQLSERVER, Providers.MYSQL].includes(provider))
+ 
+     beforeEach(async () => {
+       await prisma.$connect()
+diff --git a/packages/client/tests/functional/typed-sql/mysql-scalars-nullable/test.ts b/packages/client/tests/functional/typed-sql/mysql-scalars-nullable/test.ts
+index 81195a74f0e8..31a0d5f80800 100644
+--- a/packages/client/tests/functional/typed-sql/mysql-scalars-nullable/test.ts
++++ b/packages/client/tests/functional/typed-sql/mysql-scalars-nullable/test.ts
+@@ -51,7 +51,8 @@ testMatrix.setupTestSuite(
+ 
+     test('float - output', async () => {
+       const result = await prisma.$queryRawTyped(sql.getFloat(id))
+-      expect(result[0].float).toBe(12.3)
++      // Account for potential precision loss when storing the value as a FLOAT
++      expect(result[0].float).toBeOneOf([new Float32Array([12.3])[0], 12.3])
+       expectTypeOf(result[0].float).toEqualTypeOf<number | null>()
+     })
+ 
+diff --git a/packages/client/tests/functional/typed-sql/mysql-scalars/test.ts b/packages/client/tests/functional/typed-sql/mysql-scalars/test.ts
+index c20119b23af8..593bc2b27414 100644
+--- a/packages/client/tests/functional/typed-sql/mysql-scalars/test.ts
++++ b/packages/client/tests/functional/typed-sql/mysql-scalars/test.ts
+@@ -50,7 +50,8 @@ testMatrix.setupTestSuite(
+ 
+     test('float - output', async () => {
+       const result = await prisma.$queryRawTyped(sql.getFloat(id))
+-      expect(result[0].float).toBe(12.3)
++      // Account for potential precision loss when storing the value as a FLOAT
++      expect(result[0].float).toBeOneOf([new Float32Array([12.3])[0], 12.3])
+       expectTypeOf(result[0].float).toBeNumber()
+     })
+ 

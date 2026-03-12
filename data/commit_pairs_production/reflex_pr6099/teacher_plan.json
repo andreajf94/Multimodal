@@ -1,0 +1,89 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "api_design",
+      "recommendation": "Used a named constant EVENT_ACTIONS_MARKER instead of hardcoded string '_rx_event_actions' for event action storage",
+      "rationale": "Centralizing the marker name as a constant ensures consistency across the codebase and makes it easier to maintain. If the marker name needs to change in the future, it only needs to be updated in one place (the constant definition). This follows the DRY principle and reduces the risk of typos or inconsistencies.",
+      "alternatives_considered": [
+        "Continue using hardcoded string literals throughout the code",
+        "Create a separate configuration module for all marker constants",
+        "Use a class attribute on EventHandler instead of a module-level constant"
+      ],
+      "files_affected": [
+        "reflex/event.py",
+        "reflex/state.py"
+      ]
+    },
+    {
+      "dimension": "data_modeling",
+      "recommendation": "Preserved event actions metadata when copying functions in mixin inheritance",
+      "rationale": "When mixin classes are inherited, Python creates new function objects. The _copy_fn method in State class needed to explicitly copy the EVENT_ACTIONS_MARKER attribute to ensure event actions (like prevent_default, stop_propagation) are preserved through the inheritance chain. This is crucial because mixins create new function instances that don't automatically inherit custom attributes.",
+      "alternatives_considered": [
+        "Store event actions in a separate registry instead of function attributes",
+        "Use functools.wraps which preserves some but not all custom attributes",
+        "Modify the inheritance mechanism to avoid function copying altogether"
+      ],
+      "files_affected": [
+        "reflex/state.py"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Used object.__setattr__ for setting EVENT_ACTIONS_MARKER on copied functions",
+      "rationale": "When creating new function objects via types.MethodType, the function may be a read-only descriptor. Using object.__setattr__ bypasses any descriptor protocol restrictions and ensures the attribute can be set reliably. This is a defensive programming technique that handles edge cases in Python's attribute setting mechanism.",
+      "alternatives_considered": [
+        "Use setattr() with try-except for AttributeError",
+        "Store metadata in a separate dict keyed by function id",
+        "Modify the function creation to produce mutable function objects"
+      ],
+      "files_affected": [
+        "reflex/state.py"
+      ]
+    },
+    {
+      "dimension": "testing",
+      "recommendation": "Added specific test for mixin event handler preservation",
+      "rationale": "Created a targeted unit test that verifies event actions are preserved when inherited from mixins. The test uses the @rx.event decorator with prevent_default and stop_propagation parameters and asserts that the handler retains these actions. This prevents regression and documents the expected behavior for future developers.",
+      "alternatives_considered": [
+        "Rely on existing integration tests to catch the issue",
+        "Add property-based testing with hypothesis",
+        "Create more complex inheritance chain tests"
+      ],
+      "files_affected": [
+        "tests/units/test_state.py"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Fix Event Actions Preservation in Mixins",
+      "description": "Ensure event actions defined via @rx.event decorator are preserved when methods are inherited from mixin classes. This involves updating the event action storage mechanism to use a named constant and ensuring the State class properly copies event action metadata during function inheritance.",
+      "files_to_modify": [
+        "reflex/event.py",
+        "reflex/state.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-002",
+      "title": "Add Test Coverage for Mixin Event Actions",
+      "description": "Create unit test to verify that event actions (prevent_default, stop_propagation, etc.) are correctly preserved when event handlers are inherited from mixin classes. This test ensures the fix works correctly and prevents future regressions.",
+      "files_to_modify": [
+        "tests/units/test_state.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation addresses a subtle bug where event actions defined via the @rx.event decorator were lost when event handlers were inherited from mixin classes. The root cause was that mixin inheritance creates new function objects, and the custom attributes storing event actions weren't being copied to these new function instances.\n\nThe fix involves three key changes: First, a named constant EVENT_ACTIONS_MARKER was introduced in reflex/event.py to replace the hardcoded string '_rx_event_actions', ensuring consistency. Second, the @rx.event decorator was updated to use setattr with this constant when storing event actions on functions. Third and most importantly, the State._copy_fn method was modified to explicitly copy the EVENT_ACTIONS_MARKER attribute when creating new function instances during mixin inheritance, using object.__setattr__ to ensure reliable attribute setting.\n\nThis solution maintains backward compatibility while fixing the specific issue with mixins. The use of a named constant follows good software engineering practices by centralizing the marker name. The test added provides clear documentation of the expected behavior and prevents regression. The approach is minimal and focused, changing only what's necessary to fix the bug without refactoring larger parts of the event system.",
+  "source_pr": "https://github.com/reflex-dev/reflex/pull/6099",
+  "before_sha": "56f8f976c92e40685580b9ee5d4f4e889866430b",
+  "after_sha": "22bf804022c405de90008182ff98f8b10c523b59",
+  "diff_stats": {
+    "additions": 23,
+    "deletions": 2,
+    "files_changed": 3
+  }
+}

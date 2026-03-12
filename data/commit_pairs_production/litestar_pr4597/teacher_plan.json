@@ -1,0 +1,65 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "dependency_injection",
+      "recommendation": "Added explicit bound method detection in dependency classification logic",
+      "rationale": "The original implementation only distinguished between classes, functions, and callable instances. Bound methods (instance methods) were being misclassified as callable instances, causing incorrect async generator detection. By adding explicit `ismethod()` check, we ensure bound methods are properly identified before determining the target for generator detection.",
+      "alternatives_considered": [
+        "Checking `hasattr(dependency, '__self__')` instead of `ismethod()`",
+        "Adding special handling only for async generator methods rather than all bound methods",
+        "Modifying the generator detection logic instead of the classification logic"
+      ],
+      "files_affected": [
+        "litestar/di.py"
+      ]
+    },
+    {
+      "dimension": "testing",
+      "recommendation": "Added comprehensive tests for bound method generator detection",
+      "rationale": "Created two test cases covering both async and sync generator bound methods to ensure the fix works correctly and prevents regression. Tests verify the correct detection of generator types and proper classification of callable types.",
+      "alternatives_considered": [
+        "Adding only one test case for the specific bug scenario",
+        "Integrating the test into existing test functions rather than creating new ones",
+        "Using mocks instead of concrete classes for testing"
+      ],
+      "files_affected": [
+        "tests/unit/test_di.py"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Maintained backward compatibility while fixing the classification issue",
+      "rationale": "The fix only adds an additional classification category (bound methods) without changing the behavior for existing categories (classes, functions, callable instances). This ensures that existing dependency injection patterns continue to work while fixing the specific issue with bound methods.",
+      "alternatives_considered": [
+        "Refactoring the entire dependency classification system",
+        "Adding a flag to explicitly mark bound methods rather than detecting them",
+        "Creating a separate code path for bound methods entirely"
+      ],
+      "files_affected": [
+        "litestar/di.py"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Fix bound method detection in dependency injection",
+      "description": "Update the dependency injection system to correctly identify bound methods when checking for async generators, preventing misclassification and spurious warnings",
+      "files_to_modify": [
+        "litestar/di.py",
+        "tests/unit/test_di.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation addresses a specific bug in Litestar's dependency injection system where bound methods (instance methods) were being misclassified as callable instances, leading to incorrect async generator detection. The fix adds explicit bound method detection using Python's `inspect.ismethod()` function in the dependency classification logic.\n\nIn the `Provide` class constructor, the original code distinguished between three categories: class dependencies, function dependencies, and callable instances. Bound methods fell into the 'callable instance' category, which caused issues because the generator detection logic would then check `dependency.__call__` instead of the method itself. By adding `ismethod(dependency)` as a separate check, bound methods are now properly identified before determining which target to use for generator detection.\n\nThe testing strategy is comprehensive, covering both async and sync generator bound methods. The tests create concrete classes with generator methods, instantiate them, and verify that the `Provide` class correctly identifies the generator types. This ensures the fix works for the reported issue and prevents similar problems with sync generators. The approach maintains backward compatibility by only adding a new classification category without changing the behavior for existing dependency types.",
+  "source_pr": "https://github.com/litestar-org/litestar/pull/4597",
+  "before_sha": "b379144aba7faae95a985e719ea3794510a2b364",
+  "after_sha": "7670d49924379867b9a3e8ce721518a53bc210c7",
+  "diff_stats": {
+    "additions": 40,
+    "deletions": 2,
+    "files_changed": 2
+  }
+}

@@ -1,0 +1,145 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "api_design",
+      "recommendation": "Added navigation methods (first(), last(), previous(), next()) to ListState with saturating arithmetic to prevent out-of-bounds access",
+      "rationale": "The navigation methods use saturating_add() and saturating_sub() to ensure indices never overflow or underflow, providing safe navigation even when the list length is unknown at navigation time. This approach allows users to call navigation methods before rendering without causing panics.",
+      "alternatives_considered": [
+        "Using checked arithmetic with explicit bounds checking",
+        "Panicking on out-of-bounds access",
+        "Returning Result types for navigation operations"
+      ],
+      "files_affected": [
+        "src/widgets/list.rs"
+      ]
+    },
+    {
+      "dimension": "api_design",
+      "recommendation": "Modified select() method to clamp indices to valid bounds during rendering",
+      "rationale": "The select() method now clamps the selected index to the last valid item when the index is out of bounds. This ensures that programmatically setting an index (e.g., via select_last() with usize::MAX) results in a valid selection after rendering, preventing invisible selections.",
+      "alternatives_considered": [
+        "Returning an error when setting invalid indices",
+        "Wrapping indices modulo list length",
+        "Maintaining the invalid index as-is"
+      ],
+      "files_affected": [
+        "src/widgets/list.rs"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Added bounds checking in the render method to handle empty lists and out-of-bounds selections",
+      "rationale": "The render method now explicitly checks for empty lists and out-of-bounds selections, setting the selection to None for empty lists and clamping to the last item for out-of-bounds indices. This prevents visual artifacts and ensures consistent behavior across different list states.",
+      "alternatives_considered": [
+        "Letting users handle empty list cases manually",
+        "Panicking on out-of-bounds access during rendering",
+        "Silently ignoring invalid selections"
+      ],
+      "files_affected": [
+        "src/widgets/list.rs"
+      ]
+    },
+    {
+      "dimension": "testing",
+      "recommendation": "Added comprehensive unit tests for navigation methods and edge cases",
+      "rationale": "Tests cover navigation method behavior, empty list handling, single item lists, and boundary conditions. Using rstest fixtures allows parameterized testing of different scenarios, ensuring the clamping logic works correctly in all cases.",
+      "alternatives_considered": [
+        "Only testing happy paths",
+        "Relying on integration tests only",
+        "Skipping edge case testing"
+      ],
+      "files_affected": [
+        "src/widgets/list.rs",
+        "tests/widgets_list.rs"
+      ]
+    },
+    {
+      "dimension": "documentation",
+      "recommendation": "Updated example to demonstrate new navigation methods and refactored for clarity",
+      "rationale": "The list example was completely rewritten to use the new navigation methods, with clearer separation of concerns and better code organization. The example now shows practical usage of first(), last(), previous(), and next() methods in a todo list application.",
+      "alternatives_considered": [
+        "Keeping the old example unchanged",
+        "Adding a separate example for navigation",
+        "Minimal changes to existing example"
+      ],
+      "files_affected": [
+        "examples/list.rs"
+      ]
+    },
+    {
+      "dimension": "backward_compatibility",
+      "recommendation": "Documented the behavior change in BREAKING-CHANGES.md as a breaking change",
+      "rationale": "The clamping behavior represents a semantic change from previous versions where out-of-bounds selections could exist but not be visible. This is documented as a breaking change to alert users who might have relied on the old behavior.",
+      "alternatives_considered": [
+        "Treating it as a bug fix without documentation",
+        "Making it configurable via feature flag",
+        "Keeping backward compatibility with deprecation warnings"
+      ],
+      "files_affected": [
+        "BREAKING-CHANGES.md"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Add navigation methods to ListState",
+      "description": "Implement first(), last(), previous(), and next() methods for programmatic navigation through list items with safe bounds handling",
+      "files_to_modify": [
+        "src/widgets/list.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-002",
+      "title": "Implement bounds clamping in render method",
+      "description": "Modify the List widget's render method to clamp selected indices to valid bounds and handle empty lists properly",
+      "files_to_modify": [
+        "src/widgets/list.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-003",
+      "title": "Update list example to demonstrate navigation",
+      "description": "Rewrite the list example to use the new navigation methods and improve code organization",
+      "files_to_modify": [
+        "examples/list.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-004",
+      "title": "Add comprehensive tests for navigation",
+      "description": "Create unit tests for navigation methods, edge cases, and bounds clamping behavior",
+      "files_to_modify": [
+        "src/widgets/list.rs",
+        "tests/widgets_list.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-005",
+      "title": "Document breaking changes",
+      "description": "Update breaking changes documentation to reflect the new clamping behavior",
+      "files_to_modify": [
+        "BREAKING-CHANGES.md"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation adds programmatic navigation methods to the List widget while ensuring the selected index always stays within valid bounds. The core approach uses saturating arithmetic in navigation methods (first(), last(), previous(), next()) to prevent overflow/underflow, combined with bounds clamping during rendering to correct indices that exceed list length.\n\nKey design decisions include: 1) Using saturating arithmetic for safe navigation before list length is known, 2) Deferring final bounds correction to the render phase when the actual list length is available, 3) Handling empty lists by setting selection to None, and 4) Treating out-of-bounds selections by clamping to the last valid item rather than wrapping or panicking.\n\nThe example was significantly refactored to demonstrate the new API, with improved separation of terminal setup logic into a module and clearer mapping between keyboard inputs and navigation methods. Tests were added to verify the clamping behavior works correctly for edge cases like empty lists, single items, and boundary conditions. This approach balances safety with usability, allowing developers to navigate lists programmatically without manual bounds checking while maintaining predictable visual behavior.",
+  "source_pr": "https://github.com/ratatui/ratatui/pull/1159",
+  "before_sha": "38bb19640449c7a3eee3a2fba6450071395e5e06",
+  "after_sha": "46977d88519d28ccac1c94e171af0c9cca071dbc",
+  "diff_stats": {
+    "additions": 411,
+    "deletions": 276,
+    "files_changed": 4
+  }
+}

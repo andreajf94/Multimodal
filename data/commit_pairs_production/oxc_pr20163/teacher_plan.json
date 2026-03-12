@@ -1,0 +1,65 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "build_configuration",
+      "recommendation": "Added chunkFileNames configuration to TypeScript bundler to organize common chunks in a 'common' directory",
+      "rationale": "When bundling multiple entry points (ESLint plugin rules), Rollup/tsdown generates shared modules as common chunks. Without explicit naming configuration, these chunks would be placed in the root output directory, making it difficult to include them in the package.json files field. The 'common/[name].cjs' pattern organizes chunks predictably.",
+      "alternatives_considered": [
+        "Leaving chunks in root directory and using glob patterns in package.json files field",
+        "Disabling code splitting entirely to avoid chunks",
+        "Using a different bundler configuration that doesn't generate chunks"
+      ],
+      "files_affected": [
+        "apps/oxlint/tsdown.config.ts"
+      ]
+    },
+    {
+      "dimension": "package_management",
+      "recommendation": "Added 'common' directory to package.json files field to ensure common chunks are included in published npm package",
+      "rationale": "npm's package.json 'files' field acts as an allowlist for what gets published. Without including the 'common' directory, the shared chunks generated during bundling would be excluded from the published package, causing runtime errors when the plugin tries to import missing modules. This ensures the published package is complete.",
+      "alternatives_considered": [
+        "Using .npmignore with negation patterns instead of files field",
+        "Moving common chunks to existing 'rules' directory",
+        "Changing the bundler output structure to avoid separate common directory"
+      ],
+      "files_affected": [
+        "npm/oxlint-plugin-eslint/package.json"
+      ]
+    },
+    {
+      "dimension": "module_system_compatibility",
+      "recommendation": "Used CommonJS (.cjs) extension for chunk files to maintain compatibility with mixed module systems",
+      "rationale": "The ESLint plugin ecosystem primarily uses CommonJS, but the package.json specifies 'type': 'module'. The .cjs extension explicitly marks these shared chunks as CommonJS modules, preventing Node.js module resolution issues in a dual-module package. This follows Node.js conventions for mixed module packages.",
+      "alternatives_considered": [
+        "Using .js extension and relying on package.json type field",
+        "Converting entire package to ESM-only",
+        "Using .mjs extension for all output files"
+      ],
+      "files_affected": [
+        "apps/oxlint/tsdown.config.ts"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Fix ESLint Plugin Package Bundling Configuration",
+      "description": "Update TypeScript bundler configuration to properly organize common chunks and ensure they're included in the published npm package",
+      "files_to_modify": [
+        "apps/oxlint/tsdown.config.ts",
+        "npm/oxlint-plugin-eslint/package.json"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The changes address a packaging issue where the oxlint-plugin-eslint npm package would be incomplete when published. The root cause was that the TypeScript bundler (tsdown/Rollup) generates common chunks when bundling multiple ESLint rule entry points, but these chunks weren't being included in the published package.\n\nThe solution involves two coordinated changes. First, in the tsdown configuration, we added outputOptions with chunkFileNames set to 'common/[name].cjs'. This organizes shared modules into a predictable 'common' directory with .cjs extensions, making them easy to reference. Second, we updated the package.json's files field to include this new 'common' directory, ensuring npm includes these essential files during publication.\n\nThis approach maintains the existing bundler optimization (code splitting) while ensuring package completeness. The .cjs extension is particularly important because the package uses 'type': 'module' in package.json but needs CommonJS compatibility for the ESLint ecosystem. The changes are minimal and focused, avoiding broader architectural changes while fixing a critical packaging issue.",
+  "source_pr": "https://github.com/oxc-project/oxc/pull/20163",
+  "before_sha": "c422abd641c71554c77f998d19a3ddb6b8ea1663",
+  "after_sha": "e1713a44e6c8a1bde4599e300e39e405bd3aecea",
+  "diff_stats": {
+    "additions": 4,
+    "deletions": 0,
+    "files_changed": 2
+  }
+}

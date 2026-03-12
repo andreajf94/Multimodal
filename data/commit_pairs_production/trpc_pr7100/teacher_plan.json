@@ -1,0 +1,172 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "api_design",
+      "recommendation": "Added an optional `experimental_encoder` configuration to WebSocket client and server adapters, maintaining JSON as the default for backward compatibility",
+      "rationale": "The feature needed to be opt-in and non-breaking for existing users. By making it experimental and optional, we can gather feedback before stabilizing the API. The encoder interface is minimal (encode/decode methods) to support various binary formats while keeping the API surface small.",
+      "alternatives_considered": [
+        "Mandatory encoder configuration",
+        "Separate WebSocket link for binary formats",
+        "Automatic content negotiation"
+      ],
+      "files_affected": [
+        "packages/client/src/links/wsLink/wsClient/options.ts",
+        "packages/server/src/adapters/ws.ts"
+      ]
+    },
+    {
+      "dimension": "data_modeling",
+      "recommendation": "Created a shared Encoder interface that can handle both text (JSON) and binary (MessagePack, CBOR) formats, with proper type safety",
+      "rationale": "The encoder needs to work across client and server boundaries with consistent behavior. The interface accepts string | Uint8Array for encode and string | ArrayBuffer | Uint8Array for decode, covering all WebSocket message types. This ensures compatibility with both text and binary WebSocket frames.",
+      "alternatives_considered": [
+        "Separate interfaces for text vs binary encoders",
+        "Using MIME types for content negotiation",
+        "Relying solely on WebSocket's binaryType property"
+      ],
+      "files_affected": [
+        "packages/client/src/links/wsLink/wsClient/encoder.ts",
+        "packages/server/src/adapters/wsEncoder.ts"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Added validation to ensure encoder compatibility between client and server, with clear error messages for mismatched configurations",
+      "rationale": "When a binary encoder is used on one side but not the other, or when JSON encoder receives binary data, users need clear error messages. The implementation includes runtime checks in both jsonEncoder and custom encoders to detect format mismatches early.",
+      "alternatives_considered": [
+        "Silent fallback to JSON",
+        "Automatic detection and conversion",
+        "Connection-level negotiation protocol"
+      ],
+      "files_affected": [
+        "packages/client/src/links/wsLink/wsClient/encoder.ts",
+        "packages/server/src/adapters/wsEncoder.ts",
+        "examples/next-websockets-encoder/src/utils/encoder.ts"
+      ]
+    },
+    {
+      "dimension": "compatibility",
+      "recommendation": "Maintained PING/PONG handling as text frames regardless of encoder configuration to preserve WebSocket keep-alive functionality",
+      "rationale": "PING/PONG frames are part of the WebSocket protocol and must remain as text frames for compatibility with existing infrastructure and WebSocket libraries. The implementation checks for these control messages before passing data to the encoder.",
+      "alternatives_considered": [
+        "Encoding PING/PONG with the custom encoder",
+        "Separate control channel",
+        "Removing PING/PONG entirely for binary encoders"
+      ],
+      "files_affected": [
+        "packages/client/src/links/wsLink/wsClient/wsClient.ts",
+        "packages/server/src/adapters/ws.ts"
+      ]
+    },
+    {
+      "dimension": "developer_experience",
+      "recommendation": "Created a comprehensive example demonstrating MessagePack encoder usage with proper handling of undefined values and binary data",
+      "rationale": "Developers need a working reference implementation to understand how to implement custom encoders. The example shows practical concerns like handling undefined values (which MessagePack converts to null) and configuring both client and server with the same encoder.",
+      "alternatives_considered": [
+        "Documentation-only approach",
+        "Simple code snippets without full context",
+        "Separate repository for examples"
+      ],
+      "files_affected": [
+        "examples/next-websockets-encoder/README.md",
+        "examples/next-websockets-encoder/src/utils/encoder.ts",
+        "examples/next-websockets-encoder/src/utils/trpc.ts"
+      ]
+    },
+    {
+      "dimension": "testing",
+      "recommendation": "Added comprehensive test suite covering encoder compatibility, binary encoding, and edge cases",
+      "rationale": "Custom encoders introduce new failure modes that need to be tested. The test suite verifies that JSON encoder rejects binary data, binary encoders work correctly, and mismatched configurations produce appropriate errors.",
+      "alternatives_considered": [
+        "Relying on existing WebSocket tests",
+        "Manual testing only",
+        "Separate test package"
+      ],
+      "files_affected": [
+        "packages/tests/server/websockets.encoder.test.ts"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Core Encoder Interface Implementation",
+      "description": "Define the Encoder interface and implement default JSON encoder for WebSocket connections",
+      "files_to_modify": [],
+      "files_to_create": [
+        "packages/client/src/links/wsLink/wsClient/encoder.ts",
+        "packages/server/src/adapters/wsEncoder.ts"
+      ],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-002",
+      "title": "WebSocket Client Encoder Integration",
+      "description": "Add experimental_encoder option to WebSocket client and integrate encoder into message sending/receiving",
+      "files_to_modify": [
+        "packages/client/src/links/wsLink/createWsClient.ts",
+        "packages/client/src/links/wsLink/wsClient/options.ts",
+        "packages/client/src/links/wsLink/wsClient/wsClient.ts",
+        "packages/client/src/links/wsLink/wsClient/wsConnection.ts",
+        "packages/client/src/links/wsLink/wsLink.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-003",
+      "title": "WebSocket Server Encoder Integration",
+      "description": "Add experimental_encoder option to WebSocket server adapter and integrate encoder into message handling",
+      "files_to_modify": [
+        "packages/server/src/adapters/ws.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-004",
+      "title": "Example Application with MessagePack Encoder",
+      "description": "Create a complete Next.js example demonstrating MessagePack encoder usage with WebSocket subscriptions",
+      "files_to_modify": [],
+      "files_to_create": [
+        "examples/next-websockets-encoder/README.md",
+        "examples/next-websockets-encoder/next-env.d.ts",
+        "examples/next-websockets-encoder/next.config.ts",
+        "examples/next-websockets-encoder/package.json",
+        "examples/next-websockets-encoder/postcss.config.js",
+        "examples/next-websockets-encoder/src/pages/_app.tsx",
+        "examples/next-websockets-encoder/src/pages/api/trpc/[trpc].ts",
+        "examples/next-websockets-encoder/src/pages/index.tsx",
+        "examples/next-websockets-encoder/src/server/prodServer.ts",
+        "examples/next-websockets-encoder/src/server/routers/_app.ts",
+        "examples/next-websockets-encoder/src/server/trpc.ts",
+        "examples/next-websockets-encoder/src/server/wssDevServer.ts",
+        "examples/next-websockets-encoder/src/styles/global.css",
+        "examples/next-websockets-encoder/src/utils/encoder.ts",
+        "examples/next-websockets-encoder/src/utils/trpc.ts",
+        "examples/next-websockets-encoder/tailwind.config.ts",
+        "examples/next-websockets-encoder/tsconfig.json",
+        "examples/next-websockets-encoder/tsconfig.server.json"
+      ],
+      "estimated_effort": "large"
+    },
+    {
+      "id": "T-005",
+      "title": "Encoder Test Suite",
+      "description": "Create comprehensive tests for encoder functionality including compatibility and error cases",
+      "files_to_modify": [],
+      "files_to_create": [
+        "packages/tests/server/websockets.encoder.test.ts"
+      ],
+      "estimated_effort": "medium"
+    }
+  ],
+  "implementation_summary": "The implementation adds experimental support for custom WebSocket encoders to tRPC, allowing developers to use binary formats like MessagePack, CBOR, or protobufs instead of JSON for WebSocket communications. The core design centers around a minimal Encoder interface with encode/decode methods that sits between the transformer and WebSocket transport layer.\n\nKey architectural decisions include: 1) Making the feature opt-in via an experimental_encoder option to maintain backward compatibility, 2) Keeping PING/PONG control messages as text frames regardless of encoder choice to preserve WebSocket protocol compatibility, 3) Providing clear error messages when encoder configurations mismatch between client and server, and 4) Including a comprehensive example with MessagePack that demonstrates practical concerns like handling undefined values (which MessagePack converts to null but tRPC expects as undefined).\n\nThe implementation follows tRPC's existing patterns by adding the encoder configuration to both client WebSocket options and server WebSocket adapter options. The encoder processes data after transformer serialization on the client and before transformer deserialization on the server, maintaining the existing transformer abstraction for data shaping while allowing different wire formats. The example application shows a complete Next.js setup with WebSocket subscriptions using MessagePack, providing developers with a reference implementation that includes proper error handling and configuration.",
+  "source_pr": "https://github.com/trpc/trpc/pull/7100",
+  "before_sha": "163ec4ec05bea21ae66dae8cdb9da9d33b312d3c",
+  "after_sha": "7b6e62472221ff21dd4c8509a4aca71b34eec78b",
+  "diff_stats": {
+    "additions": 1687,
+    "deletions": 562,
+    "files_changed": 28
+  }
+}

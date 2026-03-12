@@ -1,0 +1,109 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "data_modeling",
+      "recommendation": "Added type discrimination between simple and complex values with isComplexValue function to determine which values can be filtered by equality",
+      "rationale": "Simple types (strings, numbers, booleans) can be filtered using equality operators, while complex types (objects, arrays) require different filtering approaches. This distinction ensures users only see the 'Filter by value' option for data types that support simple equality comparisons.",
+      "alternatives_considered": [
+        "Treat all values as filterable and handle complex types differently in the filter logic",
+        "Create separate filter interfaces for different data type categories"
+      ],
+      "files_affected": [
+        "apps/studio/components/grid/components/header/filter/FilterPopoverNew.utils.ts"
+      ]
+    },
+    {
+      "dimension": "api_design",
+      "recommendation": "Created buildFilterFromCellValue utility function that standardizes filter creation from cell values, handling null/undefined values with 'is' operator and other values with '=' operator",
+      "rationale": "Provides a consistent way to convert cell values into filter objects that the existing filter system can process. The function handles type coercion (converting values to strings) and special cases for nullish values, ensuring filters work correctly with the backend query system.",
+      "alternatives_considered": [
+        "Creating separate filter builders for each data type",
+        "Passing raw values and letting the filter component handle type conversion"
+      ],
+      "files_affected": [
+        "apps/studio/components/grid/components/header/filter/FilterPopoverNew.utils.ts"
+      ]
+    },
+    {
+      "dimension": "ui_ux",
+      "recommendation": "Integrated 'Filter by value' option into the row context menu, making it discoverable from right-click interactions on table cells",
+      "rationale": "Provides intuitive access to filtering directly from the data users are viewing. The context menu is a natural place for row/cell operations, and adding filtering here follows the principle of putting functionality where users need it.",
+      "alternatives_considered": [
+        "Adding a separate filter button to each cell",
+        "Creating a dedicated filter panel accessible only from the header"
+      ],
+      "files_affected": [
+        "apps/studio/components/grid/components/menu/RowContextMenu.tsx"
+      ]
+    },
+    {
+      "dimension": "feature_toggling",
+      "recommendation": "Used existing feature flag system (useIsTableFilterBarEnabled) to conditionally show the 'Filter by value' option",
+      "rationale": "Maintains backward compatibility and allows gradual rollout of the new filtering feature. The feature flag system was already in place for the table filter bar, making it the logical choice for controlling this related functionality.",
+      "alternatives_considered": [
+        "Hard-coding the feature without toggle",
+        "Creating a separate feature flag just for context menu filtering"
+      ],
+      "files_affected": [
+        "apps/studio/components/grid/components/menu/RowContextMenu.tsx"
+      ]
+    },
+    {
+      "dimension": "testing",
+      "recommendation": "Created comprehensive test file covering edge cases for both isComplexValue and buildFilterFromCellValue functions",
+      "rationale": "Ensures type discrimination logic works correctly for all JavaScript primitive types and common edge cases (null, undefined, empty strings, zero, negative numbers). The tests verify both the classification logic and the filter generation logic produce expected results.",
+      "alternatives_considered": [
+        "Testing only the integration points",
+        "Relying on existing integration tests"
+      ],
+      "files_affected": [
+        "apps/studio/components/grid/components/header/filter/FilterPopoverNew.utils.test.ts"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Added defensive checks in getRowAndColumn function to handle missing row/column data gracefully",
+      "rationale": "Prevents runtime errors when the context menu is invoked without proper selection state. The function returns null when essential data is missing, allowing the calling code to handle the error case appropriately.",
+      "alternatives_considered": [
+        "Throwing errors when data is missing",
+        "Using optional chaining with default values"
+      ],
+      "files_affected": [
+        "apps/studio/components/grid/components/menu/RowContextMenu.tsx"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Add value-based filtering utilities for simple data types",
+      "description": "Implement core logic for discriminating between simple and complex values, and create standardized filter generation from cell values",
+      "files_to_modify": [
+        "apps/studio/components/grid/components/header/filter/FilterPopoverNew.utils.ts"
+      ],
+      "files_to_create": [
+        "apps/studio/components/grid/components/header/filter/FilterPopoverNew.utils.test.ts"
+      ],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-002",
+      "title": "Integrate filter by value into row context menu",
+      "description": "Add 'Filter by value' option to the right-click context menu for table rows, with conditional display based on data type and feature flags",
+      "files_to_modify": [
+        "apps/studio/components/grid/components/menu/RowContextMenu.tsx"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    }
+  ],
+  "implementation_summary": "The implementation extends the table filtering system to support value-based filtering for simple data types through the row context menu. The approach centers around two key utility functions: isComplexValue() which discriminates between filterable simple types (strings, numbers, booleans, null/undefined) and complex types (objects, arrays), and buildFilterFromCellValue() which standardizes the conversion of cell values into filter objects using '=' operator for values and 'is' operator for null/undefined.\n\nThe integration into the existing UI follows the established patterns of the codebase. The 'Filter by value' option is added to the row context menu, making it discoverable through right-click interactions. This leverages the existing feature flag system (useIsTableFilterBarEnabled) for controlled rollout and maintains consistency with other context menu operations. The implementation carefully handles edge cases with defensive programming in getRowAndColumn() and provides user feedback through toast notifications.\n\nA comprehensive test suite was created to validate both the type discrimination logic and filter generation, covering all primitive types and edge cases. This ensures the filtering works correctly across the variety of data types users might encounter in their tables. The solution integrates seamlessly with the existing filter state management (snap.setFilters) and maintains backward compatibility through feature toggling.",
+  "source_pr": "https://github.com/supabase/supabase/pull/43579",
+  "before_sha": "8ebbad3a5b9b9ba98149ff16fedd17adada1ef6f",
+  "after_sha": "f7d3d2d3c3c4b2ccef8017665539f915a34006fb",
+  "diff_stats": {
+    "additions": 219,
+    "deletions": 4,
+    "files_changed": 3
+  }
+}

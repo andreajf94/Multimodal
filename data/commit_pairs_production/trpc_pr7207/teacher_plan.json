@@ -1,0 +1,87 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "api_design",
+      "recommendation": "Extended the RPC result type to include an optional AbortSignal for subscription procedures, allowing the response handler to properly clean up resources when maxDurationMs timeout fires.",
+      "rationale": "The core issue was that subscription responses would hang indefinitely after maxDurationMs elapsed, preventing EventSource clients from automatically reconnecting. By exposing the AbortSignal in the result object, the response handler can detect subscription procedures and attach cleanup logic specifically for them. This maintains backward compatibility while enabling the fix.",
+      "alternatives_considered": [
+        "Adding a separate flag or metadata field instead of exposing the signal",
+        "Handling timeout cleanup at the subscription procedure level rather than in resolveResponse",
+        "Creating a separate response flow for subscription vs regular procedures"
+      ],
+      "files_affected": [
+        "packages/server/src/unstable-core-do-not-import/http/resolveResponse.ts"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Implemented proper ReadableStream cancellation when the AbortSignal fires for subscription procedures, ensuring the HTTP response ends cleanly and EventSource clients can reconnect.",
+      "rationale": "When maxDurationMs timeout triggers, the AbortSignal becomes aborted. The fix creates a wrapper ReadableStream that listens for this abort event and cancels the underlying stream reader. This allows the HTTP response to complete properly, which is essential for EventSource's automatic reconnection mechanism. The wrapper stream also ensures proper cleanup by removing event listeners.",
+      "alternatives_considered": [
+        "Simply closing the response without stream cancellation",
+        "Throwing an error to terminate the response",
+        "Using response.destroy() if available in the runtime"
+      ],
+      "files_affected": [
+        "packages/server/src/unstable-core-do-not-import/http/resolveResponse.ts"
+      ]
+    },
+    {
+      "dimension": "testing",
+      "recommendation": "Added comprehensive regression test that verifies automatic reconnection with last-event-id resumption after maxDurationMs timeout.",
+      "rationale": "The test simulates the exact scenario from issue #7094: a subscription hits its maxDurationMs limit, the connection ends, and the client automatically reconnects using the tracked() mechanism to resume from the last event ID. It validates that data continues to flow correctly after reconnection and that no errors or premature completions occur. The test uses realistic timing and the actual SSE polyfill behavior.",
+      "alternatives_considered": [
+        "Mocking the EventSource behavior instead of using the real polyfill",
+        "Testing only the server-side behavior without client integration",
+        "Adding the test to an existing test file rather than extending the subscription link tests"
+      ],
+      "files_affected": [
+        "packages/tests/server/httpSubscriptionLink.test.ts"
+      ]
+    },
+    {
+      "dimension": "resource_management",
+      "recommendation": "Implemented proper cleanup of event listeners and stream resources to prevent memory leaks when connections abort or complete.",
+      "rationale": "The wrapper ReadableStream carefully manages the lifecycle: it removes the abort event listener when the stream ends naturally (chunk.done) and also during cancellation. This ensures no dangling event listeners remain after the connection ends. The approach follows best practices for working with AbortSignal and ReadableStream together.",
+      "alternatives_considered": [
+        "Using AbortSignal's 'once' option without manual cleanup",
+        "Letting the garbage collector handle cleanup",
+        "Creating a separate cleanup function"
+      ],
+      "files_affected": [
+        "packages/server/src/unstable-core-do-not-import/http/resolveResponse.ts"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Fix SSE subscription hanging after maxDurationMs timeout",
+      "description": "Modify resolveResponse to properly end HTTP responses when subscription maxDurationMs timeout fires, enabling EventSource automatic reconnection with last-event-id resumption.",
+      "files_to_modify": [
+        "packages/server/src/unstable-core-do-not-import/http/resolveResponse.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-002",
+      "title": "Add regression test for automatic reconnection after timeout",
+      "description": "Create comprehensive test that verifies clients automatically reconnect and continue receiving data via tracked() when maxDurationMs causes server to end SSE connection.",
+      "files_to_modify": [
+        "packages/tests/server/httpSubscriptionLink.test.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation addresses a critical issue where SSE subscriptions would hang indefinitely after reaching their maxDurationMs timeout, preventing EventSource clients from automatically reconnecting. The fix consists of two main components: server-side response handling improvements and comprehensive regression testing.\n\nIn the server code, the solution extends the RPC result type to optionally include an AbortSignal for subscription procedures. When a subscription response is being streamed and the associated AbortSignal fires (due to maxDurationMs timeout), the implementation creates a wrapper ReadableStream that listens for the abort event and properly cancels the underlying stream reader. This allows the HTTP response to end cleanly, which triggers the EventSource client's automatic reconnection mechanism. The wrapper stream also ensures proper resource cleanup by removing event listeners when the stream ends or is cancelled.\n\nThe regression test simulates the exact failure scenario: a subscription with a short maxDurationMs, initial data transmission, timeout-triggered disconnection, automatic client reconnection, and continued data flow with proper last-event-id resumption via the tracked() function. The test validates that the entire reconnection process works seamlessly without errors or data loss.\n\nThis approach maintains backward compatibility, doesn't affect non-subscription procedures, and integrates cleanly with the existing tRPC architecture. The fix is minimal and focused, addressing only the specific issue while following established patterns in the codebase for handling abort signals and stream management.",
+  "source_pr": "https://github.com/trpc/trpc/pull/7207",
+  "before_sha": "b465c51316f3650d392323bd2e784117b93ddb53",
+  "after_sha": "dad1281917a6f16930d0e154ea9deb9a6e7dd75b",
+  "diff_stats": {
+    "additions": 165,
+    "deletions": 2,
+    "files_changed": 2
+  }
+}

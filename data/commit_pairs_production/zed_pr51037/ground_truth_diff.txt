@@ -1,0 +1,105 @@
+diff --git a/crates/language/src/buffer.rs b/crates/language/src/buffer.rs
+index a8bf8dd83ca76f..f92ae2419edf61 100644
+--- a/crates/language/src/buffer.rs
++++ b/crates/language/src/buffer.rs
+@@ -2859,9 +2859,19 @@ impl Buffer {
+ 
+         self.reparse(cx, true);
+         cx.emit(BufferEvent::Edited { is_local });
+-        if was_dirty != self.is_dirty() {
++        let is_dirty = self.is_dirty();
++        if was_dirty != is_dirty {
+             cx.emit(BufferEvent::DirtyChanged);
+         }
++        if was_dirty && !is_dirty {
++            if let Some(file) = self.file.as_ref() {
++                if matches!(file.disk_state(), DiskState::Present { .. })
++                    && file.disk_state().mtime() != self.saved_mtime
++                {
++                    cx.emit(BufferEvent::ReloadNeeded);
++                }
++            }
++        }
+         cx.notify();
+     }
+ 
+diff --git a/crates/project/tests/integration/project_tests.rs b/crates/project/tests/integration/project_tests.rs
+index 2cecc5054df29b..0080236758214b 100644
+--- a/crates/project/tests/integration/project_tests.rs
++++ b/crates/project/tests/integration/project_tests.rs
+@@ -5687,6 +5687,75 @@ async fn test_buffer_is_dirty(cx: &mut gpui::TestAppContext) {
+     cx.update(|cx| assert!(buffer3.read(cx).is_dirty()));
+ }
+ 
++#[gpui::test]
++async fn test_dirty_buffer_reloads_after_undo(cx: &mut gpui::TestAppContext) {
++    init_test(cx);
++
++    let fs = FakeFs::new(cx.executor());
++    fs.insert_tree(
++        path!("/dir"),
++        json!({
++            "file.txt": "version 1",
++        }),
++    )
++    .await;
++
++    let project = Project::test(fs.clone(), [path!("/dir").as_ref()], cx).await;
++    let buffer = project
++        .update(cx, |p, cx| p.open_local_buffer(path!("/dir/file.txt"), cx))
++        .await
++        .unwrap();
++
++    buffer.read_with(cx, |buffer, _| {
++        assert_eq!(buffer.text(), "version 1");
++        assert!(!buffer.is_dirty());
++    });
++
++    // User makes an edit, making the buffer dirty.
++    buffer.update(cx, |buffer, cx| {
++        buffer.edit([(0..0, "user edit: ")], None, cx);
++    });
++
++    buffer.read_with(cx, |buffer, _| {
++        assert!(buffer.is_dirty());
++        assert_eq!(buffer.text(), "user edit: version 1");
++    });
++
++    // External tool writes new content while buffer is dirty.
++    // file_updated() updates the File but suppresses ReloadNeeded.
++    fs.save(
++        path!("/dir/file.txt").as_ref(),
++        &"version 2 from external tool".into(),
++        Default::default(),
++    )
++    .await
++    .unwrap();
++    cx.executor().run_until_parked();
++
++    buffer.read_with(cx, |buffer, _| {
++        assert!(buffer.has_conflict());
++        assert_eq!(buffer.text(), "user edit: version 1");
++    });
++
++    // User undoes their edit. Buffer becomes clean, but disk has different
++    // content. did_edit() detects the dirty->clean transition and checks if
++    // disk changed while dirty. Since mtime differs from saved_mtime, it
++    // emits ReloadNeeded.
++    buffer.update(cx, |buffer, cx| {
++        buffer.undo(cx);
++    });
++    cx.executor().run_until_parked();
++
++    buffer.read_with(cx, |buffer, _| {
++        assert_eq!(
++            buffer.text(),
++            "version 2 from external tool",
++            "buffer should reload from disk after undo makes it clean"
++        );
++        assert!(!buffer.is_dirty());
++    });
++}
++
+ #[gpui::test]
+ async fn test_buffer_file_changes_on_disk(cx: &mut gpui::TestAppContext) {
+     init_test(cx);

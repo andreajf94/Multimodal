@@ -1,0 +1,67 @@
+diff --git a/libs/partners/huggingface/langchain_huggingface/llms/huggingface_pipeline.py b/libs/partners/huggingface/langchain_huggingface/llms/huggingface_pipeline.py
+index daecda0d879c4..4314b906abac3 100644
+--- a/libs/partners/huggingface/langchain_huggingface/llms/huggingface_pipeline.py
++++ b/libs/partners/huggingface/langchain_huggingface/llms/huggingface_pipeline.py
+@@ -202,7 +202,16 @@ def from_model_id(
+         model = model_cls.from_pretrained(model_id, **_model_kwargs)
+ 
+         if tokenizer.pad_token is None:
+-            tokenizer.pad_token_id = model.config.eos_token_id
++            if model.config.pad_token_id is not None:
++                tokenizer.pad_token_id = model.config.pad_token_id
++            elif model.config.eos_token_id is not None and isinstance(
++                model.config.eos_token_id, int
++            ):
++                tokenizer.pad_token_id = model.config.eos_token_id
++            elif tokenizer.eos_token_id is not None:
++                tokenizer.pad_token_id = tokenizer.eos_token_id
++            else:
++                tokenizer.add_special_tokens({"pad_token": "[PAD]"})
+ 
+         if (
+             (
+diff --git a/libs/partners/huggingface/tests/integration_tests/test_standard.py b/libs/partners/huggingface/tests/integration_tests/test_standard.py
+index ce9b5b6b44b9f..ca2e930c93cdb 100644
+--- a/libs/partners/huggingface/tests/integration_tests/test_standard.py
++++ b/libs/partners/huggingface/tests/integration_tests/test_standard.py
+@@ -67,12 +67,14 @@ def test_bind_runnables_as_tools(self, model: BaseChatModel) -> None:
+         super().test_bind_runnables_as_tools(model)
+ 
+     @pytest.mark.xfail(reason=("Not implemented"))
+-    def test_structured_output(self, model: BaseChatModel) -> None:
+-        super().test_structured_output(model)
++    def test_structured_output(self, model: BaseChatModel, schema_type: str) -> None:
++        super().test_structured_output(model, schema_type)
+ 
+     @pytest.mark.xfail(reason=("Not implemented"))
+-    def test_structured_output_async(self, model: BaseChatModel) -> None:  # type: ignore[override]
+-        super().test_structured_output(model)
++    async def test_structured_output_async(
++        self, model: BaseChatModel, schema_type: str
++    ) -> None:  # type: ignore[override]
++        super().test_structured_output(model, schema_type)
+ 
+     @pytest.mark.xfail(reason=("Not implemented"))
+     def test_structured_output_pydantic_2_v1(self, model: BaseChatModel) -> None:
+diff --git a/libs/partners/huggingface/tests/unit_tests/test_chat_models.py b/libs/partners/huggingface/tests/unit_tests/test_chat_models.py
+index fb9d141d022be..10b67c93e890b 100644
+--- a/libs/partners/huggingface/tests/unit_tests/test_chat_models.py
++++ b/libs/partners/huggingface/tests/unit_tests/test_chat_models.py
+@@ -248,10 +248,13 @@ def test_bind_tools_errors(
+ 
+ def test_bind_tools(chat_hugging_face: Any) -> None:
+     tools = [MagicMock(spec=BaseTool)]
+-    with patch(
+-        "langchain_huggingface.chat_models.huggingface.convert_to_openai_tool",
+-        side_effect=lambda x: x,
+-    ), patch("langchain_core.runnables.base.Runnable.bind") as mock_super_bind:
++    with (
++        patch(
++            "langchain_huggingface.chat_models.huggingface.convert_to_openai_tool",
++            side_effect=lambda x: x,
++        ),
++        patch("langchain_core.runnables.base.Runnable.bind") as mock_super_bind,
++    ):
+         chat_hugging_face.bind_tools(tools, tool_choice="auto")
+         mock_super_bind.assert_called_once()
+         _, kwargs = mock_super_bind.call_args

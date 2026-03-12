@@ -1,0 +1,75 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "dependency_management",
+      "recommendation": "Updated PostgreSQL submodule references to new commits across all supported versions (v14-v17) to incorporate upstream changes that enforce the Databricks authentication hook",
+      "rationale": "The authentication hook enforcement requires changes to PostgreSQL's core authentication logic, which must be applied at the source code level. By updating the submodule references, we're pulling in upstream PostgreSQL commits that contain the necessary fixes. This approach ensures consistency across all versions and leverages PostgreSQL's own authentication framework modifications.",
+      "alternatives_considered": [
+        "Creating custom patches in the compute/patches/ directory",
+        "Modifying authentication logic in Neon's compute layer instead of PostgreSQL core",
+        "Implementing a wrapper around PostgreSQL's authentication system"
+      ],
+      "files_affected": [
+        "vendor/postgres-v14",
+        "vendor/postgres-v15",
+        "vendor/postgres-v16",
+        "vendor/postgres-v17"
+      ]
+    },
+    {
+      "dimension": "version_management",
+      "recommendation": "Updated the revisions.json file to track the new PostgreSQL commit hashes and maintain version consistency across the system",
+      "rationale": "The revisions.json file serves as a single source of truth for PostgreSQL versions used in the Neon system. Updating it ensures that all build systems, CI/CD pipelines, and deployment tools reference the correct PostgreSQL commits. This prevents version mismatches and ensures the authentication hook changes are consistently applied in all environments.",
+      "alternatives_considered": [
+        "Relying solely on submodule references without a centralized version file",
+        "Hardcoding versions in Dockerfiles and build scripts",
+        "Using environment variables for version management"
+      ],
+      "files_affected": [
+        "vendor/revisions.json"
+      ]
+    },
+    {
+      "dimension": "cross_version_compatibility",
+      "recommendation": "Applied the same authentication hook enforcement across all four supported PostgreSQL versions simultaneously",
+      "rationale": "Databricks authentication must work consistently regardless of the PostgreSQL version being used. By updating all versions at once, we ensure that customers on any supported PostgreSQL version (v14 through v17) get the same security guarantee. This prevents fragmentation where some versions might have authentication gaps while others don't.",
+      "alternatives_considered": [
+        "Rolling out changes version by version",
+        "Only updating the latest version (v17)",
+        "Creating version-specific authentication implementations"
+      ],
+      "files_affected": [
+        "vendor/postgres-v14",
+        "vendor/postgres-v15",
+        "vendor/postgres-v16",
+        "vendor/postgres-v17",
+        "vendor/revisions.json"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Update PostgreSQL Submodules for Authentication Hook Enforcement",
+      "description": "Update all PostgreSQL submodule references to incorporate upstream commits that ensure the Databricks authentication hook executes consistently across all authentication attempts",
+      "files_to_modify": [],
+      "files_to_create": [
+        "vendor/postgres-v14",
+        "vendor/postgres-v15",
+        "vendor/postgres-v16",
+        "vendor/postgres-v17",
+        "vendor/revisions.json"
+      ],
+      "estimated_effort": "medium"
+    }
+  ],
+  "implementation_summary": "The implementation addresses the Databricks authentication hook enforcement by updating PostgreSQL submodule references across all supported versions (v14 through v17). This approach leverages upstream PostgreSQL commits that modify the core authentication logic to ensure the hook is always invoked during authentication attempts. The changes are minimal but critical - they update Git submodule commit hashes in the vendor/ directory and synchronize these updates in the revisions.json manifest file.\n\nThis strategy follows Neon's established pattern of managing PostgreSQL modifications through submodule references rather than maintaining extensive custom patches. By updating to specific upstream commits, we inherit PostgreSQL's own authentication framework improvements while maintaining compatibility with Neon's modifications. The simultaneous update across all versions ensures consistent behavior regardless of which PostgreSQL version a customer is using, preventing security gaps in any deployment scenario.\n\nThe implementation integrates seamlessly with Neon's existing build system, which already uses these submodule references to build PostgreSQL binaries with Neon's patches. The revisions.json file update ensures that all tooling - from CI/CD pipelines to deployment scripts - references the correct PostgreSQL versions with the authentication hook enforcement. This maintains backward compatibility while closing the authentication gap that could have allowed unauthorized access in certain scenarios.",
+  "source_pr": "https://github.com/neondatabase/neon/pull/12683",
+  "before_sha": "81ddd10be6d18da39332bf51c48a99017ce6f9df",
+  "after_sha": "4d3b28bd2eecaf38b8700281e17d027b7920fdc3",
+  "diff_stats": {
+    "additions": 8,
+    "deletions": 8,
+    "files_changed": 5
+  }
+}

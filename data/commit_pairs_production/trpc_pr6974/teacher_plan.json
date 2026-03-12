@@ -1,0 +1,97 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "api_design",
+      "recommendation": "Added explicit FormData handling in Fastify adapter by removing and re-adding the multipart/form-data content type parser",
+      "rationale": "Fastify's default multipart/form-data parser attempts to parse the body, which breaks FormData handling. By removing the default parser and adding a custom one that passes through the raw body, we preserve the FormData object for tRPC procedures to process directly.",
+      "alternatives_considered": [
+        "Modifying Fastify's default parser configuration",
+        "Creating a separate adapter specifically for FormData",
+        "Converting FormData to JSON before passing to tRPC"
+      ],
+      "files_affected": [
+        "packages/server/src/adapters/fastify/fastifyTRPCPlugin.ts"
+      ]
+    },
+    {
+      "dimension": "data_modeling",
+      "recommendation": "Extended the request body handling in Node HTTP adapter to support IncomingMessage instances",
+      "rationale": "When Fastify passes through FormData, it's represented as an IncomingMessage stream. The adapter needs to recognize this type and pass it through without stringification, allowing tRPC procedures to access the raw FormData.",
+      "alternatives_considered": [
+        "Converting IncomingMessage to FormData in the adapter",
+        "Creating a separate body parsing path for FormData",
+        "Using middleware to transform FormData before reaching tRPC"
+      ],
+      "files_affected": [
+        "packages/server/src/adapters/node-http/incomingMessageToRequest.ts"
+      ]
+    },
+    {
+      "dimension": "testing",
+      "recommendation": "Added comprehensive test coverage for FormData handling including procedure definition, client configuration, and end-to-end validation",
+      "rationale": "FormData handling requires testing across the entire stack: server-side procedure validation, client-side request routing, and actual FormData transmission. The test validates that FormData can be sent, received, and processed correctly.",
+      "alternatives_considered": [
+        "Unit testing only the adapter changes",
+        "Mocking FormData instead of using real instances",
+        "Separating FormData tests into a different test file"
+      ],
+      "files_affected": [
+        "packages/tests/server/adapters/fastify.test.ts"
+      ]
+    },
+    {
+      "dimension": "client_side_routing",
+      "recommendation": "Implemented conditional client-side routing using splitLink to handle FormData requests differently from regular JSON requests",
+      "rationale": "FormData cannot be batched with other requests and requires different HTTP handling. The splitLink routes FormData requests through httpLink (single requests) while other requests use httpBatchStreamLink for batching and streaming.",
+      "alternatives_considered": [
+        "Modifying httpBatchStreamLink to handle FormData",
+        "Creating a custom link for FormData",
+        "Always using httpLink when FormData might be present"
+      ],
+      "files_affected": [
+        "packages/tests/server/adapters/fastify.test.ts"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Fastify FormData Content Type Parser Configuration",
+      "description": "Update Fastify adapter to properly handle multipart/form-data requests by bypassing Fastify's default parsing and passing raw FormData through to tRPC procedures",
+      "files_to_modify": [
+        "packages/server/src/adapters/fastify/fastifyTRPCPlugin.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-002",
+      "title": "Node HTTP Adapter FormData Support",
+      "description": "Extend the incoming message to request conversion logic to recognize and preserve IncomingMessage instances (which represent FormData streams) without attempting JSON stringification",
+      "files_to_modify": [
+        "packages/server/src/adapters/node-http/incomingMessageToRequest.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-003",
+      "title": "FormData End-to-End Test Suite",
+      "description": "Add comprehensive test coverage for FormData handling including procedure definition with Zod validation, client-side request routing configuration, and actual FormData transmission and processing",
+      "files_to_modify": [
+        "packages/tests/server/adapters/fastify.test.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    }
+  ],
+  "implementation_summary": "The implementation adds first-class FormData support to tRPC's Fastify adapter through a three-pronged approach. First, the Fastify adapter is modified to bypass Fastify's default multipart/form-data parsing by removing and re-adding the content type parser with a pass-through handler. This preserves the raw FormData object for tRPC procedures to process directly.\n\nSecond, the Node HTTP adapter is updated to recognize IncomingMessage instances (which represent FormData streams from Fastify) and pass them through without JSON stringification. This ensures FormData maintains its integrity through the request pipeline. The solution maintains backward compatibility by only affecting FormData requests while leaving JSON handling unchanged.\n\nThird, comprehensive test coverage is added including a FormData procedure with Zod validation, client-side routing logic using splitLink to handle FormData requests separately from batched JSON requests, and end-to-end validation of FormData transmission. The client-side routing is particularly important because FormData cannot be batched with other requests and requires different HTTP handling. The implementation follows tRPC's pattern of framework-agnostic type safety while providing runtime-specific optimizations for different content types.",
+  "source_pr": "https://github.com/trpc/trpc/pull/6974",
+  "before_sha": "1c9a6ec37c749278655d37b7351b0c63fee8f4f6",
+  "after_sha": "b802056b6f21b0557cb352fa48cd90c2557af262",
+  "diff_stats": {
+    "additions": 49,
+    "deletions": 4,
+    "files_changed": 3
+  }
+}

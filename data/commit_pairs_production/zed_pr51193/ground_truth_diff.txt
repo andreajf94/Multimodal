@@ -1,0 +1,224 @@
+diff --git a/crates/acp_thread/src/connection.rs b/crates/acp_thread/src/connection.rs
+index 644986bc15eccb..1236058226eee8 100644
+--- a/crates/acp_thread/src/connection.rs
++++ b/crates/acp_thread/src/connection.rs
+@@ -242,6 +242,7 @@ pub struct AgentSessionInfo {
+     pub cwd: Option<PathBuf>,
+     pub title: Option<SharedString>,
+     pub updated_at: Option<DateTime<Utc>>,
++    pub created_at: Option<DateTime<Utc>>,
+     pub meta: Option<acp::Meta>,
+ }
+ 
+@@ -252,6 +253,7 @@ impl AgentSessionInfo {
+             cwd: None,
+             title: None,
+             updated_at: None,
++            created_at: None,
+             meta: None,
+         }
+     }
+diff --git a/crates/agent/src/db.rs b/crates/agent/src/db.rs
+index 2c9b33e4efc4f2..43ab9c3c1826ea 100644
+--- a/crates/agent/src/db.rs
++++ b/crates/agent/src/db.rs
+@@ -45,6 +45,7 @@ impl From<&DbThreadMetadata> for acp_thread::AgentSessionInfo {
+             cwd: None,
+             title: Some(meta.title.clone()),
+             updated_at: Some(meta.updated_at),
++            created_at: meta.created_at,
+             meta: None,
+         }
+     }
+@@ -482,7 +483,10 @@ impl ThreadsDatabase {
+         let data_type = DataType::Zstd;
+         let data = compressed;
+ 
+-        let created_at = Utc::now().to_rfc3339();
++        // Use the thread's updated_at as created_at for new threads.
++        // This ensures the creation time reflects when the thread was conceptually
++        // created, not when it was saved to the database.
++        let created_at = updated_at.clone();
+ 
+         let mut insert = connection.exec_bound::<(Arc<str>, Option<Arc<str>>, Option<String>, Option<String>, String, String, DataType, Vec<u8>, String)>(indoc! {"
+             INSERT INTO threads (id, parent_id, folder_paths, folder_paths_order, summary, updated_at, data_type, data, created_at)
+diff --git a/crates/agent_servers/src/acp.rs b/crates/agent_servers/src/acp.rs
+index ceceb5b8ae02a0..b9e4eba497ef1e 100644
+--- a/crates/agent_servers/src/acp.rs
++++ b/crates/agent_servers/src/acp.rs
+@@ -131,6 +131,7 @@ impl AgentSessionList for AcpSessionList {
+                                 .ok()
+                                 .map(|dt| dt.with_timezone(&chrono::Utc))
+                         }),
++                        created_at: None,
+                         meta: s.meta,
+                     })
+                     .collect(),
+diff --git a/crates/agent_ui/src/thread_history.rs b/crates/agent_ui/src/thread_history.rs
+index 6601616e9f2ef4..01536b00e98d13 100644
+--- a/crates/agent_ui/src/thread_history.rs
++++ b/crates/agent_ui/src/thread_history.rs
+@@ -1232,6 +1232,7 @@ mod tests {
+             cwd: None,
+             title: Some(title.to_string().into()),
+             updated_at: None,
++            created_at: None,
+             meta: None,
+         }
+     }
+@@ -1443,6 +1444,7 @@ mod tests {
+             cwd: None,
+             title: Some("Original Title".into()),
+             updated_at: None,
++            created_at: None,
+             meta: None,
+         }];
+         let session_list = Rc::new(TestSessionList::new(sessions));
+@@ -1479,6 +1481,7 @@ mod tests {
+             cwd: None,
+             title: Some("Original Title".into()),
+             updated_at: None,
++            created_at: None,
+             meta: None,
+         }];
+         let session_list = Rc::new(TestSessionList::new(sessions));
+@@ -1512,6 +1515,7 @@ mod tests {
+             cwd: None,
+             title: Some("Original Title".into()),
+             updated_at: None,
++            created_at: None,
+             meta: None,
+         }];
+         let session_list = Rc::new(TestSessionList::new(sessions));
+@@ -1548,6 +1552,7 @@ mod tests {
+             cwd: None,
+             title: None,
+             updated_at: None,
++            created_at: None,
+             meta: None,
+         }];
+         let session_list = Rc::new(TestSessionList::new(sessions));
+@@ -1588,6 +1593,7 @@ mod tests {
+             cwd: None,
+             title: Some("Server Title".into()),
+             updated_at: None,
++            created_at: None,
+             meta: None,
+         }];
+         let session_list = Rc::new(TestSessionList::new(sessions));
+@@ -1625,6 +1631,7 @@ mod tests {
+             cwd: None,
+             title: Some("Original".into()),
+             updated_at: None,
++            created_at: None,
+             meta: None,
+         }];
+         let session_list = Rc::new(TestSessionList::new(sessions));
+diff --git a/crates/sidebar/src/sidebar.rs b/crates/sidebar/src/sidebar.rs
+index 4dbc2f811a62c2..bef521c6a0fe8a 100644
+--- a/crates/sidebar/src/sidebar.rs
++++ b/crates/sidebar/src/sidebar.rs
+@@ -63,6 +63,7 @@ impl From<&ActiveThreadInfo> for acp_thread::AgentSessionInfo {
+             cwd: None,
+             title: Some(info.title.clone()),
+             updated_at: Some(Utc::now()),
++            created_at: Some(Utc::now()),
+             meta: None,
+         }
+     }
+@@ -512,7 +513,13 @@ impl Sidebar {
+                     }
+                 }
+ 
+-                threads.sort_by(|a, b| b.session_info.updated_at.cmp(&a.session_info.updated_at));
++                // Sort by created_at (newest first), falling back to updated_at
++                // for threads without a created_at (e.g., ACP sessions).
++                threads.sort_by(|a, b| {
++                    let a_time = a.session_info.created_at.or(a.session_info.updated_at);
++                    let b_time = b.session_info.created_at.or(b.session_info.updated_at);
++                    b_time.cmp(&a_time)
++                });
+             }
+ 
+             if !query.is_empty() {
+@@ -726,12 +733,9 @@ impl Sidebar {
+             } => self.render_new_thread(ix, path_list, workspace, is_selected, cx),
+         };
+ 
+-        // add the blue border here, not in the sub methods
+-
+         if is_group_header_after_first {
+             v_flex()
+                 .w_full()
+-                .pt_2()
+                 .border_t_1()
+                 .border_color(cx.theme().colors().border_variant)
+                 .child(rendered)
+@@ -1472,9 +1476,9 @@ impl Render for Sidebar {
+             .child(
+                 h_flex()
+                     .flex_none()
+-                    .p_2()
++                    .px_2p5()
+                     .h(Tab::container_height(cx))
+-                    .gap_1p5()
++                    .gap_2()
+                     .border_b_1()
+                     .border_color(cx.theme().colors().border)
+                     .child(
+@@ -2017,6 +2021,7 @@ mod tests {
+                         cwd: None,
+                         title: Some("Completed thread".into()),
+                         updated_at: Some(Utc::now()),
++                        created_at: Some(Utc::now()),
+                         meta: None,
+                     },
+                     icon: IconName::ZedAgent,
+@@ -2034,6 +2039,7 @@ mod tests {
+                         cwd: None,
+                         title: Some("Running thread".into()),
+                         updated_at: Some(Utc::now()),
++                        created_at: Some(Utc::now()),
+                         meta: None,
+                     },
+                     icon: IconName::ZedAgent,
+@@ -2051,6 +2057,7 @@ mod tests {
+                         cwd: None,
+                         title: Some("Error thread".into()),
+                         updated_at: Some(Utc::now()),
++                        created_at: Some(Utc::now()),
+                         meta: None,
+                     },
+                     icon: IconName::ZedAgent,
+@@ -2068,6 +2075,7 @@ mod tests {
+                         cwd: None,
+                         title: Some("Waiting thread".into()),
+                         updated_at: Some(Utc::now()),
++                        created_at: Some(Utc::now()),
+                         meta: None,
+                     },
+                     icon: IconName::ZedAgent,
+@@ -2085,6 +2093,7 @@ mod tests {
+                         cwd: None,
+                         title: Some("Notified thread".into()),
+                         updated_at: Some(Utc::now()),
++                        created_at: Some(Utc::now()),
+                         meta: None,
+                     },
+                     icon: IconName::ZedAgent,
+@@ -3456,6 +3465,7 @@ mod tests {
+                     cwd: None,
+                     title: Some("Test".into()),
+                     updated_at: None,
++                    created_at: None,
+                     meta: None,
+                 },
+                 &workspace_a,
+@@ -3511,6 +3521,7 @@ mod tests {
+                     cwd: None,
+                     title: Some("Thread B".into()),
+                     updated_at: None,
++                    created_at: None,
+                     meta: None,
+                 },
+                 &workspace_b,

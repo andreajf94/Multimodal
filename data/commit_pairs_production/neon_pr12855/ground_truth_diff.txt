@@ -1,0 +1,78 @@
+diff --git a/libs/remote_storage/src/config.rs b/libs/remote_storage/src/config.rs
+index 8c8d5235b82e..973a45f4a0fd 100644
+--- a/libs/remote_storage/src/config.rs
++++ b/libs/remote_storage/src/config.rs
+@@ -339,7 +339,7 @@ timeout = '5s'";
+     fn test_gcs_parsing() {
+         let toml = "\
+     bucket_name = 'foo-bar'
+-    prefix_in_bucket = '/pageserver'
++    prefix_in_bucket = 'pageserver/'
+     ";
+ 
+         let config = parse(toml).unwrap();
+diff --git a/libs/remote_storage/src/gcs_bucket.rs b/libs/remote_storage/src/gcs_bucket.rs
+index f716a6b78b61..a4f6db0b18f4 100644
+--- a/libs/remote_storage/src/gcs_bucket.rs
++++ b/libs/remote_storage/src/gcs_bucket.rs
+@@ -728,7 +728,7 @@ impl GCSBucket {
+                         StatusCode::NOT_FOUND => return Err(DownloadError::NotFound),
+                         _ => {
+                             return Err(DownloadError::Other(anyhow::anyhow!(
+-                                "GCS GET resposne contained no response body"
++                                "GCS GET response contained no response body"
+                             )));
+                         }
+                     }
+@@ -751,7 +751,17 @@ impl GCSBucket {
+ 
+         // 2. Byte Stream request
+         let mut headers = header::HeaderMap::new();
+-        headers.insert(header::RANGE, header::HeaderValue::from_static("bytes=0-"));
++        let bytes_range = match &request.range {
++           Some(s) => header::HeaderValue::from_str(s).unwrap(),
++           None => header::HeaderValue::from_static("bytes=0-"),
++        };
++        
++        tracing::info!(
++            "performing object download with {:?} range header",
++            bytes_range
++        );
++        
++        headers.insert(header::RANGE, bytes_range);
+ 
+         let encoded_path: String =
+             url::form_urlencoded::byte_serialize(request.key.as_bytes()).collect();
+diff --git a/libs/remote_storage/tests/test_real_gcs.rs b/libs/remote_storage/tests/test_real_gcs.rs
+index 72937c620775..78b87d007ff3 100644
+--- a/libs/remote_storage/tests/test_real_gcs.rs
++++ b/libs/remote_storage/tests/test_real_gcs.rs
+@@ -75,6 +75,28 @@ impl AsyncTestContext for EnabledGCS {
+     }
+ }
+ 
++#[test_context(EnabledGCS)]
++#[tokio::test]
++async fn gcs_get_object_bytes_range_header(ctx: &mut EnabledGCS) -> anyhow::Result<()> {
++    let cancel = CancellationToken::new();
++    let path = RemotePath::new(Utf8Path::new(
++        format!("{}/000000010000028000000086", ctx.base_prefix).as_str(),
++    ))
++    .with_context(|| "RemotePath conversion")?;
++
++    let (data, len) = upload_stream("hello, world".as_bytes().into());
++
++    ctx.client.upload(data, len, &path, None, &cancel).await?;
++
++    let opts = DownloadOpts {
++        byte_start: Bound::Included(7),
++        ..Default::default()
++    };
++    let dl_object = download_to_vec(ctx.client.download(&path, &opts, &cancel).await?).await?;
++    let s = String::from_utf8(dl_object).unwrap();
++    assert_eq!(5, s.len());
++    Ok(())
++}
+ #[test_context(EnabledGCS)]
+ #[tokio::test]
+ async fn gcs_test_suite(ctx: &mut EnabledGCS) -> anyhow::Result<()> {

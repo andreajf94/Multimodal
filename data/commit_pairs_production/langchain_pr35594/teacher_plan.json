@@ -1,0 +1,78 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "api_design",
+      "recommendation": "Changed model detection from substring matching to prefix matching using a tuple of known prefixes",
+      "rationale": "The original implementation used substring matching ('gpt-5.2-pro' in model_name) which could incorrectly match models like 'gpt-5.2-pro-max' or other variants. Prefix matching ensures we only match models that actually start with the specified prefixes, which is more precise and safer. Using a tuple of prefixes makes the logic explicit and maintainable.",
+      "alternatives_considered": [
+        "Keep substring matching but add more specific checks",
+        "Use regex patterns for more complex matching",
+        "Create a separate configuration file for model mappings"
+      ],
+      "files_affected": [
+        "libs/partners/openai/langchain_openai/chat_models/base.py"
+      ]
+    },
+    {
+      "dimension": "data_modeling",
+      "recommendation": "Defined a constant tuple _RESPONSES_API_ONLY_PREFIXES to centralize the list of model prefixes that require Responses API",
+      "rationale": "Centralizing the model prefixes in a constant makes the code more maintainable and readable. If OpenAI adds new model families in the future, developers only need to update this single location. The tuple format is immutable and efficient for prefix checking.",
+      "alternatives_considered": [
+        "Hardcode the prefixes directly in the function",
+        "Use a list instead of tuple",
+        "Load prefixes from an external configuration"
+      ],
+      "files_affected": [
+        "libs/partners/openai/langchain_openai/chat_models/base.py"
+      ]
+    },
+    {
+      "dimension": "testing",
+      "recommendation": "Expanded test coverage to include all GPT-5 Pro model families and more Codex variants, including dated snapshots",
+      "rationale": "The original test only covered gpt-5.2-pro and a few Codex models. The updated tests now verify: 1) All three GPT-5 Pro families (gpt-5-pro, gpt-5.2-pro, gpt-5.4-pro), 2) Dated snapshots of each, 3) More comprehensive Codex model coverage including mini variants, 4) Negative cases to ensure non-matching models don't trigger the Responses API. This ensures the prefix matching logic works correctly for all edge cases.",
+      "alternatives_considered": [
+        "Keep minimal tests and rely on integration tests",
+        "Create parameterized tests",
+        "Add separate test files for different model families"
+      ],
+      "files_affected": [
+        "libs/partners/openai/tests/unit_tests/chat_models/test_base.py"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Maintained the existing None check and early return pattern for model_name parameter",
+      "rationale": "The function gracefully handles None model_name by returning False early. This is important because the model_name parameter might be None in some code paths, and we shouldn't crash in those cases. The early return pattern keeps the code clean and prevents potential AttributeErrors.",
+      "alternatives_considered": [
+        "Raise an exception for None model_name",
+        "Use a default value",
+        "Add type hints to enforce non-None values"
+      ],
+      "files_affected": [
+        "libs/partners/openai/langchain_openai/chat_models/base.py"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Update OpenAI model detection for Responses API compatibility",
+      "description": "Enhanced the model detection logic to properly identify all GPT-5 Pro model families and Codex models that require the Responses API instead of the Completions API. Implemented prefix matching to handle dated snapshots correctly.",
+      "files_to_modify": [
+        "libs/partners/openai/langchain_openai/chat_models/base.py",
+        "libs/partners/openai/tests/unit_tests/chat_models/test_base.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation updates LangChain's OpenAI integration to correctly detect which models require the newer Responses API versus the legacy Completions API. The key change was replacing substring matching with prefix matching using a tuple of known model prefixes (_RESPONSES_API_ONLY_PREFIXES). This approach ensures that all GPT-5 Pro model families (gpt-5-pro, gpt-5.2-pro, gpt-5.4-pro) and their dated snapshots (e.g., gpt-5.4-pro-2026-03-05) are correctly identified as requiring the Responses API.\n\nThe solution maintains backward compatibility while improving accuracy. The prefix matching logic is more precise than the previous substring approach, preventing false positives. All Codex models continue to be identified via substring matching ('codex' in model_name), which is appropriate since Codex appears in various positions within model names.\n\nThe changes integrate seamlessly with the existing codebase structure. The partner library pattern allows OpenAI-specific logic to be contained within the openai partner directory, maintaining separation of concerns. The test updates provide comprehensive coverage of the new functionality while also adding important negative test cases to ensure the detection logic doesn't incorrectly flag other models like gpt-5, gpt-4.1, or o3-pro.",
+  "source_pr": "https://github.com/langchain-ai/langchain/pull/35594",
+  "before_sha": "f838c787885ba6350ee75c0d4bba4e7a4d19355c",
+  "after_sha": "3af0bc01417d946710a2ed5b2b513c08c4577870",
+  "diff_stats": {
+    "additions": 24,
+    "deletions": 2,
+    "files_changed": 2
+  }
+}

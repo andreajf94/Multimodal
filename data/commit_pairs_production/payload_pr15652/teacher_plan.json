@@ -1,0 +1,87 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "query_optimization",
+      "recommendation": "Restructured polymorphic join queries to apply LIMIT per parent folder rather than globally",
+      "rationale": "The original implementation applied LIMIT at the global UNION query level, which caused incomplete results when querying folders with nested subfolders. This was particularly problematic for SQL databases where the limit would be applied across all parent folders combined, not per individual parent. By moving the LIMIT application to occur AFTER parent correlation, each parent folder gets its own proper limit application.",
+      "alternatives_considered": [
+        "Applying window functions with PARTITION BY to handle per-parent limits",
+        "Using correlated subqueries with separate limit clauses for each parent",
+        "Maintaining the global limit but adding additional filtering logic"
+      ],
+      "files_affected": [
+        "packages/drizzle/src/find/traverseFields.ts"
+      ]
+    },
+    {
+      "dimension": "sql_query_structure",
+      "recommendation": "Changed from a single-level subquery to a two-level nested subquery approach",
+      "rationale": "The new structure uses an inner subquery (sortedUnionAlias) that contains the sorted UNION results, then an outer subquery that correlates to the parent row and applies the LIMIT. This ensures parent correlation happens before limit application. The key insight is that for polymorphic joins, the limit must be applied per-parent, not globally across all potential matches.",
+      "alternatives_considered": [
+        "Using Common Table Expressions (CTEs) to separate the sorting and limiting steps",
+        "Applying the limit in application code after fetching all results",
+        "Using database-specific features like LATERAL joins"
+      ],
+      "files_affected": [
+        "packages/drizzle/src/find/traverseFields.ts"
+      ]
+    },
+    {
+      "dimension": "testing_strategy",
+      "recommendation": "Added comprehensive integration tests for nested folder queries with various scenarios",
+      "rationale": "The tests verify the fix works correctly for multiple edge cases: 1) multiple root folders with many nested subfolders, 2) consistent results regardless of query sort order, and 3) proper pagination within polymorphic joins. These tests ensure the fix handles real-world usage patterns and prevents regression.",
+      "alternatives_considered": [
+        "Adding only unit tests for the specific SQL generation logic",
+        "Relying on existing folder tests without adding new ones",
+        "Creating separate test files for polymorphic join scenarios"
+      ],
+      "files_affected": [
+        "test/folders/int.spec.ts"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Maintained backward compatibility while fixing the limit logic",
+      "rationale": "The changes preserve the existing API and query structure while fixing the underlying SQL generation. All existing queries should continue to work, but now with correct limit application for polymorphic joins. The fix is transparent to users - they don't need to change their queries.",
+      "alternatives_considered": [
+        "Breaking changes to the query API to force explicit per-parent limit configuration",
+        "Adding a new parameter to control limit application behavior",
+        "Deprecating the old behavior and requiring migration"
+      ],
+      "files_affected": [
+        "packages/drizzle/src/find/traverseFields.ts"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Fix polymorphic join limit application in SQL databases",
+      "description": "Restructure the SQL query generation for polymorphic joins to apply LIMIT per parent folder rather than globally, ensuring correct nested subfolder queries",
+      "files_to_modify": [
+        "packages/drizzle/src/find/traverseFields.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-002",
+      "title": "Add comprehensive tests for nested folder queries",
+      "description": "Create integration tests that verify the polymorphic join fix works correctly for multiple scenarios including depth queries, sort variations, and pagination",
+      "files_to_modify": [
+        "test/folders/int.spec.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation addresses a critical bug in SQL database queries for polymorphic joins, specifically affecting folder structures with nested subfolders. The core issue was that LIMIT clauses were being applied at the global UNION query level, causing incomplete or incorrect child data when multiple parent folders were queried simultaneously.\n\nThe fix restructures the SQL generation in `traverseFields.ts` from a single-level subquery approach to a two-level nested subquery. The key change moves the LIMIT application to occur AFTER parent correlation, ensuring each parent folder gets its own proper limit rather than a shared global limit. This is achieved by creating an intermediate sorted result set (`sortedUnionAlias`) that's then filtered by parent correlation before applying the limit.\n\nThe accompanying tests in `int.spec.ts` provide comprehensive validation of the fix across multiple scenarios: verifying that all nested subfolders are populated regardless of parent count, ensuring consistent results across different sort orders, and validating proper pagination behavior within polymorphic joins. These tests use realistic data patterns (8 root folders with 10 subfolders each) to ensure the fix handles production-scale scenarios.\n\nThis change maintains full backward compatibility while fixing the underlying SQL generation logic. Users of the Payload CMS will see correct folder hierarchy queries in SQL databases without needing to modify their existing queries or configurations. The fix is particularly important for applications using folder-based content organization with deep nesting structures.",
+  "source_pr": "https://github.com/payloadcms/payload/pull/15652",
+  "before_sha": "3fb10e1f2f81028775df82faf1b782586b8d099f",
+  "after_sha": "fe36dded4bcf1c54289c6687bb2308d02fbeba99",
+  "diff_stats": {
+    "additions": 235,
+    "deletions": 14,
+    "files_changed": 2
+  }
+}

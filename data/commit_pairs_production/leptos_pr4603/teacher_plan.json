@@ -1,0 +1,88 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "memory_management",
+      "recommendation": "Replaced strong owner references with weak references in Action creation to prevent memory leaks from circular references",
+      "rationale": "The previous implementation stored a strong `Owner` reference in action closures, creating reference cycles that prevented proper garbage collection. When actions outlive their owners (common in async scenarios), this caused memory leaks. The weak reference approach allows the owner to be dropped when no longer needed while still providing access when available.",
+      "alternatives_considered": [
+        "Using Rc/Arc with manual cycle breaking",
+        "Implementing a custom reference-counting scheme",
+        "Leaving as-is and documenting the memory leak risk"
+      ],
+      "files_affected": [
+        "reactive_graph/src/actions/action.rs",
+        "reactive_graph/src/owner.rs"
+      ]
+    },
+    {
+      "dimension": "api_design",
+      "recommendation": "Made WeakOwner struct and its methods public to expose weak reference functionality",
+      "rationale": "The WeakOwner type needs to be accessible outside the owner module for use in action creation. By making it public and documenting its purpose, we maintain encapsulation while providing the necessary functionality. The downgrade/upgrade pattern follows Rust's standard library conventions (similar to Arc::downgrade/Weak::upgrade).",
+      "alternatives_considered": [
+        "Keeping WeakOwner private and using internal-only weak references",
+        "Creating a separate public trait for weak references",
+        "Exposing raw Weak pointers directly"
+      ],
+      "files_affected": [
+        "reactive_graph/src/owner.rs"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Implemented graceful fallback when owner cannot be upgraded, running actions without owner context",
+      "rationale": "When the owner has been dropped (weak reference upgrade returns None), the action still needs to execute. The solution runs the future without owner context using ScopedFuture::new_untracked, ensuring the system doesn't panic or lose functionality. This handles the edge case where actions outlive their reactive context.",
+      "alternatives_considered": [
+        "Panicking when owner is dropped",
+        "Cancelling actions when owner disappears",
+        "Creating a default/global owner as fallback"
+      ],
+      "files_affected": [
+        "reactive_graph/src/actions/action.rs"
+      ]
+    },
+    {
+      "dimension": "performance",
+      "recommendation": "Moved untrack() call outside the owner.with() closure to avoid unnecessary nesting",
+      "rationale": "The previous code called untrack() inside owner.with(), creating unnecessary closure nesting. By extracting the future creation first, we simplify the control flow and potentially reduce closure overhead. This also makes the weak reference check logic clearer and more efficient.",
+      "alternatives_considered": [
+        "Keeping the original nested structure",
+        "Creating a helper function for the pattern",
+        "Using match guards for more complex logic"
+      ],
+      "files_affected": [
+        "reactive_graph/src/actions/action.rs"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Implement WeakOwner type and public API",
+      "description": "Create a public WeakOwner struct with downgrade/upgrade methods to allow weak reference semantics for Owner instances, preventing reference cycles",
+      "files_to_modify": [
+        "reactive_graph/src/owner.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-002",
+      "title": "Update Action creation to use weak owner references",
+      "description": "Modify both Action::new and Action::new_arc to capture weak owner references instead of strong ones, with graceful handling when owner is dropped",
+      "files_to_modify": [
+        "reactive_graph/src/actions/action.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    }
+  ],
+  "implementation_summary": "The changes address a memory leak issue in Leptos's Action system by replacing strong owner references with weak references. Previously, actions captured strong Owner references, creating circular dependencies that prevented garbage collection when actions outlived their owners. This was particularly problematic in async scenarios where actions might persist beyond their reactive context.\n\nThe solution introduces a WeakOwner type (made public from previously private) that provides weak reference semantics similar to Arc/Weak in Rust's standard library. The Owner::downgrade() method creates a weak reference, and WeakOwner::upgrade() attempts to recover a strong reference if the owner still exists. In action creation, instead of storing a strong Owner reference, we now store a WeakOwner and attempt to upgrade it when the action executes.\n\nA key design decision is the graceful fallback when the owner has been dropped: if upgrade() returns None, the action still executes but without owner context using ScopedFuture::new_untracked(). This ensures system robustness while solving the memory leak. The implementation also optimizes the control flow by moving untrack() calls outside closure nesting, improving code clarity. This change maintains backward compatibility while fixing a critical memory management issue in the framework's reactive system.",
+  "source_pr": "https://github.com/leptos-rs/leptos/pull/4603",
+  "before_sha": "9654f82ad84ff7bacfe5a7c57615f8bd9f8c6334",
+  "after_sha": "557d908ff9651560193f8b10048fa923a808011b",
+  "diff_stats": {
+    "additions": 30,
+    "deletions": 11,
+    "files_changed": 2
+  }
+}

@@ -1,0 +1,91 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "error_handling",
+      "recommendation": "Added try-except blocks around from_qualified_name() calls to catch ImportError and AttributeError when resolving class names, preventing crashes from unimportable classes",
+      "rationale": "The decoder must be robust against malformed or malicious input. Previously, unimportable class names would raise exceptions and crash the decoding process. Now, for '__class__' paths, we return the raw dictionary, and for '__exc_type__' paths, we raise a controlled ValueError with a clear message.",
+      "alternatives_considered": [
+        "Letting exceptions propagate (original behavior - rejected as unsafe)",
+        "Returning None or a sentinel value (rejected as less informative)",
+        "Logging warnings instead of changing behavior (rejected as insufficient for security)"
+      ],
+      "files_affected": [
+        "src/prefect/serializers.py"
+      ]
+    },
+    {
+      "dimension": "security",
+      "recommendation": "Added explicit type checking for '__exc_type__' values to ensure they resolve to BaseException subclasses before instantiation",
+      "rationale": "Preventing instantiation of arbitrary classes as exceptions is a security measure. Without this check, '__exc_type__': 'builtins.int' would create int('message'), which could have unintended side effects. The check ensures only valid exception classes can be instantiated.",
+      "alternatives_considered": [
+        "Trusting that from_qualified_name only returns exception classes (rejected as unsafe)",
+        "Using a whitelist of allowed exception types (rejected as too restrictive)",
+        "Checking against a blacklist of dangerous classes (rejected as incomplete)"
+      ],
+      "files_affected": [
+        "src/prefect/serializers.py"
+      ]
+    },
+    {
+      "dimension": "api_design",
+      "recommendation": "Differentiated error handling between '__class__' and '__exc_type__' branches: '__class__' returns raw dict on failure, '__exc_type__' raises ValueError",
+      "rationale": "This asymmetric design reflects the different use cases: '__class__' is for general object deserialization where preserving data is important, while '__exc_type__' is specifically for exception reconstruction where safety is paramount. Raising on invalid exception types prevents silent failures in error handling paths.",
+      "alternatives_considered": [
+        "Consistent behavior for both branches (rejected as inappropriate for their different purposes)",
+        "Always raising exceptions (rejected as too strict for general object deserialization)",
+        "Always returning raw dictionaries (rejected as unsafe for exception reconstruction)"
+      ],
+      "files_affected": [
+        "src/prefect/serializers.py"
+      ]
+    },
+    {
+      "dimension": "testing",
+      "recommendation": "Added comprehensive test coverage for both valid and invalid inputs across all decoder branches, including edge cases like dotless names and unimportable modules",
+      "rationale": "Security-critical code requires thorough testing. The tests verify that the decoder behaves correctly for both safe and unsafe inputs, ensuring the defensive programming measures work as intended. Each test case addresses a specific vulnerability or edge case.",
+      "alternatives_considered": [
+        "Only testing happy paths (rejected as insufficient for security features)",
+        "Testing through integration tests only (rejected as less precise for edge cases)",
+        "Adding the tests to existing test classes (rejected because security tests deserve their own focused class)"
+      ],
+      "files_affected": [
+        "tests/test_serializers.py"
+      ]
+    },
+    {
+      "dimension": "performance",
+      "recommendation": "Maintained the TYPE_ADAPTER_CACHE optimization while adding safety checks, ensuring performance isn't degraded for valid inputs",
+      "rationale": "The cache is important for performance in serialization-heavy workflows. The safety checks are added outside the cache logic, so valid class names still benefit from caching. Invalid class names fail fast before cache population.",
+      "alternatives_considered": [
+        "Removing the cache for simplicity (rejected due to performance impact)",
+        "Caching failed lookups (rejected as potentially memory-leaking and not useful)",
+        "Adding cache invalidation logic (rejected as unnecessary complexity)"
+      ],
+      "files_affected": [
+        "src/prefect/serializers.py"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Secure JSON object decoder against unimportable and invalid class names",
+      "description": "Enhance the prefect_json_object_decoder to safely handle malformed JSON with '__class__' and '__exc_type__' fields by validating class names and handling import failures gracefully",
+      "files_to_modify": [
+        "src/prefect/serializers.py",
+        "tests/test_serializers.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The changes implement a security-hardened JSON object decoder that prevents crashes and potential exploitation from malformed serialized data. The core enhancement is the addition of defensive programming around class name resolution using from_qualified_name().\n\nFor the '__class__' branch (general object deserialization), unimportable classes now cause the decoder to return the raw dictionary instead of raising an exception. This preserves data integrity while preventing crashes. For the '__exc_type__' branch (exception reconstruction), additional validation ensures the resolved class is actually a BaseException subclass before instantiation, preventing arbitrary class instantiation.\n\nThe implementation follows the principle of failing safely: invalid '__class__' paths degrade gracefully by returning the original data, while invalid '__exc_type__' paths fail loudly with clear ValueError messages. This asymmetric approach is intentional, reflecting the different security requirements of general object deserialization versus exception reconstruction.\n\nThe accompanying tests provide comprehensive coverage of edge cases, including dotless class names, unimportable modules, and non-exception classes masquerading as exceptions. This ensures the decoder behaves predictably for both valid and malicious inputs, maintaining backward compatibility for correct usage while adding robustness against malformed data.",
+  "source_pr": "https://github.com/PrefectHQ/prefect/pull/21073",
+  "before_sha": "cecc80649f71f7a6afc5b3706b3b16e3f590684d",
+  "after_sha": "af54e125f399b6ef44fa28f40007d44cda6f938b",
+  "diff_stats": {
+    "additions": 47,
+    "deletions": 4,
+    "files_changed": 2
+  }
+}

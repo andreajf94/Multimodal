@@ -1,0 +1,119 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "data_modeling",
+      "recommendation": "Added created_at field to AgentSessionInfo struct to track thread creation time",
+      "rationale": "To support chronological sorting, we need a reliable creation timestamp. While updated_at existed, it changes when threads are modified, making it unsuitable for stable chronological ordering. The created_at field provides a stable reference point that reflects when a thread was conceptually created.",
+      "alternatives_considered": [
+        "Using only updated_at for sorting",
+        "Adding a separate timestamp field",
+        "Using a combination of existing metadata fields"
+      ],
+      "files_affected": [
+        "crates/acp_thread/src/connection.rs",
+        "crates/agent/src/db.rs",
+        "crates/agent_servers/src/acp.rs",
+        "crates/agent_ui/src/thread_history.rs",
+        "crates/sidebar/src/sidebar.rs"
+      ]
+    },
+    {
+      "dimension": "data_persistence",
+      "recommendation": "Modified database insertion to use thread's updated_at as created_at for new threads",
+      "rationale": "When saving new threads to the database, we need to preserve the conceptual creation time rather than the database save time. Using updated_at (which is set when the thread is created) ensures the creation time reflects when the thread was actually created in the UI, not when it was persisted.",
+      "alternatives_considered": [
+        "Using current timestamp at database insertion",
+        "Adding a separate creation timestamp at thread creation",
+        "Storing creation time in thread metadata"
+      ],
+      "files_affected": [
+        "crates/agent/src/db.rs"
+      ]
+    },
+    {
+      "dimension": "api_design",
+      "recommendation": "Implemented fallback sorting logic that uses created_at first, then updated_at",
+      "rationale": "Some thread sources (like ACP sessions) don't have created_at timestamps. The fallback mechanism ensures consistent sorting across all thread types while prioritizing creation time when available. This provides graceful degradation rather than failing or requiring all sources to implement the new field immediately.",
+      "alternatives_considered": [
+        "Requiring all thread sources to provide created_at",
+        "Using only updated_at for backward compatibility",
+        "Creating separate sorting logic for different thread types"
+      ],
+      "files_affected": [
+        "crates/sidebar/src/sidebar.rs"
+      ]
+    },
+    {
+      "dimension": "testing",
+      "recommendation": "Updated test fixtures to include created_at field in all test cases",
+      "rationale": "Tests need to reflect the new data structure to ensure they continue to pass. This maintains test coverage while adapting to the API changes. The tests use None for created_at to simulate backward compatibility scenarios.",
+      "alternatives_considered": [
+        "Leaving tests unchanged and expecting failures",
+        "Creating separate test suites for new behavior",
+        "Using default values instead of explicit None"
+      ],
+      "files_affected": [
+        "crates/agent_ui/src/thread_history.rs",
+        "crates/sidebar/src/sidebar.rs"
+      ]
+    },
+    {
+      "dimension": "ui_consistency",
+      "recommendation": "Applied sorting consistently across all thread list views in the sidebar",
+      "rationale": "The feature requirement specifies consistent chronological ordering across all thread displays. By modifying the central sorting logic in the sidebar's thread rendering method, we ensure all thread lists (filtered, searched, grouped) follow the same ordering rules.",
+      "alternatives_considered": [
+        "Applying sorting only to specific thread types",
+        "Making sorting configurable per view",
+        "Implementing sorting at the data source level"
+      ],
+      "files_affected": [
+        "crates/sidebar/src/sidebar.rs"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Add creation timestamp to thread data model",
+      "description": "Extend the AgentSessionInfo struct to include created_at field and update all implementations to handle this new field",
+      "files_to_modify": [
+        "crates/acp_thread/src/connection.rs",
+        "crates/agent/src/db.rs",
+        "crates/agent_servers/src/acp.rs",
+        "crates/agent_ui/src/thread_history.rs",
+        "crates/sidebar/src/sidebar.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-002",
+      "title": "Implement chronological sorting logic",
+      "description": "Replace existing sorting by updated_at with new sorting that prioritizes created_at with fallback to updated_at",
+      "files_to_modify": [
+        "crates/sidebar/src/sidebar.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-003",
+      "title": "Update database persistence for creation time",
+      "description": "Modify thread database insertion to preserve conceptual creation time rather than using current timestamp",
+      "files_to_modify": [
+        "crates/agent/src/db.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation adds chronological sorting to threads by introducing a new created_at field to the thread data model and updating the sorting logic to use this field with appropriate fallbacks. The approach extends the existing AgentSessionInfo struct with a created_at field, ensuring backward compatibility by making it optional. All thread sources (local database, ACP sessions, active threads) are updated to include this field, though some sources like ACP sessions use None to indicate they don't track creation time.\n\nThe core sorting logic in the sidebar now prioritizes created_at but falls back to updated_at when created_at is unavailable. This ensures consistent behavior across all thread types while gracefully handling sources that haven't been updated. The database insertion logic was modified to use the thread's updated_at as the created_at value for new threads, preserving the conceptual creation time rather than the database save time.\n\nThis implementation maintains thread grouping and categorization while applying chronological ordering, and the sorting works with existing filtering and search functionality since it's applied after those operations. The changes are minimal and focused, touching only the necessary components without restructuring the overall architecture. Test fixtures were updated to include the new field, ensuring continued test coverage while adapting to the API changes.",
+  "source_pr": "https://github.com/zed-industries/zed/pull/51193",
+  "before_sha": "d18e4a75bc8892090912bc536c081e3e84df1d2a",
+  "after_sha": "eae21de630ca111ec7b73839b8d25a7916affc9f",
+  "diff_stats": {
+    "additions": 32,
+    "deletions": 7,
+    "files_changed": 5
+  }
+}

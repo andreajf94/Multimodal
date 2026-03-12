@@ -1,0 +1,301 @@
+diff --git a/apps/studio/components/interfaces/Auth/Users/Users.constants.ts b/apps/studio/components/interfaces/Auth/Users/Users.constants.ts
+index 7712f50590dc6..b18fe9359730f 100644
+--- a/apps/studio/components/interfaces/Auth/Users/Users.constants.ts
++++ b/apps/studio/components/interfaces/Auth/Users/Users.constants.ts
+@@ -1,6 +1,7 @@
++import { type OptimizedSearchColumns } from '@supabase/pg-meta'
+ import { BASE_PATH } from 'lib/constants'
++
+ import { PROVIDER_PHONE, PROVIDERS_SCHEMAS } from '../AuthProvidersFormValidation'
+-import { OptimizedSearchColumns } from '@supabase/pg-meta/src/sql/studio/get-users-types'
+ 
+ export type Filter = 'all' | 'verified' | 'unverified' | 'anonymous'
+ 
+diff --git a/apps/studio/components/interfaces/Auth/Users/UsersFooter.tsx b/apps/studio/components/interfaces/Auth/Users/UsersFooter.tsx
+index e13281dc0a7c8..1edf69ca47da5 100644
+--- a/apps/studio/components/interfaces/Auth/Users/UsersFooter.tsx
++++ b/apps/studio/components/interfaces/Auth/Users/UsersFooter.tsx
+@@ -1,15 +1,15 @@
++import { OptimizedSearchColumns } from '@supabase/pg-meta'
+ import { THRESHOLD_COUNT } from '@supabase/pg-meta/src/sql/studio/get-count-estimate'
+ import { keepPreviousData } from '@tanstack/react-query'
+-import { HelpCircle, Loader2 } from 'lucide-react'
+-import { useEffect, useState } from 'react'
+-
+-import { OptimizedSearchColumns } from '@supabase/pg-meta/src/sql/studio/get-users-types'
+ import { useParams } from 'common'
+ import { formatEstimatedCount } from 'components/grid/components/footer/pagination/Pagination.utils'
+ import { useUsersCountQuery } from 'data/auth/users-count-query'
+ import { useSelectedProjectQuery } from 'hooks/misc/useSelectedProject'
++import { HelpCircle, Loader2 } from 'lucide-react'
++import { useEffect, useState } from 'react'
+ import { Button, Tooltip, TooltipContent, TooltipTrigger } from 'ui'
+ import ConfirmationModal from 'ui-patterns/Dialogs/ConfirmationModal'
++
+ import type { Filter, SpecificFilterColumn } from './Users.constants'
+ 
+ interface UsersFooterProps {
+diff --git a/apps/studio/components/interfaces/Auth/Users/UsersV2.tsx b/apps/studio/components/interfaces/Auth/Users/UsersV2.tsx
+index 2bd8d05201f7d..dcb8316d574ff 100644
+--- a/apps/studio/components/interfaces/Auth/Users/UsersV2.tsx
++++ b/apps/studio/components/interfaces/Auth/Users/UsersV2.tsx
+@@ -1,5 +1,5 @@
+-import pgMeta from '@supabase/pg-meta'
+-import type { OptimizedSearchColumns } from '@supabase/pg-meta/src/sql/studio/get-users-types'
++import { USER_SEARCH_INDEXES } from '@supabase/pg-meta'
++import type { OptimizedSearchColumns } from '@supabase/pg-meta'
+ import { keepPreviousData, useQueryClient } from '@tanstack/react-query'
+ import AwesomeDebouncePromise from 'awesome-debounce-promise'
+ import { LOCAL_STORAGE_KEYS, useFlag, useParams } from 'common'
+@@ -246,7 +246,7 @@ export const UsersV2 = () => {
+   const userSearchIndexesAreValidAndReady =
+     !isUserSearchIndexesError &&
+     !isUserSearchIndexesLoading &&
+-    userSearchIndexes?.length === pgMeta.USER_SEARCH_INDEXES.length &&
++    userSearchIndexes?.length === USER_SEARCH_INDEXES.length &&
+     userSearchIndexes?.every((index) => index.is_valid && index.is_ready)
+ 
+   /**
+diff --git a/apps/studio/data/auth/index-worker-status-query.ts b/apps/studio/data/auth/index-worker-status-query.ts
+index a86b087e050f3..2ac8ae3d7c958 100644
+--- a/apps/studio/data/auth/index-worker-status-query.ts
++++ b/apps/studio/data/auth/index-worker-status-query.ts
+@@ -1,8 +1,8 @@
+-import pgMeta from '@supabase/pg-meta'
++import { getIndexWorkerStatusSQL } from '@supabase/pg-meta'
+ import { useQuery } from '@tanstack/react-query'
+-
+ import { executeSql, type ExecuteSqlError } from 'data/sql/execute-sql-query'
+ import { UseCustomQueryOptions } from 'types'
++
+ import { authKeys } from './keys'
+ 
+ type IndexWorkerStatusVariables = {
+@@ -18,7 +18,7 @@ export async function getIndexWorkerStatus(
+   { projectRef, connectionString }: IndexWorkerStatusVariables,
+   signal?: AbortSignal
+ ): Promise<IndexWorkerStatusData> {
+-  const sql = pgMeta.getIndexWorkerStatusSQL()
++  const sql = getIndexWorkerStatusSQL()
+ 
+   const { result } = await executeSql<IndexWorkerStatusData[]>(
+     {
+diff --git a/apps/studio/data/auth/keys.ts b/apps/studio/data/auth/keys.ts
+index e7e83801c7fd9..baf29ce6dc18a 100644
+--- a/apps/studio/data/auth/keys.ts
++++ b/apps/studio/data/auth/keys.ts
+@@ -1,4 +1,4 @@
+-import type { OptimizedSearchColumns } from '@supabase/pg-meta/src/sql/studio/get-users-types'
++import type { OptimizedSearchColumns } from '@supabase/pg-meta'
+ 
+ export const authKeys = {
+   user: (projectRef: string | undefined, userId?: string | null) =>
+diff --git a/apps/studio/data/auth/user-query.ts b/apps/studio/data/auth/user-query.ts
+index 5bd5b0dcd7d14..8e067d003a5b1 100644
+--- a/apps/studio/data/auth/user-query.ts
++++ b/apps/studio/data/auth/user-query.ts
+@@ -1,8 +1,8 @@
++import { getUserSQL } from '@supabase/pg-meta'
+ import { useQuery } from '@tanstack/react-query'
+ import { executeSql, type ExecuteSqlError } from 'data/sql/execute-sql-query'
+ import { UseCustomQueryOptions } from 'types'
+ 
+-import { getUserSQL } from './auth.sql'
+ import { authKeys } from './keys'
+ import { User } from './users-infinite-query'
+ import { UUID_REGEX } from '@/lib/constants'
+@@ -21,6 +21,7 @@ export async function getUser(
+   if (!UUID_REGEX.test(userId)) throw new Error('Invalid user ID format')
+ 
+   const sql = getUserSQL(userId)
++
+   const { result } = await executeSql(
+     { projectRef, connectionString, sql, queryKey: [`user-${userId}`] },
+     signal
+diff --git a/apps/studio/data/auth/user-search-indexes-query.ts b/apps/studio/data/auth/user-search-indexes-query.ts
+index 2b95392ab389c..3894d39258815 100644
+--- a/apps/studio/data/auth/user-search-indexes-query.ts
++++ b/apps/studio/data/auth/user-search-indexes-query.ts
+@@ -1,8 +1,8 @@
+-import pgMeta from '@supabase/pg-meta'
++import { getIndexStatusesSQL } from '@supabase/pg-meta'
+ import { useQuery } from '@tanstack/react-query'
+-
+ import { executeSql, type ExecuteSqlError } from 'data/sql/execute-sql-query'
+ import { UseCustomQueryOptions } from 'types'
++
+ import { authKeys } from './keys'
+ 
+ type UsersIndexStatusesVariables = {
+@@ -20,7 +20,7 @@ export async function getUserIndexStatuses(
+   { projectRef, connectionString }: UsersIndexStatusesVariables,
+   signal?: AbortSignal
+ ): Promise<UsersIndexStatusesData> {
+-  const sql = pgMeta.getIndexStatusesSQL()
++  const sql = getIndexStatusesSQL()
+ 
+   const { result } = await executeSql<UsersIndexStatusesData>(
+     {
+diff --git a/apps/studio/data/auth/users-count-query.ts b/apps/studio/data/auth/users-count-query.ts
+index 7d78176ad4f53..bb8a41038fdd5 100644
+--- a/apps/studio/data/auth/users-count-query.ts
++++ b/apps/studio/data/auth/users-count-query.ts
+@@ -1,9 +1,9 @@
+-import type { OptimizedSearchColumns } from '@supabase/pg-meta/src/sql/studio/get-users-types'
+-import { getUsersCountSQL } from '@supabase/pg-meta/src/sql/studio/get-users-count'
++import type { OptimizedSearchColumns } from '@supabase/pg-meta'
++import { getUsersCountSQL } from '@supabase/pg-meta'
+ import { useQuery } from '@tanstack/react-query'
+-
+ import { executeSql, type ExecuteSqlError } from 'data/sql/execute-sql-query'
+ import { UseCustomQueryOptions } from 'types'
++
+ import { authKeys } from './keys'
+ import { type Filter } from './users-infinite-query'
+ 
+diff --git a/apps/studio/data/auth/users-infinite-query.ts b/apps/studio/data/auth/users-infinite-query.ts
+index 0db05a99c2e30..5cff74bcfca84 100644
+--- a/apps/studio/data/auth/users-infinite-query.ts
++++ b/apps/studio/data/auth/users-infinite-query.ts
+@@ -1,15 +1,11 @@
+-import {
+-  getPaginatedUsersSQL,
+-  UsersCursor,
+-} from '@supabase/pg-meta/src/sql/studio/get-users-paginated'
++import { getPaginatedUsersSQL, OptimizedSearchColumns, UsersCursor } from '@supabase/pg-meta'
+ import { InfiniteData, useInfiniteQuery } from '@tanstack/react-query'
+-
+-import { OptimizedSearchColumns } from '@supabase/pg-meta/src/sql/studio/get-users-types'
+ import type { components } from 'data/api'
+ import { executeSql, ExecuteSqlError } from 'data/sql/execute-sql-query'
+ import { useSelectedProjectQuery } from 'hooks/misc/useSelectedProject'
+ import { PROJECT_STATUS } from 'lib/constants'
+ import { UseCustomInfiniteQueryOptions } from 'types'
++
+ import { authKeys } from './keys'
+ 
+ const USERS_PAGE_LIMIT = 50
+diff --git a/packages/pg-meta/src/index.ts b/packages/pg-meta/src/index.ts
+index b4f962ad8b379..bd10839e178d9 100644
+--- a/packages/pg-meta/src/index.ts
++++ b/packages/pg-meta/src/index.ts
+@@ -17,8 +17,14 @@ import types from './pg-meta-types'
+ import version from './pg-meta-version'
+ import views from './pg-meta-views'
+ import * as query from './query/index'
+-import { getIndexStatusesSQL, USER_SEARCH_INDEXES } from './sql/studio/get-index-statuses'
+-import { getIndexWorkerStatusSQL } from './sql/studio/get-index-worker-status'
++
++// Studio SQL queries
++export { getUserSQL } from './sql/studio/auth/get-user'
++export { getIndexStatusesSQL, USER_SEARCH_INDEXES } from './sql/studio/auth/get-index-statuses'
++export { getIndexWorkerStatusSQL } from './sql/studio/auth/get-index-worker-status'
++export { type OptimizedSearchColumns } from './sql/studio/auth/get-users-types'
++export { getPaginatedUsersSQL, type UsersCursor } from './sql/studio/auth/get-users-paginated'
++export { getUsersCountSQL } from './sql/studio/auth/get-users-count'
+ 
+ export default {
+   roles,
+@@ -40,7 +46,4 @@ export default {
+   indexes,
+   columnPrivileges,
+   query,
+-  getIndexWorkerStatusSQL,
+-  getIndexStatusesSQL,
+-  USER_SEARCH_INDEXES,
+ }
+diff --git a/packages/pg-meta/src/sql/studio/get-index-statuses.ts b/packages/pg-meta/src/sql/studio/auth/get-index-statuses.ts
+similarity index 93%
+rename from packages/pg-meta/src/sql/studio/get-index-statuses.ts
+rename to packages/pg-meta/src/sql/studio/auth/get-index-statuses.ts
+index 8b09717270582..685c1c809fb54 100644
+--- a/packages/pg-meta/src/sql/studio/get-index-statuses.ts
++++ b/packages/pg-meta/src/sql/studio/auth/get-index-statuses.ts
+@@ -1,4 +1,4 @@
+-import { literal } from '../../pg-format'
++import { literal } from '../../../pg-format'
+ 
+ export const USER_SEARCH_INDEXES = [
+   'idx_users_email',
+diff --git a/packages/pg-meta/src/sql/studio/get-index-worker-status.ts b/packages/pg-meta/src/sql/studio/auth/get-index-worker-status.ts
+similarity index 100%
+rename from packages/pg-meta/src/sql/studio/get-index-worker-status.ts
+rename to packages/pg-meta/src/sql/studio/auth/get-index-worker-status.ts
+diff --git a/apps/studio/data/auth/auth.sql.ts b/packages/pg-meta/src/sql/studio/auth/get-user.ts
+similarity index 100%
+rename from apps/studio/data/auth/auth.sql.ts
+rename to packages/pg-meta/src/sql/studio/auth/get-user.ts
+diff --git a/packages/pg-meta/src/sql/studio/get-users-common.ts b/packages/pg-meta/src/sql/studio/auth/get-users-common.ts
+similarity index 100%
+rename from packages/pg-meta/src/sql/studio/get-users-common.ts
+rename to packages/pg-meta/src/sql/studio/auth/get-users-common.ts
+diff --git a/packages/pg-meta/src/sql/studio/get-users-count.ts b/packages/pg-meta/src/sql/studio/auth/get-users-count.ts
+similarity index 97%
+rename from packages/pg-meta/src/sql/studio/get-users-count.ts
+rename to packages/pg-meta/src/sql/studio/auth/get-users-count.ts
+index 790afd6691ff6..530664402ffce 100644
+--- a/packages/pg-meta/src/sql/studio/get-users-count.ts
++++ b/packages/pg-meta/src/sql/studio/auth/get-users-count.ts
+@@ -1,5 +1,5 @@
+-import { literal } from '../../pg-format'
+-import { COUNT_ESTIMATE_SQL, THRESHOLD_COUNT } from './get-count-estimate'
++import { literal } from '../../../pg-format'
++import { COUNT_ESTIMATE_SQL, THRESHOLD_COUNT } from '../get-count-estimate'
+ import { prefixToUUID, stringRange } from './get-users-common'
+ import type { OptimizedSearchColumns } from './get-users-types'
+ 
+diff --git a/packages/pg-meta/src/sql/studio/get-users-paginated.ts b/packages/pg-meta/src/sql/studio/auth/get-users-paginated.ts
+similarity index 99%
+rename from packages/pg-meta/src/sql/studio/get-users-paginated.ts
+rename to packages/pg-meta/src/sql/studio/auth/get-users-paginated.ts
+index ffaec4db6dea1..ab4fd4427b0ea 100644
+--- a/packages/pg-meta/src/sql/studio/get-users-paginated.ts
++++ b/packages/pg-meta/src/sql/studio/auth/get-users-paginated.ts
+@@ -1,4 +1,4 @@
+-import { ident, literal } from '../../pg-format'
++import { ident, literal } from '../../../pg-format'
+ import { prefixToUUID, stringRange } from './get-users-common'
+ import { OptimizedSearchColumns } from './get-users-types'
+ 
+diff --git a/packages/pg-meta/src/sql/studio/get-users-types.ts b/packages/pg-meta/src/sql/studio/auth/get-users-types.ts
+similarity index 100%
+rename from packages/pg-meta/src/sql/studio/get-users-types.ts
+rename to packages/pg-meta/src/sql/studio/auth/get-users-types.ts
+diff --git a/packages/pg-meta/test/sql/studio/get-users-common.test.ts b/packages/pg-meta/test/sql/studio/get-users-common.test.ts
+index fc00c2d03dabc..92428c756ea24 100644
+--- a/packages/pg-meta/test/sql/studio/get-users-common.test.ts
++++ b/packages/pg-meta/test/sql/studio/get-users-common.test.ts
+@@ -1,6 +1,6 @@
+ import { describe, expect, test } from 'vitest'
+ 
+-import { prefixToUUID, stringRange } from '../../../src/sql/studio/get-users-common'
++import { prefixToUUID, stringRange } from '../../../src/sql/studio/auth/get-users-common'
+ 
+ describe('prefixToUUID', () => {
+   test('returns UUID template with no prefix', () => {
+diff --git a/packages/pg-meta/test/sql/studio/get-users-count.test.ts b/packages/pg-meta/test/sql/studio/get-users-count.test.ts
+index 7c45a2fc838a9..1e186d87a8055 100644
+--- a/packages/pg-meta/test/sql/studio/get-users-count.test.ts
++++ b/packages/pg-meta/test/sql/studio/get-users-count.test.ts
+@@ -1,7 +1,7 @@
+ import { randomUUID } from 'crypto'
+ import { afterAll, expect, test } from 'vitest'
+ 
+-import { getUsersCountSQL } from '../../../src/sql/studio/get-users-count'
++import { getUsersCountSQL } from '../../../src/sql/studio/auth/get-users-count'
+ import { cleanupRoot, createDatabaseWithAuthSchema, createTestDatabase } from '../../db/utils'
+ 
+ afterAll(async () => {
+diff --git a/packages/pg-meta/test/sql/studio/get-users-paginated.test.ts b/packages/pg-meta/test/sql/studio/get-users-paginated.test.ts
+index 2e876ab4b8a09..016cbb0af0d19 100644
+--- a/packages/pg-meta/test/sql/studio/get-users-paginated.test.ts
++++ b/packages/pg-meta/test/sql/studio/get-users-paginated.test.ts
+@@ -1,7 +1,7 @@
+ import { randomUUID } from 'crypto'
+ import { afterAll, expect, test } from 'vitest'
+ 
+-import { getPaginatedUsersSQL } from '../../../src/sql/studio/get-users-paginated'
++import { getPaginatedUsersSQL } from '../../../src/sql/studio/auth/get-users-paginated'
+ import { cleanupRoot, createDatabaseWithAuthSchema, createTestDatabase } from '../../db/utils'
+ 
+ afterAll(async () => {

@@ -1,0 +1,116 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "api_design",
+      "recommendation": "Added From<&[T]> trait implementations for Line and Text to enable slice-based construction",
+      "rationale": "The existing API only supported construction from Vec<T> and single elements. Adding slice support provides more flexibility for users who have data in slices (e.g., array slices, slice views) without requiring them to allocate a new Vec. This follows Rust's convention of providing From implementations for common collection types.",
+      "alternatives_considered": [
+        "Creating separate constructors like Line::from_slice()",
+        "Only supporting Vec<T> and requiring users to call .to_vec() on slices",
+        "Using AsRef<[T]> instead of &[T] as the parameter"
+      ],
+      "files_affected": [
+        "ratatui-core/src/text/line.rs",
+        "ratatui-core/src/text/text.rs"
+      ]
+    },
+    {
+      "dimension": "type_system",
+      "recommendation": "Used generic bounds T: Into<Span> + Clone for Line and T: Into<Line> + Clone for Text with appropriate lifetime annotations",
+      "rationale": "The Clone bound is necessary because we need to iterate over the slice and convert each element. Since we're taking a reference to the slice (&'b [T]), we need to clone each element before converting it. The Into<T> bound ensures type safety while maintaining flexibility - it allows conversion from any type that can become a Span/Line (String, &str, styled spans, etc.). The lifetime annotations ('a, 'b) properly handle the relationship between the source slice's lifetime and the resulting Line/Text's lifetime.",
+      "alternatives_considered": [
+        "Using T: AsRef<Span> instead of T: Into<Span>",
+        "Requiring T: Copy instead of T: Clone (too restrictive)",
+        "Using owned values instead of references (would require allocation)"
+      ],
+      "files_affected": [
+        "ratatui-core/src/text/line.rs",
+        "ratatui-core/src/text/text.rs"
+      ]
+    },
+    {
+      "dimension": "consistency",
+      "recommendation": "Maintained the same pattern as existing From implementations by using ..Default::default() and collecting into the appropriate field",
+      "rationale": "The implementation follows the established pattern in the codebase: create a new struct with default values, then set the spans/lines field by mapping and collecting the input. This ensures consistency with other From implementations (like From<Vec<Span>>) and makes the code predictable for maintainers. Using ..Default::default() ensures other fields (like alignment, style) are properly initialized.",
+      "alternatives_considered": [
+        "Creating a completely new initialization pattern",
+        "Using Line::new() or Text::new() constructors",
+        "Manually setting all fields instead of using default"
+      ],
+      "files_affected": [
+        "ratatui-core/src/text/line.rs",
+        "ratatui-core/src/text/text.rs"
+      ]
+    },
+    {
+      "dimension": "testing",
+      "recommendation": "Added comprehensive test cases covering different slice types and ranges",
+      "rationale": "Tests verify that the implementation works correctly with: 1) slices of Spans, 2) slices of &str, 3) slices of String, 4) different slice ranges (start..end, start..). This ensures edge cases like empty slices are handled (via collect() on empty iterator) and that the Clone requirement works correctly. The tests mirror existing test patterns in the module.",
+      "alternatives_considered": [
+        "Only testing basic cases",
+        "Relying on existing tests for Vec<T> implementations",
+        "Not testing slice ranges"
+      ],
+      "files_affected": [
+        "ratatui-core/src/text/line.rs",
+        "ratatui-core/src/text/text.rs"
+      ]
+    },
+    {
+      "dimension": "documentation",
+      "recommendation": "Updated documentation comments to mention the new slice conversion capability",
+      "rationale": "The documentation for Line and Text now includes mentions of From<&[Into<Span>]> and From<&[Into<Line>]> respectively. This helps users discover the feature through IDE tooltips and documentation. The wording matches the existing documentation style.",
+      "alternatives_considered": [
+        "Not updating documentation",
+        "Creating separate documentation sections",
+        "Using different wording that doesn't match existing style"
+      ],
+      "files_affected": [
+        "ratatui-core/src/text/line.rs",
+        "ratatui-core/src/text/text.rs"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Add slice-based construction for Line type",
+      "description": "Implement From<&[T]> for Line where T: Into<Span> + Clone, allowing users to create Line instances directly from slices of Span-compatible types without manual iteration or allocation",
+      "files_to_modify": [
+        "ratatui-core/src/text/line.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-002",
+      "title": "Add slice-based construction for Text type",
+      "description": "Implement From<&[T]> for Text where T: Into<Line> + Clone, allowing users to create Text instances directly from slices of Line-compatible types, maintaining consistency with the Line implementation",
+      "files_to_modify": [
+        "ratatui-core/src/text/text.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-003",
+      "title": "Add comprehensive tests for slice conversions",
+      "description": "Create test cases for both Line and Text slice conversions, covering different input types (Spans, strings, String objects) and slice ranges to ensure correctness and handle edge cases",
+      "files_to_modify": [
+        "ratatui-core/src/text/line.rs",
+        "ratatui-core/src/text/text.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation adds slice-based construction capabilities to the Line and Text types in the ratatui library by implementing From<&[T]> trait conversions. This enhancement provides more ergonomic APIs for users who have data in slice form, allowing them to create text elements without manual iteration or unnecessary allocations.\n\nThe key design decision was to use generic bounds T: Into<Span> + Clone for Line and T: Into<Line> + Clone for Text, which provides maximum flexibility while maintaining type safety. The Clone bound is necessary because we're working with references to slice elements, and we need to clone each element before converting it. This approach maintains consistency with existing From implementations in the codebase, using the same ..Default::default() pattern and collecting results into the appropriate fields.\n\nThe changes integrate seamlessly with the existing codebase by following established patterns. The implementations handle empty slices correctly (producing empty collections), and the comprehensive test suite ensures proper behavior with various input types and slice ranges. This enhancement aligns with Rust's convention of providing From implementations for common collection types, making the library more intuitive for users familiar with Rust's standard library patterns.",
+  "source_pr": "https://github.com/ratatui/ratatui/pull/2371",
+  "before_sha": "d830a731320ee566ed25fbcc27d8d825f34a7f26",
+  "after_sha": "6faaddb47e9707647b97c1cdb8275f14b58397d2",
+  "diff_stats": {
+    "additions": 109,
+    "deletions": 0,
+    "files_changed": 2
+  }
+}

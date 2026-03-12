@@ -1,0 +1,99 @@
+diff --git a/excalidraw-app/components/DebugCanvas.tsx b/excalidraw-app/components/DebugCanvas.tsx
+index 2c157e34e78e..d9279296f76b 100644
+--- a/excalidraw-app/components/DebugCanvas.tsx
++++ b/excalidraw-app/components/DebugCanvas.tsx
+@@ -414,7 +414,6 @@ export const debugRenderer = throttleRAF(
+   ) => {
+     _debugRenderer(canvas, appState, elements, scale);
+   },
+-  { trailing: true },
+ );
+ 
+ export const loadSavedDebugState = () => {
+diff --git a/packages/common/src/utils.ts b/packages/common/src/utils.ts
+index 6d3858a00de7..26c75dcfa29d 100644
+--- a/packages/common/src/utils.ts
++++ b/packages/common/src/utils.ts
+@@ -151,24 +151,19 @@ export const debounce = <T extends any[]>(
+   return ret;
+ };
+ 
+-// throttle callback to execute once per animation frame
+-export const throttleRAF = <T extends any[]>(
+-  fn: (...args: T) => void,
+-  opts?: { trailing?: boolean },
+-) => {
++// throttle callback to execute once per animation frame using the latest args
++export const throttleRAF = <T extends any[]>(fn: (...args: T) => void) => {
+   let timerId: number | null = null;
+   let lastArgs: T | null = null;
+-  let lastArgsTrailing: T | null = null;
+ 
+-  const scheduleFunc = (args: T) => {
++  const scheduleFunc = () => {
+     timerId = window.requestAnimationFrame(() => {
+       timerId = null;
+-      fn(...args);
++      const args = lastArgs;
+       lastArgs = null;
+-      if (lastArgsTrailing) {
+-        lastArgs = lastArgsTrailing;
+-        lastArgsTrailing = null;
+-        scheduleFunc(lastArgs);
++
++      if (args) {
++        fn(...args);
+       }
+     });
+   };
+@@ -180,9 +175,7 @@ export const throttleRAF = <T extends any[]>(
+     }
+     lastArgs = args;
+     if (timerId === null) {
+-      scheduleFunc(lastArgs);
+-    } else if (opts?.trailing) {
+-      lastArgsTrailing = args;
++      scheduleFunc();
+     }
+   };
+   ret.flush = () => {
+@@ -191,12 +184,12 @@ export const throttleRAF = <T extends any[]>(
+       timerId = null;
+     }
+     if (lastArgs) {
+-      fn(...(lastArgsTrailing || lastArgs));
+-      lastArgs = lastArgsTrailing = null;
++      fn(...lastArgs);
++      lastArgs = null;
+     }
+   };
+   ret.cancel = () => {
+-    lastArgs = lastArgsTrailing = null;
++    lastArgs = null;
+     if (timerId !== null) {
+       cancelAnimationFrame(timerId);
+       timerId = null;
+diff --git a/packages/excalidraw/renderer/renderNewElementScene.ts b/packages/excalidraw/renderer/renderNewElementScene.ts
+index 07215dfc075f..31aa72132943 100644
+--- a/packages/excalidraw/renderer/renderNewElementScene.ts
++++ b/packages/excalidraw/renderer/renderNewElementScene.ts
+@@ -88,7 +88,6 @@ export const renderNewElementSceneThrottled = throttleRAF(
+   (config: NewElementSceneRenderConfig) => {
+     _renderNewElementScene(config);
+   },
+-  { trailing: true },
+ );
+ 
+ export const renderNewElementScene = (
+diff --git a/packages/excalidraw/renderer/staticScene.ts b/packages/excalidraw/renderer/staticScene.ts
+index 83e45a122729..48c72f8d3773 100644
+--- a/packages/excalidraw/renderer/staticScene.ts
++++ b/packages/excalidraw/renderer/staticScene.ts
+@@ -483,7 +483,6 @@ export const renderStaticSceneThrottled = throttleRAF(
+   (config: StaticSceneRenderConfig) => {
+     _renderStaticScene(config);
+   },
+-  { trailing: true },
+ );
+ 
+ /**

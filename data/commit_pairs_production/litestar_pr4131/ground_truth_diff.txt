@@ -1,0 +1,39 @@
+diff --git a/litestar/_openapi/datastructures.py b/litestar/_openapi/datastructures.py
+index 30c0c24736..7ea5bce819 100644
+--- a/litestar/_openapi/datastructures.py
++++ b/litestar/_openapi/datastructures.py
+@@ -138,8 +138,7 @@ def get_reference_for_field_definition(self, field: FieldDefinition) -> Referenc
+         key = _get_normalized_schema_key(field)
+         if key not in self._schema_key_map:
+             return None
+-
+-        if (existing_type := self._component_type_map[key]) != field:
++        if (existing_type := self._component_type_map[key]) != field and f"{field.raw!r}" != f"{existing_type.raw!r}":
+             # TODO: This should check for strict equality, e.g. changes in type metadata
+             # However, this is currently not possible to do without breaking things, as
+             # we allow to define metadata on a type annotation in one place to be used
+diff --git a/litestar/dto/_backend.py b/litestar/dto/_backend.py
+index e25f40f0fb..710899544e 100644
+--- a/litestar/dto/_backend.py
++++ b/litestar/dto/_backend.py
+@@ -208,7 +208,7 @@ def create_transfer_model_type(
+         Returns:
+             A ``BackendT`` class.
+         """
+-        struct_name = self._create_transfer_model_name(model_name)
++        struct_name = self.dto_factory.__schema_name__ or self._create_transfer_model_name(model_name)
+ 
+         struct = _create_struct_for_field_definitions(
+             model_name=struct_name,
+diff --git a/litestar/dto/base_dto.py b/litestar/dto/base_dto.py
+index bcb48cf007..5bcd5a8c92 100644
+--- a/litestar/dto/base_dto.py
++++ b/litestar/dto/base_dto.py
+@@ -57,6 +57,7 @@ class AbstractDTO(Generic[T]):
+     """:func:`getattr` like callable to access attributes on the data source"""
+ 
+     _dto_backends: ClassVar[dict[str, _BackendDict]] = {}
++    __schema_name__: ClassVar[None | str] = None
+ 
+     def __init__(self, asgi_connection: ASGIConnection) -> None:
+         """Create an AbstractDTOFactory type.

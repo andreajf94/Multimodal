@@ -1,0 +1,13 @@
+{
+  "feature_name": "CI: Skip Already-Published NPM Packages",
+  "description": "Modify the CI publish workflow to skip packages that have already been published to the npm registry instead of failing when attempting to republish existing versions. This will make CI re-runs more robust after partial publishes by checking package versions before attempting publication.",
+  "functional_requirements": [
+    "Add version checking logic to the existing npm package validation script to identify already-published package versions",
+    "Create a reusable shell script that checks the npm registry before publishing and only proceeds if the version doesn't exist",
+    "Update all trusted publish workflows to use the new version-checking script instead of attempting direct publishes",
+    "Consolidate npm registry query logic into a single helper function to avoid redundant API calls",
+    "Maintain dry-run functionality that accurately reports which packages would be skipped vs published"
+  ],
+  "project_name": "oxc",
+  "source_pr": "https://github.com/oxc-project/oxc/pull/20173"
+}

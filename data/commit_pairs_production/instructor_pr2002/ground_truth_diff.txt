@@ -1,0 +1,146 @@
+diff --git a/instructor/providers/openai/utils.py b/instructor/providers/openai/utils.py
+index 1c1d7d186..a51f3708e 100644
+--- a/instructor/providers/openai/utils.py
++++ b/instructor/providers/openai/utils.py
+@@ -28,6 +28,37 @@ def _is_stream_response(response: Any) -> bool:
+     return response is None or not hasattr(response, "choices")
+ 
+ 
++def _filter_responses_tool_calls(output_items: list[Any]) -> list[Any]:
++    """Return response output items that represent tool calls."""
++    tool_calls: list[Any] = []
++    for item in output_items:
++        item_type = getattr(item, "type", None)
++        if item_type in {"function_call", "tool_call"}:
++            tool_calls.append(item)
++            continue
++        if item_type is None and hasattr(item, "arguments"):
++            tool_calls.append(item)
++    return tool_calls
++
++
++def _format_responses_tool_call_details(tool_call: Any) -> str:
++    """Format tool call name/id details for reask messages."""
++    tool_name = getattr(tool_call, "name", None)
++    tool_id = (
++        getattr(tool_call, "id", None)
++        or getattr(tool_call, "call_id", None)
++        or getattr(tool_call, "tool_call_id", None)
++    )
++    details: list[str] = []
++    if tool_name:
++        details.append(f"name={tool_name}")
++    if tool_id:
++        details.append(f"id={tool_id}")
++    if not details:
++        return ""
++    return f" (tool call {', '.join(details)})"
++
++
+ def reask_tools(
+     kwargs: dict[str, Any],
+     response: Any,
+@@ -100,12 +131,15 @@ def reask_responses_tools(
+         return kwargs
+ 
+     reask_messages = []
+-    for tool_call in response.output:
++    for tool_call in _filter_responses_tool_calls(response.output):
++        details = _format_responses_tool_call_details(tool_call)
+         reask_messages.append(
+             {
+                 "role": "user",  # type: ignore
+                 "content": (
+-                    f"Validation Error found:\n{exception}\nRecall the function correctly, fix the errors with {tool_call.arguments}"
++                    f"Validation Error found:\n{exception}\n"
++                    "Recall the function correctly, fix the errors with "
++                    f"{tool_call.arguments}{details}"
+                 ),
+             }
+         )
+diff --git a/tests/test_streaming_reask_bug.py b/tests/test_streaming_reask_bug.py
+index 3e452b50d..52cd72a52 100644
+--- a/tests/test_streaming_reask_bug.py
++++ b/tests/test_streaming_reask_bug.py
+@@ -7,6 +7,8 @@
+ GitHub Issue: https://github.com/jxnl/instructor/issues/1991
+ """
+ 
++from typing import Any, Optional
++
+ import pytest
+ from pydantic import ValidationError, BaseModel, field_validator
+ 
+@@ -24,6 +26,35 @@ def __next__(self):
+         raise StopIteration
+ 
+ 
++class MockResponsesToolCall:
++    """Mock tool call item in a responses output list."""
++
++    def __init__(
++        self,
++        arguments: str,
++        name: Optional[str] = None,
++        call_id: Optional[str] = None,
++        item_type: str = "function_call",
++    ) -> None:
++        self.arguments = arguments
++        self.name = name
++        self.call_id = call_id
++        self.type = item_type
++
++
++class MockResponsesReasoningItem:
++    """Mock reasoning item in a responses output list."""
++
++    type = "reasoning"
++
++
++class MockResponsesResponse:
++    """Mock Responses API response with output items."""
++
++    def __init__(self, output: list[Any]) -> None:
++        self.output = output
++
++
+ def create_mock_validation_error():
+     """Create a real Pydantic ValidationError for testing."""
+ 
+@@ -104,6 +135,36 @@ def test_reask_with_none_response(self):
+ 
+         assert "messages" in result
+ 
++    def test_reask_responses_tools_skips_reasoning_items_and_includes_details(self):
++        """Test responses reask ignores reasoning items and adds tool details."""
++        mock_response = MockResponsesResponse(
++            output=[
++                MockResponsesReasoningItem(),
++                MockResponsesToolCall(
++                    arguments='{"name": "Jane"}',
++                    name="extract_person",
++                    call_id="call_123",
++                ),
++            ]
++        )
++        kwargs = {
++            "messages": [{"role": "user", "content": "test"}],
++        }
++        exception = create_mock_validation_error()
++
++        result = handle_reask_kwargs(
++            kwargs=kwargs,
++            mode=Mode.RESPONSES_TOOLS,
++            response=mock_response,
++            exception=exception,
++        )
++
++        assert "messages" in result
++        assert len(result["messages"]) == 2
++        reask_content = result["messages"][-1]["content"]
++        assert "tool call name=extract_person, id=call_123" in reask_content
++        assert '{"name": "Jane"}' in reask_content
++
+     def test_reask_md_json_with_stream_object(self):
+         """Test that MD_JSON reask handler handles Stream objects."""
+         mock_stream = MockStream()

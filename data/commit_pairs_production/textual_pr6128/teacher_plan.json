@@ -1,0 +1,78 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "reactive_system_integration",
+      "recommendation": "Added a reactive watcher method for the `header_height` property in the DataTable widget to clear internal caches when the property changes",
+      "rationale": "The DataTable widget uses internal caches for layout calculations to optimize rendering performance. When `header_height` changes reactively, these caches become stale and cause visual glitches. By adding `watch_header_height()` that calls `_clear_caches()`, we ensure the table recalculates layout with the new header height, maintaining visual consistency.",
+      "alternatives_considered": [
+        "Manually invalidating layout in every place where header_height is modified",
+        "Adding a more granular cache invalidation method specific to header-related caches",
+        "Forcing a complete widget refresh instead of just clearing caches"
+      ],
+      "files_affected": [
+        "src/textual/widgets/_data_table.py"
+      ]
+    },
+    {
+      "dimension": "widget_lifecycle_management",
+      "recommendation": "Used the existing reactive watcher pattern already established for other DataTable properties like `fixed_columns` and `zebra_stripes`",
+      "rationale": "The DataTable already has reactive watchers for other properties that affect layout. Following the same pattern ensures consistency with the existing codebase and leverages the framework's reactive system properly. This approach integrates seamlessly with Textual's reactive attribute system where `@reactive` properties automatically trigger their corresponding `watch_*` methods.",
+      "alternatives_considered": [
+        "Creating a custom property setter with side effects",
+        "Using a separate event handler for header height changes",
+        "Overriding the reactive property's setter method directly"
+      ],
+      "files_affected": [
+        "src/textual/widgets/_data_table.py"
+      ]
+    },
+    {
+      "dimension": "error_prevention",
+      "recommendation": "Prevented crashes by ensuring cursor positioning remains valid when header height changes during user interaction",
+      "rationale": "When `header_height` increases while the cursor is on the bottom row, the available space for data rows decreases. Without cache invalidation, the table might try to render the cursor in a now-invalid position, causing index errors. Clearing caches forces a recalculation of row positions and cursor bounds, preventing out-of-bounds access.",
+      "alternatives_considered": [
+        "Adding explicit bounds checking in cursor positioning logic",
+        "Temporarily hiding the cursor during header height changes",
+        "Resetting cursor to a safe position when header height changes"
+      ],
+      "files_affected": [
+        "src/textual/widgets/_data_table.py"
+      ]
+    },
+    {
+      "dimension": "documentation_and_changelog",
+      "recommendation": "Updated CHANGELOG.md to document the fix for the visual glitches and crash related to `DataTable.header_height` changes",
+      "rationale": "Maintaining accurate change documentation helps users understand what issues have been resolved and provides context for the fix. The changelog entry references the specific PR (#6128) for traceability and follows the project's established documentation practices.",
+      "alternatives_considered": [
+        "Adding detailed comments in the code instead of changelog",
+        "Creating a separate documentation file for the fix",
+        "Only documenting in the PR description without changelog update"
+      ],
+      "files_affected": [
+        "CHANGELOG.md"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Fix DataTable header_height reactive updates",
+      "description": "Implement a fix to properly handle reactive updates to the DataTable's header_height property, preventing visual glitches and crashes when the property changes while the table is displayed",
+      "files_to_modify": [
+        "src/textual/widgets/_data_table.py",
+        "CHANGELOG.md"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The fix addresses a critical issue in the DataTable widget where reactive updates to the `header_height` property caused visual glitches and potential crashes. The implementation follows Textual's established reactive patterns by adding a `watch_header_height()` method that calls the existing `_clear_caches()` method when the header height changes.\n\nThis approach leverages the framework's reactive attribute system, where properties decorated with `@reactive` automatically trigger their corresponding `watch_*` methods. By clearing internal caches, the table is forced to recalculate layout with the new header height, ensuring proper visual alignment between the header and data rows. The fix also prevents crashes that occurred when increasing header height while the cursor was positioned on the bottom row, as cache invalidation triggers a recalculation of row positions and cursor bounds.\n\nThe solution is minimal and consistent with how other DataTable properties like `fixed_columns` and `zebra_stripes` handle reactive updates. By using the existing `_clear_caches()` method, we avoid duplicating cache management logic and ensure all dependent calculations are properly invalidated. The changelog update provides proper documentation of the fix for users and maintains the project's documentation standards.",
+  "source_pr": "https://github.com/Textualize/textual/pull/6128",
+  "before_sha": "606a1686f6221205163487e95cf542148dc9555b",
+  "after_sha": "6bfb7e8ee683a78644e6683a1358cb790f606c4b",
+  "diff_stats": {
+    "additions": 4,
+    "deletions": 0,
+    "files_changed": 2
+  }
+}

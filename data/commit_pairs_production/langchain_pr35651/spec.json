@@ -1,0 +1,13 @@
+{
+  "feature_name": "Custom PII Detector Output Normalization",
+  "description": "Implement normalization logic for custom PII detectors to ensure consistent output format across all redaction strategies. Currently, custom detectors may return dictionaries with 'text' keys instead of 'value' keys, causing hash and mask strategies to fail with KeyError. This fix will wrap custom detectors to normalize their output before passing to downstream processing.",
+  "functional_requirements": [
+    "Modify the detector resolution function to wrap custom callable detectors with a normalizing wrapper",
+    "Implement normalization that maps 'text' field to 'value' field when 'value' is missing in detector output",
+    "Ensure the normalization adds a 'type' field with appropriate PII type if missing from detector output",
+    "Maintain backward compatibility with existing built-in and regex detectors that already produce proper PIIMatch objects",
+    "Ensure all redaction strategies (hash, mask, redact, block) work consistently with both normalized and original detector outputs"
+  ],
+  "project_name": "langchain",
+  "source_pr": "https://github.com/langchain-ai/langchain/pull/35651"
+}

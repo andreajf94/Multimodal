@@ -1,0 +1,78 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "api_design",
+      "recommendation": "Extended the GCS JSON API client's read_object method to accept optional byte range parameters while maintaining backward compatibility for full object reads",
+      "rationale": "The SafeKeeper WAL backup operations require reading specific segments of stored objects rather than entire files. By adding optional range support to the existing download interface, we enable partial reads without breaking existing code that expects full object downloads. The implementation follows HTTP Range header standards (RFC 7233) which GCS supports.",
+      "alternatives_considered": [
+        "Creating a separate method for ranged reads would duplicate code and require callers to know which method to use",
+        "Implementing custom byte slicing after full downloads would be inefficient for large objects",
+        "Using GCS's object composition API would add complexity for simple range reads"
+      ],
+      "files_affected": [
+        "libs/remote_storage/src/gcs_bucket.rs"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Maintained existing error handling patterns while adding specific logging for range operations",
+      "rationale": "The existing error handling already covers HTTP status codes like 404 (NOT_FOUND) and generic errors. The range implementation doesn't introduce new error types because GCS uses standard HTTP 206 for partial content and 416 for invalid ranges, which are already handled by the HTTP client. Added info-level logging helps debug range requests without being too verbose.",
+      "alternatives_considered": [
+        "Creating custom error types for range-specific failures would add complexity without clear benefit",
+        "Adding more detailed error messages for range parsing could help debugging but might leak implementation details"
+      ],
+      "files_affected": [
+        "libs/remote_storage/src/gcs_bucket.rs"
+      ]
+    },
+    {
+      "dimension": "testing",
+      "recommendation": "Added integration test that verifies byte range functionality works with real GCS",
+      "rationale": "Since this feature interacts with external GCS APIs, a real integration test is necessary to ensure the HTTP Range header is properly formatted and interpreted by GCS. The test uploads a known string ('hello, world'), then reads bytes 7-11 ('world') to verify partial reads work correctly. This catches issues that unit tests might miss, like header formatting problems.",
+      "alternatives_considered": [
+        "Mock-based unit tests would be faster but wouldn't verify actual GCS API compatibility",
+        "Testing with a local GCS emulator would add dependency complexity",
+        "Skipping integration tests would risk production issues with real GCS"
+      ],
+      "files_affected": [
+        "libs/remote_storage/tests/test_real_gcs.rs"
+      ]
+    },
+    {
+      "dimension": "data_modeling",
+      "recommendation": "Leveraged existing DownloadOpts struct to pass range information through the call chain",
+      "rationale": "The DownloadOpts struct already existed with a byte_start field (Bound type), so we didn't need to modify the public API. The GCS implementation reads this field and converts it to the appropriate HTTP Range header format. This keeps the API clean and consistent across different storage backends.",
+      "alternatives_considered": [
+        "Adding a new parameter to the download method would break backward compatibility",
+        "Creating a separate ranged_download method would fragment the API",
+        "Using a builder pattern for download options would require larger refactoring"
+      ],
+      "files_affected": [
+        "libs/remote_storage/src/gcs_bucket.rs"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Implement GCS byte range support for partial object reads",
+      "description": "Add HTTP Range header support to GCS JSON API client to enable SafeKeeper WAL backup operations that need to read specific segments of stored objects",
+      "files_to_modify": [
+        "libs/remote_storage/src/gcs_bucket.rs",
+        "libs/remote_storage/tests/test_real_gcs.rs",
+        "libs/remote_storage/src/config.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation adds byte range support to the GCS JSON API client in Neon's remote storage module. The core change is in gcs_bucket.rs where the download method now reads an optional range from the DownloadOpts parameter and formats it as an HTTP Range header. When no range is specified, it defaults to 'bytes=0-' for full object reads, maintaining backward compatibility.\n\nThe implementation follows a minimal change approach: it doesn't modify the public API since DownloadOpts already had the necessary byte_start field. The HTTP client automatically handles the 206 Partial Content response from GCS, so no special handling was needed beyond proper header formatting. Added logging helps with debugging range requests without being overly verbose.\n\nA real integration test was added to verify the functionality works with actual GCS. The test uploads 'hello, world', then reads bytes 7-11 to get 'world', confirming the range header is correctly formatted and interpreted. This ensures compatibility with GCS's API specifications. The config.rs change appears to be a minor test data correction unrelated to the main feature, possibly fixing a test that was broken by a previous change.",
+  "source_pr": "https://github.com/neondatabase/neon/pull/12855",
+  "before_sha": "489c7a20f4ee23ae017d48ab18a9c24123d2b0ec",
+  "after_sha": "39e4f234633fa480cebcdf09993628779d73c094",
+  "diff_stats": {
+    "additions": 35,
+    "deletions": 3,
+    "files_changed": 3
+  }
+}

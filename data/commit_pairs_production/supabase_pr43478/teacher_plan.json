@@ -1,0 +1,158 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "component_architecture",
+      "recommendation": "Created a parallel component structure for functions alongside existing table controls, reusing the same UI patterns and interaction models",
+      "rationale": "The ExposedFunctionSelector component mirrors the ExposedTableSelector almost exactly, ensuring consistent user experience and reducing cognitive load. This approach allows users to apply the same mental model for both tables and functions, with only the data layer differing.",
+      "alternatives_considered": [
+        "Creating a single unified component for both tables and functions",
+        "Building a completely different UI pattern for functions"
+      ],
+      "files_affected": [
+        "apps/studio/components/interfaces/Settings/API/ExposedFunctionSelector.tsx",
+        "apps/studio/components/interfaces/Settings/API/ExposedTableSelector.tsx"
+      ]
+    },
+    {
+      "dimension": "data_fetching",
+      "recommendation": "Implemented separate query hooks for functions while maintaining the same infinite scroll pattern used for tables",
+      "rationale": "Functions have different data structures and filtering requirements than tables (grouping overloads, excluding triggers/aggregates). Creating separate query hooks allows for optimized SQL queries specific to functions while reusing the proven infinite scroll UX pattern.",
+      "alternatives_considered": [
+        "Extending the existing table queries to handle functions",
+        "Creating a generic query that handles both entities"
+      ],
+      "files_affected": [
+        "apps/studio/data/privileges/exposed-function-counts-query.ts",
+        "apps/studio/data/privileges/exposed-functions-infinite-query.ts"
+      ]
+    },
+    {
+      "dimension": "api_design",
+      "recommendation": "Created a unified mutation endpoint that handles both tables and functions in a single API call",
+      "rationale": "This ensures atomic updates - either all changes (tables and functions) succeed or none do. It also reduces network overhead and maintains backward compatibility by extending rather than replacing the existing mutation.",
+      "alternatives_considered": [
+        "Separate mutations for tables and functions",
+        "Keeping the existing table-only mutation and adding a separate function mutation"
+      ],
+      "files_affected": [
+        "apps/studio/data/privileges/update-exposed-entities-mutation.ts",
+        "apps/studio/data/privileges/update-exposed-tables-mutation.ts"
+      ]
+    },
+    {
+      "dimension": "state_management",
+      "recommendation": "Extended the existing form schema and state to include function selections alongside table selections",
+      "rationale": "By adding functionNamesToAdd and functionNamesToRemove to the same form schema, we maintain a single source of truth for all exposure changes. This simplifies validation, submission logic, and dirty state tracking.",
+      "alternatives_considered": [
+        "Creating separate forms for tables and functions",
+        "Using React state outside the form for function selections"
+      ],
+      "files_affected": [
+        "apps/studio/components/interfaces/Settings/API/PostgrestConfig.tsx"
+      ]
+    },
+    {
+      "dimension": "ui_consistency",
+      "recommendation": "Refactored ExposedTableSelector to remove unnecessary wrapper div and add schema exposure tooltip, making it visually consistent with the new function selector",
+      "rationale": "The wrapper div was unnecessary and removing it makes both components structurally identical. Adding the schema exposure tooltip to tables ensures users get the same helpful guidance for both entity types when schemas aren't exposed.",
+      "alternatives_considered": [
+        "Leaving the table component as-is",
+        "Creating a shared base component for both selectors"
+      ],
+      "files_affected": [
+        "apps/studio/components/interfaces/Settings/API/ExposedTableSelector.tsx"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Implemented proper empty states and loading indicators that match the table component's behavior",
+      "rationale": "Consistent empty states ('No functions available' vs '0 of 0') improve UX by clearly communicating when there are genuinely no functions vs when counts are loading. The shimmering loaders and error messages follow the same pattern as tables.",
+      "alternatives_considered": [
+        "Simpler loading states",
+        "Different empty state messaging for functions"
+      ],
+      "files_affected": [
+        "apps/studio/components/interfaces/Settings/API/ExposedFunctionSelector.tsx"
+      ]
+    },
+    {
+      "dimension": "permission_management",
+      "recommendation": "Maintained the same custom grants handling pattern for functions as used for tables, with appropriate tooltips explaining the implications",
+      "rationale": "Functions can have custom EXECUTE permissions just like tables can have custom SELECT/INSERT/etc permissions. Reusing the same 'custom', 'granted', 'neutral' states and tooltip logic ensures users understand the consequences of overriding custom permissions.",
+      "alternatives_considered": [
+        "Simplifying permission handling for functions",
+        "Creating different permission states for functions"
+      ],
+      "files_affected": [
+        "apps/studio/components/interfaces/Settings/API/ExposedFunctionSelector.tsx"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Create function selector UI component",
+      "description": "Build a dropdown selector component for database functions that mirrors the existing table selector, with infinite scroll, search, and proper handling of function overloads and schema exposure states",
+      "files_to_modify": [],
+      "files_to_create": [
+        "apps/studio/components/interfaces/Settings/API/ExposedFunctionSelector.tsx"
+      ],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-002",
+      "title": "Implement data layer for function queries",
+      "description": "Create React Query hooks for fetching function counts and paginated function lists, with proper SQL filtering for normal/window functions and grouping of overloads",
+      "files_to_modify": [
+        "apps/studio/data/privileges/keys.ts"
+      ],
+      "files_to_create": [
+        "apps/studio/data/privileges/exposed-function-counts-query.ts",
+        "apps/studio/data/privileges/exposed-functions-infinite-query.ts"
+      ],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-003",
+      "title": "Update mutation to handle both tables and functions",
+      "description": "Extend the existing table exposure mutation to support functions, creating a unified endpoint that atomically updates permissions for both entity types",
+      "files_to_modify": [
+        "apps/studio/data/privileges/privileges.sql.ts",
+        "apps/studio/data/privileges/update-exposed-tables-mutation.ts"
+      ],
+      "files_to_create": [
+        "apps/studio/data/privileges/update-exposed-entities-mutation.ts"
+      ],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-004",
+      "title": "Integrate function controls into settings page",
+      "description": "Add the function selector to the PostgREST config form, update form schema to include function selections, and ensure proper state management and validation",
+      "files_to_modify": [
+        "apps/studio/components/interfaces/Settings/API/PostgrestConfig.tsx"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-005",
+      "title": "Refactor table component for consistency",
+      "description": "Clean up the table selector component to match the new function selector structure and add missing schema exposure tooltip",
+      "files_to_modify": [
+        "apps/studio/components/interfaces/Settings/API/ExposedTableSelector.tsx"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation adds function exposure management to Supabase Studio's Data API settings by creating a parallel architecture to the existing table controls. The approach centers on consistency and reuse: a new ExposedFunctionSelector component mirrors the ExposedTableSelector almost exactly, providing users with familiar interaction patterns for managing EXECUTE permissions on database functions.\n\nKey technical decisions include maintaining separate data fetching layers for functions (with custom SQL queries that group overloads and filter out triggers/aggregates) while unifying the mutation endpoint to handle both tables and functions atomically. The form schema was extended to include function selections alongside table selections, ensuring all changes are tracked in a single state object. The table component was also refactored to remove unnecessary structure and add missing tooltips, bringing both components to visual parity.\n\nThe solution integrates seamlessly with the existing codebase by extending rather than replacing functionality. Query invalidation was updated to refresh both table and function data after mutations, and the UI properly handles edge cases like unexposed schemas, custom grants, and empty states. This approach minimizes risk while delivering a cohesive user experience for managing PostgREST API exposure across different database entity types.",
+  "source_pr": "https://github.com/supabase/supabase/pull/43478",
+  "before_sha": "87581e02cb85c67bba9f90650efa3e51d00100ee",
+  "after_sha": "3eb00222641c2e7ab404a044c7ad140879117669",
+  "diff_stats": {
+    "additions": 925,
+    "deletions": 296,
+    "files_changed": 9
+  }
+}

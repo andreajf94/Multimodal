@@ -1,0 +1,74 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "error_handling",
+      "recommendation": "Separated import error handling into two distinct phases: package import errors vs. runtime import errors during client initialization",
+      "rationale": "The original implementation caught all ImportErrors in a single try-except block, masking legitimate runtime dependency issues (like missing socksio for SOCKS proxy support) with misleading ConfigurationError messages about missing google-genai package. By separating the import of google.genai into its own try-except block, we can distinguish between 'package not installed' errors (which should show installation instructions) and 'runtime dependency missing' errors (which should propagate with their original error messages).",
+      "alternatives_considered": [
+        "Catching ImportError only for the specific import statements and letting all other ImportErrors propagate",
+        "Adding a more sophisticated error type checking to differentiate between package-level and module-level import errors",
+        "Creating a custom exception hierarchy for different types of import failures"
+      ],
+      "files_affected": [
+        "instructor/auto_client.py"
+      ]
+    },
+    {
+      "dimension": "testing",
+      "recommendation": "Added comprehensive regression tests for each Google provider variant to ensure runtime import errors propagate correctly",
+      "rationale": "The issue was subtle and could easily regress. By adding tests that simulate the exact failure scenario (socksio ImportError during genai.Client() initialization), we ensure that future changes don't reintroduce the bug. Each test mocks the google.genai module to simulate the runtime ImportError and verifies that the original error message propagates rather than being converted to a ConfigurationError.",
+      "alternatives_considered": [
+        "Adding a single test case covering all Google providers",
+        "Relying on existing integration tests to catch the issue",
+        "Adding the test only for the main 'google' provider and assuming the pattern applies to others"
+      ],
+      "files_affected": [
+        "tests/test_auto_client.py"
+      ]
+    },
+    {
+      "dimension": "api_design",
+      "recommendation": "Maintained backward compatibility for legitimate missing package errors while improving error propagation for runtime issues",
+      "rationale": "Users who haven't installed google-genai should still receive the helpful ConfigurationError with installation instructions. The change only affects the error handling flow - when google-genai is importable but fails during client initialization due to missing runtime dependencies (like socksio), those errors now propagate with their original messages. This preserves the user experience for the common case while fixing the edge case.",
+      "alternatives_considered": [
+        "Changing all ImportError handling to propagate original errors (would break backward compatibility)",
+        "Creating a new exception type for runtime import errors (would require users to catch new exception type)",
+        "Adding a configuration flag to control error propagation behavior (adds complexity)"
+      ],
+      "files_affected": [
+        "instructor/auto_client.py"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Fix Import Error Handling for Google Providers",
+      "description": "Update the google, vertexai, and generative-ai provider initialization in auto_client.py to properly distinguish between package import errors and runtime import errors. Package import errors should raise ConfigurationError with installation instructions, while runtime import errors (like missing socksio for SOCKS proxy support) should propagate with their original error messages.",
+      "files_to_modify": [
+        "instructor/auto_client.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-002",
+      "title": "Add Regression Tests for Runtime Import Error Propagation",
+      "description": "Create comprehensive tests for each Google provider variant (google, vertexai, generative-ai) that verify runtime ImportErrors during client initialization propagate correctly. Tests should mock the google.genai module to simulate socksio ImportError and ensure the original error message is preserved.",
+      "files_to_modify": [
+        "tests/test_auto_client.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    }
+  ],
+  "implementation_summary": "The changes address a subtle but important error handling issue in the Instructor library's auto client. Previously, all ImportErrors during Google provider initialization were caught and converted to a ConfigurationError about missing google-genai package. This masked legitimate runtime dependency issues, such as when using SOCKS proxies without the required socksio package.\n\nThe fix restructures the error handling by separating the import of google.genai into its own try-except block. If this import fails, it's a legitimate package installation issue, and we raise ConfigurationError with installation instructions. Once the package is successfully imported, any ImportErrors during client initialization (like missing socksio) are allowed to propagate with their original error messages. This pattern is applied consistently across all three Google provider variants: 'google', 'vertexai', and 'generative-ai'.\n\nTo prevent regression, comprehensive tests were added that mock the google.genai module and simulate the runtime ImportError scenario. Each test verifies that the original error message (mentioning 'socksio') propagates rather than being converted to a misleading ConfigurationError. The implementation maintains backward compatibility for the common case of missing packages while fixing the edge case of missing runtime dependencies.",
+  "source_pr": "https://github.com/567-labs/instructor/pull/1975",
+  "before_sha": "130c034c4b7ec9fe6b7d06ad836fa1318f78fd43",
+  "after_sha": "069699b9da5e929c3cf0d413be80468f6f6df781",
+  "diff_stats": {
+    "additions": 157,
+    "deletions": 21,
+    "files_changed": 2
+  }
+}

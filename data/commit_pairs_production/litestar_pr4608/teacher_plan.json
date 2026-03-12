@@ -1,0 +1,66 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "frontend_ui_design",
+      "recommendation": "Converted button container to use flexbox layout with wrapping behavior for mobile responsiveness",
+      "rationale": "Flexbox provides better control over layout on different screen sizes. The 'flex-wrap: wrap' property allows buttons to flow naturally on smaller screens without horizontal scrolling. Using 'gap' property ensures consistent spacing that adapts to the layout.",
+      "alternatives_considered": [
+        "CSS Grid layout",
+        "Media queries with fixed breakpoints",
+        "Bootstrap-like framework"
+      ],
+      "files_affected": [
+        "docs/_static/style.css",
+        "docs/index.rst"
+      ]
+    },
+    {
+      "dimension": "documentation_rendering",
+      "recommendation": "Changed from reStructuredText link syntax to raw HTML anchor tags with custom CSS class",
+      "rationale": "The reStructuredText ':doc:' and backtick link syntax doesn't allow adding custom CSS classes. Raw HTML gives full control over the markup needed for the responsive design. The 'btn-no-wrap' class prevents text wrapping within individual buttons.",
+      "alternatives_considered": [
+        "Custom Sphinx directive",
+        "JavaScript-based solution",
+        "Keeping reStructuredText syntax with limited styling"
+      ],
+      "files_affected": [
+        "docs/index.rst"
+      ]
+    },
+    {
+      "dimension": "css_architecture",
+      "recommendation": "Added specific CSS rules targeting '.buttons.wrap' selector with minimal, focused properties",
+      "rationale": "Using the combined selector '.buttons.wrap' ensures the styles only apply to button containers explicitly marked for wrapping. This prevents unintended side effects on other button containers. The 'flex: 0 0 auto' on '.btn-no-wrap' prevents buttons from shrinking/growing while maintaining their natural size.",
+      "alternatives_considered": [
+        "Generic button styles affecting all buttons",
+        "Inline styles",
+        "Complex CSS with multiple media queries"
+      ],
+      "files_affected": [
+        "docs/_static/style.css"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Implement responsive button layout for documentation homepage",
+      "description": "Update the main documentation homepage button container to be mobile-responsive using flexbox layout with wrapping behavior",
+      "files_to_modify": [
+        "docs/_static/style.css",
+        "docs/index.rst"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation addresses mobile responsiveness for documentation button containers through a two-file modification approach. In `docs/_static/style.css`, new CSS rules were added to create a flexible container system using flexbox with wrapping behavior and consistent spacing via the gap property. The `.buttons.wrap` selector targets containers specifically marked for responsive behavior, while `.btn-no-wrap` ensures individual buttons maintain their text integrity without unwanted line breaks.\n\nIn `docs/index.rst`, the button container was modified from using reStructuredText's native link syntax to raw HTML anchor tags. This change was necessary because reStructuredText doesn't support adding custom CSS classes to links, which was required for the responsive design. The container class was updated from 'buttons' to 'buttons wrap' to activate the new CSS rules.\n\nThe solution is minimal and focused, avoiding over-engineering while solving the specific mobile responsiveness requirement. It maintains backward compatibility by only affecting containers explicitly marked with the 'wrap' class, and it uses modern CSS features (flexbox and gap) that are well-supported across browsers. The approach balances maintainability with the need for precise control over the responsive behavior.",
+  "source_pr": "https://github.com/litestar-org/litestar/pull/4608",
+  "before_sha": "3dc350721e3db14c0f9a3849227e77fb44b42aa0",
+  "after_sha": "f6600e39395161071aa69699aedd87f068659dec",
+  "diff_stats": {
+    "additions": 18,
+    "deletions": 5,
+    "files_changed": 2
+  }
+}

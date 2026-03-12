@@ -1,0 +1,120 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "api_design",
+      "recommendation": "Replaced boolean 'skip' parameter with enum 'CellDiffOption' to support multiple diffing strategies",
+      "rationale": "The boolean 'skip' was insufficient for handling escape sequences with visual widths different from their character lengths. An enum provides extensibility for future diffing strategies while maintaining backward compatibility through a deprecated 'set_skip' method.",
+      "alternatives_considered": [
+        "Adding separate boolean flags for different behaviors",
+        "Creating a struct with multiple boolean fields",
+        "Keeping boolean 'skip' and adding separate width override"
+      ],
+      "files_affected": [
+        "ratatui-core/src/buffer/cell.rs"
+      ]
+    },
+    {
+      "dimension": "data_modeling",
+      "recommendation": "Added 'CellDiffOption' enum with three variants: None, Skip, and ForcedWidth(NonZeroUsize)",
+      "rationale": "NonZeroUsize ensures forced width is always at least 1, preventing zero-width cells which would cause logical errors. The enum approach cleanly models mutually exclusive diffing behaviors while being memory-efficient.",
+      "alternatives_considered": [
+        "Using Option<usize> for forced width",
+        "Separate skip boolean and width Option<usize> fields",
+        "Using trait objects for diffing strategies"
+      ],
+      "files_affected": [
+        "ratatui-core/src/buffer/cell.rs"
+      ]
+    },
+    {
+      "dimension": "algorithm_design",
+      "recommendation": "Rewrote buffer diffing algorithm to handle 'CellDiffOption' variants with different skipping logic",
+      "rationale": "The previous algorithm used a single 'skip' boolean and separate 'invalidated' tracking. The new approach centralizes all width/skip logic in 'CellDiffOption', making the algorithm more maintainable and correctly handling forced widths for escape sequences.",
+      "alternatives_considered": [
+        "Keeping separate 'skip' and width calculations",
+        "Adding special cases for escape sequences in existing algorithm",
+        "Creating separate diffing algorithms for different cell types"
+      ],
+      "files_affected": [
+        "ratatui-core/src/buffer/buffer.rs"
+      ]
+    },
+    {
+      "dimension": "backward_compatibility",
+      "recommendation": "Deprecated 'set_skip' method but kept it functional by mapping to 'CellDiffOption::Skip'",
+      "rationale": "Existing code using 'set_skip' continues to work without modification, giving users time to migrate. The deprecation notice guides users to the new API while preventing breaking changes.",
+      "alternatives_considered": [
+        "Removing 'set_skip' entirely",
+        "Keeping 'set_skip' without deprecation",
+        "Adding compiler feature flags for compatibility"
+      ],
+      "files_affected": [
+        "ratatui-core/src/buffer/cell.rs"
+      ]
+    },
+    {
+      "dimension": "testing",
+      "recommendation": "Added comprehensive tests for forced width diffing with hyperlinks and kitty image sequences",
+      "rationale": "The tests verify idempotency (no repeated diffs) and correct handling of the three use cases mentioned in requirements: squeezed hyperlinks, split hyperlinks, and kitty image sequences with UTF-8 placeholders.",
+      "alternatives_considered": [
+        "Only testing basic functionality",
+        "Relying on existing diff tests",
+        "Creating integration tests instead of unit tests"
+      ],
+      "files_affected": [
+        "ratatui-core/src/buffer/buffer.rs"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Replace boolean skip with CellDiffOption enum",
+      "description": "Define new enum to support multiple diffing strategies including forced width calculations for escape sequences",
+      "files_to_modify": [
+        "ratatui-core/src/buffer/cell.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-002",
+      "title": "Update buffer diffing algorithm",
+      "description": "Rewrite diff/merge logic to handle CellDiffOption variants with proper width skipping and idempotency guarantees",
+      "files_to_modify": [
+        "ratatui-core/src/buffer/buffer.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-003",
+      "title": "Update public API exports",
+      "description": "Export CellDiffOption from buffer module for public use",
+      "files_to_modify": [
+        "ratatui-core/src/buffer.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-004",
+      "title": "Add comprehensive tests",
+      "description": "Test idempotency, forced width diffing, hyperlink handling, and kitty image sequence scenarios",
+      "files_to_modify": [
+        "ratatui-core/src/buffer/buffer.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    }
+  ],
+  "implementation_summary": "The implementation extends ratatui's cell diffing mechanism to properly handle escape sequences with visual widths that differ from their character lengths. The core change replaces the boolean 'skip' field with a 'CellDiffOption' enum that supports three behaviors: None (default diffing), Skip (skip cell entirely), and ForcedWidth (specify exact visual width).\n\nThe buffer diffing algorithm in buffer.rs was rewritten to handle these options. When encountering ForcedWidth, the algorithm skips the specified number of trailing cells, ensuring escape sequences like hyperlinks or kitty image protocols don't cause incorrect multi-width calculations. The algorithm maintains idempotency - after merging a buffer, diffing against it produces no changes.\n\nBackward compatibility is preserved through a deprecated 'set_skip' method that maps to CellDiffOption::Skip. The implementation includes extensive tests covering the three primary use cases: hyperlinks squeezed into single cells, hyperlinks split across multiple cells, and kitty image sequences with UTF-8 placeholders. These changes integrate seamlessly with the existing widget-based architecture, allowing widgets to specify exact visual widths for cells containing terminal escape sequences.",
+  "source_pr": "https://github.com/ratatui/ratatui/pull/1605",
+  "before_sha": "2c8d28da9dc661ed5ab1266ddd773a2b10081aca",
+  "after_sha": "39c32c6fa981c4b326bf2533100ac86b7be05eba",
+  "diff_stats": {
+    "additions": 226,
+    "deletions": 63,
+    "files_changed": 3
+  }
+}

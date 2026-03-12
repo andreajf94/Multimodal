@@ -1,0 +1,137 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "api_design",
+      "recommendation": "Added automatic detection of image content to dynamically switch between text and image safety categories in the Google GenAI integration",
+      "rationale": "Google's GenAI SDK requires different harm categories for image content (HARM_CATEGORY_IMAGE_*) vs text content. The previous implementation always used text categories, causing 400 INVALID_ARGUMENT errors when images were present. This approach maintains backward compatibility while automatically handling the SDK's requirements.",
+      "alternatives_considered": [
+        "Requiring users to manually specify image categories",
+        "Creating separate API methods for image vs text requests",
+        "Always using image categories regardless of content type"
+      ],
+      "files_affected": [
+        "instructor/providers/gemini/utils.py"
+      ]
+    },
+    {
+      "dimension": "data_modeling",
+      "recommendation": "Implemented content detection logic that inspects both GenAI SDK types and OpenAI-style message formats",
+      "rationale": "The system needs to detect images in multiple formats: 1) Native GenAI Content objects with inline_data/file_data, 2) Instructor's Image class, 3) OpenAI-style message dictionaries with image/image_url types. This comprehensive detection ensures the safety settings work regardless of how users construct their requests.",
+      "alternatives_considered": [
+        "Only supporting one format",
+        "Requiring users to explicitly flag image content",
+        "Using type annotations or markers instead of runtime inspection"
+      ],
+      "files_affected": [
+        "instructor/providers/gemini/utils.py"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Added graceful handling of SDK version differences and edge cases in safety settings processing",
+      "rationale": "Different versions of the google-genai SDK may or may not have image categories. The implementation checks for their existence before using them and falls back to text categories when needed. It also preserves compatibility with users who pass safety_settings as a list (advanced SDK usage).",
+      "alternatives_considered": [
+        "Requiring a minimum SDK version",
+        "Failing hard when image categories are missing",
+        "Ignoring SDK version differences"
+      ],
+      "files_affected": [
+        "instructor/providers/gemini/utils.py",
+        "tests/genai/test_safety_settings.py",
+        "tests/llm/test_genai/test_utils.py"
+      ]
+    },
+    {
+      "dimension": "testing",
+      "recommendation": "Created comprehensive tests covering image detection, category mapping, and autodetect_images integration",
+      "rationale": "Safety settings are critical functionality that can break user applications. The tests verify: 1) Image content triggers image categories, 2) Text thresholds map to equivalent image categories, 3) The autodetect_images feature works correctly with safety settings. Tests handle SDK version differences gracefully.",
+      "alternatives_considered": [
+        "Only unit testing the detection logic",
+        "Skipping tests for older SDK versions",
+        "Testing only happy paths"
+      ],
+      "files_affected": [
+        "tests/genai/test_safety_settings.py",
+        "tests/llm/test_genai/test_utils.py"
+      ]
+    },
+    {
+      "dimension": "documentation",
+      "recommendation": "Updated documentation with clear examples showing the automatic mapping behavior",
+      "rationale": "Users need to understand that they can continue using text safety categories even with image content, and the system will handle the mapping automatically. The documentation shows a complete working example with the Image.autodetect helper.",
+      "alternatives_considered": [
+        "Only documenting the technical change",
+        "Creating separate documentation for image vs text safety",
+        "Relying on code comments alone"
+      ],
+      "files_affected": [
+        "docs/integrations/google.md",
+        "CHANGELOG.md"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Implement image content detection for safety settings",
+      "description": "Add logic to detect when requests contain image content and switch to appropriate image-specific harm categories",
+      "files_to_modify": [
+        "instructor/providers/gemini/utils.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-002",
+      "title": "Add safety settings mapping between text and image categories",
+      "description": "Implement threshold mapping so users can specify text categories that get automatically applied to equivalent image categories",
+      "files_to_modify": [
+        "instructor/providers/gemini/utils.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-003",
+      "title": "Update message processing order for accurate detection",
+      "description": "Reorder operations in handle_genai_tools to convert messages and extract multimodal content before building config, ensuring safety settings use correct categories",
+      "files_to_modify": [
+        "instructor/providers/gemini/utils.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-004",
+      "title": "Create comprehensive safety settings tests",
+      "description": "Add tests for image detection, category mapping, and integration with autodetect_images feature",
+      "files_to_modify": [
+        "tests/llm/test_genai/test_utils.py"
+      ],
+      "files_to_create": [
+        "tests/genai/test_safety_settings.py"
+      ],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-005",
+      "title": "Update documentation and changelog",
+      "description": "Add documentation explaining the automatic mapping behavior and update changelog with the fix",
+      "files_to_modify": [
+        "docs/integrations/google.md",
+        "CHANGELOG.md"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation addresses a critical bug where Google GenAI's safety settings would cause 400 INVALID_ARGUMENT errors when processing image content. The core issue was that Google's SDK requires different harm categories for images (HARM_CATEGORY_IMAGE_*) versus text. The solution introduces automatic detection of image content through a helper function `_genai_kwargs_has_image_content()` that inspects both GenAI SDK types and OpenAI-style message formats.\n\nKey design decisions include: 1) Maintaining backward compatibility by allowing users to continue using text categories, with automatic mapping to equivalent image categories when needed; 2) Reordering operations in `handle_genai_tools()` to ensure message conversion and multimodal extraction happen before safety settings are processed; 3) Gracefully handling SDK version differences by checking for the existence of image categories before using them.\n\nThe changes integrate seamlessly with the existing codebase by extending the `update_genai_kwargs()` function rather than creating a separate code path. The implementation preserves the existing API surface while fixing the underlying issue. Comprehensive tests verify the behavior across different scenarios, including edge cases with older SDK versions that might not have image categories. Documentation updates ensure users understand the automatic mapping behavior without needing to change their existing code.",
+  "source_pr": "https://github.com/567-labs/instructor/pull/2007",
+  "before_sha": "b31ffee152ad5dfefd61847f5da7a9ec7170aef2",
+  "after_sha": "3b692a7d66aefcdbc769150cc7413feb0a0403db",
+  "diff_stats": {
+    "additions": 352,
+    "deletions": 17,
+    "files_changed": 5
+  }
+}

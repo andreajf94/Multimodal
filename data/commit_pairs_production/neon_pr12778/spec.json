@@ -1,0 +1,13 @@
+{
+  "feature_name": "safekeeper_advancement_logic_fix",
+  "description": "Fix two bugs in safekeeper advancement logic that could cause data loss during migration or restore operations. First, ensure membership switching uses the correct term value when determining sync positions. Second, implement proper safekeeper advancement comparison to prevent pulling from less advanced nodes.",
+  "functional_requirements": [
+    "Modify membership switching logic to use last_log_term instead of current term when calculating sync positions",
+    "Implement advancement comparison using (last_log_term, flush_lsn) tuple as primary key for choosing the most advanced safekeeper",
+    "Add safeguards to prevent pulling from safekeepers with higher term but lower advancement than the most advanced node",
+    "Update quorum size calculations to properly account for sync position determination",
+    "Add retry logic for safekeeper synchronization operations in compute control components"
+  ],
+  "project_name": "neon",
+  "source_pr": "https://github.com/neondatabase/neon/pull/12778"
+}

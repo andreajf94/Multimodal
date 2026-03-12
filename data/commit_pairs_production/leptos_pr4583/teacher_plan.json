@@ -1,0 +1,80 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "api_design",
+      "recommendation": "Removed the 'no_std' feature flag and made the crate fully no_std compatible by default",
+      "rationale": "The crate now unconditionally uses `#![no_std]` instead of conditionally with `cfg_attr(feature = \"no_std\", no_std)`. This simplifies the API surface and eliminates the need for users to opt into no_std support via a feature flag. Since the MSRV is now 1.88 and core::error::Error is available, we can guarantee no_std compatibility for all users.",
+      "alternatives_considered": [
+        "Keeping the feature flag but updating it to use core::error::Error",
+        "Adding a new feature flag for std compatibility instead of no_std",
+        "Maintaining both std and no_std paths with conditional compilation"
+      ],
+      "files_affected": [
+        "either_of/src/lib.rs"
+      ]
+    },
+    {
+      "dimension": "dependency_management",
+      "recommendation": "Removed the conditional dependency on std::error::Error and replaced it with core::error::Error",
+      "rationale": "With Rust 1.88 as the minimum supported version, the Error trait is now available in core, allowing us to eliminate the std dependency entirely. This reduces the crate's footprint and makes it truly no_std compatible without any feature flags or conditional compilation.",
+      "alternatives_considered": [
+        "Keeping both std and core imports with version detection",
+        "Using a polyfill crate for older Rust versions",
+        "Maintaining the conditional import but updating the MSRV check"
+      ],
+      "files_affected": [
+        "either_of/src/lib.rs"
+      ]
+    },
+    {
+      "dimension": "versioning",
+      "recommendation": "Bumped the crate version from 0.1.6 to 0.1.7 to reflect the breaking change in API",
+      "rationale": "Removing the 'no_std' feature flag is a breaking change for users who were explicitly enabling it. While the functionality improves, the change in how no_std is configured requires a version bump according to semantic versioning rules.",
+      "alternatives_considered": [
+        "Keeping the same version with a major version bump warning",
+        "Adding the change as a non-breaking feature addition",
+        "Creating a new minor version instead of patch"
+      ],
+      "files_affected": [
+        "Cargo.lock",
+        "either_of/Cargo.toml"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Made the Error trait implementation unconditional by removing the #[cfg(not(feature = \"no_std\"))] attribute",
+      "rationale": "Since core::error::Error is now always available in Rust 1.88+, the Error trait implementation can be provided unconditionally. This simplifies the code and ensures that EitherOf types always implement Error when their component types do, regardless of any feature flags.",
+      "alternatives_considered": [
+        "Keeping the conditional compilation but updating the condition",
+        "Adding a different condition based on Rust version",
+        "Making Error implementation optional via a separate feature"
+      ],
+      "files_affected": [
+        "either_of/src/lib.rs"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Remove std dependency and make either_of fully no_std compatible",
+      "description": "Updated the either_of crate to use core::error::Error instead of std::error::Error, removed the no_std feature flag, and made the crate unconditionally no_std compatible. This aligns with the MSRV of 1.88 where core::error::Error is available.",
+      "files_to_modify": [
+        "either_of/src/lib.rs",
+        "either_of/Cargo.toml",
+        "Cargo.lock"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The changes implement a straightforward but important improvement to the either_of crate's compatibility with no_std environments. The key decision was to leverage Rust 1.88's availability of core::error::Error to eliminate the std dependency entirely, rather than maintaining dual code paths or feature flags.\n\nThe implementation follows a clean, minimal approach: changing the conditional `#![cfg_attr(feature = \"no_std\", no_std)]` to unconditional `#![no_std]`, replacing the conditional import of std::error::Error with an unconditional import of core::error::Error, and removing the conditional attribute from the Error trait implementation. This simplification reduces cognitive overhead for users and eliminates the need to understand and enable feature flags for no_std support.\n\nThe version bump from 0.1.6 to 0.1.7 reflects that removing the 'no_std' feature flag is technically a breaking change for users who were explicitly enabling it, even though the end result is improved functionality. The changes integrate seamlessly with the existing codebase, as they maintain all existing functionality while expanding compatibility to pure no_std environments without any runtime cost or complexity.",
+  "source_pr": "https://github.com/leptos-rs/leptos/pull/4583",
+  "before_sha": "35af19cbcd9aca194418ff1041ac80ae1cca7b6e",
+  "after_sha": "4eb4f27f942914712a746265839729d293269e88",
+  "diff_stats": {
+    "additions": 4,
+    "deletions": 6,
+    "files_changed": 3
+  }
+}

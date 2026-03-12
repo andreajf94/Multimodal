@@ -1,0 +1,78 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "data_modeling",
+      "recommendation": "Extended the node update persistence method to include gRPC address and port fields alongside existing HTTPS port field",
+      "rationale": "The existing `update_node_on_registration` method only persisted HTTPS port changes. To meet the requirement of persisting gRPC addresses across restarts, we needed to add gRPC address and port parameters to the method signature and update the database query accordingly. This maintains consistency with the existing pattern of storing node connection information.",
+      "alternatives_considered": [
+        "Creating a separate method specifically for gRPC address updates",
+        "Modifying the database schema to combine address/port fields differently",
+        "Storing gRPC information in a separate table"
+      ],
+      "files_affected": [
+        "storage_controller/src/persistence.rs"
+      ]
+    },
+    {
+      "dimension": "api_design",
+      "recommendation": "Updated the service layer to pass gRPC address and port parameters through to the persistence layer",
+      "rationale": "The service layer's `register_pageserver` method receives gRPC address information from the registration request but wasn't passing it to the persistence layer. We modified the call to `update_node_on_registration` to include `register_req.listen_grpc_addr` and `register_req.listen_grpc_port`. This ensures the complete connection information is persisted.",
+      "alternatives_considered": [
+        "Creating a separate persistence method call for gRPC updates",
+        "Modifying the registration flow to handle gRPC updates separately from HTTPS updates",
+        "Adding a new API endpoint specifically for gRPC address updates"
+      ],
+      "files_affected": [
+        "storage_controller/src/service.rs"
+      ]
+    },
+    {
+      "dimension": "backward_compatibility",
+      "recommendation": "Used `.clone()` on the gRPC address string to avoid ownership issues while maintaining existing behavior",
+      "rationale": "The original code passed `register_req.listen_grpc_addr` by reference, but when we need to use it in multiple places (for node creation and persistence update), we need to clone it. This avoids borrowing conflicts while maintaining the existing ownership patterns in the codebase.",
+      "alternatives_considered": [
+        "Changing the method signatures to accept references instead of owned values",
+        "Restructuring the code to avoid the clone operation",
+        "Using Arc/Rc for shared ownership"
+      ],
+      "files_affected": [
+        "storage_controller/src/service.rs"
+      ]
+    },
+    {
+      "dimension": "database_interaction",
+      "recommendation": "Updated the Diesel query to set multiple columns simultaneously using a tuple syntax",
+      "rationale": "Diesel's update queries can set multiple columns using tuple syntax. We changed from `listen_https_port.eq(...)` to a tuple containing all three fields: HTTPS port, gRPC address, and gRPC port. This ensures atomic updates to all connection-related fields in a single database operation.",
+      "alternatives_considered": [
+        "Making separate update calls for each field",
+        "Creating a struct to bundle the update fields",
+        "Using a different ORM pattern for multi-field updates"
+      ],
+      "files_affected": [
+        "storage_controller/src/persistence.rs"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Persist gRPC address during pageserver reattachment",
+      "description": "Modify the persistence layer to store gRPC address and port information when a pageserver reattaches, ensuring this information survives service restarts",
+      "files_to_modify": [
+        "storage_controller/src/persistence.rs",
+        "storage_controller/src/service.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation addresses the core issue of gRPC address persistence during pageserver reattachment by making minimal, targeted changes to two key files. In the persistence layer (`persistence.rs`), we extended the `update_node_on_registration` method signature to accept gRPC address and port parameters alongside the existing HTTPS port parameter. The Diesel database query was updated to set all three fields (HTTPS port, gRPC address, and gRPC port) using tuple syntax, ensuring atomic updates.\n\nIn the service layer (`service.rs`), we modified the `register_pageserver` method to pass the gRPC address and port information through to the persistence layer. Notably, we used `.clone()` on the gRPC address string to avoid ownership issues while maintaining the existing code structure. This approach ensures backward compatibility with the existing database schema and reattach workflows while adding the required persistence functionality.\n\nThe changes follow the existing patterns in the codebase, using consistent naming conventions and maintaining the separation of concerns between service logic and persistence operations. By updating both layers in tandem, we ensure that gRPC address information flows from the registration request through the service layer to the database, where it can be retrieved after service restarts or disruptions.",
+  "source_pr": "https://github.com/neondatabase/neon/pull/12784",
+  "before_sha": "f3a0e4f255631b3c2039265abc465282d9057c4e",
+  "after_sha": "eb2741758bbf97616746b16831a72c4531791ee9",
+  "diff_stats": {
+    "additions": 10,
+    "deletions": 2,
+    "files_changed": 2
+  }
+}

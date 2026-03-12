@@ -1,0 +1,94 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "database_query_optimization",
+      "recommendation": "Changed 'contains' operator behavior for hasMany select fields from pattern matching to exact value matching",
+      "rationale": "PostgreSQL doesn't support ILIKE on enum type columns, which is how hasMany select fields are stored. The previous implementation incorrectly used substring matching on enum arrays, causing query failures. For select fields, 'contains' should mean 'array includes this exact value' rather than 'array contains substring'.",
+      "alternatives_considered": [
+        "Using PostgreSQL array functions like @> (contains) operator",
+        "Converting enum arrays to text arrays for pattern matching",
+        "Adding database-specific handling only for PostgreSQL"
+      ],
+      "files_affected": [
+        "packages/db-mongodb/src/queries/sanitizeQueryValue.ts",
+        "packages/drizzle/src/queries/sanitizeQueryValue.ts"
+      ]
+    },
+    {
+      "dimension": "database_abstraction_layer",
+      "recommendation": "Implemented consistent behavior across MongoDB and PostgreSQL adapters for hasMany select fields",
+      "rationale": "Both database adapters needed to handle hasMany select fields similarly to maintain consistent API behavior. MongoDB was using $elemMatch with regex for pattern matching, which doesn't make sense for select fields where values are discrete options. PostgreSQL was incorrectly using LIKE on enum columns.",
+      "alternatives_considered": [
+        "Database-specific implementations with different semantics",
+        "Adding a new operator like 'includes' instead of modifying 'contains'",
+        "Deprecating 'contains' for select fields entirely"
+      ],
+      "files_affected": [
+        "packages/db-mongodb/src/queries/sanitizeQueryValue.ts",
+        "packages/drizzle/src/queries/sanitizeQueryValue.ts"
+      ]
+    },
+    {
+      "dimension": "testing_strategy",
+      "recommendation": "Added comprehensive tests for the 'contains' operator with hasMany select fields, including edge cases for partial matching",
+      "rationale": "The tests verify that the fix works correctly and prevent regression. The 'bananabread' test specifically ensures that partial matching doesn't occur (searching for 'banana' shouldn't match 'bananabread'), which was the core issue with the previous implementation.",
+      "alternatives_considered": [
+        "Only testing basic functionality without edge cases",
+        "Testing only one database adapter",
+        "Adding the tests in a separate file"
+      ],
+      "files_affected": [
+        "test/database/getConfig.ts",
+        "test/database/int.spec.ts",
+        "test/database/payload-types.ts"
+      ]
+    },
+    {
+      "dimension": "type_safety",
+      "recommendation": "Updated TypeScript type definitions to include the new 'select-has-many' collection",
+      "rationale": "The payload-types.ts file is auto-generated based on the configuration. Adding the new collection ensures TypeScript can properly type-check queries against the select-has-many collection, providing compile-time safety for developers using this feature.",
+      "alternatives_considered": [
+        "Not updating types and relying on runtime validation",
+        "Using generic types instead of specific interfaces",
+        "Manually updating types instead of relying on generation"
+      ],
+      "files_affected": [
+        "test/database/payload-types.ts"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Fix contains operator for hasMany select fields in PostgreSQL",
+      "description": "Modify query builders to handle 'contains' operator correctly for hasMany select fields by using exact value matching instead of pattern matching, which fails on PostgreSQL enum columns",
+      "files_to_modify": [
+        "packages/drizzle/src/queries/sanitizeQueryValue.ts",
+        "packages/db-mongodb/src/queries/sanitizeQueryValue.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-002",
+      "title": "Add test coverage for hasMany select field queries",
+      "description": "Create test collection and comprehensive tests to verify the 'contains' operator works correctly with hasMany select fields, including edge cases for partial matching prevention",
+      "files_to_modify": [
+        "test/database/getConfig.ts",
+        "test/database/int.spec.ts",
+        "test/database/payload-types.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation addresses a critical bug where the 'contains' operator incorrectly used pattern matching (ILIKE/LIKE) on hasMany select fields in PostgreSQL. Since PostgreSQL stores select fields as enum types, pattern matching operations are not supported, causing query failures.\n\nThe fix modifies both MongoDB and PostgreSQL query builders to treat 'contains' as exact value matching for hasMany select fields. In MongoDB, this means checking if the array includes the exact value using direct equality rather than regex matching. In PostgreSQL (via Drizzle), the fix changes the operator from 'contains' to 'equals' for hasMany select fields, leveraging the existing join table structure where each value is stored as a separate row.\n\nA key design decision was maintaining consistency between database adapters while respecting their underlying storage models. MongoDB stores hasMany select fields as arrays in documents, while PostgreSQL uses a join table with individual rows. The solution handles both cases appropriately while providing the same semantic behavior to API consumers.\n\nThe changes integrate seamlessly with the existing codebase by modifying the sanitizeQueryValue functions in both adapters, which are responsible for transforming Payload query operators into database-specific queries. Comprehensive tests were added to prevent regression, including a clever test case with 'bananabread' to ensure partial matching doesn't occur, which was the root cause of the original bug.",
+  "source_pr": "https://github.com/payloadcms/payload/pull/15865",
+  "before_sha": "17a0d196f4570951715fe9782884591f659ceffe",
+  "after_sha": "fba24380578f513209a5f4811e2836a2317c33d2",
+  "diff_stats": {
+    "additions": 124,
+    "deletions": 9,
+    "files_changed": 5
+  }
+}

@@ -1,0 +1,60 @@
+diff --git a/src/prefect/server/api/middleware.py b/src/prefect/server/api/middleware.py
+index 75f1786154da..aadb2c7a9ea7 100644
+--- a/src/prefect/server/api/middleware.py
++++ b/src/prefect/server/api/middleware.py
+@@ -1,3 +1,4 @@
++import hmac
+ from typing import Awaitable, Callable
+ 
+ from fastapi import status
+@@ -63,7 +64,9 @@ async def dispatch(
+                     session=session, client=incoming_client
+                 )
+ 
+-                if token is None or token.token != incoming_token:
++                if token is None or not hmac.compare_digest(
++                    token.token, incoming_token
++                ):
+                     return JSONResponse(
+                         {"detail": "Invalid CSRF token or client identifier."},
+                         status_code=status.HTTP_403_FORBIDDEN,
+diff --git a/src/prefect/server/api/server.py b/src/prefect/server/api/server.py
+index e8f6eb4d9f32..db52e3e03bb1 100644
+--- a/src/prefect/server/api/server.py
++++ b/src/prefect/server/api/server.py
+@@ -9,6 +9,7 @@
+ import base64
+ import contextlib
+ import gc
++import hmac
+ import logging
+ import mimetypes
+ import os
+@@ -446,7 +447,7 @@ async def token_validation(request: Request, call_next: Any):  # type: ignore[re
+                     status_code=status.HTTP_401_UNAUTHORIZED,
+                     content={"exception_message": "Unauthorized"},
+                 )
+-            if decoded != auth_string:
++            if not hmac.compare_digest(decoded, auth_string):
+                 return JSONResponse(
+                     status_code=status.HTTP_401_UNAUTHORIZED,
+                     content={"exception_message": "Unauthorized"},
+diff --git a/src/prefect/server/utilities/subscriptions.py b/src/prefect/server/utilities/subscriptions.py
+index 44a9c18b84b2..9cc4ccf07a13 100644
+--- a/src/prefect/server/utilities/subscriptions.py
++++ b/src/prefect/server/utilities/subscriptions.py
+@@ -1,4 +1,5 @@
+ import asyncio
++import hmac
+ from asyncio import IncompleteReadError as IOError
+ from logging import Logger
+ from typing import Optional
+@@ -81,7 +82,7 @@ async def accept_prefect_socket(websocket: WebSocket) -> Optional[WebSocket]:
+                     reason="Auth required but no token provided",
+                 )
+ 
+-            if received_token != auth_setting:
++            if not hmac.compare_digest(received_token, auth_setting):
+                 logger.warning("WebSocket connection closed: Invalid token.")
+                 return await websocket.close(
+                     WS_1008_POLICY_VIOLATION, reason="Invalid token"

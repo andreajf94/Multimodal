@@ -1,0 +1,150 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "data_modeling",
+      "recommendation": "Changed NativeAgent from single-project to multi-project architecture by replacing singular project fields with a HashMap<EntityId, ProjectState> mapping",
+      "rationale": "The previous design had a one-to-one relationship between NativeAgent and Project, limiting the agent to work with only one project at a time. By introducing a hashmap keyed by project EntityId, we can maintain separate project contexts, context server registries, and subscriptions per project while sharing the same agent instance.",
+      "alternatives_considered": [
+        "Creating multiple NativeAgent instances per project",
+        "Using a global project registry separate from the agent"
+      ],
+      "files_affected": [
+        "crates/agent/src/agent.rs"
+      ]
+    },
+    {
+      "dimension": "api_design",
+      "recommendation": "Modified all session-related methods to accept project parameter and updated Session struct to track project_id",
+      "rationale": "Since sessions can now belong to different projects, each session needs to reference its parent project. This allows proper routing of commands, context updates, and resource management to the correct project context. The project parameter is now required for session creation, loading, and opening operations.",
+      "alternatives_considered": [
+        "Implicitly deriving project from session context",
+        "Using session metadata to infer project"
+      ],
+      "files_affected": [
+        "crates/agent/src/agent.rs",
+        "crates/agent/src/native_agent_server.rs"
+      ]
+    },
+    {
+      "dimension": "state_management",
+      "recommendation": "Introduced lazy initialization of project state via get_or_create_project_state() method",
+      "rationale": "Project state is only created when needed (when a session is created for that project), avoiding unnecessary overhead for unused projects. This follows the principle of lazy initialization and ensures resources are allocated only when required.",
+      "alternatives_considered": [
+        "Pre-creating project state for all available projects",
+        "Using a factory pattern for project state creation"
+      ],
+      "files_affected": [
+        "crates/agent/src/agent.rs"
+      ]
+    },
+    {
+      "dimension": "resource_management",
+      "recommendation": "Implemented automatic cleanup of project state when no sessions remain for a project",
+      "rationale": "When the last session for a project is closed, the corresponding ProjectState is removed from the projects HashMap. This prevents memory leaks and ensures resources (like context server registrations and subscriptions) are properly released.",
+      "alternatives_considered": [
+        "Keeping project state alive indefinitely",
+        "Using reference counting with weak references"
+      ],
+      "files_affected": [
+        "crates/agent/src/agent.rs"
+      ]
+    },
+    {
+      "dimension": "testing",
+      "recommendation": "Updated all test cases to work with the new multi-project agent initialization pattern",
+      "rationale": "Tests needed to be updated because NativeAgent::new() no longer takes a project parameter and returns synchronously. Tests now create sessions to trigger project registration, which mimics real usage patterns.",
+      "alternatives_considered": [
+        "Keeping old test patterns with deprecation warnings",
+        "Creating test-specific constructors"
+      ],
+      "files_affected": [
+        "crates/agent/src/tests/mod.rs"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Added proper error handling for missing project states with session_project_state() helper",
+      "rationale": "Since sessions now reference projects that might have been cleaned up, operations need to gracefully handle missing project states. The helper method provides a clean way to access project state while handling the 'not found' case.",
+      "alternatives_considered": [
+        "Panicking on missing project state",
+        "Using Option types throughout the API"
+      ],
+      "files_affected": [
+        "crates/agent/src/agent.rs"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Refactor NativeAgent core data structures for multi-project support",
+      "description": "Replace singular project fields with per-project state management using HashMap<EntityId, ProjectState>. Update Session struct to track project_id and modify agent initialization to not require a project parameter.",
+      "files_to_modify": [
+        "crates/agent/src/agent.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-002",
+      "title": "Update session lifecycle methods to support project parameter",
+      "description": "Modify load_thread(), open_thread(), thread_summary(), and related methods to accept project parameter. Update register_session() to include project_id and ensure proper project state initialization.",
+      "files_to_modify": [
+        "crates/agent/src/agent.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-003",
+      "title": "Refactor event handling and command routing for multi-project",
+      "description": "Update event handlers (handle_project_event, handle_context_server_store_updated, etc.) to route events to correct project state. Modify command building and updating to be project-specific.",
+      "files_to_modify": [
+        "crates/agent/src/agent.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-004",
+      "title": "Update agent server and connection interfaces",
+      "description": "Modify NativeAgentServer::connect() to not pass project to NativeAgent::new(). Update NativeAgentConnection methods to accept project parameter where needed.",
+      "files_to_modify": [
+        "crates/agent/src/native_agent_server.rs",
+        "crates/agent/src/agent.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-005",
+      "title": "Update all test cases for new initialization pattern",
+      "description": "Refactor test cases to work with synchronous NativeAgent::new() that doesn't require project parameter. Ensure tests create sessions to trigger project registration.",
+      "files_to_modify": [
+        "crates/agent/src/tests/mod.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "large"
+    },
+    {
+      "id": "T-006",
+      "title": "Update dependent components (agent UI and eval CLI)",
+      "description": "Modify agent UI components and evaluation CLI to work with the new multi-project agent architecture.",
+      "files_to_modify": [
+        "crates/agent_ui/src/mention_set.rs",
+        "crates/eval_cli/src/main.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation transforms the NativeAgent from a single-project architecture to a multi-project capable system through several key changes. First, the core data structure was refactored to replace singular project fields (project, project_context, context_server_registry) with a HashMap<EntityId, ProjectState> that maintains separate state per project. This allows the same agent instance to manage sessions across multiple projects while keeping their contexts isolated.\n\nSecond, all session lifecycle methods were updated to accept a project parameter, and the Session struct now tracks project_id to enable proper routing of operations. The agent uses lazy initialization via get_or_create_project_state() to create project state only when needed, and automatically cleans up project state when no sessions remain for that project. This ensures efficient resource usage while maintaining the required isolation.\n\nThird, event handling and command routing were updated to be project-specific. Event handlers like handle_project_event() now find the correct ProjectState using the project_id, and command updates are scoped to sessions belonging to the affected project. This maintains the existing functionality while extending it to multiple projects.\n\nFinally, all dependent components including tests were updated to work with the new architecture. Tests were particularly affected because NativeAgent::new() became synchronous and no longer requires a project parameter, requiring tests to create sessions to trigger project registration. The changes maintain backward compatibility while enabling the multi-project functionality required for future global ACP connection sharing capabilities.",
+  "source_pr": "https://github.com/zed-industries/zed/pull/51202",
+  "before_sha": "3d36d1f2af7427c8b785470cae3599d49adabdd2",
+  "after_sha": "f4b04af3dc63d23ab0fb70527d7e0938c81ef4d0",
+  "diff_stats": {
+    "additions": 325,
+    "deletions": 272,
+    "files_changed": 6
+  }
+}

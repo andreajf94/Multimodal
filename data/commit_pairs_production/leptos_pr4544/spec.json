@@ -1,0 +1,14 @@
+{
+  "feature_name": "Keyed Field Patching for Store Collections",
+  "description": "Implement key-aware patching for collection fields in reactive stores to enable efficient updates when items are reordered rather than replaced. Currently, patching operations treat collections as unkeyed lists, causing unnecessary value changes when items move positions. This feature will use key functions to identify items across patches and generate minimal diffs.",
+  "functional_requirements": [
+    "Implement a new trait `PatchFieldKeyed` that defines key-based patching logic for collection types",
+    "Add support for `Vec<T>` fields where `T` implements a key function, enabling detection of reordering operations",
+    "Ensure the patching system correctly identifies moved items and generates appropriate move operations instead of delete/create pairs",
+    "Design the system to be extensible for future collection types like maps or sets by implementing the trait on those types",
+    "Integrate the keyed patching logic with the existing reactive store patch generation system",
+    "Maintain backward compatibility with existing unkeyed patching behavior for collections without key functions"
+  ],
+  "project_name": "leptos",
+  "source_pr": "https://github.com/leptos-rs/leptos/pull/4544"
+}

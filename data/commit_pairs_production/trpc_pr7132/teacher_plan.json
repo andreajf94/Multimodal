@@ -1,0 +1,79 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "api_design",
+      "recommendation": "Added encoder parameter to the buildConnectionMessage function to enable custom encoding of WebSocket connection parameters",
+      "rationale": "The WebSocket connection parameters were being sent as plain JSON strings without respecting the client's encoder configuration. This could cause compatibility issues when servers expect encoded parameters (e.g., base64, msgpack, or custom serialization). By passing the encoder through the call chain, we ensure connection parameters are processed consistently with regular RPC messages.",
+      "alternatives_considered": [
+        "Creating a separate encoder configuration just for connection parameters",
+        "Hardcoding JSON.stringify for connection parameters while using encoder for regular messages",
+        "Making the encoder optional with a default JSON.stringify fallback"
+      ],
+      "files_affected": [
+        "packages/client/src/links/wsLink/wsClient/utils.ts"
+      ]
+    },
+    {
+      "dimension": "data_modeling",
+      "recommendation": "Added encoder as a required property in WebSocketConnectionOptions interface",
+      "rationale": "The encoder is a core dependency for WebSocket connections and should be explicitly required rather than optional. This ensures type safety and prevents runtime errors where connections might be established without proper encoding capabilities. The encoder is already part of the WsClient class, so passing it through maintains consistency.",
+      "alternatives_considered": [
+        "Making encoder optional with a default JSON encoder",
+        "Storing encoder as a global singleton",
+        "Inferring encoder from URL or connection parameters"
+      ],
+      "files_affected": [
+        "packages/client/src/links/wsLink/wsClient/wsConnection.ts"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Maintained existing error handling while adding encoder.encode() call",
+      "rationale": "The encoder.encode() method should already have its own error handling for encoding failures. By keeping the existing try-catch structure in wsConnection.ts, we ensure that WebSocket connection failures are properly caught and re-thrown as TRPCWebSocketClosedError. The encoder's potential errors will bubble up through this existing error handling mechanism.",
+      "alternatives_considered": [
+        "Wrapping encoder.encode() in additional try-catch blocks",
+        "Adding specific error types for encoding failures",
+        "Creating a fallback to JSON.stringify if encoder.encode() fails"
+      ],
+      "files_affected": [
+        "packages/client/src/links/wsLink/wsClient/wsConnection.ts"
+      ]
+    },
+    {
+      "dimension": "backward_compatibility",
+      "recommendation": "Updated WsClient to pass its encoder to WsConnection constructor",
+      "rationale": "The WsClient already has an encoder property, so we simply pass it through to maintain backward compatibility. Existing code that creates WsClient instances continues to work without modification because the encoder is already part of the client configuration. This ensures no breaking changes for users.",
+      "alternatives_considered": [
+        "Requiring users to explicitly pass encoder when creating WebSocket connections",
+        "Creating a new WebSocket client class with encoder support",
+        "Using dependency injection for encoder configuration"
+      ],
+      "files_affected": [
+        "packages/client/src/links/wsLink/wsClient/wsClient.ts"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Add encoder support for WebSocket connection parameters",
+      "description": "Modified the WebSocket connection infrastructure to apply the configured encoder when building connection parameters. This ensures connection parameters are encoded consistently with regular RPC messages.",
+      "files_to_modify": [
+        "packages/client/src/links/wsLink/wsClient/utils.ts",
+        "packages/client/src/links/wsLink/wsClient/wsClient.ts",
+        "packages/client/src/links/wsLink/wsClient/wsConnection.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation adds support for custom encoding of WebSocket connection parameters in the tRPC client. The core change involves modifying the `buildConnectionMessage` function in `utils.ts` to accept an `Encoder` parameter and use it to encode the connection parameters message instead of hardcoded `JSON.stringify`. This change is propagated through the WebSocket connection stack: the `WsConnection` class now requires an encoder in its constructor options, and the `WsClient` passes its existing encoder when creating connections.\n\nThe approach maintains backward compatibility by leveraging the existing encoder configuration in `WsClient`. No new files were created because the encoder type and implementation already exist in the codebase. The changes are minimal and focused, affecting only the WebSocket connection initialization path where connection parameters are sent to the server.\n\nThis implementation ensures consistency across the tRPC client: connection parameters are now encoded using the same mechanism as regular RPC messages, preventing compatibility issues when servers expect encoded parameters. The error handling remains intact, as any encoding failures will be caught by the existing WebSocket error handling infrastructure. The solution is elegant in its simplicity, adding only the necessary parameter passing without restructuring the WebSocket client architecture.",
+  "source_pr": "https://github.com/trpc/trpc/pull/7132",
+  "before_sha": "9d4b3b975197890a71cac20a7a0836ef349c087b",
+  "after_sha": "d92cc45b3e6edb5805474112feacbe9f386a97ee",
+  "diff_stats": {
+    "additions": 14,
+    "deletions": 2,
+    "files_changed": 3
+  }
+}

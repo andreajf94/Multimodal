@@ -1,0 +1,90 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "memory_management",
+      "recommendation": "Changed visitor lifecycle to reset state after each file instead of before the next file, allowing earlier garbage collection of visit functions",
+      "rationale": "By moving the reset from the beginning of the next file's processing to the end of the current file's processing, JavaScript garbage collection can reclaim memory while Rust-side code is executing between files. This reduces memory pressure and improves performance by allowing GC to occur during natural processing gaps.",
+      "alternatives_considered": [
+        "Keeping the existing init-at-start approach",
+        "Creating a separate lightweight reset function just for normal operation",
+        "Allowing memory to accumulate and relying on GC to eventually clean it up"
+      ],
+      "files_affected": [
+        "apps/oxlint/src-js/plugins/lint.ts",
+        "apps/oxlint/src-js/plugins/visitor.ts"
+      ]
+    },
+    {
+      "dimension": "api_design",
+      "recommendation": "Replaced `initCompiledVisitor` with `resetCompiledVisitor` and updated the documented visitor lifecycle sequence",
+      "rationale": "The new API better reflects the actual usage pattern: compile visitor \u2192 use it \u2192 reset it. This makes the API more intuitive and aligns with the principle of cleaning up resources immediately after use rather than preparing for next use ahead of time.",
+      "alternatives_considered": [
+        "Keeping both functions and calling them at different times",
+        "Renaming `initCompiledVisitor` to `resetCompiledVisitor` but keeping same timing",
+        "Creating a single function that handles both initialization and reset"
+      ],
+      "files_affected": [
+        "apps/oxlint/src-js/plugins/lint.ts",
+        "apps/oxlint/src-js/plugins/visitor.ts"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Updated error recovery to call both `finalizeCompiledVisitor` and `resetCompiledVisitor` in `resetStateAfterError`",
+      "rationale": "Since the normal flow now uses both functions, error recovery should mirror the same cleanup sequence to ensure consistent state. This prevents potential state leaks when errors occur.",
+      "alternatives_considered": [
+        "Keeping only `finalizeCompiledVisitor` in error recovery",
+        "Creating a separate error-specific cleanup function",
+        "Not cleaning up on error (risking state corruption)"
+      ],
+      "files_affected": [
+        "apps/oxlint/src-js/plugins/lint.ts"
+      ]
+    },
+    {
+      "dimension": "testing",
+      "recommendation": "Updated test setup to call both `finalizeCompiledVisitor` and `resetCompiledVisitor` in the afterEach hook",
+      "rationale": "Tests need to reflect the new lifecycle where reset happens after use. This ensures tests properly clean up state between test cases and validate the correct sequence.",
+      "alternatives_considered": [
+        "Keeping the old beforeEach/afterEach pattern",
+        "Creating a test helper that encapsulates the new sequence",
+        "Not updating tests (risking test pollution)"
+      ],
+      "files_affected": [
+        "apps/oxlint/test/compile_visitor.test.ts"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Optimize visitor memory lifecycle",
+      "description": "Change visitor compilation to reset state after linting each file rather than before the next file, enabling earlier garbage collection",
+      "files_to_modify": [
+        "apps/oxlint/src-js/plugins/lint.ts",
+        "apps/oxlint/src-js/plugins/visitor.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-002",
+      "title": "Update tests for new visitor lifecycle",
+      "description": "Modify test setup to reflect the new visitor reset timing and ensure proper cleanup between test cases",
+      "files_to_modify": [
+        "apps/oxlint/test/compile_visitor.test.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation optimizes memory management in the oxlint plugin system by changing when visitor state is reset. Previously, `initCompiledVisitor` was called at the start of processing each file, which meant visit functions from the previous file couldn't be garbage collected until the next file started processing. Now, `resetCompiledVisitor` is called immediately after walking the AST, allowing JavaScript's garbage collector to reclaim memory while Rust-side code executes between files.\n\nKey changes include: 1) Removing the call to `initCompiledVisitor` at the start of `lintFileImpl`, 2) Adding a call to `resetCompiledVisitor` after walking the AST, 3) Replacing `initCompiledVisitor` with `resetCompiledVisitor` in the visitor module (keeping similar implementation but with updated documentation), 4) Updating error recovery to call both finalization and reset functions, and 5) Adjusting tests to use the new lifecycle sequence.\n\nThe new pattern follows a more intuitive resource management approach: compile visitor, use it, then immediately clean it up. This reduces memory pressure during batch processing of multiple files and takes advantage of natural processing gaps for garbage collection. The implementation maintains backward compatibility in terms of functionality while improving performance characteristics.",
+  "source_pr": "https://github.com/oxc-project/oxc/pull/20186",
+  "before_sha": "d9f8ff48aa78b7e671a01e823bf3251ca5011af1",
+  "after_sha": "c73912b9c21b0d1bee40d23b41a1682287fb45b3",
+  "diff_stats": {
+    "additions": 37,
+    "deletions": 29,
+    "files_changed": 3
+  }
+}

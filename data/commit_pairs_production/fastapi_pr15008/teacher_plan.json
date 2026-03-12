@@ -1,0 +1,111 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "documentation_structure",
+      "recommendation": "Created a new top-level documentation page 'editor-support.md' instead of nesting it under existing sections like 'how-to' or 'advanced'",
+      "rationale": "The VS Code extension is a significant development tool that deserves its own dedicated section rather than being buried in existing categories. This makes it easily discoverable and gives it appropriate prominence alongside other major topics like 'fastapi-cli' and 'Deployment'.",
+      "alternatives_considered": [
+        "Adding it as a subsection under 'how-to' or 'advanced' sections",
+        "Creating a new 'tools' or 'integrations' category",
+        "Embedding the content directly in the tutorial without a dedicated page"
+      ],
+      "files_affected": [
+        "docs/en/docs/editor-support.md"
+      ]
+    },
+    {
+      "dimension": "information_architecture",
+      "recommendation": "Added a contextual tip in the tutorial index page to promote the extension at the optimal learning moment",
+      "rationale": "The tutorial index is where users begin their FastAPI journey. Adding the tip after installation instructions but before the advanced guide ensures users discover the extension early when they're setting up their development environment, maximizing adoption.",
+      "alternatives_considered": [
+        "Adding the tip at the very beginning of the tutorial",
+        "Creating a separate 'getting started' section for editor tools",
+        "Only linking from the navigation without in-content promotion"
+      ],
+      "files_affected": [
+        "docs/en/docs/tutorial/index.md"
+      ]
+    },
+    {
+      "dimension": "navigation_design",
+      "recommendation": "Placed the editor support page in the main navigation between 'fastapi-cli.md' and 'Deployment' sections",
+      "rationale": "This positioning groups development tools together (CLI and editor extension) while maintaining logical flow from development tools to deployment. It creates a natural progression: CLI tools \u2192 Editor support \u2192 Deployment options.",
+      "alternatives_considered": [
+        "Placing it at the end of the navigation",
+        "Creating a new 'Tools' section grouping CLI and editor support",
+        "Adding it to the beginning of the navigation as a 'Getting Started' item"
+      ],
+      "files_affected": [
+        "docs/en/mkdocs.yml"
+      ]
+    },
+    {
+      "dimension": "content_organization",
+      "recommendation": "Structured the editor support page with clear sections: overview, setup/installation, application discovery, and features",
+      "rationale": "This hierarchical structure follows the same pattern as other FastAPI documentation: starting with high-level overview, then practical setup instructions, configuration details, and finally feature explanations. This familiar structure helps users quickly find the information they need.",
+      "alternatives_considered": [
+        "A single continuous page without sections",
+        "Separating setup and features into different pages",
+        "Organizing by editor type (VS Code vs Cursor) rather than by topic"
+      ],
+      "files_affected": [
+        "docs/en/docs/editor-support.md"
+      ]
+    },
+    {
+      "dimension": "external_integration",
+      "recommendation": "Used external links to marketplace, GitHub repository, and FastAPI Cloud while maintaining the FastAPI documentation style",
+      "rationale": "The extension exists outside the core FastAPI repository, so linking to external resources is necessary. Using the existing 'external-link' CSS class ensures consistent styling with other external links in the documentation while clearly indicating these are external resources.",
+      "alternatives_considered": [
+        "Embedding all extension documentation directly",
+        "Using iframes or embedded content from external sources",
+        "Creating a separate microsite for extension documentation"
+      ],
+      "files_affected": [
+        "docs/en/docs/editor-support.md",
+        "docs/en/docs/tutorial/index.md"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Create VS Code Extension Documentation Page",
+      "description": "Create a comprehensive documentation page detailing the FastAPI VS Code extension's features, installation, and usage. This serves as the primary reference for developers wanting to use the extension.",
+      "files_to_modify": [],
+      "files_to_create": [
+        "docs/en/docs/editor-support.md"
+      ],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-002",
+      "title": "Integrate Extension Promotion into Tutorial",
+      "description": "Add a contextual tip in the tutorial index page to help users discover the VS Code extension at the optimal learning moment during environment setup.",
+      "files_to_modify": [
+        "docs/en/docs/tutorial/index.md"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-003",
+      "title": "Update Navigation Structure",
+      "description": "Add the new editor support page to the main documentation navigation, positioning it logically among related development tools.",
+      "files_to_modify": [
+        "docs/en/mkdocs.yml"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation follows a three-pronged approach to integrate VS Code extension documentation into the FastAPI ecosystem. First, a dedicated 'editor-support.md' page was created with comprehensive documentation structured similarly to other FastAPI documentation pages, featuring clear sections for overview, setup, configuration, and features. This maintains consistency with existing documentation patterns while providing complete information in one location.\n\nSecond, strategic promotion was added to the tutorial index page as a tip box placed after installation instructions but before the advanced guide. This timing is crucial - users discover the extension just as they're setting up their development environment, maximizing the likelihood of adoption. The tip uses the same 'external-link' styling as other external resources in the documentation.\n\nThird, the navigation was updated in 'mkdocs.yml' to include the new page between 'fastapi-cli.md' and the 'Deployment' section. This positioning groups development tools together while maintaining a logical flow from development to deployment. The implementation respects the existing documentation architecture by adding a new top-level page rather than forcing it into existing categories, giving the extension appropriate prominence as a major development tool.\n\nAll changes maintain the existing FastAPI documentation conventions, including external link styling, section headers with anchor IDs, and the use of definition tags (<dfn>) for consistent terminology. The approach balances completeness (full documentation page) with discoverability (strategic tutorial promotion) while integrating seamlessly into the existing documentation structure.",
+  "source_pr": "https://github.com/fastapi/fastapi/pull/15008",
+  "before_sha": "e26eb871f85edb07320ad728d64aa85c45b9f7a6",
+  "after_sha": "196cafa07aef4e8d3907184bb646d0f7ab1c35f2",
+  "diff_stats": {
+    "additions": 30,
+    "deletions": 0,
+    "files_changed": 3
+  }
+}

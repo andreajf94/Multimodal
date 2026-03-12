@@ -1,0 +1,106 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "api_design",
+      "recommendation": "Added two distinct methods for CSS paths: `css_file_path()` for filesystem paths and `css_path()` for route paths, plus `site_pkg_dir_route_base()` for normalized route bases",
+      "rationale": "The original `css_path()` method was ambiguous - it returned a PathBuf but was being used for both filesystem operations and route construction. This separation clarifies intent: filesystem paths should be absolute and platform-specific, while route paths should be URL-friendly strings with proper slash normalization. This prevents bugs when developers confuse the two contexts.",
+      "alternatives_considered": [
+        "Keep single method with a boolean parameter",
+        "Use different return types (PathBuf vs String) in same method",
+        "Create a CSS path struct with both representations"
+      ],
+      "files_affected": [
+        "leptos_config/src/lib.rs",
+        "leptos_config/src/tests.rs"
+      ]
+    },
+    {
+      "dimension": "testing",
+      "recommendation": "Added comprehensive integration tests that verify both CSS path methods work correctly in routing scenarios, including edge cases with custom site/pkg directories",
+      "rationale": "The tests demonstrate real-world usage patterns: 1) Basic routing with default configuration, 2) Custom directory structures with environment variables, 3) Path normalization edge cases. Using `tempfile::TempDir` ensures tests don't interfere with each other and can run in parallel. The tests validate that the API works correctly when integrated with Axum's routing system.",
+      "alternatives_considered": [
+        "Unit tests only without integration tests",
+        "Mocking filesystem instead of using temp directories",
+        "Testing only happy paths without edge cases"
+      ],
+      "files_affected": [
+        "integrations/axum/tests/axum_integration.rs",
+        "integrations/axum/tests/service_mode/src/main.rs"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Maintained backward compatibility by keeping the original `css_path()` method signature but changing its implementation to return a String for route paths",
+      "rationale": "Changing the return type from PathBuf to String is a breaking change, but since the method was likely being misused for route construction, this correction aligns with its actual purpose. The documentation clearly explains the change. Existing code using it for filesystem operations will need to migrate to `css_file_path()`, but this is a necessary correction for API clarity.",
+      "alternatives_considered": [
+        "Deprecate old method and introduce new names",
+        "Keep both behaviors with different method names",
+        "Use feature flags for migration period"
+      ],
+      "files_affected": [
+        "leptos_config/src/lib.rs"
+      ]
+    },
+    {
+      "dimension": "path_handling",
+      "recommendation": "Implemented consistent path normalization in `site_pkg_dir_route_base()` that ensures route bases always have exactly one leading slash and one trailing slash",
+      "rationale": "Web routes need consistent slash handling to avoid duplicate slashes (//) or missing slashes, which can cause routing failures. The method handles all edge cases: empty strings, strings with/without leading/trailing slashes. This normalization is separate from filesystem path handling where platform-specific separators matter.",
+      "alternatives_considered": [
+        "Let users handle slash normalization themselves",
+        "Use URL parsing libraries",
+        "Only normalize in specific contexts"
+      ],
+      "files_affected": [
+        "leptos_config/src/lib.rs",
+        "leptos_config/src/tests.rs"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Add CSS file path methods to LeptosOptions",
+      "description": "Implement `css_file_path()`, `css_path()`, and `site_pkg_dir_route_base()` methods with proper documentation and tests",
+      "files_to_modify": [
+        "leptos_config/src/lib.rs",
+        "leptos_config/src/tests.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-002",
+      "title": "Add integration tests for CSS routing",
+      "description": "Create comprehensive tests that verify CSS files can be served via routes using the new path methods, including custom directory configurations",
+      "files_to_modify": [
+        "integrations/axum/tests/axum_integration.rs",
+        "integrations/axum/tests/service_mode/src/main.rs",
+        "integrations/axum/tests/service_mode/Cargo.toml"
+      ],
+      "files_to_create": [
+        "integrations/axum/tests/service_mode/style/main.css"
+      ],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-003",
+      "title": "Update dependencies and build infrastructure",
+      "description": "Add tempfile dependency for tests and update Cargo files to support new test scenarios",
+      "files_to_modify": [
+        "Cargo.lock",
+        "integrations/axum/Cargo.toml"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The changes implement a clear separation between filesystem paths and web route paths in the Leptos configuration API. The core insight was that the original `css_path()` method was serving two conflicting purposes: returning a PathBuf that some developers used for filesystem operations, while others used it for constructing web routes. This ambiguity could lead to platform-specific bugs (Windows vs Unix path separators) and incorrect route construction.\n\nThe solution introduces three new methods: `css_file_path()` returns an absolute filesystem PathBuf by joining site_root, site_pkg_dir, and output_name; `css_path()` returns a URL path String with proper slash normalization; and `site_pkg_dir_route_base()` provides a utility for constructing route bases without duplicate slashes. This separation aligns with the principle that filesystem operations and URL routing are distinct concerns requiring different representations.\n\nThe implementation includes thorough testing at multiple levels: unit tests in leptos_config verify edge cases like empty site_pkg_dir and various slash configurations, while integration tests demonstrate real-world usage with Axum routing. The tests use tempfile::TempDir to isolate file operations and environment variables to simulate different deployment configurations. This approach ensures the API works correctly across different scenarios while maintaining backward compatibility for existing route construction use cases.",
+  "source_pr": "https://github.com/leptos-rs/leptos/pull/4615",
+  "before_sha": "557d908ff9651560193f8b10048fa923a808011b",
+  "after_sha": "4e5e13774fcdf26b3e0ac8da2e9fae59cc7a9372",
+  "diff_stats": {
+    "additions": 197,
+    "deletions": 15,
+    "files_changed": 8
+  }
+}

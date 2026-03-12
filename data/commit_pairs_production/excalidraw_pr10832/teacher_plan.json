@@ -1,0 +1,102 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "rendering_optimization",
+      "recommendation": "Simplified midpoint highlighting logic by removing complex heading-based calculations and replacing with distance-based proximity detection",
+      "rationale": "The previous implementation used heading comparisons (HEADING_RIGHT, HEADING_DOWN, etc.) which was error-prone and computationally expensive. The new approach uses simple Euclidean distance calculations which are more reliable, performant, and easier to maintain. This fixes visual bugs where midpoints wouldn't highlight correctly due to heading comparison edge cases.",
+      "alternatives_considered": [
+        "Keeping the heading-based system with bug fixes",
+        "Using a more complex geometric approach with bounding boxes",
+        "Implementing a spatial indexing system for all interactive points"
+      ],
+      "files_affected": [
+        "packages/excalidraw/renderer/interactiveScene.ts"
+      ]
+    },
+    {
+      "dimension": "state_management",
+      "recommendation": "Added currentItemArrowType to the InteractiveCanvasAppState type and getRelevantAppStateProps to ensure proper elbow arrow detection",
+      "rationale": "The midpoint highlighting behavior differs between regular arrows and elbow arrows. By including currentItemArrowType in the app state props that trigger re-renders, we ensure the interactive canvas updates correctly when the user switches arrow types. This prevents stale rendering where elbow arrow midpoints might not display properly after tool changes.",
+      "alternatives_considered": [
+        "Passing the entire appState object to interactiveScene",
+        "Creating a separate state subscription for arrow type changes",
+        "Using a global event emitter for tool changes"
+      ],
+      "files_affected": [
+        "packages/excalidraw/components/canvases/InteractiveCanvas.tsx",
+        "packages/excalidraw/types.ts"
+      ]
+    },
+    {
+      "dimension": "type_safety",
+      "recommendation": "Updated type definitions to use GlobalPoint instead of LocalPoint for midpoint coordinates and added proper type annotations",
+      "rationale": "The previous implementation used LocalPoint coordinates (relative to element origin) which required constant translation calculations. Switching to GlobalPoint (absolute canvas coordinates) simplifies the rendering logic and reduces computational overhead. This also makes the code more readable and less error-prone by eliminating coordinate system conversions.",
+      "alternatives_considered": [
+        "Keeping LocalPoint and adding conversion utilities",
+        "Creating a hybrid coordinate system",
+        "Using a custom midpoint type with both coordinate systems"
+      ],
+      "files_affected": [
+        "packages/excalidraw/renderer/interactiveScene.ts"
+      ]
+    },
+    {
+      "dimension": "visual_feedback",
+      "recommendation": "Improved visual hierarchy by using different opacity levels for highlighted vs. shown midpoints and adding distance thresholds",
+      "rationale": "The new implementation provides clearer visual feedback: highlighted midpoints (closest to cursor) use solid colors, while nearby midpoints use semi-transparent colors. This helps users understand which midpoint they're targeting. The distance thresholds (highlightThreshold and highlightThreshold * 2) create a progressive visual system that's more intuitive than the binary heading-based approach.",
+      "alternatives_considered": [
+        "Keeping the same visual style with bug fixes",
+        "Using different shapes instead of color variations",
+        "Animating the midpoint highlights"
+      ],
+      "files_affected": [
+        "packages/excalidraw/renderer/interactiveScene.ts"
+      ]
+    },
+    {
+      "dimension": "performance",
+      "recommendation": "Reduced computational complexity by eliminating trigonometric functions (heading calculations) and using simpler distance checks with early returns",
+      "rationale": "The previous implementation used pointRotateRads, headingForPoint, and compareHeading functions for each midpoint. The new approach uses pointDistance (Euclidean distance) which is much cheaper computationally. This improves rendering performance, especially with complex scenes containing many bindable elements.",
+      "alternatives_considered": [
+        "Optimizing the heading calculations with caching",
+        "Using squared distance comparisons to avoid sqrt calculations",
+        "Implementing a spatial partitioning system for all interactive elements"
+      ],
+      "files_affected": [
+        "packages/excalidraw/renderer/interactiveScene.ts"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Refactor midpoint highlighting logic",
+      "description": "Replace complex heading-based midpoint detection with simple distance-based proximity detection to fix visual bugs and improve performance",
+      "files_to_modify": [
+        "packages/excalidraw/renderer/interactiveScene.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-002",
+      "title": "Update type definitions and state propagation",
+      "description": "Add currentItemArrowType to InteractiveCanvasAppState and ensure it's included in relevant app state props for proper elbow arrow handling",
+      "files_to_modify": [
+        "packages/excalidraw/components/canvases/InteractiveCanvas.tsx",
+        "packages/excalidraw/types.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The changes implement a significant simplification of the midpoint highlighting system in Excalidraw's interactive canvas. The core problem was that the previous heading-based approach (using HEADING_RIGHT, HEADING_DOWN, etc.) was both computationally expensive and prone to visual bugs where midpoints wouldn't highlight correctly.\n\nThe new implementation replaces this with a distance-based proximity system. Instead of calculating headings and comparing them, we now compute Euclidean distances between the cursor and each midpoint. This is more reliable because it doesn't suffer from the edge cases of angular comparisons. The code now uses GlobalPoint coordinates throughout, eliminating the need for constant translations between local and global coordinate systems.\n\nKey improvements include: 1) Better visual hierarchy with distinct colors for highlighted vs. shown midpoints, 2) Proper handling of elbow arrows by checking both existing elements and the current tool state, 3) Performance gains from removing trigonometric calculations, and 4) Cleaner code structure with reduced complexity. The changes integrate seamlessly with the existing rendering pipeline by updating the type definitions and ensuring all necessary state is propagated to the interactive scene renderer.",
+  "source_pr": "https://github.com/excalidraw/excalidraw/pull/10832",
+  "before_sha": "0b3a5e7cc4d6ba5bcc5105f694a59f721ee06fc5",
+  "after_sha": "2874f9e48c3bf9e7c4a46015b4bb65b177f18b13",
+  "diff_stats": {
+    "additions": 60,
+    "deletions": 49,
+    "files_changed": 3
+  }
+}

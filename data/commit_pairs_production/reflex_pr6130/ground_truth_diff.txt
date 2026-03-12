@@ -1,0 +1,107 @@
+diff --git a/reflex/app.py b/reflex/app.py
+index 4ff412ef863..6245a9f0d1d 100644
+--- a/reflex/app.py
++++ b/reflex/app.py
+@@ -77,13 +77,13 @@
+ from reflex.event import (
+     _EVENT_FIELDS,
+     Event,
+-    EventHandler,
+     EventSpec,
+     EventType,
+     IndividualEventType,
+     get_hydrate_event,
+     noop,
+ )
++from reflex.istate.proxy import StateProxy
+ from reflex.page import DECORATED_PAGES
+ from reflex.route import (
+     get_route_args,
+@@ -1619,6 +1619,8 @@ def _process_background(
+         if not handler.is_background:
+             return None
+ 
++        substate = StateProxy(substate)
++
+         async def _coro():
+             """Coroutine to process the event and emit updates inside an asyncio.Task.
+ 
+@@ -1934,21 +1936,14 @@ async def upload_file(request: Request):
+         substate_token = _substate_key(token, handler.rpartition(".")[0])
+         state = await app.state_manager.get_state(substate_token)
+ 
+-        # get the current session ID
+-        # get the current state(parent state/substate)
+-        path = handler.split(".")[:-1]
+-        current_state = state.get_substate(path)
+         handler_upload_param = ()
+ 
+-        # get handler function
+-        func = getattr(type(current_state), handler.split(".")[-1])
++        _current_state, event_handler = state._get_event_handler(handler)
+ 
+-        # check if there exists any handler args with annotation, list[UploadFile]
+-        if isinstance(func, EventHandler):
+-            if func.is_background:
+-                msg = f"@rx.event(background=True) is not supported for upload handler `{handler}`."
+-                raise UploadTypeError(msg)
+-            func = func.fn
++        if event_handler.is_background:
++            msg = f"@rx.event(background=True) is not supported for upload handler `{handler}`."
++            raise UploadTypeError(msg)
++        func = event_handler.fn
+         if isinstance(func, functools.partial):
+             func = func.func
+         for k, v in get_type_hints(func).items():
+diff --git a/reflex/state.py b/reflex/state.py
+index 89698cfa186..bb13e519b82 100644
+--- a/reflex/state.py
++++ b/reflex/state.py
+@@ -1709,13 +1709,11 @@ async def get_var_value(self, var: Var[VAR_TYPE]) -> VAR_TYPE:
+         )
+         return getattr(other_state, var_data.field_name)
+ 
+-    def _get_event_handler(
+-        self, event: Event
+-    ) -> tuple[BaseState | StateProxy, EventHandler]:
++    def _get_event_handler(self, event: Event | str) -> tuple[BaseState, EventHandler]:
+         """Get the event handler for the given event.
+ 
+         Args:
+-            event: The event to get the handler for.
++            event: The event to get the handler for, or a dotted handler name string.
+ 
+ 
+         Returns:
+@@ -1725,7 +1723,8 @@ def _get_event_handler(
+             ValueError: If the event handler or substate is not found.
+         """
+         # Get the event handler.
+-        path = event.name.split(".")
++        name = event.name if isinstance(event, Event) else event
++        path = name.split(".")
+         path, name = path[:-1], path[-1]
+         substate = self.get_substate(path)
+         if not substate:
+@@ -1733,10 +1732,6 @@ def _get_event_handler(
+             raise ValueError(msg)
+         handler = substate.event_handlers[name]
+ 
+-        # For background tasks, proxy the state
+-        if handler.is_background:
+-            substate = StateProxy(substate)
+-
+         return substate, handler
+ 
+     async def _process(self, event: Event) -> AsyncIterator[StateUpdate]:
+@@ -1751,6 +1746,10 @@ async def _process(self, event: Event) -> AsyncIterator[StateUpdate]:
+         # Get the event handler.
+         substate, handler = self._get_event_handler(event)
+ 
++        # For background tasks, proxy the state.
++        if handler.is_background:
++            substate = StateProxy(substate)
++
+         # Run the event generator and yield state updates.
+         async for update in self._process_event(
+             handler=handler,

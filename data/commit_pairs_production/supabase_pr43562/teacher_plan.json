@@ -1,0 +1,154 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "package_structure",
+      "recommendation": "Reorganized Studio SQL queries into a dedicated `/sql/studio/auth/` folder structure within pg-meta package",
+      "rationale": "The previous structure had Studio queries scattered across different locations, including some in the Studio app itself. By consolidating all auth-related SQL queries into a single, organized location within pg-meta, we create a clear separation of concerns and make the queries discoverable. The `auth` subfolder indicates these are specifically for authentication/authorization functionality in the Studio dashboard.",
+      "alternatives_considered": [
+        "Keeping queries in the Studio app with proper imports",
+        "Creating a separate package just for Studio queries",
+        "Organizing by query type rather than product area"
+      ],
+      "files_affected": [
+        "packages/pg-meta/src/sql/studio/get-index-statuses.ts",
+        "packages/pg-meta/src/sql/studio/get-index-worker-status.ts",
+        "packages/pg-meta/src/sql/studio/get-users-common.ts",
+        "packages/pg-meta/src/sql/studio/get-users-count.ts",
+        "packages/pg-meta/src/sql/studio/get-users-paginated.ts",
+        "packages/pg-meta/src/sql/studio/get-users-types.ts",
+        "apps/studio/data/auth/auth.sql.ts"
+      ]
+    },
+    {
+      "dimension": "api_design",
+      "recommendation": "Updated pg-meta's main index to export all Studio query functions and types directly, enabling clean imports from '@supabase/pg-meta'",
+      "rationale": "Previously, consumers had to import from deep paths like '@supabase/pg-meta/src/sql/studio/get-users-types'. By exporting everything from the main index, we provide a cleaner, more maintainable API surface. Consumers can now import everything they need from the package root, which follows standard package consumption patterns and reduces coupling to internal file structure.",
+      "alternatives_considered": [
+        "Keeping deep imports but documenting them better",
+        "Creating a separate entry point for Studio queries",
+        "Using barrel files within the sql/studio/auth directory"
+      ],
+      "files_affected": [
+        "packages/pg-meta/src/index.ts"
+      ]
+    },
+    {
+      "dimension": "dependency_management",
+      "recommendation": "Moved auth.sql.ts from Studio app to pg-meta package and updated all Studio files to import from the centralized package",
+      "rationale": "The getUserSQL function was previously defined in the Studio app itself (apps/studio/data/auth/auth.sql.ts), creating a circular dependency pattern. By moving it to pg-meta, we centralize all SQL query definitions in one place, making them reusable across the codebase and ensuring consistency. This also allows for better testing and maintenance of the SQL queries.",
+      "alternatives_considered": [
+        "Keeping the query in Studio but exporting it from pg-meta",
+        "Creating a shared utilities package for SQL queries",
+        "Using a monorepo linking strategy without moving files"
+      ],
+      "files_affected": [
+        "apps/studio/data/auth/auth.sql.ts",
+        "packages/pg-meta/src/sql/studio/auth/get-user.ts",
+        "apps/studio/data/auth/user-query.ts"
+      ]
+    },
+    {
+      "dimension": "import_optimization",
+      "recommendation": "Updated all Studio component and data layer files to use the new centralized import pattern",
+      "rationale": "Consistent import patterns improve code readability and maintainability. By updating all affected files to import from '@supabase/pg-meta' instead of deep paths or local files, we reduce the cognitive load for developers and make it easier to refactor or reorganize the package structure in the future without breaking consumers.",
+      "alternatives_considered": [
+        "Using aliases or path mapping in tsconfig",
+        "Creating wrapper modules in Studio that re-export from pg-meta",
+        "Gradual migration with deprecation warnings"
+      ],
+      "files_affected": [
+        "apps/studio/components/interfaces/Auth/Users/Users.constants.ts",
+        "apps/studio/components/interfaces/Auth/Users/UsersFooter.tsx",
+        "apps/studio/components/interfaces/Auth/Users/UsersV2.tsx",
+        "apps/studio/data/auth/index-worker-status-query.ts",
+        "apps/studio/data/auth/keys.ts",
+        "apps/studio/data/auth/user-query.ts",
+        "apps/studio/data/auth/user-search-indexes-query.ts",
+        "apps/studio/data/auth/users-count-query.ts",
+        "apps/studio/data/auth/users-infinite-query.ts"
+      ]
+    },
+    {
+      "dimension": "testing_strategy",
+      "recommendation": "Updated test file imports to reflect the new file locations while maintaining test coverage",
+      "rationale": "Test files must import from the correct locations to validate the actual implementation. By updating the import paths in test files, we ensure tests continue to run against the reorganized code structure. This maintains the safety net for refactoring and ensures the queries work correctly in their new locations.",
+      "alternatives_considered": [
+        "Moving test files along with source files",
+        "Updating test configuration to handle path aliases",
+        "Creating test utilities that abstract import paths"
+      ],
+      "files_affected": [
+        "packages/pg-meta/test/sql/studio/get-users-common.test.ts",
+        "packages/pg-meta/test/sql/studio/get-users-count.test.ts",
+        "packages/pg-meta/test/sql/studio/get-users-paginated.test.ts"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Reorganize Studio SQL queries into pg-meta package structure",
+      "description": "Move all Studio-related SQL query files into a new organized folder structure within the pg-meta package, specifically under /sql/studio/auth/ to group by product area",
+      "files_to_modify": [
+        "packages/pg-meta/src/sql/studio/get-index-statuses.ts",
+        "packages/pg-meta/src/sql/studio/get-index-worker-status.ts",
+        "packages/pg-meta/src/sql/studio/get-users-common.ts",
+        "packages/pg-meta/src/sql/studio/get-users-count.ts",
+        "packages/pg-meta/src/sql/studio/get-users-paginated.ts",
+        "packages/pg-meta/src/sql/studio/get-users-types.ts",
+        "apps/studio/data/auth/auth.sql.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-002",
+      "title": "Update pg-meta package exports for Studio queries",
+      "description": "Modify the main index file of pg-meta to export all Studio query functions, constants, and types directly from the package root",
+      "files_to_modify": [
+        "packages/pg-meta/src/index.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-003",
+      "title": "Update Studio dashboard imports to use centralized package",
+      "description": "Update all Studio component and data layer files to import Studio SQL queries from '@supabase/pg-meta' instead of local files or deep package paths",
+      "files_to_modify": [
+        "apps/studio/components/interfaces/Auth/Users/Users.constants.ts",
+        "apps/studio/components/interfaces/Auth/Users/UsersFooter.tsx",
+        "apps/studio/components/interfaces/Auth/Users/UsersV2.tsx",
+        "apps/studio/data/auth/index-worker-status-query.ts",
+        "apps/studio/data/auth/keys.ts",
+        "apps/studio/data/auth/user-query.ts",
+        "apps/studio/data/auth/user-search-indexes-query.ts",
+        "apps/studio/data/auth/users-count-query.ts",
+        "apps/studio/data/auth/users-infinite-query.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-004",
+      "title": "Update test imports for reorganized query files",
+      "description": "Update test file import paths to reflect the new locations of Studio SQL query files within the pg-meta package",
+      "files_to_modify": [
+        "packages/pg-meta/test/sql/studio/get-users-common.test.ts",
+        "packages/pg-meta/test/sql/studio/get-users-count.test.ts",
+        "packages/pg-meta/test/sql/studio/get-users-paginated.test.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "This change implements a significant reorganization of Studio SQL queries within the Supabase monorepo. The core approach was to centralize all manually written SQL queries used by the Studio dashboard into the pg-meta package, creating a dedicated folder structure under `/sql/studio/auth/` to group queries by product area (authentication in this case).\n\nThe key pattern used is package boundary optimization - moving queries from the consumer (Studio app) to the provider (pg-meta package) where they logically belong. This follows the principle of separation of concerns, where pg-meta becomes the single source of truth for PostgreSQL metadata queries, including those used by the Studio UI. The implementation involved moving files, updating import paths, and modifying the package's public API to export all necessary functions and types directly from the main index.\n\nThe changes integrate well with the existing codebase by maintaining backward compatibility through the updated exports while cleaning up the import patterns. All Studio components now import from '@supabase/pg-meta' instead of using deep import paths or local files, which reduces coupling and makes the codebase more maintainable. The test updates ensure that the reorganization doesn't break existing functionality, and the relative import path fixes in the moved files (like updating `../../pg-format` to `../../../pg-format`) maintain proper module resolution in their new locations.",
+  "source_pr": "https://github.com/supabase/supabase/pull/43562",
+  "before_sha": "3570abad4de52edcaaadb5e24ce8a7d7358cd5ef",
+  "after_sha": "fc7fb50aa20172463c5db15a58d33332a5a4cc23",
+  "diff_stats": {
+    "additions": 38,
+    "deletions": 37,
+    "files_changed": 20
+  }
+}

@@ -1,0 +1,87 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "concurrency_and_context_management",
+      "recommendation": "Used Python's contextvars.copy_context() to preserve logging context in synchronous reader threads",
+      "rationale": "When spawning threads for stdout/stderr capture in synchronous shell operations, the logging context (which contains flow/task metadata) is thread-local and doesn't automatically propagate. Using copy_context() captures the current context at thread creation time and preserves it when the thread executes, ensuring logs maintain proper metadata.",
+      "alternatives_considered": [
+        "Passing context variables explicitly as thread arguments",
+        "Using thread-local storage to manually copy context",
+        "Redesigning to use async-only output capture"
+      ],
+      "files_affected": [
+        "src/integrations/prefect-shell/prefect_shell/commands.py"
+      ]
+    },
+    {
+      "dimension": "api_integration_and_logging",
+      "recommendation": "Added comprehensive test to verify logs are sent incrementally to the API with proper metadata",
+      "rationale": "The test validates that streamed stdout/stderr logs from synchronous shell operations reach the Prefect API with flow-run context preserved. It uses the actual API client to read logs and verifies they contain expected messages and metadata patterns.",
+      "alternatives_considered": [
+        "Mocking the API response instead of testing actual integration",
+        "Only testing local log capture without API verification",
+        "Using synthetic test data instead of real shell commands"
+      ],
+      "files_affected": [
+        "src/integrations/prefect-shell/tests/test_commands.py"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Created separate context objects for stdout and stderr threads to avoid RuntimeError",
+      "rationale": "Python's Context.run() raises RuntimeError if the same context is entered multiple times. By creating separate copy_context() instances for stdout and stderr threads, each thread gets its own independent context copy, preventing race conditions and runtime errors.",
+      "alternatives_considered": [
+        "Using a lock to serialize context access",
+        "Creating a single context and using it sequentially",
+        "Implementing a custom context manager"
+      ],
+      "files_affected": [
+        "src/integrations/prefect-shell/prefect_shell/commands.py"
+      ]
+    },
+    {
+      "dimension": "testing",
+      "recommendation": "Implemented polling mechanism to wait for API logs with timeout",
+      "rationale": "Logs may take time to propagate through the API. The wait_for_flow_run_logs helper polls the API with exponential backoff, ensuring tests are robust against timing variations while still failing fast if logs never arrive.",
+      "alternatives_considered": [
+        "Fixed sleep delays that could be flaky",
+        "No waiting - assuming logs arrive instantly",
+        "Complex event-driven waiting mechanisms"
+      ],
+      "files_affected": [
+        "src/integrations/prefect-shell/tests/test_commands.py"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Fix context propagation in synchronous shell output threads",
+      "description": "Preserve logging context in stdout/stderr reader threads to ensure shell command output logs maintain flow/task metadata when sent to the API",
+      "files_to_modify": [
+        "src/integrations/prefect-shell/prefect_shell/commands.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-002",
+      "title": "Add API integration test for sync streaming logs",
+      "description": "Create regression test that verifies synchronous shell operations send incremental logs to the API with proper metadata preservation",
+      "files_to_modify": [
+        "src/integrations/prefect-shell/tests/test_commands.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    }
+  ],
+  "implementation_summary": "The changes address a critical issue where synchronous shell operations in the prefect-shell integration were losing logging context when capturing stdout/stderr in separate threads. Previously, reader threads spawned to capture subprocess output didn't inherit the flow/task metadata context, causing logs to either buffer until process exit or lose metadata entirely.\n\nThe core fix uses Python's contextvars.copy_context() to capture the current logging context before spawning each reader thread. Each thread (stdout and stderr) gets its own independent context copy, which is then executed via Context.run(). This preserves the active flow-run context, ensuring logs sent to the API contain proper metadata like flow_run_id and task_run_id.\n\nA comprehensive regression test was added to verify the fix works end-to-end. The test enables API logging, runs a shell operation with mixed stdout/stderr output, and polls the API to verify logs arrive incrementally with the expected messages and metadata patterns. The test helper wait_for_flow_run_logs implements robust polling with timeout to handle asynchronous log propagation. This ensures the fix not only preserves context but also maintains the incremental streaming behavior rather than buffering logs until process completion.",
+  "source_pr": "https://github.com/PrefectHQ/prefect/pull/21056",
+  "before_sha": "481bc37f4fb6a8e536e2b8cb877a85cf3c24efa9",
+  "after_sha": "50aef2cffa12e3236633c50b5506d366d220977a",
+  "diff_stats": {
+    "additions": 76,
+    "deletions": 5,
+    "files_changed": 2
+  }
+}

@@ -1,0 +1,689 @@
+diff --git a/apps/www/.env.local.example b/apps/www/.env.local.example
+index b2c47601c2fdf..9300dad637644 100644
+--- a/apps/www/.env.local.example
++++ b/apps/www/.env.local.example
+@@ -6,9 +6,13 @@ MISC_USE_SERVICE_ROLE_KEY=secret
+ NEXT_PUBLIC_API_URL=http://localhost:8080/platform
+ NEXT_PUBLIC_DESIGN_SYSTEM_URL=http://localhost:3003
+ NEXT_PUBLIC_DOCS_URL=http://localhost:3005
++NEXT_PUBLIC_ENVIRONMENT=local
+ NEXT_PUBLIC_HCAPTCHA_SITE_KEY=10000000-ffff-ffff-ffff-000000000001
++NEXT_PUBLIC_IS_PLATFORM=true
+ NEXT_PUBLIC_MISC_USE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9idWxkYW5ycHRsb2t0eGNmZnZuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3MTg2MTQ2ODUsImV4cCI6MjAzNDE5MDY4NX0.NFt49g6DFkc1X5khCzN5p01iAVo2TMxlx88cY1V0E2M
+ NEXT_PUBLIC_MISC_USE_URL=https://obuldanrptloktxcffvn.supabase.co
++NEXT_PUBLIC_POSTHOG_HOST=https://ph.supabase.green
++NEXT_PUBLIC_POSTHOG_KEY=your-posthog-key-here
+ NEXT_PUBLIC_REFERENCE_DOCS_URL=https://localhost:3010
+ NEXT_PUBLIC_STUDIO_URL=http://localhost:8082
+ NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhndWloeHV6cWlid3hqbmlteGV2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE2NzUwOTQ4MzUsImV4cCI6MTk5MDY3MDgzNX0.0PMlOxtKL4O9GGZuAP_Xl4f-Tut1qOnW4bNEmAtoB8w
+diff --git a/apps/www/app/pricing/PricingContent.tsx b/apps/www/app/pricing/PricingContent.tsx
+index 56ec66b8390e3..9402a4ec3fcba 100644
+--- a/apps/www/app/pricing/PricingContent.tsx
++++ b/apps/www/app/pricing/PricingContent.tsx
+@@ -1,16 +1,23 @@
+ 'use client'
+ 
+ import { ArrowDownIcon } from '@heroicons/react/outline'
++import DefaultLayout from '~/components/Layouts/Default'
++import PricingPlans from '~/components/Pricing/PricingPlans'
++import { useOrganizations } from '~/data/organizations'
++import { hasConsented, posthogClient } from 'common'
+ import { ArrowUpRight } from 'lucide-react'
+ import dynamic from 'next/dynamic'
+ import { usePathname } from 'next/navigation'
+-import { useEffect } from 'react'
++import { useEffect, useState } from 'react'
+ import { Button } from 'ui'
++import { InfoTooltip } from 'ui-patterns/info-tooltip'
+ 
+-import DefaultLayout from '~/components/Layouts/Default'
+-import PricingPlans from '~/components/Pricing/PricingPlans'
+-import { useOrganizations } from '~/data/organizations'
++const EXPERIMENT_ID = 'pricingCalculatorExperiment' as const
++type PricingCalculatorVariant = 'control' | 'test'
+ 
++const NewPricingComputeSection = dynamic(
++  () => import('~/components/Pricing/NewPricingComputeSection')
++)
+ const PricingComputeSection = dynamic(() => import('~/components/Pricing/PricingComputeSection'))
+ const PricingAddons = dynamic(() => import('~/components/Pricing/PricingAddons'))
+ const PricingComparisonTable = dynamic(() => import('~/components/Pricing/PricingComparisonTable'))
+@@ -45,6 +52,30 @@ export default function PricingContent() {
+   const { isLoading, organizations } = useOrganizations()
+   const hasExistingOrganizations = !isLoading && organizations.length > 0
+ 
++  // Pricing calculator A/B experiment
++  // Uses client-side PostHog directly — server-side evaluation lacks full person context for www pages.
++  // DevToolbar overrides (x-ph-flag-overrides cookie) are respected in local dev via posthogClient.getFeatureFlag.
++  const [flagValue, setFlagValue] = useState<PricingCalculatorVariant | false | undefined>(
++    () =>
++      posthogClient.getFeatureFlag(EXPERIMENT_ID) as PricingCalculatorVariant | false | undefined
++  )
++
++  useEffect(() => {
++    return posthogClient.onFeatureFlags(() => {
++      const value = posthogClient.getFeatureFlag(EXPERIMENT_ID)
++      setFlagValue(value as PricingCalculatorVariant | false | undefined)
++    })
++  }, [])
++
++  const isTestVariant = flagValue === 'test'
++  const isInExperiment = flagValue === 'control' || flagValue === 'test'
++
++  useEffect(() => {
++    if (!isInExperiment) return
++
++    posthogClient.captureExperimentExposure(EXPERIMENT_ID, { variant: flagValue }, hasConsented())
++  }, [isInExperiment, flagValue])
++
+   return (
+     <DefaultLayout>
+       <div className="relative z-10 pt-8 pb-4 xl:py-16">
+@@ -88,7 +119,27 @@ export default function PricingContent() {
+         id="addon-compute"
+         className="container relative mx-auto px-4 lg:px-12 pt-16 md:pt-24 lg:pt-32 lg:pb-16"
+       >
+-        <PricingComputeSection />
++        {isTestVariant && (
++          <div className="text-center mb-8 lg:mb-16">
++            <h2 className="text-foreground text-3xl" id="how-compute-pricing-works">
++              How compute pricing works
++            </h2>
++            <p className="text-foreground-light mt-4 text-lg mb-4">
++              Choose a plan, add projects, and see your total cost
++            </p>
++            <div className="flex items-center justify-center gap-1">
++              <span className="py-1 px-3 bg-surface-100 flex items-center gap-1 border rounded-full text-xs text-foreground-lighter">
++                What is &ldquo;compute&rdquo;?
++                <InfoTooltip side="bottom" className="max-w-[280px]">
++                  Think of compute as the computer your database runs on. As your app grows, you
++                  scale CPU and memory to handle more traffic and data.
++                </InfoTooltip>
++              </span>
++            </div>
++          </div>
++        )}
++
++        {isTestVariant ? <NewPricingComputeSection /> : <PricingComputeSection />}
+       </div>
+ 
+       <div
+diff --git a/apps/www/components/Pricing/NewComputePricingCalculator.tsx b/apps/www/components/Pricing/NewComputePricingCalculator.tsx
+new file mode 100644
+index 0000000000000..fc5c30be38a96
+--- /dev/null
++++ b/apps/www/components/Pricing/NewComputePricingCalculator.tsx
+@@ -0,0 +1,209 @@
++import pricingAddOn from '~/data/PricingAddOnTable.json'
++import { Plus, Trash2 } from 'lucide-react'
++import { useEffect, useState } from 'react'
++import { Button, cn, Slider_Shadcn_ } from 'ui'
++import { ComputeBadge } from 'ui-patterns/ComputeBadge'
++import { InfoTooltip } from 'ui-patterns/info-tooltip'
++
++const findInstanceValueByColumn = (instance: any, column: string) =>
++  instance.columns?.find((col: any) => col.key === column)?.value
++
++const parsePrice = (price: string) => {
++  const n = parseInt(price?.toString().replace('$', '').replace(',', ''), 10)
++  return Number.isNaN(n) ? 0 : n
++}
++
++interface ComputePricingCalculatorProps {
++  activePlan?: {
++    name: string
++    price: number
++  }
++}
++
++const NewComputePricingCalculator = ({
++  activePlan = { name: 'Pro', price: 25 },
++}: ComputePricingCalculatorProps) => {
++  // Filter out rows with no specific pricing
++  const computeInstances = pricingAddOn.database.rows.filter((row) =>
++    row.columns.some((it) => it.key === 'pricing' && it.value !== 'Contact Us')
++  )
++  const priceSteps = computeInstances.map((instance) =>
++    parsePrice(findInstanceValueByColumn(instance, 'pricing'))
++  )
++  // Base discount credits that come with every paid plan
++  const COMPUTE_CREDITS = 10
++
++  const [activeInstances, setActiveInstances] = useState([{ ...computeInstances[0], position: 0 }])
++  // Final calculated price: plan cost + compute aggregate - compute credits
++  const [activePrice, setActivePrice] = useState(activePlan.price + priceSteps[0] - COMPUTE_CREDITS)
++  const [hasInteractedWithSlider, setHasInteractedWithSlider] = useState(false)
++
++  const handleUpdateInstance = (position: number, value: number[]) => {
++    setHasInteractedWithSlider(true)
++    const newArray = activeInstances.map((activeInstance) => {
++      // only update the instance corresponding to the correct slider
++      if (activeInstance.position === position) {
++        return { ...computeInstances[value[0] - 1], position }
++      } else {
++        return activeInstance
++      }
++    })
++
++    setActiveInstances(newArray)
++  }
++
++  const calculateComputeAggregate = (price: number) => {
++    return activeInstances.reduce(
++      (acc, activeInstance: any) =>
++        acc + parsePrice(findInstanceValueByColumn(activeInstance, 'pricing')),
++      price
++    )
++  }
++
++  useEffect(() => {
++    const computeAggregate = calculateComputeAggregate(0)
++    setActivePrice(Math.max(0, computeAggregate + activePlan.price - COMPUTE_CREDITS))
++  }, [activeInstances, activePlan])
++
++  const removeInstance = (position: number) => {
++    const newArray = activeInstances
++      .filter((activeInstance) => activeInstance.position !== position)
++      .map((instance, index) => ({ ...instance, position: index }))
++
++    setActiveInstances(newArray)
++  }
++
++  const findSliderComputeValue = (activeInstance: any) => {
++    // find index of compute based on active compute name
++    const selectedCompute = computeInstances
++      .map((compute) => findInstanceValueByColumn(compute, 'plan'))
++      .indexOf(findInstanceValueByColumn(activeInstance, 'plan'))
++
++    return [selectedCompute + 1]
++  }
++
++  return (
++    <div className="flex flex-col lg:grid grid-cols-4 gap-4 border border-strong rounded-xl p-4">
++      <div className="flex flex-col text-lighter leading-4 text-xs w-full gap-4">
++        <div>
++          <p className="text-foreground-light text-xs mb-2">Monthly estimate:</p>
++          <div className="flex flex-col gap-1 text-lighter text-right leading-4 w-full border-b pb-1 mb-1">
++            <div className="flex items-center justify-between">
++              <span className="text-foreground-muted">Plan subscription</span>
++              <span className="text-light font-mono" translate="no">
++                ${activePlan.price}
++              </span>
++            </div>
++            <div className="flex items-center justify-between">
++              <span className="text-foreground-muted">Total Compute</span>
++              <span className="text-light font-mono">${calculateComputeAggregate(0)}</span>
++            </div>
++            <div className="flex items-center justify-between">
++              <span className="text-foreground-muted">Compute Credits</span>
++              <span className="text-light font-mono" translate="no">
++                - ${COMPUTE_CREDITS}
++              </span>
++            </div>
++          </div>
++          <div className="flex items-center gap-1 w-full justify-between">
++            <span>Total</span>
++            <span className="text-foreground font-mono flex items-center gap-1">
++              <InfoTooltip side="top" className="max-w-[250px]">
++                This estimate only includes Plan and Compute add-on monthly costs. Other resources
++                might incur additional costs in the final invoice.
++              </InfoTooltip>
++              ${activePrice}
++            </span>
++          </div>
++        </div>
++      </div>
++      <div className="flex flex-col gap-2 col-span-3 items-start flex-1 w-full lg:w-auto lg:border-l lg:pl-4">
++        <div
++          className={cn(
++            'w-full flex flex-col items-start gap-y-2',
++            activeInstances.length === 1 && 'border-none'
++          )}
++        >
++          {activeInstances.map((activeInstance, index) => (
++            <div
++              className="group w-full flex flex-col gap-3 p-3 bg-surface-200 rounded border"
++              key={`instance-${index}`}
++            >
++              <div className="w-full flex justify-between items-center">
++                <div className="flex items-center gap-2">
++                  <ComputeBadge
++                    infraComputeSize={findInstanceValueByColumn(activeInstance, 'plan')}
++                  />
++                  <p className="text-xs text-foreground-lighter">
++                    Project {activeInstance.position + 1}
++                  </p>
++                </div>
++                <span className="leading-3 text-sm" translate="no">
++                  {findInstanceValueByColumn(activeInstance, 'pricing')}
++                </span>
++              </div>
++              <div className="w-full relative">
++                {!hasInteractedWithSlider && (
++                  <label className="absolute -top-2 left-6 text-xs text-foreground-muted pointer-events-none bg-surface-300 px-1 py-0.5 rounded-md z-10 flex items-center gap-1">
++                    Drag to adjust
++                  </label>
++                )}
++                <Slider_Shadcn_
++                  onValueChange={(value) => handleUpdateInstance(activeInstance.position, value)}
++                  value={findSliderComputeValue(activeInstance)}
++                  min={1}
++                  key={`${index}-${activeInstance.position}`}
++                  max={priceSteps.length}
++                  step={1}
++                  className={cn(
++                    'w-full cursor-grab active:cursor-grabbing',
++                    !hasInteractedWithSlider && "[&_[data-slot='slider-thumb']]:animate-pulse"
++                  )}
++                />
++              </div>
++              <div className="flex items-center justify-between text-sm">
++                <div className="w-full flex items-center gap-2">
++                  <span className="text-lighter text-xs md:text-[13px]">
++                    {findInstanceValueByColumn(activeInstance, 'memory')} RAM /{' '}
++                    {findInstanceValueByColumn(activeInstance, 'cpu')} CPU / Connections: Direct{' '}
++                    {findInstanceValueByColumn(activeInstance, 'directConnections')}, Pooler{' '}
++                    {findInstanceValueByColumn(activeInstance, 'poolerConnections')}
++                  </span>
++                </div>
++                <div className="flex items-center gap-2">
++                  {activeInstances.length > 1 && (
++                    <button
++                      aria-label="Remove item"
++                      title="Remove item"
++                      className="p-1 text-lighter hover:text-foreground rounded opacity-0 group-hover:opacity-100 transition-opacity"
++                      onClick={() => removeInstance(activeInstance.position)}
++                    >
++                      <Trash2 className="w-3 h-3" />
++                    </button>
++                  )}
++                </div>
++              </div>
++            </div>
++          ))}
++        </div>
++        <div className="text-right w-full">
++          <Button
++            size="tiny"
++            type="primary"
++            icon={<Plus />}
++            onClick={() => {
++              setActiveInstances([
++                ...activeInstances,
++                { ...computeInstances[0], position: activeInstances.length },
++              ])
++            }}
++          >
++            <span className="text-left">Add Project</span>
++          </Button>
++        </div>
++      </div>
++    </div>
++  )
++}
++
++export default NewComputePricingCalculator
+diff --git a/apps/www/components/Pricing/NewPricingComputeSection.tsx b/apps/www/components/Pricing/NewPricingComputeSection.tsx
+new file mode 100644
+index 0000000000000..c180ac11a24bf
+--- /dev/null
++++ b/apps/www/components/Pricing/NewPricingComputeSection.tsx
+@@ -0,0 +1,205 @@
++import { ChevronDownIcon } from '@heroicons/react/outline'
++import Link from 'next/link'
++import React, { useEffect, useRef, useState } from 'react'
++import { useWindowSize } from 'react-use'
++import { plans as allPlans } from 'shared-data/plans'
++import { Button, cn } from 'ui'
++import { InfoTooltip } from 'ui-patterns/info-tooltip'
++import { ToggleGroup, ToggleGroupItem } from 'ui/src/components/shadcn/ui/toggle-group'
++
++import Panel from '../Panel'
++import ComputePricingTable from './ComputePricingTable'
++import NewComputePricingCalculator from './NewComputePricingCalculator'
++import PricingComputeAnimation from './PricingComputeAnimation'
++
++const plans = allPlans
++  .filter((plan) => plan.planId === 'pro' || plan.planId === 'team')
++  .map((plan) => ({
++    name: plan.name,
++    price: plan.priceMonthly as number,
++  }))
++
++const NewPricingComputeSection = () => {
++  const ref = useRef<HTMLDivElement>(null)
++  const [showTable, setShowTable] = useState(false)
++  const { width } = useWindowSize()
++  const [height, setHeight] = useState(ref?.current?.clientHeight)
++  const [activePlan, setActivePlan] = useState(plans[0])
++
++  useEffect(() => {
++    setHeight(ref?.current?.clientHeight)
++  }, [width])
++
++  return (
++    <Panel outerClassName="w-full mx-auto max-w-6xl" innerClassName="flex flex-col">
++      <div className="flex flex-col xl:grid xl:grid-cols-3 xl:gap-4">
++        <div className="p-4 pb-0 lg:p-8 gap-4 flex flex-col">
++          <div className="mb-4 grid gap-1">
++            <h3 className="text-foreground-light text-lg">1. Choose your plan</h3>
++          </div>
++          <ToggleGroup
++            type="single"
++            value={activePlan.name}
++            onValueChange={(value) => {
++              const selectedPlan = plans.find((p) => p.name === value)
++              if (selectedPlan) setActivePlan(selectedPlan)
++            }}
++            className="grid grid-cols-2 gap-2 w-full bg-surface-200 rounded-md"
++          >
++            {plans.map((plan) => (
++              <ToggleGroupItem
++                key={plan.name}
++                value={plan.name}
++                className={cn(
++                  'w-full h-6 ',
++                  activePlan.name === plan.name
++                    ? 'bg-surface-200 text-foreground data-[state=on]:bg-surface-400 data-[state=on]:text-foreground'
++                    : 'hover:bg-surface-200'
++                )}
++              >
++                {plan.name}
++              </ToggleGroupItem>
++            ))}
++          </ToggleGroup>
++
++          <div className="grid gap-3">
++            <h3 className="text-foreground text-2xl font-medium">{activePlan.name}</h3>
++            <div className="grid gap-1">
++              <p className="text-foreground text-lg">
++                <span className="font-mono font-bold">${activePlan.price}</span>
++                <span className="text-foreground-light text-sm">/month </span>
++              </p>
++            </div>
++            <div className="grid gap-2 text-sm">
++              {activePlan.name === 'Pro' && (
++                <>
++                  <p className="text-foreground-light font-medium">
++                    Everything in the Free Plan, plus:
++                  </p>
++                  <p className="text-foreground-light">100K monthly active users</p>
++                  <p className="text-foreground-light">8 GB disk size per project</p>
++                  <p className="text-foreground-light">250 GB bandwidth</p>
++                  <p className="text-foreground-light">Daily backups (7 day retention)</p>
++                  <p className="text-foreground-light">Email support</p>
++                </>
++              )}
++              {activePlan.name === 'Team' && (
++                <>
++                  <p className="text-foreground-light font-medium">
++                    Everything in the Pro Plan, plus:
++                  </p>
++                  <p className="text-foreground-light">SOC2</p>
++                  <p className="text-foreground-light">Project-scoped and read-only access</p>
++                  <p className="text-foreground-light">HIPAA available as paid add-on</p>
++                  <p className="text-foreground-light">SSO for Supabase Dashboard</p>
++                  <p className="text-foreground-light">Priority email support & SLAs</p>
++                  <p className="text-foreground-light">Daily backups (14 day retention)</p>
++                </>
++              )}
++              <p className="text-foreground-lighter text-xs mt-2">
++                Paid plans include $10/mo in compute credits, enough to cover one Micro instance.
++              </p>
++            </div>
++          </div>
++        </div>
++        <div className="relative col-span-2 h-full w-full p-4 lg:p-8">
++          <h3 className="text-foreground-light text-lg mb-2">
++            2. Configure compute for your projects
++          </h3>
++          <p className="text-foreground-lighter text-xs mb-6">
++            Add projects and adjust compute to estimate your monthly cost.
++          </p>
++
++          <NewComputePricingCalculator activePlan={activePlan} />
++        </div>
++      </div>
++      <hr className="border-0 border-t" />
++      <div className="flex flex-col">
++        <div className="flex gap-2 p-6 justify-between items-center mt-2">
++          <div className="grid gap-2">
++            <p>
++              <span className="border bg-alternative px-3 py-0.5 text-foreground text-sm rounded-full">
++                Starts from <span translate="no">$10</span>/month
++              </span>
++            </p>
++            <h3 className="text-foreground text-2xl">
++              Scale compute up to
++              <br className="hidden sm:block" /> 64 cores and 256 GB RAM
++            </h3>
++          </div>
++
++          <Button asChild size="tiny" type="default">
++            <Link href="https://supabase.com/docs/guides/platform/compute-add-ons">
++              Learn about Compute add-ons
++            </Link>
++          </Button>
++        </div>
++        <div
++          className="relative w-full overflow-hidden transition-all !ease-[cubic-bezier(.76,0,.23,1)] duration-300"
++          style={{ height: showTable ? `${height}px` : '200px' }}
++        >
++          <div
++            className={cn(
++              'absolute inset-0 top-auto w-full h-40 bg-gradient-to-t from-background-surface-100 z-20 to-transparent transition-opacity pointer-events-none not-sr-only',
++              showTable ? 'opacity-0 delay-200' : 'opacity-100'
++            )}
++          />
++          <div ref={ref}>
++            <ComputePricingTable />
++
++            <div className="grid lg:grid-cols-2 gap-4 md:gap-8 mt-4 md:mt-0 border-t">
++              <div className="max-w-4xl prose p-4 md:p-8 relative z-10">
++                <h4 className="text-lg">Choose the best compute size for you</h4>
++                <p className="text-[13px] text-foreground-lighter">
++                  Every project on the Supabase Platform comes with its own dedicated Postgres
++                  instance. Select the compute size that fits your needs.
++                </p>
++                <p className="text-[13px] text-foreground-lighter">
++                  Compute instances are billed hourly and you can scale up or down at any time. Paid
++                  Plans come with <span translate="no">$10</span>/month in compute credits to cover
++                  one Micro instance or offset the cost of any other instance.
++                </p>
++                <p className="text-[13px] text-foreground-lighter">
++                  Read more on{' '}
++                  <Link
++                    href="https://supabase.com/docs/guides/platform/manage-your-usage/compute"
++                    target="_blank"
++                    className="transition text-brand hover:text-brand-600"
++                  >
++                    usage-based billing for compute
++                  </Link>{' '}
++                  or{' '}
++                  <Link
++                    href="https://supabase.com/docs/guides/platform/compute-add-ons"
++                    target="_blank"
++                    className="transition text-brand hover:text-brand-600"
++                  >
++                    Compute Add-ons
++                  </Link>
++                  .
++                </p>
++              </div>
++              <div className="relative -mt-8 lg:mt-0 z-0">
++                <PricingComputeAnimation />
++              </div>
++            </div>
++          </div>
++        </div>
++        <button
++          onClick={() => setShowTable(!showTable)}
++          className="w-full p-2 border-t border-muted text-foreground focus-visible:outline-brand-600 focus-visible:rounded-b-xl text-sm bg-alternative flex items-center justify-center gap-2"
++        >
++          <ChevronDownIcon
++            className={cn(
++              'w-4 transition-transform transform origin-center',
++              showTable ? 'rotate-180' : 'rotate-0'
++            )}
++          />{' '}
++          {!showTable ? 'Expand' : 'Hide'} Pricing breakdown
++        </button>
++      </div>
++    </Panel>
++  )
++}
++
++export default NewPricingComputeSection
+diff --git a/apps/www/public/rss.xml b/apps/www/public/rss.xml
+index 5092c77217f57..18f8f9cccd056 100644
+--- a/apps/www/public/rss.xml
++++ b/apps/www/public/rss.xml
+@@ -13,6 +13,13 @@
+   <description>Supabase Pro users can now send their Supabase logs to their own logging backend, enabling them to debug in the same place as the rest of their stack.</description>
+   <pubDate>Thu, 05 Mar 2026 00:00:00 -0700</pubDate>
+ </item>
++<item>
++  <guid>https://supabase.com/blog/supabase-storage-performance-security-reliability-updates</guid>
++  <title>Supabase Storage: major performance, security, and reliability updates</title>
++  <link>https://supabase.com/blog/supabase-storage-performance-security-reliability-updates</link>
++  <description>Storage ships a rewritten object listing system, path traversal prevention, idempotent migrations, OpenTelemetry metrics, and fixes for the most common reliability issues.</description>
++  <pubDate>Thu, 05 Mar 2026 00:00:00 -0700</pubDate>
++</item>
+ <item>
+   <guid>https://supabase.com/blog/supabase-incident-on-february-12-2026</guid>
+   <title>Supabase incident on February 12, 2026</title>
+diff --git a/packages/common/posthog-client.ts b/packages/common/posthog-client.ts
+index 24284840a0294..acff08b0b9ee4 100644
+--- a/packages/common/posthog-client.ts
++++ b/packages/common/posthog-client.ts
+@@ -33,6 +33,7 @@ class PostHogClient {
+   private config: PostHogClientConfig
+   private readonly maxPendingEvents = MAX_PENDING_EVENTS
+   private devListeners: Set<ClientTelemetryListener> = new Set()
++  private pendingFeatureFlagCallbacks: Set<() => void> = new Set()
+ 
+   constructor(config: PostHogClientConfig = {}) {
+     const apiHost =
+@@ -107,6 +108,10 @@ class PostHogClient {
+ 
+     this.initStarted = true
+     posthog.init(this.config.apiKey, config)
++
++    // Register any feature flag callbacks that were queued before init
++    this.pendingFeatureFlagCallbacks.forEach((cb) => posthog.onFeatureFlags(cb))
++    this.pendingFeatureFlagCallbacks.clear()
+   }
+ 
+   capturePageView(properties: Record<string, any>, hasConsent: boolean = true) {
+@@ -247,6 +252,52 @@ class PostHogClient {
+     return undefined
+   }
+ 
++  /**
++   * Returns a PostHog feature flag value directly from the client-side SDK.
++   * Use this for www/docs pages where server-side evaluation lacks full person context.
++   * In local dev, DevToolbar overrides (x-ph-flag-overrides cookie) take priority.
++   */
++  getFeatureFlag(key: string): string | boolean | undefined {
++    if (typeof document === 'undefined') return undefined
++
++    if (process.env.NODE_ENV === 'development') {
++      try {
++        const cookieEntry = document.cookie
++          .split(';')
++          .map((c) => c.trim())
++          .find((c) => c.startsWith('x-ph-flag-overrides='))
++        if (cookieEntry) {
++          const overrides = JSON.parse(
++            decodeURIComponent(cookieEntry.substring('x-ph-flag-overrides='.length))
++          )
++          if (key in overrides) return overrides[key]
++        }
++      } catch {}
++    }
++
++    if (!this.initialized) return undefined
++
++    try {
++      return posthog.getFeatureFlag(key)
++    } catch {
++      return undefined
++    }
++  }
++
++  /**
++   * Subscribe to PostHog feature flag loads/reloads.
++   * Returns an unsubscribe function.
++   */
++  onFeatureFlags(callback: () => void): () => void {
++    if (!this.initStarted) {
++      // Queue until init() is called
++      this.pendingFeatureFlagCallbacks.add(callback)
++      return () => this.pendingFeatureFlagCallbacks.delete(callback)
++    }
++    if (typeof posthog.onFeatureFlags !== 'function') return () => {}
++    return posthog.onFeatureFlags(callback) ?? (() => {})
++  }
++
+   /**
+    * Returns PostHog's session_id for the current session.
+    * Returns undefined until PostHog's `loaded` callback fires.
+diff --git a/packages/common/telemetry-constants.ts b/packages/common/telemetry-constants.ts
+index 4eb26581df46f..fffc6a4eede3a 100644
+--- a/packages/common/telemetry-constants.ts
++++ b/packages/common/telemetry-constants.ts
+@@ -2675,6 +2675,27 @@ export interface RlsEventTriggerBannerCreateButtonClickedEvent {
+   groups: TelemetryGroups
+ }
+ 
++/**
++ * User was exposed to the pricing calculator experiment on the /pricing page.
++ *
++ * @group Events
++ * @source www
++ * @page /pricing
++ */
++export interface PricingCalculatorExperimentExposedEvent {
++  action: 'pricing_calculator_experiment_exposed'
++  properties: {
++    /**
++     * Experiment identifier for tracking
++     */
++    experiment_id: 'pricingCalculatorExperiment'
++    /**
++     * Experiment variant: 'control' (existing compute section) or 'test' (new compute section)
++     */
++    variant: 'control' | 'test'
++  }
++}
++
+ /**
+  * User clicked the Run button in the log explorer.
+  *
+@@ -2842,3 +2863,4 @@ export type TelemetryEvent =
+   | IntegrationInstallFailedEvent
+   | IntegrationUninstallCompletedEvent
+   | RlsEventTriggerBannerCreateButtonClickedEvent
++  | PricingCalculatorExperimentExposedEvent
+diff --git a/packages/shared-data/plans.ts b/packages/shared-data/plans.ts
+index b32860d63c559..82a20684e1d24 100644
+--- a/packages/shared-data/plans.ts
++++ b/packages/shared-data/plans.ts
+@@ -50,7 +50,7 @@ export const plans: PricingInformation[] = [
+     costUnit: '/ month',
+     href: 'https://supabase.com/dashboard/new?plan=pro',
+     priceLabel: 'From',
+-    warning: '$10 in compute credits included',
++    warning: 'Includes one project running on Micro compute.',
+     priceMonthly: 25,
+     description: 'For production applications with the power to scale.',
+     features: [
+@@ -75,7 +75,7 @@ export const plans: PricingInformation[] = [
+     costUnit: '/ month',
+     href: 'https://supabase.com/dashboard/new?plan=team',
+     priceLabel: 'From',
+-    warning: '$10 in compute credits included',
++    warning: 'Includes one project running on Micro compute.',
+     priceMonthly: 599,
+     description: 'Add features such as SSO, control over backups, and industry certifications.',
+     features: [

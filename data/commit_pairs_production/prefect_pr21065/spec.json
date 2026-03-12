@@ -1,0 +1,13 @@
+{
+  "feature_name": "Concurrency Lease Renewal Retry Logic",
+  "description": "Add retry logic to the concurrency lease renewal loop to handle transient failures gracefully. Currently, a single network or server error causes the renewal loop to crash permanently, which terminates flow runs. Implement retry mechanisms with exponential backoff to maintain lease continuity during temporary issues.",
+  "functional_requirements": [
+    "Wrap the lease renewal function with the existing `retry_async_fn` decorator to automatically retry failed renewal attempts",
+    "Configure the retry logic to allow up to 3 consecutive failures per renewal attempt before propagating the error",
+    "Implement exponential backoff between retry attempts to prevent overwhelming the server during transient issues",
+    "Enhance failure logging to include `exc_info` in error messages, providing users with diagnostic information for troubleshooting renewal failures",
+    "Ensure the retry logic only applies to the lease renewal operation and doesn't affect other concurrency management functions"
+  ],
+  "project_name": "prefect",
+  "source_pr": "https://github.com/PrefectHQ/prefect/pull/21065"
+}

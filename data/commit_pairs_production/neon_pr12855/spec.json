@@ -1,0 +1,14 @@
+{
+  "feature_name": "GCS JSON API Bytes Range Support",
+  "description": "Implement bytes range header support for the GCS JSON API interface in the remote storage module. This will enable partial object reads from Google Cloud Storage, which is required for SafeKeeper WAL backup operations that need to read specific segments of stored objects.",
+  "functional_requirements": [
+    "Add bytes range parameter support to the GCS JSON API client's read_object method",
+    "Ensure the implementation properly formats and sends HTTP Range headers according to GCS API specifications",
+    "Handle HTTP 206 Partial Content responses from GCS when reading byte ranges",
+    "Maintain backward compatibility for full object reads when no range is specified",
+    "Add appropriate error handling for invalid range requests and GCS API errors",
+    "Include integration tests to verify byte range functionality works correctly with real GCS"
+  ],
+  "project_name": "neon",
+  "source_pr": "https://github.com/neondatabase/neon/pull/12855"
+}

@@ -1,0 +1,100 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "ui_component_design",
+      "recommendation": "Modified the RelationshipFilter component to support multi-select based on operator rather than just hasMany property. Introduced a new isMultiValue variable that checks both hasMany and operator values ('in' or 'not_in').",
+      "rationale": "The previous implementation only allowed multi-select when hasMany was true, which was inconsistent with how select fields work. This change aligns relationship field behavior with select fields where multi-select is determined by the operator. The isMultiValue variable centralizes this logic and makes the component more flexible.",
+      "alternatives_considered": [
+        "Creating separate components for hasMany and operator-based multi-select",
+        "Adding a new prop to explicitly control multi-select behavior",
+        "Keeping the existing behavior and only documenting the limitation"
+      ],
+      "files_affected": [
+        "packages/ui/src/elements/WhereBuilder/Condition/Relationship/index.tsx"
+      ]
+    },
+    {
+      "dimension": "api_design",
+      "recommendation": "Updated field-type validation logic to handle polymorphic relationships correctly by restricting 'in' and 'not_in' operators for polymorphic fields.",
+      "rationale": "Polymorphic relationships store structured objects with both 'relationTo' and 'value' properties. The 'in' and 'not_in' operators would only match the 'value' property, not both properties, which could lead to incorrect filtering. This maintains data integrity while allowing the new multi-select feature for monomorphic relationships.",
+      "alternatives_considered": [
+        "Allowing 'in' and 'not_in' for polymorphic relationships with special handling",
+        "Creating separate operators for polymorphic vs monomorphic relationships",
+        "Modifying the data structure to support array filtering for polymorphic relationships"
+      ],
+      "files_affected": [
+        "packages/ui/src/elements/WhereBuilder/field-types.tsx"
+      ]
+    },
+    {
+      "dimension": "testing_strategy",
+      "recommendation": "Enhanced test utilities to handle array values in filter inputs and added comprehensive end-to-end tests for the new multi-select functionality.",
+      "rationale": "The addListFilter helper needed to support both single and array values to properly test the new feature. Added tests specifically for 'is in' operator with hasMany: false fields and multiple value filtering. This ensures the feature works correctly across different relationship configurations.",
+      "alternatives_considered": [
+        "Only testing the UI component in isolation",
+        "Relying on existing tests without modification",
+        "Creating separate test suites for different relationship types"
+      ],
+      "files_affected": [
+        "test/__helpers/e2e/filters/addListFilter.ts",
+        "test/fields-relationship/e2e.spec.ts"
+      ]
+    },
+    {
+      "dimension": "type_safety",
+      "recommendation": "Updated TypeScript type definitions to include the new collections widget interface and ensure proper typing for the enhanced filter functionality.",
+      "rationale": "The payload-types.ts file needed to be regenerated to include the new collections_widget interface and ensure all type definitions are up-to-date with the schema changes. This maintains TypeScript safety across the codebase.",
+      "alternatives_considered": [
+        "Not updating type definitions and relying on implicit typing",
+        "Creating partial type updates",
+        "Using type assertions instead of proper interface updates"
+      ],
+      "files_affected": [
+        "test/fields-relationship/payload-types.ts"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Relationship Filter Multi-Select Enhancement",
+      "description": "Update relationship filter UI to support multi-select for 'in' and 'not_in' operators regardless of hasMany configuration",
+      "files_to_modify": [
+        "packages/ui/src/elements/WhereBuilder/Condition/Relationship/index.tsx",
+        "packages/ui/src/elements/WhereBuilder/field-types.tsx"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-002",
+      "title": "Test Infrastructure Updates",
+      "description": "Update test utilities and add comprehensive end-to-end tests for the new multi-select functionality",
+      "files_to_modify": [
+        "test/__helpers/e2e/filters/addListFilter.ts",
+        "test/fields-relationship/e2e.spec.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-003",
+      "title": "Type Definition Maintenance",
+      "description": "Update TypeScript type definitions to reflect schema changes and ensure type safety",
+      "files_to_modify": [
+        "test/fields-relationship/payload-types.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation enhances relationship field filtering in Payload CMS by allowing multi-select functionality for 'in' and 'not_in' operators, regardless of whether the relationship field is configured as hasMany. Previously, only hasMany: true relationship fields supported multi-select, which created an inconsistency compared to select fields.\n\nThe core change introduces an `isMultiValue` variable in the RelationshipFilter component that checks both the `hasMany` property and the current operator. When the operator is 'in' or 'not_in', the component enables multi-select mode, allowing users to filter by multiple values even on hasMany: false relationship fields. This aligns relationship field behavior with how select fields already handle multi-select based on operator.\n\nSpecial consideration was given to polymorphic relationships (those with multiple `relationTo` collections), which continue to not support 'in' or 'not_in' operators. This is because polymorphic relationships store structured objects with both 'relationTo' and 'value' properties, and array operators would only match the 'value' property, potentially leading to incorrect filtering results. The test infrastructure was comprehensively updated to handle array values in filter inputs, and new end-to-end tests verify the functionality works correctly across different relationship configurations.",
+  "source_pr": "https://github.com/payloadcms/payload/pull/15886",
+  "before_sha": "43d5596a4e259024a216a52d133f57c0bfaa1936",
+  "after_sha": "f71ef61e73b4bcfab7ce2981b315683194f0c6c2",
+  "diff_stats": {
+    "additions": 133,
+    "deletions": 36,
+    "files_changed": 5
+  }
+}

@@ -1,0 +1,100 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "state_management",
+      "recommendation": "Added dirty-to-clean transition detection in Buffer::did_edit() to trigger external change checks",
+      "rationale": "The fix leverages the existing dirty state tracking mechanism to detect when a buffer becomes clean (e.g., after undo). This is the natural point to check for external modifications because the buffer's content now matches what the user intended, and any divergence from disk should be resolved. The solution reuses the existing dirty state change events rather than creating a new monitoring system.",
+      "alternatives_considered": [
+        "Polling for file changes continuously",
+        "Adding a separate undo completion callback",
+        "Modifying the undo system directly to trigger reloads"
+      ],
+      "files_affected": [
+        "crates/language/src/buffer.rs"
+      ]
+    },
+    {
+      "dimension": "file_system_integration",
+      "recommendation": "Used saved_mtime comparison to detect external modifications during dirty period",
+      "rationale": "The buffer already tracks saved_mtime (the modification time when the buffer was last saved or loaded). By comparing this with the current disk state's mtime when the buffer becomes clean, we can detect if the file was modified externally while the buffer was dirty. This approach is efficient and race-condition resistant because it uses atomic timestamp comparisons rather than content hashing.",
+      "alternatives_considered": [
+        "Content hash comparison",
+        "File size comparison",
+        "Continuous diffing between buffer and disk"
+      ],
+      "files_affected": [
+        "crates/language/src/buffer.rs"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Added safety checks for DiskState::Present before attempting reload",
+      "rationale": "The implementation only triggers reloads for files that still exist on disk (DiskState::Present). This prevents errors when files are deleted externally while the buffer is dirty. The check ensures we don't attempt to reload missing files, which would cause crashes or unexpected behavior.",
+      "alternatives_considered": [
+        "Attempting to reload all files and catching exceptions",
+        "Creating placeholder content for deleted files",
+        "Prompting the user about missing files"
+      ],
+      "files_affected": [
+        "crates/language/src/buffer.rs"
+      ]
+    },
+    {
+      "dimension": "testing",
+      "recommendation": "Added integration test that simulates the exact race condition scenario",
+      "rationale": "The test creates a realistic scenario: user edits making buffer dirty, external tool modifies file, user undoes edits. This validates the complete flow including the interaction between dirty state tracking, file system notifications, and undo operations. The test uses FakeFs to simulate external file modifications without actual disk I/O, making it deterministic and fast.",
+      "alternatives_considered": [
+        "Unit testing individual components in isolation",
+        "Manual testing only",
+        "Relying on existing file change tests"
+      ],
+      "files_affected": [
+        "crates/project/tests/integration/project_tests.rs"
+      ]
+    },
+    {
+      "dimension": "event_system",
+      "recommendation": "Emitted BufferEvent::ReloadNeeded signal instead of directly reloading",
+      "rationale": "Using the existing event system allows other components (like the editor UI) to respond appropriately to the reload signal. This follows the established pattern in the codebase where buffer events drive UI updates. Direct reloading would bypass necessary coordination with other subsystems that might need to prepare for the reload.",
+      "alternatives_considered": [
+        "Directly calling reload methods",
+        "Adding a new callback system",
+        "Synchronously reloading within did_edit()"
+      ],
+      "files_affected": [
+        "crates/language/src/buffer.rs"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Implement dirty buffer reload detection after undo",
+      "description": "Add logic to detect when a buffer becomes clean after being dirty and check if the file was modified externally during that period, triggering a reload if needed",
+      "files_to_modify": [
+        "crates/language/src/buffer.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-002",
+      "title": "Add integration test for dirty buffer reload scenario",
+      "description": "Create a test that simulates the race condition where a file is modified externally while the buffer is dirty, then the user undoes their edits, verifying the buffer reloads from disk",
+      "files_to_modify": [
+        "crates/project/tests/integration/project_tests.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation addresses a subtle race condition where a buffer could become stale after undoing edits when the file was modified externally. The core change is in Buffer::did_edit() where we now detect when a buffer transitions from dirty to clean state. At this transition point, we check if the associated file's disk modification time differs from the saved_mtime (recorded when the buffer was last clean). If there's a mismatch and the file still exists, we emit a ReloadNeeded event.\n\nThis approach is elegant because it leverages existing state tracking mechanisms rather than adding new monitoring systems. The dirty state management already exists for tracking unsaved changes, and the mtime comparison is a lightweight way to detect external modifications. The solution integrates seamlessly with the existing event system, allowing other components to handle the reload appropriately.\n\nThe integration test provides comprehensive coverage of the scenario, using FakeFs to simulate external file modifications. It verifies the complete flow: initial clean state, user edit making buffer dirty, external modification while dirty, undo operation making buffer clean, and automatic reload from disk. This ensures the fix handles the exact race condition described in the feature request while maintaining compatibility with existing file change tracking.",
+  "source_pr": "https://github.com/zed-industries/zed/pull/51037",
+  "before_sha": "f4b04af3dc63d23ab0fb70527d7e0938c81ef4d0",
+  "after_sha": "50aef1f115493aab506df9d5b33da5435dc36bfc",
+  "diff_stats": {
+    "additions": 80,
+    "deletions": 1,
+    "files_changed": 2
+  }
+}

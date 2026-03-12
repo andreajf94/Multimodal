@@ -1,0 +1,97 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "api_design",
+      "recommendation": "Added an optional 'after_exception_hook_handler' parameter to OpenTelemetryConfig that follows the existing 'AfterExceptionHookHandler' type from the framework",
+      "rationale": "This leverages the framework's existing hook system and type definitions, ensuring consistency with other exception handling mechanisms in Litestar. The optional nature (default=None) maintains backward compatibility.",
+      "alternatives_considered": [
+        "Creating a new custom callback signature specific to OpenTelemetry",
+        "Adding multiple specialized hooks for different exception types",
+        "Making the hook required with a default no-op implementation"
+      ],
+      "files_affected": [
+        "litestar/contrib/opentelemetry/config.py"
+      ]
+    },
+    {
+      "dimension": "integration_patterns",
+      "recommendation": "Integrated the hook into the plugin's on_app_init method by appending it to app_config.after_exception list",
+      "rationale": "This uses the framework's built-in after_exception hook system, which automatically calls all registered hooks when exceptions occur. This ensures the OpenTelemetry hook integrates seamlessly with other exception handling mechanisms and follows the same execution order.",
+      "alternatives_considered": [
+        "Creating custom exception handling logic within the OpenTelemetry middleware",
+        "Overriding the framework's default exception handler",
+        "Using a separate event system outside the framework's hook mechanism"
+      ],
+      "files_affected": [
+        "litestar/contrib/opentelemetry/plugin.py"
+      ]
+    },
+    {
+      "dimension": "testing_strategy",
+      "recommendation": "Added comprehensive tests that verify both positive (exception case) and negative (success case) scenarios for the hook",
+      "rationale": "The tests validate that the hook is called exactly once with the correct exception and scope when an error occurs, and not called during successful requests. This ensures the hook only triggers in appropriate scenarios and receives the expected data.",
+      "alternatives_considered": [
+        "Only testing the exception case",
+        "Testing with mocked exceptions instead of real ones",
+        "Not testing the scope parameter validation"
+      ],
+      "files_affected": [
+        "tests/unit/test_contrib/test_opentelemetry.py"
+      ]
+    },
+    {
+      "dimension": "type_safety",
+      "recommendation": "Used the existing 'AfterExceptionHookHandler' type from litestar.types and imported it in the TYPE_CHECKING block",
+      "rationale": "This ensures type consistency across the framework and provides proper IDE support and type checking. The TYPE_CHECKING import prevents runtime circular imports while maintaining type hints.",
+      "alternatives_considered": [
+        "Creating a new type definition specific to OpenTelemetry",
+        "Using a generic Callable type without specific parameter hints",
+        "Defining the type inline without importing from litestar.types"
+      ],
+      "files_affected": [
+        "litestar/contrib/opentelemetry/config.py"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Add after_exception hook to OpenTelemetry configuration",
+      "description": "Extend OpenTelemetryConfig to accept an optional after_exception hook handler that developers can use to customize exception handling in OpenTelemetry traces",
+      "files_to_modify": [
+        "litestar/contrib/opentelemetry/config.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-002",
+      "title": "Integrate hook into plugin initialization",
+      "description": "Modify the OpenTelemetryPlugin to register the after_exception hook with the app_config during on_app_init, ensuring it's called when exceptions occur",
+      "files_to_modify": [
+        "litestar/contrib/opentelemetry/plugin.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-003",
+      "title": "Add comprehensive test coverage",
+      "description": "Create tests that verify the after_exception hook is called correctly during exceptions and not called during successful requests, with proper parameter validation",
+      "files_to_modify": [
+        "tests/unit/test_contrib/test_opentelemetry.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    }
+  ],
+  "implementation_summary": "The implementation adds an after_exception hook to the OpenTelemetry configuration, allowing developers to customize exception handling behavior in OpenTelemetry traces. The approach leverages Litestar's existing hook system by adding an optional 'after_exception_hook_handler' parameter to OpenTelemetryConfig that follows the framework's standard 'AfterExceptionHookHandler' type signature.\n\nKey design decisions include maintaining backward compatibility by making the hook optional (default=None), using the framework's built-in after_exception hook registration system, and ensuring type safety through proper imports. The hook receives both the exception instance and the scope object, providing complete context for custom logging, metric collection, or trace enrichment.\n\nThe integration is minimal and non-invasive: the OpenTelemetryPlugin simply appends the hook to the app_config.after_exception list during initialization, allowing it to participate in the framework's normal exception handling flow. Comprehensive tests verify both positive and negative scenarios, ensuring the hook only triggers when appropriate and receives the correct data. This implementation follows the framework's patterns while providing the flexibility requested in the feature requirements.",
+  "source_pr": "https://github.com/litestar-org/litestar/pull/4595",
+  "before_sha": "0df45578b1c26e7c8fb720627e6cd3cbefaeb686",
+  "after_sha": "b379144aba7faae95a985e719ea3794510a2b364",
+  "diff_stats": {
+    "additions": 81,
+    "deletions": 1,
+    "files_changed": 3
+  }
+}

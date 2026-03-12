@@ -138,7 +138,8 @@ def rgs_score(completions: list[str], file_manifests: list[list[str]]) -> list[f
             must_exist = _extract_paths_regex(text)
 
         if not must_exist:
-            scores.append(0.0)
+            # No files_to_modify = nothing to ground-check = perfect score
+            scores.append(3.0)
             continue
 
         valid = sum(
@@ -313,17 +314,16 @@ def _extract_file_paths(plan: dict) -> tuple[list[str], list[str]]:
         (must_exist, new_files) where must_exist are files_to_modify
         (should be in manifest) and new_files are files_to_create
         (should NOT be in manifest).
+
+    Note: architecture_decisions.files_affected is informational and may
+    reference both existing and new files, so it is NOT grounding-checked.
+    Only tickets.files_to_modify is checked against the manifest.
     """
     must_exist: set[str] = set()
     new_files: set[str] = set()
-    for decision in plan.get("architecture_decisions", []):
-        # files_affected may include both existing and new — treat as must_exist
-        must_exist.update(decision.get("files_affected", []))
     for ticket in plan.get("tickets", []):
         must_exist.update(ticket.get("files_to_modify", []))
         new_files.update(ticket.get("files_to_create", []))
-    # Don't double-penalise: if a file is in files_to_create, remove from must_exist
-    must_exist -= new_files
     return list(must_exist), list(new_files)
 
 

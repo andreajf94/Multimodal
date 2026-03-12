@@ -1,0 +1,372 @@
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index 9f926eaf4..bae955432 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -8,6 +8,7 @@ All notable changes to this project will be documented in this file. The format
+ 
+ ### Fixed
+ - Fixed Google GenAI `safety_settings` causing `400 INVALID_ARGUMENT` when requests include image content by using image-specific harm categories when needed (#1773)
++- Fixed `create_with_completion()` crashing when using `list[T]` response models by preserving `_raw_response` on list outputs (#1303)
+ 
+ ## [1.14.3] - 2026-01-13
+ 
+diff --git a/docs/concepts/raw_response.md b/docs/concepts/raw_response.md
+index 859bb9792..adeadeeab 100644
+--- a/docs/concepts/raw_response.md
++++ b/docs/concepts/raw_response.md
+@@ -76,6 +76,36 @@ ChatCompletion(
+ """
+ ```
+ 
++## Raw response with a list response model
++
++If your response model is a list (for example, `list[UserExtract]`), you can still use `create_with_completion()`. The returned value behaves like a normal list, but it also keeps the raw response so `create_with_completion()` does not crash.
++
++```python
++import instructor
++from pydantic import BaseModel
++
++client = instructor.from_provider("openai/gpt-4.1-mini")
++
++
++class UserExtract(BaseModel):
++    name: str
++    age: int
++
++
++users, completion = client.create_with_completion(
++    response_model=list[UserExtract],
++    messages=[
++        {"role": "user", "content": "Extract users: Jason is 25, Ivan is 30"},
++    ],
++)
++
++print(users[0])
++#> name='Jason' age=25
++
++raw = users.get_raw_response()
++assert raw == completion
++```
++
+ ## See Also
+ 
+ - [Hooks](./hooks.md) - Monitor LLM interactions without accessing raw responses
+diff --git a/instructor/__init__.py b/instructor/__init__.py
+index 2ca9f4f6e..f93946989 100644
+--- a/instructor/__init__.py
++++ b/instructor/__init__.py
+@@ -114,9 +114,14 @@
+     __all__ += ["from_cohere"]
+ 
+ if all(importlib.util.find_spec(pkg) for pkg in ("vertexai", "jsonref")):
+-    from .providers.vertexai.client import from_vertexai
+-
+-    __all__ += ["from_vertexai"]
++    try:
++        from .providers.vertexai.client import from_vertexai
++    except Exception:
++        # Optional dependency may be present but broken/misconfigured at import time.
++        # Avoid failing `import instructor` in that case.
++        pass
++    else:
++        __all__ += ["from_vertexai"]
+ 
+ if importlib.util.find_spec("boto3") is not None:
+     from .providers.bedrock.client import from_bedrock
+diff --git a/instructor/dsl/__init__.py b/instructor/dsl/__init__.py
+index 838f4473c..ef4365b6e 100644
+--- a/instructor/dsl/__init__.py
++++ b/instructor/dsl/__init__.py
+@@ -2,12 +2,14 @@
+ from .maybe import Maybe
+ from .partial import Partial
+ from .citation import CitationMixin
++from .response_list import ListResponse
+ from .simple_type import is_simple_type, ModelAdapter
+ from . import validators  # Backwards compatibility module
+ 
+ __all__ = [  # noqa: F405
+     "CitationMixin",
+     "IterableModel",
++    "ListResponse",
+     "Maybe",
+     "Partial",
+     "is_simple_type",
+diff --git a/instructor/dsl/iterable.py b/instructor/dsl/iterable.py
+index 1bb0447e0..33ddc6b4f 100644
+--- a/instructor/dsl/iterable.py
++++ b/instructor/dsl/iterable.py
+@@ -636,7 +636,17 @@ def from_streaming_response(cls, completion) -> Generator[User]:
+     Returns:
+         schema (OpenAISchema): A new class that can be used to segment multiple tasks
+     """
+-    task_name = subtask_class.__name__ if name is None else name
++    if name is not None:
++        task_name = name
++    else:
++        # Handle `Union[A, B]` / `A | B` task types.
++        # `types.UnionType` does not have `__name__`, so fall back to a stable name.
++        task_name = getattr(subtask_class, "__name__", None)
++        if task_name is None and get_origin(subtask_class) is Union:
++            members = get_args(subtask_class)
++            task_name = "Or".join(getattr(m, "__name__", str(m)) for m in members)
++        if task_name is None:
++            task_name = str(subtask_class)
+ 
+     name = f"Iterable{task_name}"
+ 
+diff --git a/instructor/dsl/response_list.py b/instructor/dsl/response_list.py
+new file mode 100644
+index 000000000..2b5c1f956
+--- /dev/null
++++ b/instructor/dsl/response_list.py
+@@ -0,0 +1,33 @@
++from __future__ import annotations
++
++from typing import Any, Generic, TypeVar
++
++T = TypeVar("T")
++
++
++class ListResponse(list[T], Generic[T]):
++    """A list that preserves the underlying provider response.
++
++    This is used when a call returns a list of objects (e.g. `list[User]`), so
++    `create_with_completion()` can still return `(result, raw_response)` without
++    crashing on a plain `list`.
++    """
++
++    _raw_response: Any | None
++
++    def __init__(self, iterable=(), _raw_response: Any | None = None):  # type: ignore[no-untyped-def]
++        super().__init__(iterable)
++        self._raw_response = _raw_response
++
++    @classmethod
++    def from_list(cls, items: list[T], *, raw_response: Any | None) -> ListResponse[T]:
++        return cls(items, _raw_response=raw_response)
++
++    def get_raw_response(self) -> Any | None:
++        return self._raw_response
++
++    def __getitem__(self, key):  # type: ignore[no-untyped-def]
++        value = super().__getitem__(key)
++        if isinstance(key, slice):
++            return type(self)(value, _raw_response=self._raw_response)
++        return value
+diff --git a/instructor/processing/response.py b/instructor/processing/response.py
+index 482bffe7c..8a87b23bc 100644
+--- a/instructor/processing/response.py
++++ b/instructor/processing/response.py
+@@ -49,6 +49,7 @@ class User(BaseModel):
+ from ..dsl.iterable import IterableBase
+ from ..dsl.parallel import ParallelBase
+ from ..dsl.partial import PartialBase
++from ..dsl.response_list import ListResponse
+ from ..dsl.simple_type import AdapterBase
+ 
+ if TYPE_CHECKING:
+@@ -248,7 +249,10 @@ async def process_response_async(
+     # ? attaching usage data and the raw response to the model we return.
+     if isinstance(model, IterableBase):
+         logger.debug(f"Returning takes from IterableBase")
+-        return [task for task in model.tasks]  # type: ignore
++        return ListResponse.from_list(  # type: ignore[return-value]
++            [task for task in model.tasks],
++            raw_response=response,
++        )
+ 
+     if isinstance(response_model, ParallelBase):
+         logger.debug(f"Returning model from ParallelBase")
+@@ -353,7 +357,10 @@ class to parse the response into. Special DSL types supported:
+     # ? attaching usage data and the raw response to the model we return.
+     if isinstance(model, IterableBase):
+         logger.debug(f"Returning takes from IterableBase")
+-        return [task for task in model.tasks]  # type: ignore
++        return ListResponse.from_list(  # type: ignore[return-value]
++            [task for task in model.tasks],
++            raw_response=response,
++        )
+ 
+     if isinstance(response_model, ParallelBase):
+         logger.debug(f"Returning model from ParallelBase")
+diff --git a/instructor/providers/__init__.py b/instructor/providers/__init__.py
+index 63bae8167..a9b658529 100644
+--- a/instructor/providers/__init__.py
++++ b/instructor/providers/__init__.py
+@@ -62,9 +62,14 @@
+     __all__.append("from_perplexity")
+ 
+ if all(importlib.util.find_spec(pkg) for pkg in ("vertexai", "jsonref")):
+-    from .vertexai.client import from_vertexai  # noqa: F401
+-
+-    __all__.append("from_vertexai")
++    try:
++        from .vertexai.client import from_vertexai  # noqa: F401
++    except Exception:
++        # Optional dependency may be present but broken/misconfigured at import time.
++        # Avoid failing `import instructor` in that case.
++        pass
++    else:
++        __all__.append("from_vertexai")
+ 
+ if importlib.util.find_spec("writerai") is not None:
+     from .writer.client import from_writer  # noqa: F401
+diff --git a/instructor/utils/core.py b/instructor/utils/core.py
+index 4d4b4a5fa..6db6c4b58 100644
+--- a/instructor/utils/core.py
++++ b/instructor/utils/core.py
+@@ -14,6 +14,7 @@
+     Any,
+     Callable,
+     Generic,
++    Union,
+     TypeVar,
+     cast,
+     get_args,
+@@ -595,22 +596,66 @@ def prepare_response_model(response_model: type[T] | None) -> type[T] | None:
+     if response_model is None:
+         return None
+ 
+-    if is_simple_type(response_model):
+-        from instructor.dsl.simple_type import ModelAdapter
++    # `list[int | str]` and similar scalar lists are treated as simple types and should
++    # be adapted, not converted into an IterableModel.
++    origin = get_origin(response_model)
++    if origin is list and is_simple_type(response_model):
++        args = get_args(response_model)
++
++        def _is_model_type(t: Any) -> bool:
++            if inspect.isclass(t) and issubclass(t, BaseModel):
++                return True
++            return get_origin(t) is Union and all(
++                inspect.isclass(m) and issubclass(m, BaseModel) for m in get_args(t)
++            )
+ 
+-        response_model = ModelAdapter[response_model]
++        # If the list element is a Pydantic model (or union of models), this is a
++        # structured "iterable extraction" response model, not a simple scalar list.
++        if args and _is_model_type(args[0]):
++            origin = None
++        else:
++            from instructor.dsl.simple_type import ModelAdapter
++
++            response_model = ModelAdapter[response_model]  # type: ignore[invalid-type-form]
++            origin = get_origin(response_model)
+ 
+     if is_typed_dict(response_model):
+-        response_model: BaseModel = create_model(
+-            response_model.__name__,
+-            **{k: (v, ...) for k, v in response_model.__annotations__.items()},
++        response_model = cast(
++            type[BaseModel],
++            create_model(
++                response_model.__name__,
++                **{k: (v, ...) for k, v in response_model.__annotations__.items()},
++            ),
+         )
+ 
+-    if get_origin(response_model) is Iterable:
++    # Recompute after potential wrapping/conversion above.
++    origin = get_origin(response_model)
++    if origin in {Iterable, list}:
+         from instructor.dsl.iterable import IterableModel
+ 
+-        iterable_element_class = get_args(response_model)[0]
+-        response_model = cast(BaseModel, IterableModel(iterable_element_class))  # type: ignore
++        args = get_args(response_model)
++        if not args or args[0] is None:
++            raise ValueError(
++                "response_model must be parameterized, e.g. list[User] or Iterable[User]"
++            )
++        iterable_element_class = args[0]
++        if is_typed_dict(iterable_element_class):
++            iterable_element_class = cast(
++                type[BaseModel],
++                create_model(
++                    iterable_element_class.__name__,
++                    **{
++                        k: (v, ...)
++                        for k, v in iterable_element_class.__annotations__.items()
++                    },
++                ),
++            )
++        response_model = IterableModel(cast(type[BaseModel], iterable_element_class))
++
++    if is_simple_type(response_model):
++        from instructor.dsl.simple_type import ModelAdapter
++
++        response_model = ModelAdapter[response_model]  # type: ignore[invalid-type-form]
+ 
+     # Import here to avoid circular dependency
+     from ..processing.function_calls import OpenAISchema, openai_schema
+diff --git a/tests/test_list_response.py b/tests/test_list_response.py
+new file mode 100644
+index 000000000..a36e82b5f
+--- /dev/null
++++ b/tests/test_list_response.py
+@@ -0,0 +1,64 @@
++from __future__ import annotations
++
++from collections.abc import Iterable as ABCIterable
++from typing import Any
++
++from pydantic import BaseModel
++
++from instructor.dsl import ListResponse
++from instructor.dsl.iterable import IterableBase
++from instructor.mode import Mode
++from instructor.processing.response import process_response
++from instructor.utils.core import prepare_response_model
++
++
++class User(BaseModel):
++    name: str
++
++
++def test_listresponse_preserves_raw_response_on_slice() -> None:
++    raw: Any = {"provider": "test"}
++    resp = ListResponse([User(name="a"), User(name="b")], _raw_response=raw)
++
++    assert resp.get_raw_response() is raw
++    assert resp[0].name == "a"
++
++    sliced = resp[1:]
++    assert isinstance(sliced, ListResponse)
++    assert sliced.get_raw_response() is raw
++    assert sliced[0].name == "b"
++
++
++def test_process_response_wraps_iterablebase_tasks_with_raw_response() -> None:
++    class FakeIterableResponse(BaseModel, IterableBase):
++        tasks: list[User]
++
++        @classmethod
++        def from_response(  # type: ignore[override]
++            cls, _response: Any, **_kwargs: Any
++        ) -> FakeIterableResponse:
++            return cls(tasks=[User(name="x"), User(name="y")])
++
++    # `process_response()` is typed with a BaseModel-bounded type variable for `response`,
++    # so use a BaseModel instance here to keep `ty` happy.
++    raw_response: Any = User(name="raw")
++    out = process_response(
++        raw_response,
++        response_model=FakeIterableResponse,
++        stream=False,
++        mode=Mode.TOOLS,
++    )
++
++    assert isinstance(out, ListResponse)
++    assert [u.name for u in out] == ["x", "y"]
++    assert out.get_raw_response() is raw_response
++
++
++def test_prepare_response_model_supports_list_and_iterable() -> None:
++    prepared_list = prepare_response_model(list[User])
++    assert prepared_list is not None
++    assert issubclass(prepared_list, IterableBase)
++
++    prepared_iterable = prepare_response_model(ABCIterable[User])  # type: ignore[index]
++    assert prepared_iterable is not None
++    assert issubclass(prepared_iterable, IterableBase)

@@ -1,0 +1,677 @@
+diff --git a/Cargo.lock b/Cargo.lock
+index 22fb5c672a..12dca2bc72 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -2941,6 +2941,7 @@ version = "0.4.1"
+ dependencies = [
+  "any_spawner",
+  "guardian",
++ "indexmap",
+  "itertools",
+  "leptos",
+  "or_poisoned",
+@@ -2957,7 +2958,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "reactive_stores_macro"
+-version = "0.2.6"
++version = "0.4.0"
+ dependencies = [
+  "convert_case 0.11.0",
+  "proc-macro-error2",
+diff --git a/Cargo.toml b/Cargo.toml
+index 03fedc512b..adb1b49caa 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -64,7 +64,7 @@ oco_ref = { path = "./oco", version = "0.2.1" }
+ or_poisoned = { path = "./or_poisoned", version = "0.1.0" }
+ reactive_graph = { path = "./reactive_graph", version = "0.2.13" }
+ reactive_stores = { path = "./reactive_stores", version = "0.4.1" }
+-reactive_stores_macro = { path = "./reactive_stores_macro", version = "0.2.6" }
++reactive_stores_macro = { path = "./reactive_stores_macro", version = "0.4.0" }
+ server_fn = { path = "./server_fn", version = "0.8.10" }
+ server_fn_macro = { path = "./server_fn_macro", version = "0.8.9" }
+ server_fn_macro_default = { path = "./server_fn/server_fn_macro_default", version = "0.8.5" }
+diff --git a/reactive_stores/Cargo.toml b/reactive_stores/Cargo.toml
+index b74642e7a0..24bf461520 100644
+--- a/reactive_stores/Cargo.toml
++++ b/reactive_stores/Cargo.toml
+@@ -25,6 +25,7 @@ reactive_stores_macro = { workspace = true }
+ send_wrapper = { workspace = true, default-features = true }
+ serde = { workspace = true, optional = true }
+ slotmap = { workspace = true, optional = true }
++indexmap = { workspace = true, default-features = true }
+ 
+ [dev-dependencies]
+ tokio = { features = [
+diff --git a/reactive_stores/src/keyed.rs b/reactive_stores/src/keyed.rs
+index f0d3e9e57c..15a287741c 100644
+--- a/reactive_stores/src/keyed.rs
++++ b/reactive_stores/src/keyed.rs
+@@ -94,7 +94,7 @@ where
+     inner: Inner,
+     read: fn(&Prev) -> &T,
+     write: fn(&mut Prev) -> &mut T,
+-    key_fn: fn(<&T as IntoIterator>::Item) -> K,
++    pub(crate) key_fn: fn(<&T as IntoIterator>::Item) -> K,
+ }
+ 
+ impl<Inner, Prev, K, T> Clone for KeyedSubfield<Inner, Prev, K, T>
+@@ -230,6 +230,26 @@ where
+             .map(|r| r.deref().into_iter().map(|n| (self.key_fn)(n)).collect())
+             .unwrap_or_default()
+     }
++
++    pub(crate) fn path_at_key(
++        &self,
++        base_path: &StorePath,
++        key: &K,
++    ) -> Option<StorePath> {
++        let keys = self.keys();
++        let keys = keys.as_ref()?;
++        let segment = keys
++            .with_field_keys(
++                base_path.clone(),
++                |keys| (keys.get(key), vec![]),
++                || self.latest_keys(),
++            )
++            .flatten()
++            .map(|(_, idx)| idx)?;
++        let mut path = base_path.clone();
++        path.push(segment);
++        Some(path)
++    }
+ }
+ 
+ impl<Inner, Prev, K, T> KeyedSubfield<Inner, Prev, K, T>
+@@ -1339,4 +1359,101 @@ mod tests {
+ 
+         let _fields = store.items().into_iter();
+     }
++
++    #[tokio::test]
++    async fn patching_keyed_field_only_notifies_changed_keys() {
++        _ = any_spawner::Executor::init_tokio();
++
++        let store = Store::new(TodoVec::test_data());
++        assert_eq!(store.read_untracked().todos.len(), 3);
++
++        // create an effect to read from each keyed field
++        let whole_count = Arc::new(AtomicUsize::new(0));
++        let a_count = Arc::new(AtomicUsize::new(0));
++        let b_count = Arc::new(AtomicUsize::new(0));
++        let c_count = Arc::new(AtomicUsize::new(0));
++
++        let whole = store.todos();
++        let a = AtKeyed::new(store.todos(), 10);
++        let b = AtKeyed::new(store.todos(), 11);
++        let c = AtKeyed::new(store.todos(), 12);
++
++        Effect::new_sync({
++            let whole_count = Arc::clone(&whole_count);
++            move || {
++                whole.track();
++                whole_count.fetch_add(1, Ordering::Relaxed);
++            }
++        });
++        Effect::new_sync({
++            let a_count = Arc::clone(&a_count);
++            move || {
++                a.track();
++                a_count.fetch_add(1, Ordering::Relaxed);
++            }
++        });
++        Effect::new_sync({
++            let b_count = Arc::clone(&b_count);
++            move || {
++                b.track();
++                b_count.fetch_add(1, Ordering::Relaxed);
++            }
++        });
++        Effect::new_sync({
++            let c_count = Arc::clone(&c_count);
++            move || {
++                c.track();
++                c_count.fetch_add(1, Ordering::Relaxed);
++            }
++        });
++
++        tick().await;
++        assert_eq!(whole_count.load(Ordering::Relaxed), 1);
++        assert_eq!(a_count.load(Ordering::Relaxed), 1);
++        assert_eq!(b_count.load(Ordering::Relaxed), 1);
++        assert_eq!(c_count.load(Ordering::Relaxed), 1);
++
++        // patching only notifies changed keys
++        let mut new_data = store.todos().get_untracked();
++        new_data.swap(0, 2);
++        store.todos().patch(new_data.clone());
++        let after = store.todos().get_untracked();
++        assert_eq!(
++            after,
++            vec![Todo::new(12, "C"), Todo::new(11, "B"), Todo::new(10, "A")]
++        );
++
++        tick().await;
++        assert_eq!(whole_count.load(Ordering::Relaxed), 2);
++        assert_eq!(a_count.load(Ordering::Relaxed), 1);
++        assert_eq!(b_count.load(Ordering::Relaxed), 1);
++        assert_eq!(c_count.load(Ordering::Relaxed), 1);
++
++        // and after we move the keys around, they still update the moved items
++        a.label().set("Bar".into());
++        let after = store.todos().get_untracked();
++        assert_eq!(
++            after,
++            vec![Todo::new(12, "C"), Todo::new(11, "B"), Todo::new(10, "Bar")]
++        );
++        tick().await;
++        assert_eq!(whole_count.load(Ordering::Relaxed), 3);
++        assert_eq!(a_count.load(Ordering::Relaxed), 2);
++        assert_eq!(b_count.load(Ordering::Relaxed), 1);
++        assert_eq!(c_count.load(Ordering::Relaxed), 1);
++
++        // regular writes to the collection notify all keyed children
++        store.todos().write().pop();
++        store.todos().write().push(Todo::new(13, "New"));
++        let after = store.todos().get_untracked();
++        assert_eq!(
++            after,
++            vec![Todo::new(12, "C"), Todo::new(11, "B"), Todo::new(13, "New")]
++        );
++        tick().await;
++        assert_eq!(whole_count.load(Ordering::Relaxed), 4);
++        assert_eq!(a_count.load(Ordering::Relaxed), 3);
++        assert_eq!(b_count.load(Ordering::Relaxed), 2);
++        assert_eq!(c_count.load(Ordering::Relaxed), 2);
++    }
+ }
+diff --git a/reactive_stores/src/patch.rs b/reactive_stores/src/patch.rs
+index 17ef92c5be..ad42fc9a68 100644
+--- a/reactive_stores/src/patch.rs
++++ b/reactive_stores/src/patch.rs
+@@ -1,8 +1,12 @@
+-use crate::{path::StorePath, StoreField};
++use crate::{path::StorePath, KeyMap, KeyedAccess, KeyedSubfield, StoreField};
++use indexmap::IndexMap;
+ use itertools::{EitherOrBoth, Itertools};
+ use reactive_graph::traits::{Notify, UntrackableGuard};
+ use std::{
+     borrow::Cow,
++    collections::HashMap,
++    fmt::Debug,
++    hash::Hash,
+     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6},
+     num::{
+         NonZeroI128, NonZeroI16, NonZeroI32, NonZeroI64, NonZeroI8,
+@@ -31,17 +35,74 @@ where
+ 
+     fn patch(&self, new: Self::Value) {
+         let path = self.path_unkeyed().into_iter().collect::<StorePath>();
++        let keys = self.keys();
++
+         if let Some(mut writer) = self.writer() {
+             // don't track the writer for the whole store
+             writer.untrack();
+             let mut notify = |path: &StorePath| {
+                 self.triggers_for_path_unkeyed(path.to_owned()).notify();
+             };
+-            writer.patch_field(new, &path, &mut notify);
++            writer.patch_field(new, &path, &mut notify, keys.as_ref());
+         }
+     }
+ }
+ 
++impl<Inner, Prev, K, T> KeyedSubfield<Inner, Prev, K, T>
++where
++    Self: Clone,
++    for<'a> &'a T: IntoIterator,
++    Self: StoreField<Value = T>,
++    <Self as StoreField>::Value: PatchFieldKeyed<K>,
++    Inner: StoreField<Value = Prev>,
++    T: PatchFieldKeyed<K>,
++    K: Clone + Debug + Send + Sync + PartialEq + Eq + Hash + 'static,
++    Prev: 'static,
++{
++    /// This implements a custom, keyed patch for keyed subfields.
++    ///
++    /// It is used in the same way as the [`Patch`] trait, but uses a keyed data diff for
++    /// data structures that implement [`PatchFieldKeyed`].
++    pub fn patch(&self, new: T) {
++        let path = self.path_unkeyed().into_iter().collect::<StorePath>();
++        let keys = self.keys();
++
++        let structure_changed = if let Some(mut writer) = self.writer() {
++            // don't track the writer for the whole store
++            writer.untrack();
++            let mut notify = |path: &StorePath| {
++                self.triggers_for_path_unkeyed(path.to_owned()).notify();
++            };
++            writer.patch_field_keyed(
++                new,
++                &mut notify,
++                keys.as_ref(),
++                self.key_fn,
++                |key| self.path_at_key(&path, key),
++            )
++        } else {
++            false
++        };
++
++        if structure_changed {
++            // Only notify `children` (not `this`) at the collection path, so that
++            // individual keyed items — which track `this` on all ancestor paths —
++            // are not spuriously notified when only the collection order has changed.
++            let trigger = self.get_trigger_unkeyed(path.clone());
++            trigger.children.notify();
++
++            let mut ancestor_path = path;
++            while !ancestor_path.is_empty() {
++                ancestor_path.pop();
++                let inner = self.get_trigger_unkeyed(ancestor_path.clone());
++                inner.children.notify();
++            }
++        }
++
++        self.update_keys();
++    }
++}
++
+ /// Allows patching a store field with some new value.
+ pub trait PatchField {
+     /// Patches the field with some new value, only notifying if the value has changed.
+@@ -50,9 +111,41 @@ pub trait PatchField {
+         new: Self,
+         path: &StorePath,
+         notify: &mut dyn FnMut(&StorePath),
++        keys: Option<&KeyMap>,
+     );
+ }
+ 
++/// Allows patching a collection in a store field with a new value, after doing a keyed diff.
++///     
++/// This takes a `key_fn` that is applied to each entry in the collection and returns a
++/// unique key. Items in the old collection and new collection with the same key are treated
++/// as the same value, and the items are patched using [`PatchField`].
++///
++/// The exact notification behavior will depend on the collection type. For example, patching
++/// a vector or slice-like type should notify on the collection itself if the order of items changes.
++/// If all the same keys are present in the same order, however, the parent collection will not
++/// be notified; only the keyed items that have changed.
++pub trait PatchFieldKeyed<K>
++where
++    Self: Sized + KeyedAccess<K>,
++    for<'a> &'a Self: IntoIterator,
++{
++    /// Patches a collection with a new value.
++    ///
++    /// Returns `true` if the structure of the collection changed (items added, removed,
++    /// or reordered). Individual item changes are notified via the `notify` callback.
++    fn patch_field_keyed(
++        &mut self,
++        new: Self,
++        notify: &mut dyn FnMut(&StorePath),
++        keys: Option<&KeyMap>,
++        key_fn: impl Fn(<&Self as IntoIterator>::Item) -> K,
++        path_at_key: impl Fn(&K) -> Option<StorePath>,
++    ) -> bool
++    where
++        K: Clone + Debug + Send + Sync + PartialEq + Eq + Hash + 'static;
++}
++
+ macro_rules! patch_primitives {
+     ($($ty:ty),*) => {
+         $(impl PatchField for $ty {
+@@ -61,6 +154,7 @@ macro_rules! patch_primitives {
+                 new: Self,
+                 path: &StorePath,
+                 notify: &mut dyn FnMut(&StorePath),
++                _keys: Option<&KeyMap>
+             ) {
+                 if new != *self {
+                     *self = new;
+@@ -122,6 +216,7 @@ where
+         new: Self,
+         path: &StorePath,
+         notify: &mut dyn FnMut(&StorePath),
++        keys: Option<&KeyMap>,
+     ) {
+         match (self, new) {
+             (None, None) => {}
+@@ -136,7 +231,7 @@ where
+             (Some(old), Some(new)) => {
+                 let mut new_path = path.to_owned();
+                 new_path.push(0);
+-                old.patch_field(new, &new_path, notify);
++                old.patch_field(new, &new_path, notify, keys);
+             }
+         }
+     }
+@@ -151,6 +246,7 @@ where
+         new: Self,
+         path: &StorePath,
+         notify: &mut dyn FnMut(&StorePath),
++        keys: Option<&KeyMap>,
+     ) {
+         if self.is_empty() && new.is_empty() {
+             return;
+@@ -172,7 +268,7 @@ where
+             {
+                 match item {
+                     EitherOrBoth::Both(new, old) => {
+-                        old.patch_field(new, &new_path, notify);
++                        old.patch_field(new, &new_path, notify, keys);
+                     }
+                     EitherOrBoth::Left(new) => {
+                         adds.push(new);
+@@ -195,6 +291,184 @@ where
+     }
+ }
+ 
++impl<K, T> PatchFieldKeyed<K> for Vec<T>
++where
++    T: PatchField,
++{
++    fn patch_field_keyed(
++        &mut self,
++        mut new: Self,
++        notify: &mut dyn FnMut(&StorePath),
++        keys: Option<&KeyMap>,
++        key_fn: impl Fn(<&Self as IntoIterator>::Item) -> K,
++        path_at_key: impl Fn(&K) -> Option<StorePath>,
++    ) -> bool
++    where
++        K: Clone + Debug + Send + Sync + PartialEq + Eq + Hash + 'static,
++    {
++        let mut has_changed = false;
++
++        let mut old_keyed = HashMap::new();
++        let mut new_keyed = IndexMap::new();
++
++        // first, calculate keys and indices for all the old values
++        for (idx, item) in self.drain(0..).enumerate() {
++            let key = key_fn(&item);
++            old_keyed.insert(key, (idx, item));
++        }
++
++        // then, calculate keys and indices for all the new values
++        for (idx, item) in new.drain(0..).enumerate() {
++            let key = key_fn(&item);
++            new_keyed.insert(key, (idx, item));
++        }
++
++        // if there are any old keys not included in the new keys, the list has changed
++        for old_key in old_keyed.keys() {
++            if !new_keyed.contains_key(old_key) {
++                has_changed = true;
++            }
++        }
++
++        // iterate over the new entries, rebuilding the `new` Vec (which we emptied with `drain` above)
++        //
++        // because we're using an IndexMap, this will iterate over the values in the same order
++        // as the new Vec had them
++        //
++        // for each entry, either
++        // 1) push it directly into the `new` Vec again, or
++        // 2) take the old
++        for (key, (new_idx, new_value)) in new_keyed {
++            let old_at_key = old_keyed.remove(&key);
++
++            match old_at_key {
++                None => {
++                    // add this item into the new vec
++                    new.push(new_value);
++
++                    // not found in old map, list has changed and will trigger
++                    has_changed = true;
++                }
++                // found in old map
++                Some((old_idx, old_value)) => {
++                    // if indices are different, list has changed
++                    if old_idx != new_idx {
++                        has_changed = true;
++                    }
++
++                    // if we had an old value for this key, we're actually going to push the *old*
++                    // value into the vec, and then patch it with the new value; because we're iterating
++                    // in the new order, it will be at the `new_idx`
++                    new.push(old_value);
++                    let field_to_patch = &mut new[new_idx];
++
++                    // now we need to actually patch the old item with this key with the new item
++                    // we do this by calling patch_field(); to get the correct path, we need to get the
++                    // path to the field at this key
++
++                    // we do th
++                    if let Some(path) = path_at_key(&key) {
++                        field_to_patch
++                            .patch_field(new_value, &path, notify, keys);
++                    } else {
++                        has_changed = true;
++                    }
++                }
++            }
++        }
++
++        // update the value
++        *self = new;
++
++        has_changed
++    }
++}
++
++impl<K, V> PatchFieldKeyed<K> for HashMap<K, V>
++where
++    V: PatchField,
++    K: Eq + Hash,
++{
++    fn patch_field_keyed(
++        &mut self,
++        mut new: Self,
++        notify: &mut dyn FnMut(&StorePath),
++        keys: Option<&KeyMap>,
++        key_fn: impl Fn(<&Self as IntoIterator>::Item) -> K,
++        path_at_key: impl Fn(&K) -> Option<StorePath>,
++    ) -> bool
++    where
++        K: Clone + Debug + Send + Sync + PartialEq + Eq + Hash + 'static,
++    {
++        let mut has_changed = false;
++
++        let mut old_keyed = HashMap::new();
++        let mut new_keyed = HashMap::new();
++
++        // first, calculate keys for all the old values
++        for item in self.drain() {
++            let key = key_fn((&item.0, &item.1));
++            old_keyed.insert(key, item);
++        }
++
++        // then, calculate keys and indices for all the new values
++        for item in new.drain() {
++            let key = key_fn((&item.0, &item.1));
++            new_keyed.insert(key, item);
++        }
++
++        // if there are any old keys not included in the new keys, the map has changed
++        for old_key in old_keyed.keys() {
++            if !new_keyed.contains_key(old_key) {
++                has_changed = true;
++            }
++        }
++
++        // iterate over the new entries, rebuilding the `new` map (which we emptied with `drain` above)
++        //
++        // for each entry, either
++        // 1) push it directly into the `new` map again, or
++        // 2) take the old value and patch it
++        for (key, new_value) in new_keyed {
++            let old_at_key = old_keyed.remove(&key);
++
++            match old_at_key {
++                None => {
++                    // add this item into the new map
++                    new.insert(new_value.0, new_value.1);
++
++                    // not found in old map, list has changed and will trigger
++                    has_changed = true;
++                }
++                // found in old map
++                Some(mut old_value) => {
++                    // now we need to actually patch the old item with this key with the new item
++                    // we do this by calling patch_field(); to get the correct path, we need to get the
++                    // path to the field at this key
++                    if let Some(path) = path_at_key(&key) {
++                        old_value.1.patch_field(
++                            new_value.1,
++                            &path,
++                            notify,
++                            keys,
++                        );
++                    } else {
++                        has_changed = true;
++                    }
++
++                    // and we'll insert it into the new map
++                    new.insert(new_value.0, old_value.1);
++                }
++            }
++        }
++
++        // update the value
++        *self = new;
++
++        has_changed
++    }
++}
++
+ macro_rules! patch_tuple {
+ 	($($ty:ident),*) => {
+ 		impl<$($ty),*> PatchField for ($($ty,)*)
+@@ -206,6 +480,7 @@ macro_rules! patch_tuple {
+                 new: Self,
+                 path: &StorePath,
+                 notify: &mut dyn FnMut(&StorePath),
++                keys: Option<&KeyMap>
+             ) {
+                 let mut idx = 0;
+                 let mut new_path = path.to_owned();
+@@ -216,7 +491,7 @@ macro_rules! patch_tuple {
+                     let ($($ty,)*) = self;
+                     let ($([<new_ $ty:lower>],)*) = new;
+                     $(
+-                        $ty.patch_field([<new_ $ty:lower>], &new_path, notify);
++                        $ty.patch_field([<new_ $ty:lower>], &new_path, notify, keys);
+                         idx += 1;
+                         new_path.replace_last(idx);
+                     )*
+@@ -232,6 +507,7 @@ impl PatchField for () {
+         _new: Self,
+         _path: &StorePath,
+         _notify: &mut dyn FnMut(&StorePath),
++        _keys: Option<&KeyMap>,
+     ) {
+     }
+ }
+diff --git a/reactive_stores_macro/Cargo.toml b/reactive_stores_macro/Cargo.toml
+index c19bf92567..daaa3f804a 100644
+--- a/reactive_stores_macro/Cargo.toml
++++ b/reactive_stores_macro/Cargo.toml
+@@ -1,6 +1,6 @@
+ [package]
+ name = "reactive_stores_macro"
+-version = "0.2.6"
++version = "0.4.0"
+ authors = ["Greg Johnston"]
+ license = "MIT"
+ readme = "../README.md"
+diff --git a/reactive_stores_macro/src/lib.rs b/reactive_stores_macro/src/lib.rs
+index 7790751d3e..07d1b44102 100644
+--- a/reactive_stores_macro/src/lib.rs
++++ b/reactive_stores_macro/src/lib.rs
+@@ -744,6 +744,35 @@ impl ToTokens for PatchModel {
+                                 },
+                             )
+                         });
++                        let keyed = attrs
++                        .iter()
++                        .find_map(|attr| {
++                            attr.meta.path().is_ident("store").then(|| {
++                                match &attr.meta {
++                                    Meta::List(list) => {
++                                        let subfields = match Punctuated::<
++                                                SubfieldMode,
++                                                Comma,
++                                            >::parse_terminated
++                                                .parse2(list.tokens.clone())
++                                            {
++                                                Ok(modes) => Some(
++                                                    modes
++                                                        .iter()
++                                                        .cloned()
++                                                        .collect::<Vec<_>>(),
++                                                ),
++                                                Err(e) => abort!(list, e),
++                                            }.unwrap_or_default();
++                                            subfields.into_iter().find_map(|subfield| match subfield {
++                                                SubfieldMode::Keyed(closure, _ty) => Some(closure),
++                                                SubfieldMode::Skip => None,
++                                            })
++                                    }
++                                    _ => None,
++                                }
++                            })
++                        }).flatten();
+ 
+                     if let Some(closure) = closure {
+                         let params = closure.inputs;
+@@ -758,13 +787,39 @@ impl ToTokens for PatchModel {
+                             }
+                             new_path.replace_last(#idx + 1);
+                         }
++                    } else if let Some(closure) = keyed {
++                        quote! {
++                            #library_path::PatchFieldKeyed::patch_field_keyed(
++                                &mut self.#locator,
++                                new.#locator,
++                                notify,
++                                keys,
++                                #closure,
++                                |key| {
++                                    let keys = keys.as_ref()?;
++                                    let segment = keys
++                                        .with_field_keys(
++                                            path.clone(),
++                                            |keys| (keys.get(key), vec![]),
++                                            || vec![],
++                                        )
++                                        .flatten()
++                                        .map(|(_, idx)| idx)?;
++                                    let mut path = path.clone();
++                                    path.push(segment);
++                                    Some(path)
++                                }
++                            );
++                            new_path.replace_last(#idx + 1);
++                        }
+                     } else {
+                         quote! {
+                             #library_path::PatchField::patch_field(
+                                 &mut self.#locator,
+                                 new.#locator,
+                                 &new_path,
+-                                notify
++                                notify,
++                                keys
+                             );
+                             new_path.replace_last(#idx + 1);
+                         }
+@@ -790,6 +845,7 @@ impl ToTokens for PatchModel {
+                     new: Self,
+                     path: &#library_path::StorePath,
+                     notify: &mut dyn FnMut(&#library_path::StorePath),
++                    keys: Option<&#library_path::KeyMap>,
+                 ) {
+                     let mut new_path = path.clone();
+                     new_path.push(0);

@@ -1,0 +1,92 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "api_design",
+      "recommendation": "Used JavaScript to dynamically detect and categorize links instead of relying on static HTML attributes. The solution compares link origins against the site's canonical URL or current origin to determine if they're external.",
+      "rationale": "This approach is more maintainable than manually adding target='_blank' to every external link in the documentation markup. It automatically handles all existing and future links without requiring content updates. The use of URL parsing ensures accurate origin comparison even with complex URLs.",
+      "alternatives_considered": [
+        "Manually adding target='_blank' to all external links in documentation source files",
+        "Using server-side processing during documentation generation",
+        "Relying solely on href patterns (like checking for 'http://' or 'https://')"
+      ],
+      "files_affected": [
+        "docs/en/docs/js/custom.js"
+      ]
+    },
+    {
+      "dimension": "data_modeling",
+      "recommendation": "Added data attributes (data-external-link and data-internal-link) to categorize links for CSS styling, rather than using the target attribute as the primary selector.",
+      "rationale": "Separating the categorization (external vs internal) from the behavior (target='_blank') allows for more precise CSS targeting. This prevents styling conflicts and makes the system more extensible. The data attributes serve as markers that CSS can reliably target without complex selector logic.",
+      "alternatives_considered": [
+        "Using CSS selectors based only on target='_blank' and href patterns",
+        "Adding specific CSS classes to links via JavaScript",
+        "Keeping the original approach of styling based on target='_blank' and href^='http'"
+      ],
+      "files_affected": [
+        "docs/en/docs/css/custom.css",
+        "docs/en/docs/js/custom.js"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Implemented graceful error handling with try-catch blocks and early returns for invalid URLs or special cases like same-page anchors.",
+      "rationale": "The JavaScript function includes multiple guard clauses: it skips links with target='_self', invalid hrefs, and same-page anchor links. The try-catch around URL parsing prevents crashes from malformed URLs. This ensures the feature doesn't break existing documentation functionality.",
+      "alternatives_considered": [
+        "Letting malformed URLs cause JavaScript errors",
+        "Not handling same-page anchor links specially",
+        "Applying the transformation to all links without validation"
+      ],
+      "files_affected": [
+        "docs/en/docs/js/custom.js"
+      ]
+    },
+    {
+      "dimension": "accessibility",
+      "recommendation": "Added rel='noopener' attribute to all links opened in new tabs for security and added data attributes for clear CSS targeting without affecting screen readers.",
+      "rationale": "The rel='noopener' attribute prevents security vulnerabilities when opening external links. The data attributes approach avoids adding visual clutter that might confuse screen readers. The solution maintains existing accessibility features while adding the new functionality.",
+      "alternatives_considered": [
+        "Adding aria-label attributes to indicate external links",
+        "Using title attributes to indicate links open in new tabs",
+        "Not adding rel='noopener' for performance reasons"
+      ],
+      "files_affected": [
+        "docs/en/docs/js/custom.js"
+      ]
+    },
+    {
+      "dimension": "performance",
+      "recommendation": "Used efficient DOM querying with querySelectorAll and early returns to minimize performance impact. The function runs once per page load after the document is ready.",
+      "rationale": "By limiting the query to '.md-content a[href]' and using early returns for special cases, the implementation minimizes DOM traversal. Running only once after page load ensures it doesn't affect page rendering performance. The try-catch prevents expensive error handling for invalid URLs.",
+      "alternatives_considered": [
+        "Running the function on every DOM change",
+        "Using less specific selectors that query more elements",
+        "Not optimizing for early returns in common cases"
+      ],
+      "files_affected": [
+        "docs/en/docs/js/custom.js"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Implement automatic external link detection and styling",
+      "description": "Add JavaScript logic to automatically detect external links, add target='_blank' and rel='noopener' attributes, and categorize links with data attributes for CSS styling. Update CSS to style links based on data attributes rather than href patterns.",
+      "files_to_modify": [
+        "docs/en/docs/js/custom.js",
+        "docs/en/docs/css/custom.css"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation takes a client-side JavaScript approach to automatically handle external links in FastAPI's documentation. Instead of manually updating thousands of documentation links, the solution uses JavaScript to dynamically analyze all links on page load, determine if they point outside the current documentation domain, and apply the appropriate attributes.\n\nThe key innovation is the shift from static CSS selectors based on href patterns to dynamic categorization using data attributes. The JavaScript function `openLinksInNewTab()` first determines the site's origin from either the canonical link or current URL, then iterates through all documentation links. For each valid external link, it adds `target='_blank'` and `rel='noopener'` attributes, and marks it with either `data-external-link` or `data-internal-link` based on origin comparison. The CSS was updated to target these data attributes instead of the previous pattern-based selectors.\n\nThis approach integrates seamlessly with the existing documentation infrastructure. The JavaScript runs after the document is ready (via `document$.subscribe()`), ensuring it doesn't interfere with page loading. The solution handles edge cases like same-page anchor links, links with explicit `target='_self'`, and malformed URLs gracefully. By separating the categorization logic (in JavaScript) from the presentation logic (in CSS), the implementation remains maintainable and extensible while providing consistent visual feedback for users across all documentation pages.",
+  "source_pr": "https://github.com/fastapi/fastapi/pull/15063",
+  "before_sha": "d23918588eeab1cf7fc08b3d99570aa6ab84ff72",
+  "after_sha": "f552fd3254d6f307e3db08805afbe733be20d3d9",
+  "diff_stats": {
+    "additions": 38,
+    "deletions": 8,
+    "files_changed": 2
+  }
+}

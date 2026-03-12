@@ -1,0 +1,28 @@
+diff --git a/.changeset/green-dingos-care.md b/.changeset/green-dingos-care.md
+new file mode 100644
+index 000000000000..3060c2383689
+--- /dev/null
++++ b/.changeset/green-dingos-care.md
+@@ -0,0 +1,5 @@
++---
++'astro': patch
++---
++
++Fixes `astro add` so the tsconfig preview shows the actual pending changes before confirmation
+diff --git a/packages/astro/src/cli/add/index.ts b/packages/astro/src/cli/add/index.ts
+index ae1dcc62a83a..1b48674cbc5d 100644
+--- a/packages/astro/src/cli/add/index.ts
++++ b/packages/astro/src/cli/add/index.ts
+@@ -1076,6 +1076,12 @@ async function updateTSConfig(
+ 		`\n  ${magenta(`Astro will make the following changes to your ${configFileName}:`)}`,
+ 	);
+ 
++	clack.box(diff, configFileName, {
++		rounded: true,
++		withGuide: false,
++		width: 'auto',
++	});
++
+ 	if (firstIntegrationWithTSSettings) {
+ 		// Every major framework, apart from Vue and Svelte requires different `jsxImportSource`, as such it's impossible to config
+ 		// all of them in the same `tsconfig.json`. However, Vue only need `"jsx": "preserve"` for template intellisense which

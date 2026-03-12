@@ -1,0 +1,1191 @@
+diff --git a/packages/drizzle/src/postgres/columnToCodeConverter.ts b/packages/drizzle/src/postgres/columnToCodeConverter.ts
+index fad8f5c27c9..430af808f47 100644
+--- a/packages/drizzle/src/postgres/columnToCodeConverter.ts
++++ b/packages/drizzle/src/postgres/columnToCodeConverter.ts
+@@ -3,6 +3,7 @@ export const columnToCodeConverter: ColumnToCodeConverter = ({
+   adapter,
+   addEnum,
+   addImport,
++  circularEdges,
+   column,
+   tableKey,
+ }) => {
+@@ -94,7 +95,10 @@ export const columnToCodeConverter: ColumnToCodeConverter = ({
+   if (column.reference) {
+     let callback = `()`
+ 
+-    if (column.reference.table === tableKey) {
++    if (
++      column.reference.table === tableKey ||
++      circularEdges?.has(`${tableKey}:${column.reference.table}`)
++    ) {
+       addImport(`${adapter.packageName}/drizzle/pg-core`, 'type AnyPgColumn')
+       callback = `${callback}: AnyPgColumn`
+     }
+diff --git a/packages/drizzle/src/sqlite/columnToCodeConverter.ts b/packages/drizzle/src/sqlite/columnToCodeConverter.ts
+index 8255bfbe2f2..0f3b53320f7 100644
+--- a/packages/drizzle/src/sqlite/columnToCodeConverter.ts
++++ b/packages/drizzle/src/sqlite/columnToCodeConverter.ts
+@@ -3,6 +3,7 @@ import type { ColumnToCodeConverter } from '../types.js'
+ export const columnToCodeConverter: ColumnToCodeConverter = ({
+   adapter,
+   addImport,
++  circularEdges,
+   column,
+   locales,
+   tableKey,
+@@ -124,7 +125,10 @@ export const columnToCodeConverter: ColumnToCodeConverter = ({
+   if (column.reference) {
+     let callback = `()`
+ 
+-    if (column.reference.table === tableKey) {
++    if (
++      column.reference.table === tableKey ||
++      circularEdges?.has(`${tableKey}:${column.reference.table}`)
++    ) {
+       addImport(`${adapter.packageName}/drizzle/sqlite-core`, 'type AnySQLiteColumn')
+       callback = `${callback}: AnySQLiteColumn`
+     }
+diff --git a/packages/drizzle/src/types.ts b/packages/drizzle/src/types.ts
+index c0142964262..9608befa769 100644
+--- a/packages/drizzle/src/types.ts
++++ b/packages/drizzle/src/types.ts
+@@ -323,6 +323,7 @@ export type ColumnToCodeConverter = (args: {
+   adapter: DrizzleAdapter
+   addEnum: (name: string, options: string[]) => void
+   addImport: (from: string, name: string) => void
++  circularEdges?: Set<string>
+   column: RawColumn
+   locales?: string[]
+   tableKey: string
+diff --git a/packages/drizzle/src/utilities/createSchemaGenerator.ts b/packages/drizzle/src/utilities/createSchemaGenerator.ts
+index c056464a7d9..f5077d65e1a 100644
+--- a/packages/drizzle/src/utilities/createSchemaGenerator.ts
++++ b/packages/drizzle/src/utilities/createSchemaGenerator.ts
+@@ -110,6 +110,51 @@ export const createSchemaGenerator = ({
+     addImport(`${this.packageName}/drizzle`, 'sql')
+     addImport(`${this.packageName}/drizzle`, 'relations')
+ 
++    const fkGraph: Record<string, Set<string>> = {}
++
++    for (const tableName in this.rawTables) {
++      fkGraph[tableName] = new Set()
++      const table = this.rawTables[tableName]
++
++      for (const colKey in table.columns) {
++        const col = table.columns[colKey]
++
++        if (col.reference && col.reference.table !== tableName) {
++          fkGraph[tableName].add(col.reference.table)
++        }
++      }
++    }
++
++    const canReach = (from: string, target: string, visited: Set<string>): boolean => {
++      if (from === target) {
++        return true
++      }
++
++      if (visited.has(from)) {
++        return false
++      }
++
++      visited.add(from)
++
++      for (const neighbor of fkGraph[from] ?? []) {
++        if (canReach(neighbor, target, visited)) {
++          return true
++        }
++      }
++
++      return false
++    }
++
++    const circularEdges = new Set<string>()
++
++    for (const tableA in fkGraph) {
++      for (const tableB of fkGraph[tableA]) {
++        if (canReach(tableB, tableA, new Set())) {
++          circularEdges.add(`${tableA}:${tableB}`)
++        }
++      }
++    }
++
+     for (const tableName in this.rawTables) {
+       const table = this.rawTables[tableName]
+ 
+@@ -156,6 +201,7 @@ ${Object.entries(table.columns)
+         adapter: this,
+         addEnum,
+         addImport,
++        circularEdges,
+         column,
+         locales: this.payload.config.localization
+           ? this.payload.config.localization.localeCodes
+diff --git a/test/database/circular-relation/config.ts b/test/database/circular-relation/config.ts
+new file mode 100644
+index 00000000000..c5f0f66996a
+--- /dev/null
++++ b/test/database/circular-relation/config.ts
+@@ -0,0 +1,36 @@
++import { buildConfigWithDefaults } from '../../buildConfigWithDefaults.js'
++
++export default buildConfigWithDefaults({
++  collections: [
++    {
++      slug: 'media',
++      fields: [
++        {
++          name: 'team',
++          type: 'relationship',
++          relationTo: 'teams',
++        },
++      ],
++    },
++    {
++      slug: 'teams',
++      fields: [
++        {
++          name: 'organization',
++          type: 'relationship',
++          relationTo: 'organizations',
++        },
++      ],
++    },
++    {
++      slug: 'organizations',
++      fields: [
++        {
++          name: 'image',
++          type: 'relationship',
++          relationTo: 'media',
++        },
++      ],
++    },
++  ],
++})
+diff --git a/test/database/circular-relation/payload-generated-schema.ts b/test/database/circular-relation/payload-generated-schema.ts
+new file mode 100644
+index 00000000000..8ba38d8a10d
+--- /dev/null
++++ b/test/database/circular-relation/payload-generated-schema.ts
+@@ -0,0 +1,407 @@
++/* tslint:disable */
++/* eslint-disable */
++/**
++ * This file was automatically generated by Payload.
++ * DO NOT MODIFY IT BY HAND. Instead, modify your source Payload config,
++ * and re-run `payload generate:db-schema` to regenerate this file.
++ */
++
++import type {} from '@payloadcms/db-postgres'
++import {
++  pgTable,
++  index,
++  uniqueIndex,
++  foreignKey,
++  serial,
++  integer,
++  type AnyPgColumn,
++  timestamp,
++  varchar,
++  jsonb,
++  numeric,
++} from '@payloadcms/db-postgres/drizzle/pg-core'
++import { sql, relations } from '@payloadcms/db-postgres/drizzle'
++
++export const media = pgTable(
++  'media',
++  {
++    id: serial('id').primaryKey(),
++    team: integer('team_id').references((): AnyPgColumn => teams.id, {
++      onDelete: 'set null',
++    }),
++    updatedAt: timestamp('updated_at', { mode: 'string', withTimezone: true, precision: 3 })
++      .defaultNow()
++      .notNull(),
++    createdAt: timestamp('created_at', { mode: 'string', withTimezone: true, precision: 3 })
++      .defaultNow()
++      .notNull(),
++  },
++  (columns) => [
++    index('media_team_idx').on(columns.team),
++    index('media_updated_at_idx').on(columns.updatedAt),
++    index('media_created_at_idx').on(columns.createdAt),
++  ],
++)
++
++export const teams = pgTable(
++  'teams',
++  {
++    id: serial('id').primaryKey(),
++    organization: integer('organization_id').references((): AnyPgColumn => organizations.id, {
++      onDelete: 'set null',
++    }),
++    updatedAt: timestamp('updated_at', { mode: 'string', withTimezone: true, precision: 3 })
++      .defaultNow()
++      .notNull(),
++    createdAt: timestamp('created_at', { mode: 'string', withTimezone: true, precision: 3 })
++      .defaultNow()
++      .notNull(),
++  },
++  (columns) => [
++    index('teams_organization_idx').on(columns.organization),
++    index('teams_updated_at_idx').on(columns.updatedAt),
++    index('teams_created_at_idx').on(columns.createdAt),
++  ],
++)
++
++export const organizations = pgTable(
++  'organizations',
++  {
++    id: serial('id').primaryKey(),
++    image: integer('image_id').references((): AnyPgColumn => media.id, {
++      onDelete: 'set null',
++    }),
++    updatedAt: timestamp('updated_at', { mode: 'string', withTimezone: true, precision: 3 })
++      .defaultNow()
++      .notNull(),
++    createdAt: timestamp('created_at', { mode: 'string', withTimezone: true, precision: 3 })
++      .defaultNow()
++      .notNull(),
++  },
++  (columns) => [
++    index('organizations_image_idx').on(columns.image),
++    index('organizations_updated_at_idx').on(columns.updatedAt),
++    index('organizations_created_at_idx').on(columns.createdAt),
++  ],
++)
++
++export const payload_kv = pgTable(
++  'payload_kv',
++  {
++    id: serial('id').primaryKey(),
++    key: varchar('key').notNull(),
++    data: jsonb('data').notNull(),
++  },
++  (columns) => [uniqueIndex('payload_kv_key_idx').on(columns.key)],
++)
++
++export const users_sessions = pgTable(
++  'users_sessions',
++  {
++    _order: integer('_order').notNull(),
++    _parentID: integer('_parent_id').notNull(),
++    id: varchar('id').primaryKey(),
++    createdAt: timestamp('created_at', { mode: 'string', withTimezone: true, precision: 3 }),
++    expiresAt: timestamp('expires_at', {
++      mode: 'string',
++      withTimezone: true,
++      precision: 3,
++    }).notNull(),
++  },
++  (columns) => [
++    index('users_sessions_order_idx').on(columns._order),
++    index('users_sessions_parent_id_idx').on(columns._parentID),
++    foreignKey({
++      columns: [columns['_parentID']],
++      foreignColumns: [users.id],
++      name: 'users_sessions_parent_id_fk',
++    }).onDelete('cascade'),
++  ],
++)
++
++export const users = pgTable(
++  'users',
++  {
++    id: serial('id').primaryKey(),
++    updatedAt: timestamp('updated_at', { mode: 'string', withTimezone: true, precision: 3 })
++      .defaultNow()
++      .notNull(),
++    createdAt: timestamp('created_at', { mode: 'string', withTimezone: true, precision: 3 })
++      .defaultNow()
++      .notNull(),
++    email: varchar('email').notNull(),
++    resetPasswordToken: varchar('reset_password_token'),
++    resetPasswordExpiration: timestamp('reset_password_expiration', {
++      mode: 'string',
++      withTimezone: true,
++      precision: 3,
++    }),
++    salt: varchar('salt'),
++    hash: varchar('hash'),
++    loginAttempts: numeric('login_attempts', { mode: 'number' }).default(0),
++    lockUntil: timestamp('lock_until', { mode: 'string', withTimezone: true, precision: 3 }),
++  },
++  (columns) => [
++    index('users_updated_at_idx').on(columns.updatedAt),
++    index('users_created_at_idx').on(columns.createdAt),
++    uniqueIndex('users_email_idx').on(columns.email),
++  ],
++)
++
++export const payload_locked_documents = pgTable(
++  'payload_locked_documents',
++  {
++    id: serial('id').primaryKey(),
++    globalSlug: varchar('global_slug'),
++    updatedAt: timestamp('updated_at', { mode: 'string', withTimezone: true, precision: 3 })
++      .defaultNow()
++      .notNull(),
++    createdAt: timestamp('created_at', { mode: 'string', withTimezone: true, precision: 3 })
++      .defaultNow()
++      .notNull(),
++  },
++  (columns) => [
++    index('payload_locked_documents_global_slug_idx').on(columns.globalSlug),
++    index('payload_locked_documents_updated_at_idx').on(columns.updatedAt),
++    index('payload_locked_documents_created_at_idx').on(columns.createdAt),
++  ],
++)
++
++export const payload_locked_documents_rels = pgTable(
++  'payload_locked_documents_rels',
++  {
++    id: serial('id').primaryKey(),
++    order: integer('order'),
++    parent: integer('parent_id').notNull(),
++    path: varchar('path').notNull(),
++    mediaID: integer('media_id'),
++    teamsID: integer('teams_id'),
++    organizationsID: integer('organizations_id'),
++    usersID: integer('users_id'),
++  },
++  (columns) => [
++    index('payload_locked_documents_rels_order_idx').on(columns.order),
++    index('payload_locked_documents_rels_parent_idx').on(columns.parent),
++    index('payload_locked_documents_rels_path_idx').on(columns.path),
++    index('payload_locked_documents_rels_media_id_idx').on(columns.mediaID),
++    index('payload_locked_documents_rels_teams_id_idx').on(columns.teamsID),
++    index('payload_locked_documents_rels_organizations_id_idx').on(columns.organizationsID),
++    index('payload_locked_documents_rels_users_id_idx').on(columns.usersID),
++    foreignKey({
++      columns: [columns['parent']],
++      foreignColumns: [payload_locked_documents.id],
++      name: 'payload_locked_documents_rels_parent_fk',
++    }).onDelete('cascade'),
++    foreignKey({
++      columns: [columns['mediaID']],
++      foreignColumns: [media.id],
++      name: 'payload_locked_documents_rels_media_fk',
++    }).onDelete('cascade'),
++    foreignKey({
++      columns: [columns['teamsID']],
++      foreignColumns: [teams.id],
++      name: 'payload_locked_documents_rels_teams_fk',
++    }).onDelete('cascade'),
++    foreignKey({
++      columns: [columns['organizationsID']],
++      foreignColumns: [organizations.id],
++      name: 'payload_locked_documents_rels_organizations_fk',
++    }).onDelete('cascade'),
++    foreignKey({
++      columns: [columns['usersID']],
++      foreignColumns: [users.id],
++      name: 'payload_locked_documents_rels_users_fk',
++    }).onDelete('cascade'),
++  ],
++)
++
++export const payload_preferences = pgTable(
++  'payload_preferences',
++  {
++    id: serial('id').primaryKey(),
++    key: varchar('key'),
++    value: jsonb('value'),
++    updatedAt: timestamp('updated_at', { mode: 'string', withTimezone: true, precision: 3 })
++      .defaultNow()
++      .notNull(),
++    createdAt: timestamp('created_at', { mode: 'string', withTimezone: true, precision: 3 })
++      .defaultNow()
++      .notNull(),
++  },
++  (columns) => [
++    index('payload_preferences_key_idx').on(columns.key),
++    index('payload_preferences_updated_at_idx').on(columns.updatedAt),
++    index('payload_preferences_created_at_idx').on(columns.createdAt),
++  ],
++)
++
++export const payload_preferences_rels = pgTable(
++  'payload_preferences_rels',
++  {
++    id: serial('id').primaryKey(),
++    order: integer('order'),
++    parent: integer('parent_id').notNull(),
++    path: varchar('path').notNull(),
++    usersID: integer('users_id'),
++  },
++  (columns) => [
++    index('payload_preferences_rels_order_idx').on(columns.order),
++    index('payload_preferences_rels_parent_idx').on(columns.parent),
++    index('payload_preferences_rels_path_idx').on(columns.path),
++    index('payload_preferences_rels_users_id_idx').on(columns.usersID),
++    foreignKey({
++      columns: [columns['parent']],
++      foreignColumns: [payload_preferences.id],
++      name: 'payload_preferences_rels_parent_fk',
++    }).onDelete('cascade'),
++    foreignKey({
++      columns: [columns['usersID']],
++      foreignColumns: [users.id],
++      name: 'payload_preferences_rels_users_fk',
++    }).onDelete('cascade'),
++  ],
++)
++
++export const payload_migrations = pgTable(
++  'payload_migrations',
++  {
++    id: serial('id').primaryKey(),
++    name: varchar('name'),
++    batch: numeric('batch', { mode: 'number' }),
++    updatedAt: timestamp('updated_at', { mode: 'string', withTimezone: true, precision: 3 })
++      .defaultNow()
++      .notNull(),
++    createdAt: timestamp('created_at', { mode: 'string', withTimezone: true, precision: 3 })
++      .defaultNow()
++      .notNull(),
++  },
++  (columns) => [
++    index('payload_migrations_updated_at_idx').on(columns.updatedAt),
++    index('payload_migrations_created_at_idx').on(columns.createdAt),
++  ],
++)
++
++export const relations_media = relations(media, ({ one }) => ({
++  team: one(teams, {
++    fields: [media.team],
++    references: [teams.id],
++    relationName: 'team',
++  }),
++}))
++export const relations_teams = relations(teams, ({ one }) => ({
++  organization: one(organizations, {
++    fields: [teams.organization],
++    references: [organizations.id],
++    relationName: 'organization',
++  }),
++}))
++export const relations_organizations = relations(organizations, ({ one }) => ({
++  image: one(media, {
++    fields: [organizations.image],
++    references: [media.id],
++    relationName: 'image',
++  }),
++}))
++export const relations_payload_kv = relations(payload_kv, () => ({}))
++export const relations_users_sessions = relations(users_sessions, ({ one }) => ({
++  _parentID: one(users, {
++    fields: [users_sessions._parentID],
++    references: [users.id],
++    relationName: 'sessions',
++  }),
++}))
++export const relations_users = relations(users, ({ many }) => ({
++  sessions: many(users_sessions, {
++    relationName: 'sessions',
++  }),
++}))
++export const relations_payload_locked_documents_rels = relations(
++  payload_locked_documents_rels,
++  ({ one }) => ({
++    parent: one(payload_locked_documents, {
++      fields: [payload_locked_documents_rels.parent],
++      references: [payload_locked_documents.id],
++      relationName: '_rels',
++    }),
++    mediaID: one(media, {
++      fields: [payload_locked_documents_rels.mediaID],
++      references: [media.id],
++      relationName: 'media',
++    }),
++    teamsID: one(teams, {
++      fields: [payload_locked_documents_rels.teamsID],
++      references: [teams.id],
++      relationName: 'teams',
++    }),
++    organizationsID: one(organizations, {
++      fields: [payload_locked_documents_rels.organizationsID],
++      references: [organizations.id],
++      relationName: 'organizations',
++    }),
++    usersID: one(users, {
++      fields: [payload_locked_documents_rels.usersID],
++      references: [users.id],
++      relationName: 'users',
++    }),
++  }),
++)
++export const relations_payload_locked_documents = relations(
++  payload_locked_documents,
++  ({ many }) => ({
++    _rels: many(payload_locked_documents_rels, {
++      relationName: '_rels',
++    }),
++  }),
++)
++export const relations_payload_preferences_rels = relations(
++  payload_preferences_rels,
++  ({ one }) => ({
++    parent: one(payload_preferences, {
++      fields: [payload_preferences_rels.parent],
++      references: [payload_preferences.id],
++      relationName: '_rels',
++    }),
++    usersID: one(users, {
++      fields: [payload_preferences_rels.usersID],
++      references: [users.id],
++      relationName: 'users',
++    }),
++  }),
++)
++export const relations_payload_preferences = relations(payload_preferences, ({ many }) => ({
++  _rels: many(payload_preferences_rels, {
++    relationName: '_rels',
++  }),
++}))
++export const relations_payload_migrations = relations(payload_migrations, () => ({}))
++
++type DatabaseSchema = {
++  media: typeof media
++  teams: typeof teams
++  organizations: typeof organizations
++  payload_kv: typeof payload_kv
++  users_sessions: typeof users_sessions
++  users: typeof users
++  payload_locked_documents: typeof payload_locked_documents
++  payload_locked_documents_rels: typeof payload_locked_documents_rels
++  payload_preferences: typeof payload_preferences
++  payload_preferences_rels: typeof payload_preferences_rels
++  payload_migrations: typeof payload_migrations
++  relations_media: typeof relations_media
++  relations_teams: typeof relations_teams
++  relations_organizations: typeof relations_organizations
++  relations_payload_kv: typeof relations_payload_kv
++  relations_users_sessions: typeof relations_users_sessions
++  relations_users: typeof relations_users
++  relations_payload_locked_documents_rels: typeof relations_payload_locked_documents_rels
++  relations_payload_locked_documents: typeof relations_payload_locked_documents
++  relations_payload_preferences_rels: typeof relations_payload_preferences_rels
++  relations_payload_preferences: typeof relations_payload_preferences
++  relations_payload_migrations: typeof relations_payload_migrations
++}
++
++declare module '@payloadcms/db-postgres' {
++  export interface GeneratedDatabaseSchema {
++    schema: DatabaseSchema
++  }
++}
+diff --git a/test/database/payload-generated-schema.ts b/test/database/payload-generated-schema.ts
+index 21bf2a033c1..bcfd26f6554 100644
+--- a/test/database/payload-generated-schema.ts
++++ b/test/database/payload-generated-schema.ts
+@@ -14,6 +14,7 @@ import {
+   foreignKey,
+   integer,
+   text,
++  type AnySQLiteColumn,
+   numeric,
+ } from '@payloadcms/db-sqlite/drizzle/sqlite-core'
+ import { sql, relations } from '@payloadcms/db-sqlite/drizzle'
+@@ -32,7 +33,7 @@ export const categories = sqliteTable(
+       onDelete: 'set null',
+     }),
+     hideout_camera1_time1Image: integer('hideout_camera1_time1_image_id').references(
+-      () => posts.id,
++      (): AnySQLiteColumn => posts.id,
+       {
+         onDelete: 'set null',
+       },
+@@ -86,7 +87,7 @@ export const _categories_v = sqliteTable(
+       .notNull()
+       .default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`),
+     snapshot: integer('snapshot', { mode: 'boolean' }),
+-    publishedLocale: text('published_locale', { enum: ['en', 'es'] }),
++    publishedLocale: text('published_locale', { enum: ['en', 'es', 'uk'] }),
+     latest: integer('latest', { mode: 'boolean' }),
+   },
+   (columns) => [
+@@ -125,6 +126,45 @@ export const simple = sqliteTable(
+   ],
+ )
+ 
++export const simple_localized = sqliteTable(
++  'simple_localized',
++  {
++    id: integer('id').primaryKey({ autoIncrement: true }),
++    number: numeric('number', { mode: 'number' }),
++    updatedAt: text('updated_at')
++      .notNull()
++      .default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`),
++    createdAt: text('created_at')
++      .notNull()
++      .default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`),
++  },
++  (columns) => [
++    index('simple_localized_updated_at_idx').on(columns.updatedAt),
++    index('simple_localized_created_at_idx').on(columns.createdAt),
++  ],
++)
++
++export const simple_localized_locales = sqliteTable(
++  'simple_localized_locales',
++  {
++    text: text('text'),
++    id: integer('id').primaryKey(),
++    _locale: text('_locale', { enum: ['en', 'es', 'uk'] }).notNull(),
++    _parentID: integer('_parent_id').notNull(),
++  },
++  (columns) => [
++    uniqueIndex('simple_localized_locales_locale_parent_id_unique').on(
++      columns._locale,
++      columns._parentID,
++    ),
++    foreignKey({
++      columns: [columns['_parentID']],
++      foreignColumns: [simple_localized.id],
++      name: 'simple_localized_locales_parent_id_fk',
++    }).onDelete('cascade'),
++  ],
++)
++
+ export const categories_custom_id = sqliteTable(
+   'categories_custom_id',
+   {
+@@ -165,7 +205,7 @@ export const _categories_custom_id_v = sqliteTable(
+       .notNull()
+       .default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`),
+     snapshot: integer('snapshot', { mode: 'boolean' }),
+-    publishedLocale: text('published_locale', { enum: ['en', 'es'] }),
++    publishedLocale: text('published_locale', { enum: ['en', 'es', 'uk'] }),
+     latest: integer('latest', { mode: 'boolean' }),
+   },
+   (columns) => [
+@@ -247,7 +287,7 @@ export const posts_array_with_i_ds_locales = sqliteTable(
+   {
+     textLocalized: text('text_localized'),
+     id: integer('id').primaryKey(),
+-    _locale: text('_locale', { enum: ['en', 'es'] }).notNull(),
++    _locale: text('_locale', { enum: ['en', 'es', 'uk'] }).notNull(),
+     _parentID: text('_parent_id').notNull(),
+   },
+   (columns) => [
+@@ -268,7 +308,7 @@ export const posts_array_with_i_ds_localized = sqliteTable(
+   {
+     _order: integer('_order').notNull(),
+     _parentID: integer('_parent_id').notNull(),
+-    _locale: text('_locale', { enum: ['en', 'es'] }).notNull(),
++    _locale: text('_locale', { enum: ['en', 'es', 'uk'] }).notNull(),
+     id: text('id').primaryKey(),
+     text: text('text'),
+   },
+@@ -311,7 +351,7 @@ export const posts = sqliteTable(
+   {
+     id: integer('id').primaryKey({ autoIncrement: true }),
+     title: text('title').notNull(),
+-    category: integer('category_id').references(() => categories.id, {
++    category: integer('category_id').references((): AnySQLiteColumn => categories.id, {
+       onDelete: 'set null',
+     }),
+     categoryCustomID: numeric('category_custom_i_d_id', { mode: 'number' }).references(
+@@ -323,6 +363,7 @@ export const posts = sqliteTable(
+     text: text('text'),
+     number: numeric('number', { mode: 'number' }),
+     numberDefault: numeric('number_default', { mode: 'number' }).default(1),
++    publishDate: text('publish_date').default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`),
+     testNestedGroup_nestedText1: text('test_nested_group_nested_text1'),
+     testNestedGroup_nestedText2: text('test_nested_group_nested_text2'),
+     D1_D2_D3_D4: text('d1_d2_d3_d4'),
+@@ -351,7 +392,7 @@ export const posts_locales = sqliteTable(
+     localized: text('localized'),
+     testNestedGroup_nestedLocalizedText: text('test_nested_group_nested_localized_text'),
+     id: integer('id').primaryKey(),
+-    _locale: text('_locale', { enum: ['en', 'es'] }).notNull(),
++    _locale: text('_locale', { enum: ['en', 'es', 'uk'] }).notNull(),
+     _parentID: integer('_parent_id').notNull(),
+   },
+   (columns) => [
+@@ -364,6 +405,25 @@ export const posts_locales = sqliteTable(
+   ],
+ )
+ 
++export const posts_numbers = sqliteTable(
++  'posts_numbers',
++  {
++    id: integer('id').primaryKey(),
++    number: numeric('number', { mode: 'number' }),
++    order: integer('order').notNull(),
++    parent: integer('parent_id').notNull(),
++    path: text('path').notNull(),
++  },
++  (columns) => [
++    index('posts_numbers_order_parent_idx').on(columns.order, columns.parent),
++    foreignKey({
++      columns: [columns['parent']],
++      foreignColumns: [posts.id],
++      name: 'posts_numbers_parent_fk',
++    }).onDelete('cascade'),
++  ],
++)
++
+ export const posts_rels = sqliteTable(
+   'posts_rels',
+   {
+@@ -371,7 +431,7 @@ export const posts_rels = sqliteTable(
+     order: integer('order'),
+     parent: integer('parent_id').notNull(),
+     path: text('path').notNull(),
+-    locale: text('locale', { enum: ['en', 'es'] }),
++    locale: text('locale', { enum: ['en', 'es', 'uk'] }),
+     categoriesID: integer('categories_id'),
+     'categories-custom-idID': numeric('categories_custom_id_id', { mode: 'number' }),
+     simpleID: integer('simple_id'),
+@@ -537,7 +597,7 @@ export const pg_migrations_my_array_my_sub_array_locales = sqliteTable(
+       onDelete: 'set null',
+     }),
+     id: integer('id').primaryKey(),
+-    _locale: text('_locale', { enum: ['en', 'es'] }).notNull(),
++    _locale: text('_locale', { enum: ['en', 'es', 'uk'] }).notNull(),
+     _parentID: text('_parent_id').notNull(),
+   },
+   (columns) => [
+@@ -611,7 +671,7 @@ export const pg_migrations_blocks_my_block_locales = sqliteTable(
+       onDelete: 'set null',
+     }),
+     id: integer('id').primaryKey(),
+-    _locale: text('_locale', { enum: ['en', 'es'] }).notNull(),
++    _locale: text('_locale', { enum: ['en', 'es', 'uk'] }).notNull(),
+     _parentID: text('_parent_id').notNull(),
+   },
+   (columns) => [
+@@ -656,7 +716,7 @@ export const pg_migrations_locales = sqliteTable(
+       onDelete: 'set null',
+     }),
+     id: integer('id').primaryKey(),
+-    _locale: text('_locale', { enum: ['en', 'es'] }).notNull(),
++    _locale: text('_locale', { enum: ['en', 'es', 'uk'] }).notNull(),
+     _parentID: integer('_parent_id').notNull(),
+   },
+   (columns) => [
+@@ -702,7 +762,7 @@ export const _pg_migrations_v_version_my_array_my_sub_array_locales = sqliteTabl
+       onDelete: 'set null',
+     }),
+     id: integer('id').primaryKey(),
+-    _locale: text('_locale', { enum: ['en', 'es'] }).notNull(),
++    _locale: text('_locale', { enum: ['en', 'es', 'uk'] }).notNull(),
+     _parentID: integer('_parent_id').notNull(),
+   },
+   (columns) => [
+@@ -778,7 +838,7 @@ export const _pg_migrations_v_blocks_my_block_locales = sqliteTable(
+       onDelete: 'set null',
+     }),
+     id: integer('id').primaryKey(),
+-    _locale: text('_locale', { enum: ['en', 'es'] }).notNull(),
++    _locale: text('_locale', { enum: ['en', 'es', 'uk'] }).notNull(),
+     _parentID: integer('_parent_id').notNull(),
+   },
+   (columns) => [
+@@ -838,7 +898,7 @@ export const _pg_migrations_v_locales = sqliteTable(
+       },
+     ),
+     id: integer('id').primaryKey(),
+-    _locale: text('_locale', { enum: ['en', 'es'] }).notNull(),
++    _locale: text('_locale', { enum: ['en', 'es', 'uk'] }).notNull(),
+     _parentID: integer('_parent_id').notNull(),
+   },
+   (columns) => [
+@@ -901,7 +961,7 @@ export const customArrays_locales = sqliteTable(
+   {
+     localizedText: text('localized_text'),
+     id: integer('id').primaryKey(),
+-    _locale: text('_locale', { enum: ['en', 'es'] }).notNull(),
++    _locale: text('_locale', { enum: ['en', 'es', 'uk'] }).notNull(),
+     _parentID: text('_parent_id').notNull(),
+   },
+   (columns) => [
+@@ -944,7 +1004,7 @@ export const customBlocks_locales = sqliteTable(
+   {
+     localizedText: text('localized_text'),
+     id: integer('id').primaryKey(),
+-    _locale: text('_locale', { enum: ['en', 'es'] }).notNull(),
++    _locale: text('_locale', { enum: ['en', 'es', 'uk'] }).notNull(),
+     _parentID: text('_parent_id').notNull(),
+   },
+   (columns) => [
+@@ -986,7 +1046,7 @@ export const customs_locales = sqliteTable(
+   {
+     localizedText: text('localized_text'),
+     id: integer('id').primaryKey(),
+-    _locale: text('_locale', { enum: ['en', 'es'] }).notNull(),
++    _locale: text('_locale', { enum: ['en', 'es', 'uk'] }).notNull(),
+     _parentID: integer('_parent_id').notNull(),
+   },
+   (columns) => [
+@@ -1070,7 +1130,7 @@ export const _customArrays_v_locales = sqliteTable(
+   {
+     localizedText: text('localized_text'),
+     id: integer('id').primaryKey(),
+-    _locale: text('_locale', { enum: ['en', 'es'] }).notNull(),
++    _locale: text('_locale', { enum: ['en', 'es', 'uk'] }).notNull(),
+     _parentID: integer('_parent_id').notNull(),
+   },
+   (columns) => [
+@@ -1114,7 +1174,7 @@ export const _customBlocks_v_locales = sqliteTable(
+   {
+     localizedText: text('localized_text'),
+     id: integer('id').primaryKey(),
+-    _locale: text('_locale', { enum: ['en', 'es'] }).notNull(),
++    _locale: text('_locale', { enum: ['en', 'es', 'uk'] }).notNull(),
+     _parentID: integer('_parent_id').notNull(),
+   },
+   (columns) => [
+@@ -1153,7 +1213,7 @@ export const _customs_v = sqliteTable(
+       .notNull()
+       .default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`),
+     snapshot: integer('snapshot', { mode: 'boolean' }),
+-    publishedLocale: text('published_locale', { enum: ['en', 'es'] }),
++    publishedLocale: text('published_locale', { enum: ['en', 'es', 'uk'] }),
+     latest: integer('latest', { mode: 'boolean' }),
+   },
+   (columns) => [
+@@ -1174,7 +1234,7 @@ export const _customs_v_locales = sqliteTable(
+   {
+     version_localizedText: text('version_localized_text'),
+     id: integer('id').primaryKey(),
+-    _locale: text('_locale', { enum: ['en', 'es'] }).notNull(),
++    _locale: text('_locale', { enum: ['en', 'es', 'uk'] }).notNull(),
+     _parentID: integer('_parent_id').notNull(),
+   },
+   (columns) => [
+@@ -1317,7 +1377,7 @@ export const _virtual_relations_v = sqliteTable(
+       .notNull()
+       .default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`),
+     snapshot: integer('snapshot', { mode: 'boolean' }),
+-    publishedLocale: text('published_locale', { enum: ['en', 'es'] }),
++    publishedLocale: text('published_locale', { enum: ['en', 'es', 'uk'] }),
+     latest: integer('latest', { mode: 'boolean' }),
+   },
+   (columns) => [
+@@ -1421,7 +1481,7 @@ export const _custom_ids_v = sqliteTable(
+       .notNull()
+       .default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`),
+     snapshot: integer('snapshot', { mode: 'boolean' }),
+-    publishedLocale: text('published_locale', { enum: ['en', 'es'] }),
++    publishedLocale: text('published_locale', { enum: ['en', 'es', 'uk'] }),
+     latest: integer('latest', { mode: 'boolean' }),
+   },
+   (columns) => [
+@@ -1652,7 +1712,7 @@ export const blocks_docs_blocks_cta = sqliteTable(
+     _order: integer('_order').notNull(),
+     _parentID: integer('_parent_id').notNull(),
+     _path: text('_path').notNull(),
+-    _locale: text('_locale', { enum: ['en', 'es'] }).notNull(),
++    _locale: text('_locale', { enum: ['en', 'es', 'uk'] }).notNull(),
+     id: text('id').primaryKey(),
+     text: text('text'),
+     blockName: text('block_name'),
+@@ -1728,6 +1788,71 @@ export const unique_fields = sqliteTable(
+   ],
+ )
+ 
++export const select_has_many_roles = sqliteTable(
++  'select_has_many_roles',
++  {
++    order: integer('order').notNull(),
++    parent: integer('parent_id').notNull(),
++    value: text('value', { enum: ['user', 'admin', 'editor'] }),
++    id: integer('id').primaryKey({ autoIncrement: true }),
++  },
++  (columns) => [
++    index('select_has_many_roles_order_idx').on(columns.order),
++    index('select_has_many_roles_parent_idx').on(columns.parent),
++    foreignKey({
++      columns: [columns['parent']],
++      foreignColumns: [select_has_many.id],
++      name: 'select_has_many_roles_parent_fk',
++    }).onDelete('cascade'),
++  ],
++)
++
++export const select_has_many_food = sqliteTable(
++  'select_has_many_food',
++  {
++    order: integer('order').notNull(),
++    parent: integer('parent_id').notNull(),
++    value: text('value', { enum: ['apple', 'bananabread', 'banana'] }),
++    id: integer('id').primaryKey({ autoIncrement: true }),
++  },
++  (columns) => [
++    index('select_has_many_food_order_idx').on(columns.order),
++    index('select_has_many_food_parent_idx').on(columns.parent),
++    foreignKey({
++      columns: [columns['parent']],
++      foreignColumns: [select_has_many.id],
++      name: 'select_has_many_food_parent_fk',
++    }).onDelete('cascade'),
++  ],
++)
++
++export const select_has_many = sqliteTable(
++  'select_has_many',
++  {
++    id: integer('id').primaryKey({ autoIncrement: true }),
++    updatedAt: text('updated_at')
++      .notNull()
++      .default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`),
++    createdAt: text('created_at')
++      .notNull()
++      .default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`),
++  },
++  (columns) => [
++    index('select_has_many_updated_at_idx').on(columns.updatedAt),
++    index('select_has_many_created_at_idx').on(columns.createdAt),
++  ],
++)
++
++export const payload_kv = sqliteTable(
++  'payload_kv',
++  {
++    id: integer('id').primaryKey({ autoIncrement: true }),
++    key: text('key').notNull(),
++    data: text('data', { mode: 'json' }).notNull(),
++  },
++  (columns) => [uniqueIndex('payload_kv_key_idx').on(columns.key)],
++)
++
+ export const users_sessions = sqliteTable(
+   'users_sessions',
+   {
+@@ -1806,6 +1931,7 @@ export const payload_locked_documents_rels = sqliteTable(
+     noTimeStampsID: integer('no_time_stamps_id'),
+     categoriesID: integer('categories_id'),
+     simpleID: integer('simple_id'),
++    'simple-localizedID': integer('simple_localized_id'),
+     'categories-custom-idID': numeric('categories_custom_id_id', { mode: 'number' }),
+     postsID: integer('posts_id'),
+     'error-on-unnamed-fieldsID': integer('error_on_unnamed_fields_id'),
+@@ -1824,6 +1950,7 @@ export const payload_locked_documents_rels = sqliteTable(
+     aliasesID: integer('aliases_id'),
+     'blocks-docsID': integer('blocks_docs_id'),
+     'unique-fieldsID': integer('unique_fields_id'),
++    'select-has-manyID': integer('select_has_many_id'),
+     usersID: integer('users_id'),
+   },
+   (columns) => [
+@@ -1833,6 +1960,9 @@ export const payload_locked_documents_rels = sqliteTable(
+     index('payload_locked_documents_rels_no_time_stamps_id_idx').on(columns.noTimeStampsID),
+     index('payload_locked_documents_rels_categories_id_idx').on(columns.categoriesID),
+     index('payload_locked_documents_rels_simple_id_idx').on(columns.simpleID),
++    index('payload_locked_documents_rels_simple_localized_id_idx').on(
++      columns['simple-localizedID'],
++    ),
+     index('payload_locked_documents_rels_categories_custom_id_id_idx').on(
+       columns['categories-custom-idID'],
+     ),
+@@ -1863,6 +1993,7 @@ export const payload_locked_documents_rels = sqliteTable(
+     index('payload_locked_documents_rels_aliases_id_idx').on(columns.aliasesID),
+     index('payload_locked_documents_rels_blocks_docs_id_idx').on(columns['blocks-docsID']),
+     index('payload_locked_documents_rels_unique_fields_id_idx').on(columns['unique-fieldsID']),
++    index('payload_locked_documents_rels_select_has_many_id_idx').on(columns['select-has-manyID']),
+     index('payload_locked_documents_rels_users_id_idx').on(columns.usersID),
+     foreignKey({
+       columns: [columns['parent']],
+@@ -1884,6 +2015,11 @@ export const payload_locked_documents_rels = sqliteTable(
+       foreignColumns: [simple.id],
+       name: 'payload_locked_documents_rels_simple_fk',
+     }).onDelete('cascade'),
++    foreignKey({
++      columns: [columns['simple-localizedID']],
++      foreignColumns: [simple_localized.id],
++      name: 'payload_locked_documents_rels_simple_localized_fk',
++    }).onDelete('cascade'),
+     foreignKey({
+       columns: [columns['categories-custom-idID']],
+       foreignColumns: [categories_custom_id.id],
+@@ -1974,6 +2110,11 @@ export const payload_locked_documents_rels = sqliteTable(
+       foreignColumns: [unique_fields.id],
+       name: 'payload_locked_documents_rels_unique_fields_fk',
+     }).onDelete('cascade'),
++    foreignKey({
++      columns: [columns['select-has-manyID']],
++      foreignColumns: [select_has_many.id],
++      name: 'payload_locked_documents_rels_select_has_many_fk',
++    }).onDelete('cascade'),
+     foreignKey({
+       columns: [columns['usersID']],
+       foreignColumns: [users.id],
+@@ -2219,6 +2360,21 @@ export const relations__categories_v = relations(_categories_v, ({ one }) => ({
+   }),
+ }))
+ export const relations_simple = relations(simple, () => ({}))
++export const relations_simple_localized_locales = relations(
++  simple_localized_locales,
++  ({ one }) => ({
++    _parentID: one(simple_localized, {
++      fields: [simple_localized_locales._parentID],
++      references: [simple_localized.id],
++      relationName: '_locales',
++    }),
++  }),
++)
++export const relations_simple_localized = relations(simple_localized, ({ many }) => ({
++  _locales: many(simple_localized_locales, {
++    relationName: '_locales',
++  }),
++}))
+ export const relations_categories_custom_id = relations(categories_custom_id, () => ({}))
+ export const relations__categories_custom_id_v = relations(_categories_custom_id_v, ({ one }) => ({
+   parent: one(categories_custom_id, {
+@@ -2297,6 +2453,13 @@ export const relations_posts_locales = relations(posts_locales, ({ one }) => ({
+     relationName: '_locales',
+   }),
+ }))
++export const relations_posts_numbers = relations(posts_numbers, ({ one }) => ({
++  parent: one(posts, {
++    fields: [posts_numbers.parent],
++    references: [posts.id],
++    relationName: '_numbers',
++  }),
++}))
+ export const relations_posts_rels = relations(posts_rels, ({ one }) => ({
+   parent: one(posts, {
+     fields: [posts_rels.parent],
+@@ -2348,6 +2511,9 @@ export const relations_posts = relations(posts, ({ one, many }) => ({
+   _locales: many(posts_locales, {
+     relationName: '_locales',
+   }),
++  _numbers: many(posts_numbers, {
++    relationName: '_numbers',
++  }),
+   _rels: many(posts_rels, {
+     relationName: '_rels',
+   }),
+@@ -2964,6 +3130,29 @@ export const relations_blocks_docs = relations(blocks_docs, ({ many }) => ({
+   }),
+ }))
+ export const relations_unique_fields = relations(unique_fields, () => ({}))
++export const relations_select_has_many_roles = relations(select_has_many_roles, ({ one }) => ({
++  parent: one(select_has_many, {
++    fields: [select_has_many_roles.parent],
++    references: [select_has_many.id],
++    relationName: 'roles',
++  }),
++}))
++export const relations_select_has_many_food = relations(select_has_many_food, ({ one }) => ({
++  parent: one(select_has_many, {
++    fields: [select_has_many_food.parent],
++    references: [select_has_many.id],
++    relationName: 'food',
++  }),
++}))
++export const relations_select_has_many = relations(select_has_many, ({ many }) => ({
++  roles: many(select_has_many_roles, {
++    relationName: 'roles',
++  }),
++  food: many(select_has_many_food, {
++    relationName: 'food',
++  }),
++}))
++export const relations_payload_kv = relations(payload_kv, () => ({}))
+ export const relations_users_sessions = relations(users_sessions, ({ one }) => ({
+   _parentID: one(users, {
+     fields: [users_sessions._parentID],
+@@ -2999,6 +3188,11 @@ export const relations_payload_locked_documents_rels = relations(
+       references: [simple.id],
+       relationName: 'simple',
+     }),
++    'simple-localizedID': one(simple_localized, {
++      fields: [payload_locked_documents_rels['simple-localizedID']],
++      references: [simple_localized.id],
++      relationName: 'simple-localized',
++    }),
+     'categories-custom-idID': one(categories_custom_id, {
+       fields: [payload_locked_documents_rels['categories-custom-idID']],
+       references: [categories_custom_id.id],
+@@ -3089,6 +3283,11 @@ export const relations_payload_locked_documents_rels = relations(
+       references: [unique_fields.id],
+       relationName: 'unique-fields',
+     }),
++    'select-has-manyID': one(select_has_many, {
++      fields: [payload_locked_documents_rels['select-has-manyID']],
++      references: [select_has_many.id],
++      relationName: 'select-has-many',
++    }),
+     usersID: one(users, {
+       fields: [payload_locked_documents_rels.usersID],
+       references: [users.id],
+@@ -3184,6 +3383,8 @@ type DatabaseSchema = {
+   categories: typeof categories
+   _categories_v: typeof _categories_v
+   simple: typeof simple
++  simple_localized: typeof simple_localized
++  simple_localized_locales: typeof simple_localized_locales
+   categories_custom_id: typeof categories_custom_id
+   _categories_custom_id_v: typeof _categories_custom_id_v
+   posts_blocks_block_fourth: typeof posts_blocks_block_fourth
+@@ -3194,6 +3395,7 @@ type DatabaseSchema = {
+   posts_blocks_block_first: typeof posts_blocks_block_first
+   posts: typeof posts
+   posts_locales: typeof posts_locales
++  posts_numbers: typeof posts_numbers
+   posts_rels: typeof posts_rels
+   error_on_unnamed_fields: typeof error_on_unnamed_fields
+   default_values_array: typeof default_values_array
+@@ -3251,6 +3453,10 @@ type DatabaseSchema = {
+   blocks_docs_blocks_cta_2: typeof blocks_docs_blocks_cta_2
+   blocks_docs: typeof blocks_docs
+   unique_fields: typeof unique_fields
++  select_has_many_roles: typeof select_has_many_roles
++  select_has_many_food: typeof select_has_many_food
++  select_has_many: typeof select_has_many
++  payload_kv: typeof payload_kv
+   users_sessions: typeof users_sessions
+   users: typeof users
+   payload_locked_documents: typeof payload_locked_documents
+@@ -3272,6 +3478,8 @@ type DatabaseSchema = {
+   relations_categories: typeof relations_categories
+   relations__categories_v: typeof relations__categories_v
+   relations_simple: typeof relations_simple
++  relations_simple_localized_locales: typeof relations_simple_localized_locales
++  relations_simple_localized: typeof relations_simple_localized
+   relations_categories_custom_id: typeof relations_categories_custom_id
+   relations__categories_custom_id_v: typeof relations__categories_custom_id_v
+   relations_posts_blocks_block_fourth: typeof relations_posts_blocks_block_fourth
+@@ -3281,6 +3489,7 @@ type DatabaseSchema = {
+   relations_posts_array_with_i_ds_localized: typeof relations_posts_array_with_i_ds_localized
+   relations_posts_blocks_block_first: typeof relations_posts_blocks_block_first
+   relations_posts_locales: typeof relations_posts_locales
++  relations_posts_numbers: typeof relations_posts_numbers
+   relations_posts_rels: typeof relations_posts_rels
+   relations_posts: typeof relations_posts
+   relations_error_on_unnamed_fields: typeof relations_error_on_unnamed_fields
+@@ -3339,6 +3548,10 @@ type DatabaseSchema = {
+   relations_blocks_docs_blocks_cta_2: typeof relations_blocks_docs_blocks_cta_2
+   relations_blocks_docs: typeof relations_blocks_docs
+   relations_unique_fields: typeof relations_unique_fields
++  relations_select_has_many_roles: typeof relations_select_has_many_roles
++  relations_select_has_many_food: typeof relations_select_has_many_food
++  relations_select_has_many: typeof relations_select_has_many
++  relations_payload_kv: typeof relations_payload_kv
+   relations_users_sessions: typeof relations_users_sessions
+   relations_users: typeof relations_users
+   relations_payload_locked_documents_rels: typeof relations_payload_locked_documents_rels
+diff --git a/test/generateDatabaseSchema.ts b/test/generateDatabaseSchema.ts
+index f75e8e4fab0..c1ac08c15b0 100644
+--- a/test/generateDatabaseSchema.ts
++++ b/test/generateDatabaseSchema.ts
+@@ -1,10 +1,13 @@
+ import path from 'path'
+ import { getPayload, type SanitizedConfig } from 'payload'
++import { loadEnv } from 'payload/node'
+ import { fileURLToPath } from 'url'
+ 
+ import { setTestEnvPaths } from './__helpers/shared/setTestEnvPaths.js'
+ import { generateDatabaseAdapter } from './generateDatabaseAdapter.js'
+ 
++loadEnv()
++
+ const [testConfigDir] = process.argv.slice(2)
+ 
+ const filename = fileURLToPath(import.meta.url)

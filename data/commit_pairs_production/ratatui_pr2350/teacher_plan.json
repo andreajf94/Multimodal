@@ -1,0 +1,74 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "dependency_management",
+      "recommendation": "Made ratatui-widgets dependency optional by adding `default-features = false` to the main Cargo.toml",
+      "rationale": "This allows users to include ratatui-widgets without automatically pulling in all its default features, reducing the dependency tree for users who don't need certain functionality. The change maintains backward compatibility while giving users more control over their dependency graph.",
+      "alternatives_considered": [
+        "Making ratatui-widgets completely optional with a feature flag",
+        "Splitting widgets into separate crates",
+        "Keeping the current mandatory inclusion with all features"
+      ],
+      "files_affected": [
+        "Cargo.toml"
+      ]
+    },
+    {
+      "dimension": "feature_configuration",
+      "recommendation": "Made the `time` crate dependency conditional on the `std` feature in ratatui-widgets by changing `time/local-offset` to `time?/local-offset`",
+      "rationale": "The `?` syntax makes the `time` dependency optional when the `std` feature is enabled. This allows the crate to be used in `no_std` environments by avoiding the `time` crate dependency, which requires std. This aligns with Rust's philosophy of minimizing unnecessary dependencies and supporting embedded/constrained environments.",
+      "alternatives_considered": [
+        "Keeping `time` as a mandatory dependency",
+        "Creating a separate `time` feature flag",
+        "Removing `time` dependency entirely"
+      ],
+      "files_affected": [
+        "ratatui-widgets/Cargo.toml"
+      ]
+    },
+    {
+      "dimension": "api_design",
+      "recommendation": "Maintained backward compatibility by not changing the default behavior when features are explicitly enabled",
+      "rationale": "Users who enable the `std` feature will still get the `time` dependency with `local-offset` feature. Users who don't enable `std` can still use the widgets crate in `no_std` environments. This provides flexibility without breaking existing code.",
+      "alternatives_considered": [
+        "Breaking change to force explicit feature selection",
+        "Complete feature reorganization",
+        "Major version bump with breaking changes"
+      ],
+      "files_affected": [
+        "ratatui-widgets/Cargo.toml"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Make ratatui-widgets dependency optional",
+      "description": "Modified the main crate's dependency declaration to allow ratatui-widgets to be included without default features, giving users control over their dependency tree",
+      "files_to_modify": [
+        "Cargo.toml"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-002",
+      "title": "Make time dependency conditional on std feature",
+      "description": "Updated ratatui-widgets' Cargo.toml to make the time crate dependency optional when the std feature is enabled, supporting no_std environments",
+      "files_to_modify": [
+        "ratatui-widgets/Cargo.toml"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The changes implement a more flexible dependency management strategy for the ratatui crate. The first modification in the main Cargo.toml adds `default-features = false` to the ratatui-widgets dependency, allowing users to opt out of default features if they don't need them. This reduces the dependency footprint for minimal use cases while maintaining full functionality for users who enable the features they need.\n\nThe second change in ratatui-widgets/Cargo.toml modifies the feature declaration for the `std` feature from `time/local-offset` to `time?/local-offset`. The `?` syntax is a Cargo feature that makes the dependency optional - it will only be included if the `time` crate is already in the dependency graph through other means. This is particularly important for supporting `no_std` environments where the `time` crate (which requires std) cannot be used.\n\nTogether, these changes follow Rust's philosophy of paying only for what you use. They provide better support for constrained environments (like embedded systems or WASM) while maintaining backward compatibility for existing users. The implementation is minimal and surgical, affecting only dependency declarations without requiring changes to the actual code, which demonstrates good separation of concerns between dependency management and functional code.",
+  "source_pr": "https://github.com/ratatui/ratatui/pull/2350",
+  "before_sha": "9d9239a702d8cd29ca321745901ddb56bff20f70",
+  "after_sha": "4986b28a39bd62d0b2e98624799d402e0191cfeb",
+  "diff_stats": {
+    "additions": 2,
+    "deletions": 2,
+    "files_changed": 2
+  }
+}

@@ -1,0 +1,116 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "build_system_configuration",
+      "recommendation": "Added cargo features for configurable IO alignment (512-byte default, 4k option) and made them configurable via Docker build arguments",
+      "rationale": "The system needs to support different disk block sizes (512-byte vs 4096-byte) across different hardware configurations. Using cargo features allows compile-time configuration with zero runtime overhead, ensuring optimal performance. The Dockerfile changes enable building different images for different hardware without code changes.",
+      "alternatives_considered": [
+        "Runtime configuration via environment variables",
+        "Dynamic detection of block size at startup",
+        "Hardcoding both alignments with runtime checks"
+      ],
+      "files_affected": [
+        "Dockerfile",
+        "libs/pageserver_api/Cargo.toml",
+        "pageserver/Cargo.toml"
+      ]
+    },
+    {
+      "dimension": "api_design",
+      "recommendation": "Created a centralized DEFAULT_IO_BUFFER_ALIGNMENT constant in pageserver_api::config::defaults module with conditional compilation based on cargo features",
+      "rationale": "Centralizing the alignment constant ensures consistency across the codebase. Using conditional compilation (cfg attributes) guarantees that only one alignment value is compiled into the binary, preventing runtime errors from mismatched configurations. The default is set to 512 bytes for backward compatibility.",
+      "alternatives_considered": [
+        "Making it a runtime configuration parameter",
+        "Using a global mutable variable",
+        "Passing alignment as a parameter through all function calls"
+      ],
+      "files_affected": [
+        "libs/pageserver_api/src/config.rs"
+      ]
+    },
+    {
+      "dimension": "operational_visibility",
+      "recommendation": "Added startup logging to display the configured IO buffer alignment for operational visibility",
+      "rationale": "Operators need to know which alignment their pageserver is using, especially when debugging I/O issues or migrating between hardware with different block sizes. Logging this at startup provides immediate visibility without requiring additional diagnostic commands.",
+      "alternatives_considered": [
+        "Adding a metrics endpoint",
+        "Creating a separate diagnostic command",
+        "Only logging when alignment differs from default"
+      ],
+      "files_affected": [
+        "pageserver/src/bin/pageserver.rs"
+      ]
+    },
+    {
+      "dimension": "low_level_io_optimization",
+      "recommendation": "Updated vectored Direct IO read implementation to use the configured alignment value for chunk size calculations instead of hard-coded 512-byte constant",
+      "rationale": "The vectored read implementation needs to align reads to the disk's block size. Using a hard-coded value would cause I/O errors on 4k-aligned systems. By using the configured alignment, the system works correctly on both 512-byte and 4096-byte block size hardware.",
+      "alternatives_considered": [
+        "Keeping separate implementations for different alignments",
+        "Runtime calculation of optimal chunk size",
+        "Using OS-provided alignment hints"
+      ],
+      "files_affected": [
+        "pageserver/src/tenant/storage_layer/inmemory_layer/vectored_dio_read.rs"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Updated validation logic in virtual file operations to use the configured alignment instead of hard-coded values for buffer address, file offset, and size validation",
+      "rationale": "Direct I/O has strict alignment requirements that vary by hardware. The validation logic ensures that all I/O operations meet the system's alignment requirements. Using the configured alignment prevents false validation failures on systems with different block sizes while maintaining safety.",
+      "alternatives_considered": [
+        "Removing validation entirely",
+        "Making validation conditional on hardware detection",
+        "Using the maximum of all possible alignments"
+      ],
+      "files_affected": [
+        "pageserver/src/virtual_file.rs"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Add build-time configuration for IO alignment",
+      "description": "Implement cargo features and Docker build arguments to configure Direct IO alignment at build time, supporting both 512-byte and 4096-byte alignments",
+      "files_to_modify": [
+        "Dockerfile",
+        "libs/pageserver_api/Cargo.toml",
+        "pageserver/Cargo.toml"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-002",
+      "title": "Centralize alignment configuration and add operational logging",
+      "description": "Create a centralized DEFAULT_IO_BUFFER_ALIGNMENT constant with conditional compilation and add startup logging for operational visibility",
+      "files_to_modify": [
+        "libs/pageserver_api/src/config.rs",
+        "pageserver/src/bin/pageserver.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-003",
+      "title": "Update I/O implementations to use configurable alignment",
+      "description": "Modify vectored Direct IO reads and virtual file validation to use the configured alignment instead of hard-coded 512-byte values",
+      "files_to_modify": [
+        "pageserver/src/tenant/storage_layer/inmemory_layer/vectored_dio_read.rs",
+        "pageserver/src/virtual_file.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    }
+  ],
+  "implementation_summary": "The implementation adds configurable Direct IO alignment to support different disk block sizes (512-byte and 4096-byte) in Neon's storage system. The approach uses Rust's cargo feature system for compile-time configuration, ensuring zero runtime overhead and type safety. A centralized DEFAULT_IO_BUFFER_ALIGNMENT constant is defined in pageserver_api::config::defaults with conditional compilation based on the selected feature, guaranteeing consistency across the codebase.\n\nThe Dockerfile is updated to accept an IO_ALIGNMENT build argument that translates to appropriate cargo features, allowing building different images for different hardware without code changes. Operational visibility is enhanced by logging the configured alignment at pageserver startup, helping operators verify their configuration.\n\nKey I/O components are updated to use the configurable alignment: the vectored Direct IO read implementation uses it for chunk size calculations, and virtual file validation logic uses it for buffer address, file offset, and size validation. This maintains backward compatibility with 512-byte systems while enabling support for 4096-byte block size hardware, fixing I/O errors that previously occurred on such systems. The solution is minimal and focused, changing only what's necessary to support the new alignment while preserving existing behavior for the default case.",
+  "source_pr": "https://github.com/neondatabase/neon/pull/12821",
+  "before_sha": "85ce109361be068ff890f9fece786a81f0724136",
+  "after_sha": "26b47b5beb35ffde44e3d91b1ac0f83e10f3ba68",
+  "diff_stats": {
+    "additions": 28,
+    "deletions": 5,
+    "files_changed": 7
+  }
+}

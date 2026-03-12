@@ -1,0 +1,201 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "state_management",
+      "recommendation": "Added two new app state properties: `bindingPreference` (string enum) and `isMidpointSnappingEnabled` (boolean) to control arrow binding behavior",
+      "rationale": "Separated user preference (`bindingPreference`) from runtime state (`isBindingEnabled`) to maintain backward compatibility with Ctrl/Cmd key toggling while allowing persistent user preferences. The enum approach allows for future expansion beyond simple boolean states.",
+      "alternatives_considered": [
+        "Single boolean flag for both preference and runtime state",
+        "Separate flags for binding and midpoint snapping in one object"
+      ],
+      "files_affected": [
+        "packages/excalidraw/appState.ts"
+      ]
+    },
+    {
+      "dimension": "api_design",
+      "recommendation": "Extended function signatures throughout the binding system to accept optional `isBindingEnabled` and `isMidpointSnappingEnabled` parameters, with sensible defaults",
+      "rationale": "Maintains backward compatibility while allowing granular control over binding behavior. Default parameters ensure existing code continues to work without modification. The changes propagate through the entire binding pipeline from high-level UI events to low-level geometric calculations.",
+      "alternatives_considered": [
+        "Global singleton configuration",
+        "Context-based configuration",
+        "Separate binding service"
+      ],
+      "files_affected": [
+        "packages/element/src/Scene.ts",
+        "packages/element/src/binding.ts",
+        "packages/element/src/elbowArrow.ts",
+        "packages/element/src/linearElementEditor.ts",
+        "packages/element/src/mutateElement.ts",
+        "packages/element/src/utils.ts"
+      ]
+    },
+    {
+      "dimension": "ui_integration",
+      "recommendation": "Created two new action components (`actionToggleArrowBinding` and `actionToggleMidpointSnapping`) and integrated them into the main menu and context menu",
+      "rationale": "Follows existing action pattern in Excalidraw for consistent user experience. Actions are reusable, testable, and integrate with the existing action system including keyboard shortcuts and event tracking. Menu integration uses the established dropdown checkbox pattern.",
+      "alternatives_considered": [
+        "Separate settings dialog",
+        "Toolbar toggle buttons",
+        "Keyboard-only control"
+      ],
+      "files_affected": [
+        "packages/excalidraw/actions/actionToggleArrowBinding.tsx",
+        "packages/excalidraw/actions/actionToggleMidpointSnapping.tsx",
+        "packages/excalidraw/actions/index.ts",
+        "packages/excalidraw/actions/types.ts",
+        "packages/excalidraw/components/main-menu/DefaultItems.tsx"
+      ]
+    },
+    {
+      "dimension": "data_flow",
+      "recommendation": "Modified binding logic to conditionally apply midpoint snapping and outline snapping based on the new state flags, with fallbacks to direct point coordinates when disabled",
+      "rationale": "Ensures predictable behavior: when binding is disabled, arrows use their actual endpoint coordinates; when midpoint snapping is disabled, arrows snap to element outlines but not to midpoints. This maintains visual consistency while giving users control.",
+      "alternatives_considered": [
+        "Complete removal of binding logic when disabled",
+        "Separate rendering paths for bound vs unbound arrows"
+      ],
+      "files_affected": [
+        "packages/element/src/binding.ts",
+        "packages/element/src/elbowArrow.ts",
+        "packages/element/src/linearElementEditor.ts",
+        "packages/element/src/utils.ts",
+        "packages/excalidraw/actions/actionProperties.tsx"
+      ]
+    },
+    {
+      "dimension": "rendering_optimization",
+      "recommendation": "Conditionally render midpoint indicators in the interactive scene only when `isMidpointSnappingEnabled` is true",
+      "rationale": "Reduces unnecessary canvas operations and improves performance when midpoint snapping is disabled. The rendering logic checks the flag before computing and drawing midpoint indicators, avoiding wasted CPU cycles.",
+      "alternatives_considered": [
+        "Always render but hide with opacity",
+        "Separate rendering layers",
+        "CSS-based hiding"
+      ],
+      "files_affected": [
+        "packages/excalidraw/renderer/interactiveScene.ts"
+      ]
+    },
+    {
+      "dimension": "event_handling",
+      "recommendation": "Replaced `shouldEnableBindingForPointerEvent` with direct state management based on Ctrl key and user preference, handling edge cases like key repeats and pointer events",
+      "rationale": "Simplifies the binding enable/disable logic by removing the intermediate helper function. Direct state updates in pointer handlers provide more predictable behavior and better handle edge cases like key repeat events.",
+      "alternatives_considered": [
+        "Keeping the helper function with additional parameters",
+        "Event delegation approach",
+        "Custom hook for binding state"
+      ],
+      "files_affected": [
+        "packages/excalidraw/components/App.tsx"
+      ]
+    },
+    {
+      "dimension": "persistence",
+      "recommendation": "Configured `bindingPreference` and `isMidpointSnappingEnabled` to persist in browser storage but not export/import",
+      "rationale": "User preferences should persist across sessions but not affect shared diagrams. This follows the existing pattern where UI preferences are browser-specific but diagram behavior is consistent across users.",
+      "alternatives_considered": [
+        "Include in exports for shared preferences",
+        "Separate preference storage",
+        "Cloud-synced preferences"
+      ],
+      "files_affected": [
+        "packages/excalidraw/appState.ts"
+      ]
+    },
+    {
+      "dimension": "internationalization",
+      "recommendation": "Added localization keys for the new toggle labels in the English locale file",
+      "rationale": "Maintains consistency with Excalidraw's internationalization system. New UI elements need translatable labels for all supported languages.",
+      "alternatives_considered": [
+        "Hardcoded English labels",
+        "Separate localization file for new features"
+      ],
+      "files_affected": [
+        "packages/excalidraw/locales/en.json"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Add binding preference state and persistence",
+      "description": "Extend app state to store user preferences for arrow binding and midpoint snapping, with proper persistence configuration",
+      "files_to_modify": [
+        "packages/excalidraw/appState.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-002",
+      "title": "Create UI toggle actions and menu integration",
+      "description": "Implement action components for toggling arrow binding and midpoint snapping preferences, integrate into main menu and context menu",
+      "files_to_modify": [
+        "packages/excalidraw/actions/index.ts",
+        "packages/excalidraw/actions/types.ts",
+        "packages/excalidraw/components/main-menu/DefaultItems.tsx",
+        "packages/excalidraw/locales/en.json"
+      ],
+      "files_to_create": [
+        "packages/excalidraw/actions/actionToggleArrowBinding.tsx",
+        "packages/excalidraw/actions/actionToggleMidpointSnapping.tsx"
+      ],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-003",
+      "title": "Update binding logic to respect preferences",
+      "description": "Modify binding algorithms throughout the codebase to conditionally apply binding and midpoint snapping based on the new state flags",
+      "files_to_modify": [
+        "packages/element/src/binding.ts",
+        "packages/element/src/elbowArrow.ts",
+        "packages/element/src/linearElementEditor.ts",
+        "packages/element/src/utils.ts",
+        "packages/excalidraw/actions/actionProperties.tsx"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "large"
+    },
+    {
+      "id": "T-004",
+      "title": "Refactor event handling and state management",
+      "description": "Update pointer event handlers to manage binding state based on Ctrl key and user preference, removing deprecated helper functions",
+      "files_to_modify": [
+        "packages/excalidraw/components/App.tsx"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-005",
+      "title": "Optimize rendering based on preferences",
+      "description": "Conditionally render midpoint indicators and other binding-related UI elements based on the midpoint snapping preference",
+      "files_to_modify": [
+        "packages/excalidraw/renderer/interactiveScene.ts",
+        "packages/excalidraw/components/canvases/InteractiveCanvas.tsx"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-006",
+      "title": "Extend API signatures for preference propagation",
+      "description": "Update function signatures across the element mutation and scene management systems to accept optional preference parameters",
+      "files_to_modify": [
+        "packages/element/src/Scene.ts",
+        "packages/element/src/mutateElement.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    }
+  ],
+  "implementation_summary": "The implementation adds user-controllable preferences for arrow binding behavior through a comprehensive, layered approach. At the state layer, two new properties were added to app state: `bindingPreference` (an enum for user choice) and `isMidpointSnappingEnabled` (a boolean). These are persisted in browser storage but not exported with diagrams, maintaining the principle that user preferences shouldn't affect shared content.\n\nThe UI layer follows Excalidraw's established action pattern with two new toggle actions integrated into the main menu's preferences section. This provides discoverable, persistent controls that match existing preference toggles like grid mode and object snap mode. The actions update the app state and trigger re-renders as needed.\n\nMost significantly, the binding logic throughout the codebase was extended to conditionally apply binding and snapping based on these preferences. Function signatures were updated with optional parameters (defaulting to true for backward compatibility) that propagate from high-level UI events down to low-level geometric calculations. When binding is disabled, arrows use their actual endpoint coordinates rather than snapping to element outlines. When midpoint snapping is disabled, arrows still snap to outlines but not to midpoints. The rendering layer was optimized to skip midpoint indicator calculations when midpoint snapping is disabled, improving performance.\n\nThis implementation maintains full backward compatibility while adding the requested feature. The Ctrl/Cmd key temporary override still works, now interacting intelligently with the user's preference setting. The changes are minimal and focused, following the existing architectural patterns of the codebase rather than introducing new paradigms.",
+  "source_pr": "https://github.com/excalidraw/excalidraw/pull/10839",
+  "before_sha": "60b275880da7d1eb7dff3782e8d491188790597a",
+  "after_sha": "437595fa652b77df700c7f4e6d4fcd8d9ff42000",
+  "diff_stats": {
+    "additions": 1161,
+    "deletions": 143,
+    "files_changed": 24
+  }
+}

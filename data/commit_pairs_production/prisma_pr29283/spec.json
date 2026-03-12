@@ -1,0 +1,13 @@
+{
+  "feature_name": "Migrate prisma init --db to new Management API connection model",
+  "description": "Update the `prisma init --db` command to use the new connection model from the Management API. Instead of reading deprecated fields, read the connection string directly from the new API response structure. Update dependencies to use the latest Management API SDK with proper type definitions and fix security vulnerabilities.",
+  "functional_requirements": [
+    "Read database connection strings from `connections[].endpoints.direct.connectionString` in Management API responses instead of deprecated fields",
+    "Throw an error if no connection string is found in the new format (no fallback to legacy fields)",
+    "Update Management API SDK imports to use v1.12.0 exports and types",
+    "Update the authentication client to use the new SDK naming conventions",
+    "Bump dependencies to fix security vulnerabilities and ensure compatibility"
+  ],
+  "project_name": "prisma",
+  "source_pr": "https://github.com/prisma/prisma/pull/29283"
+}

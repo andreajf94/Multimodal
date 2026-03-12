@@ -1,0 +1,392 @@
+diff --git a/apps/oxlint/src/snapshots/fixtures__cli__import_-c .oxlintrc.json test.js -c .oxlintrc-import-x.json test.js@oxlint.snap b/apps/oxlint/src/snapshots/fixtures__cli__import_-c .oxlintrc.json test.js -c .oxlintrc-import-x.json test.js@oxlint.snap
+index 0720b7fa5be41..248ee9d7c4984 100644
+--- a/apps/oxlint/src/snapshots/fixtures__cli__import_-c .oxlintrc.json test.js -c .oxlintrc-import-x.json test.js@oxlint.snap	
++++ b/apps/oxlint/src/snapshots/fixtures__cli__import_-c .oxlintrc.json test.js -c .oxlintrc-import-x.json test.js@oxlint.snap	
+@@ -13,6 +13,7 @@ working directory: fixtures/cli/import
+    :        ^^^^^^^
+  8 | 
+    `----
++  help: Replace this default export with a named export.
+ 
+ Found 0 warnings and 1 error.
+ Finished in <variable>ms on 1 file with 1 rules using 1 threads.
+@@ -32,6 +33,7 @@ working directory: fixtures/cli/import
+    :        ^^^^^^^
+  8 | 
+    `----
++  help: Replace this default export with a named export.
+ 
+ Found 0 warnings and 1 error.
+ Finished in <variable>ms on 1 file with 1 rules using 1 threads.
+diff --git a/crates/oxc_linter/src/rules/import/exports_last.rs b/crates/oxc_linter/src/rules/import/exports_last.rs
+index 5b6c245a66a4c..f2dd09babef3d 100644
+--- a/crates/oxc_linter/src/rules/import/exports_last.rs
++++ b/crates/oxc_linter/src/rules/import/exports_last.rs
+@@ -8,7 +8,9 @@ use crate::{context::LintContext, rule::Rule};
+ 
+ fn exports_last_diagnostic(span: Span) -> OxcDiagnostic {
+     // See <https://oxc.rs/docs/contribute/linter/adding-rules.html#diagnostics> for details
+-    OxcDiagnostic::warn("Export statements should appear at the end of the file").with_label(span)
++    OxcDiagnostic::warn("Export statements should appear at the end of the file")
++        .with_help("Move this export to the end of the file, after all other statements.")
++        .with_label(span)
+ }
+ 
+ #[derive(Debug, Default, Clone)]
+diff --git a/crates/oxc_linter/src/rules/import/no_absolute_path.rs b/crates/oxc_linter/src/rules/import/no_absolute_path.rs
+index 7b72213b6b1ed..fe5d91adafe9a 100644
+--- a/crates/oxc_linter/src/rules/import/no_absolute_path.rs
++++ b/crates/oxc_linter/src/rules/import/no_absolute_path.rs
+@@ -19,7 +19,9 @@ use crate::{
+ };
+ 
+ fn no_absolute_path_diagnostic(span: Span) -> OxcDiagnostic {
+-    OxcDiagnostic::warn("Do not import modules using an absolute path").with_label(span)
++    OxcDiagnostic::warn("Do not import modules using an absolute path")
++        .with_help("Replace the absolute path with a relative path or a module alias.")
++        .with_label(span)
+ }
+ 
+ // <https://github.com/import-js/eslint-plugin-import/blob/v2.31.0/docs/rules/no-absolute-path.md>
+diff --git a/crates/oxc_linter/src/rules/import/no_default_export.rs b/crates/oxc_linter/src/rules/import/no_default_export.rs
+index f29fb6458f380..21db881d440e2 100644
+--- a/crates/oxc_linter/src/rules/import/no_default_export.rs
++++ b/crates/oxc_linter/src/rules/import/no_default_export.rs
+@@ -5,7 +5,9 @@ use oxc_span::Span;
+ use crate::{context::LintContext, rule::Rule};
+ 
+ fn no_default_export_diagnostic(span: Span) -> OxcDiagnostic {
+-    OxcDiagnostic::warn("Prefer named exports").with_label(span)
++    OxcDiagnostic::warn("Prefer named exports")
++        .with_help("Replace this default export with a named export.")
++        .with_label(span)
+ }
+ 
+ #[derive(Debug, Default, Clone)]
+diff --git a/crates/oxc_linter/src/rules/import/no_mutable_exports.rs b/crates/oxc_linter/src/rules/import/no_mutable_exports.rs
+index edf306d675967..0a9ecc28d0f5b 100644
+--- a/crates/oxc_linter/src/rules/import/no_mutable_exports.rs
++++ b/crates/oxc_linter/src/rules/import/no_mutable_exports.rs
+@@ -14,6 +14,7 @@ use crate::{context::LintContext, rule::Rule};
+ fn no_mutable_exports_diagnostic(span: Span, kind: VariableDeclarationKind) -> OxcDiagnostic {
+     let kind_str = if kind == VariableDeclarationKind::Var { "var" } else { "let" };
+     OxcDiagnostic::warn(format!("Exporting mutable '{kind_str}' binding, use 'const' instead."))
++        .with_help(format!("Replace '{kind_str}' with 'const' to export an immutable binding."))
+         .with_label(span)
+ }
+ 
+diff --git a/crates/oxc_linter/src/rules/import/no_self_import.rs b/crates/oxc_linter/src/rules/import/no_self_import.rs
+index 006cea81d8d08..1f2d601787257 100644
+--- a/crates/oxc_linter/src/rules/import/no_self_import.rs
++++ b/crates/oxc_linter/src/rules/import/no_self_import.rs
+@@ -5,7 +5,9 @@ use oxc_span::Span;
+ use crate::{context::LintContext, rule::Rule};
+ 
+ fn no_self_import_diagnostic(span: Span) -> OxcDiagnostic {
+-    OxcDiagnostic::warn("A module importing itself is not allowed").with_label(span)
++    OxcDiagnostic::warn("A module importing itself is not allowed")
++        .with_help("Remove this import. A module should not import itself.")
++        .with_label(span)
+ }
+ 
+ #[derive(Debug, Default, Clone)]
+@@ -90,7 +92,7 @@ fn test() {
+         Tester::new(NoSelfImport::NAME, NoSelfImport::PLUGIN, pass, fail)
+             .with_import_plugin(true)
+             .change_rule_path("no-self-import.js")
+-            .test();
++            .test_and_snapshot();
+     }
+ 
+     // {
+diff --git a/crates/oxc_linter/src/snapshots/import_exports_last.snap b/crates/oxc_linter/src/snapshots/import_exports_last.snap
+index d02e796a0760a..f831bc592b6a0 100644
+--- a/crates/oxc_linter/src/snapshots/import_exports_last.snap
++++ b/crates/oxc_linter/src/snapshots/import_exports_last.snap
+@@ -9,6 +9,7 @@ source: crates/oxc_linter/src/tester.rs
+    ·             ───────────────────
+  4 │             const str = 'foo'
+    ╰────
++  help: Move this export to the end of the file, after all other statements.
+ 
+   ⚠ eslint-plugin-import(exports-last): Export statements should appear at the end of the file
+    ╭─[exports_last.tsx:2:13]
+@@ -17,6 +18,7 @@ source: crates/oxc_linter/src/tester.rs
+    ·             ────────────────────────
+  3 │             const str = 'foo'
+    ╰────
++  help: Move this export to the end of the file, after all other statements.
+ 
+   ⚠ eslint-plugin-import(exports-last): Export statements should appear at the end of the file
+    ╭─[exports_last.tsx:2:13]
+@@ -25,6 +27,7 @@ source: crates/oxc_linter/src/tester.rs
+    ·             ────────────────────────
+  3 │             const bar = true
+    ╰────
++  help: Move this export to the end of the file, after all other statements.
+ 
+   ⚠ eslint-plugin-import(exports-last): Export statements should appear at the end of the file
+    ╭─[exports_last.tsx:2:13]
+@@ -33,6 +36,7 @@ source: crates/oxc_linter/src/tester.rs
+    ·             ──────────────────────────────────
+  3 │             export const so = 'many'
+    ╰────
++  help: Move this export to the end of the file, after all other statements.
+ 
+   ⚠ eslint-plugin-import(exports-last): Export statements should appear at the end of the file
+    ╭─[exports_last.tsx:3:13]
+@@ -41,6 +45,7 @@ source: crates/oxc_linter/src/tester.rs
+    ·             ────────────────────────
+  4 │             const foo = 'bar'
+    ╰────
++  help: Move this export to the end of the file, after all other statements.
+ 
+   ⚠ eslint-plugin-import(exports-last): Export statements should appear at the end of the file
+    ╭─[exports_last.tsx:2:13]
+@@ -49,3 +54,4 @@ source: crates/oxc_linter/src/tester.rs
+    ·             ───────────────────────────────
+  3 │             const bar = true
+    ╰────
++  help: Move this export to the end of the file, after all other statements.
+diff --git a/crates/oxc_linter/src/snapshots/import_no_absolute_path.snap b/crates/oxc_linter/src/snapshots/import_no_absolute_path.snap
+index 83ee08ce580a3..950fce582dcbe 100644
+--- a/crates/oxc_linter/src/snapshots/import_no_absolute_path.snap
++++ b/crates/oxc_linter/src/snapshots/import_no_absolute_path.snap
+@@ -7,69 +7,81 @@ source: crates/oxc_linter/src/tester.rs
+  1 │ import _ from '/lodash'
+    ·               ─────────
+    ╰────
++  help: Replace the absolute path with a relative path or a module alias.
+ 
+   ⚠ eslint-plugin-import(no-absolute-path): Do not import modules using an absolute path
+    ╭─[index.js:1:15]
+  1 │ import _ from '/lodash'
+    ·               ─────────
+    ╰────
++  help: Replace the absolute path with a relative path or a module alias.
+ 
+   ⚠ eslint-plugin-import(no-absolute-path): Do not import modules using an absolute path
+    ╭─[index.js:1:15]
+  1 │ import f from '/foo/path'
+    ·               ───────────
+    ╰────
++  help: Replace the absolute path with a relative path or a module alias.
+ 
+   ⚠ eslint-plugin-import(no-absolute-path): Do not import modules using an absolute path
+    ╭─[index.js:1:15]
+  1 │ import f from '/foo/bar/baz.js'
+    ·               ─────────────────
+    ╰────
++  help: Replace the absolute path with a relative path or a module alias.
+ 
+   ⚠ eslint-plugin-import(no-absolute-path): Do not import modules using an absolute path
+    ╭─[index.js:1:19]
+  1 │ var foo = require('/foo')
+    ·                   ──────
+    ╰────
++  help: Replace the absolute path with a relative path or a module alias.
+ 
+   ⚠ eslint-plugin-import(no-absolute-path): Do not import modules using an absolute path
+    ╭─[index.js:1:17]
+  1 │ var f = require('/foo/some')
+    ·                 ───────────
+    ╰────
++  help: Replace the absolute path with a relative path or a module alias.
+ 
+   ⚠ eslint-plugin-import(no-absolute-path): Do not import modules using an absolute path
+    ╭─[index.js:1:17]
+  1 │ var f = require('/foo/some/add')
+    ·                 ───────────────
+    ╰────
++  help: Replace the absolute path with a relative path or a module alias.
+ 
+   ⚠ eslint-plugin-import(no-absolute-path): Do not import modules using an absolute path
+    ╭─[index.js:1:10]
+  1 │ require(['/foo'], function(){})
+    ·          ──────
+    ╰────
++  help: Replace the absolute path with a relative path or a module alias.
+ 
+   ⚠ eslint-plugin-import(no-absolute-path): Do not import modules using an absolute path
+    ╭─[index.js:1:19]
+  1 │ require(['./foo', '/boo'], function(){})
+    ·                   ──────
+    ╰────
++  help: Replace the absolute path with a relative path or a module alias.
+ 
+   ⚠ eslint-plugin-import(no-absolute-path): Do not import modules using an absolute path
+    ╭─[index.js:1:10]
+  1 │ require(['/foo', '/boo'], function(){})
+    ·          ──────
+    ╰────
++  help: Replace the absolute path with a relative path or a module alias.
+ 
+   ⚠ eslint-plugin-import(no-absolute-path): Do not import modules using an absolute path
+    ╭─[index.js:1:18]
+  1 │ require(['/foo', '/boo'], function(){})
+    ·                  ──────
+    ╰────
++  help: Replace the absolute path with a relative path or a module alias.
+ 
+   ⚠ eslint-plugin-import(no-absolute-path): Do not import modules using an absolute path
+    ╭─[index.js:1:9]
+  1 │ define(['/foo'], function(){})
+    ·         ──────
+    ╰────
++  help: Replace the absolute path with a relative path or a module alias.
+diff --git a/crates/oxc_linter/src/snapshots/import_no_default_export.snap b/crates/oxc_linter/src/snapshots/import_no_default_export.snap
+index 4de7245f84173..7259a4e8fa7aa 100644
+--- a/crates/oxc_linter/src/snapshots/import_no_default_export.snap
++++ b/crates/oxc_linter/src/snapshots/import_no_default_export.snap
+@@ -7,6 +7,7 @@ source: crates/oxc_linter/src/tester.rs
+  1 │ export default function bar() {};
+    ·        ───────
+    ╰────
++  help: Replace this default export with a named export.
+ 
+   ⚠ eslint-plugin-import(no-default-export): Prefer named exports
+    ╭─[index.ts:2:8]
+@@ -14,27 +15,32 @@ source: crates/oxc_linter/src/tester.rs
+  2 │ export default bar;
+    ·        ───────
+    ╰────
++  help: Replace this default export with a named export.
+ 
+   ⚠ eslint-plugin-import(no-default-export): Prefer named exports
+    ╭─[index.ts:1:8]
+  1 │ export default class Bar {};
+    ·        ───────
+    ╰────
++  help: Replace this default export with a named export.
+ 
+   ⚠ eslint-plugin-import(no-default-export): Prefer named exports
+    ╭─[index.ts:1:8]
+  1 │ export default function() {};
+    ·        ───────
+    ╰────
++  help: Replace this default export with a named export.
+ 
+   ⚠ eslint-plugin-import(no-default-export): Prefer named exports
+    ╭─[index.ts:1:8]
+  1 │ export default class {};
+    ·        ───────
+    ╰────
++  help: Replace this default export with a named export.
+ 
+   ⚠ eslint-plugin-import(no-default-export): Prefer named exports
+    ╭─[index.ts:1:26]
+  1 │ let foo; export { foo as default }
+    ·                          ───────
+    ╰────
++  help: Replace this default export with a named export.
+diff --git a/crates/oxc_linter/src/snapshots/import_no_mutable_exports.snap b/crates/oxc_linter/src/snapshots/import_no_mutable_exports.snap
+index c7c919f3107a8..1f1e0dc2f301c 100644
+--- a/crates/oxc_linter/src/snapshots/import_no_mutable_exports.snap
++++ b/crates/oxc_linter/src/snapshots/import_no_mutable_exports.snap
+@@ -7,12 +7,14 @@ source: crates/oxc_linter/src/tester.rs
+  1 │ export let count = 1
+    ·        ─────────────
+    ╰────
++  help: Replace 'let' with 'const' to export an immutable binding.
+ 
+   ⚠ eslint-plugin-import(no-mutable-exports): Exporting mutable 'var' binding, use 'const' instead.
+    ╭─[no_mutable_exports.tsx:1:8]
+  1 │ export var count = 1
+    ·        ─────────────
+    ╰────
++  help: Replace 'var' with 'const' to export an immutable binding.
+ 
+   ⚠ eslint-plugin-import(no-mutable-exports): Exporting mutable 'let' binding, use 'const' instead.
+    ╭─[no_mutable_exports.tsx:2:13]
+@@ -21,12 +23,14 @@ source: crates/oxc_linter/src/tester.rs
+    ·             ────────────
+  3 │             export { foo }
+    ╰────
++  help: Replace 'let' with 'const' to export an immutable binding.
+ 
+   ⚠ eslint-plugin-import(no-mutable-exports): Exporting mutable 'let' binding, use 'const' instead.
+    ╭─[no_mutable_exports.tsx:1:1]
+  1 │ let foo = 4, baz = 5; export { foo }
+    · ─────────────────────
+    ╰────
++  help: Replace 'let' with 'const' to export an immutable binding.
+ 
+   ⚠ eslint-plugin-import(no-mutable-exports): Exporting mutable 'var' binding, use 'const' instead.
+    ╭─[no_mutable_exports.tsx:2:13]
+@@ -35,6 +39,7 @@ source: crates/oxc_linter/src/tester.rs
+    ·             ────────────
+  3 │             export { foo }
+    ╰────
++  help: Replace 'var' with 'const' to export an immutable binding.
+ 
+   ⚠ eslint-plugin-import(no-mutable-exports): Exporting mutable 'let' binding, use 'const' instead.
+    ╭─[no_mutable_exports.tsx:2:13]
+@@ -43,6 +48,7 @@ source: crates/oxc_linter/src/tester.rs
+    ·             ────────────
+  3 │             export { foo as baz }
+    ╰────
++  help: Replace 'let' with 'const' to export an immutable binding.
+ 
+   ⚠ eslint-plugin-import(no-mutable-exports): Exporting mutable 'var' binding, use 'const' instead.
+    ╭─[no_mutable_exports.tsx:2:13]
+@@ -51,6 +57,7 @@ source: crates/oxc_linter/src/tester.rs
+    ·             ────────────
+  3 │             export { foo as baz }
+    ╰────
++  help: Replace 'var' with 'const' to export an immutable binding.
+ 
+   ⚠ eslint-plugin-import(no-mutable-exports): Exporting mutable 'let' binding, use 'const' instead.
+    ╭─[no_mutable_exports.tsx:2:13]
+@@ -59,6 +66,7 @@ source: crates/oxc_linter/src/tester.rs
+    ·             ────────────
+  3 │             export default foo
+    ╰────
++  help: Replace 'let' with 'const' to export an immutable binding.
+ 
+   ⚠ eslint-plugin-import(no-mutable-exports): Exporting mutable 'var' binding, use 'const' instead.
+    ╭─[no_mutable_exports.tsx:2:13]
+@@ -67,6 +75,7 @@ source: crates/oxc_linter/src/tester.rs
+    ·             ────────────
+  3 │             export default foo
+    ╰────
++  help: Replace 'var' with 'const' to export an immutable binding.
+ 
+   ⚠ eslint-plugin-import(no-mutable-exports): Exporting mutable 'let' binding, use 'const' instead.
+    ╭─[no_mutable_exports.tsx:3:13]
+@@ -75,6 +84,7 @@ source: crates/oxc_linter/src/tester.rs
+    ·             ──────────
+  4 │             export {
+    ╰────
++  help: Replace 'let' with 'const' to export an immutable binding.
+ 
+   ⚠ eslint-plugin-import(no-mutable-exports): Exporting mutable 'var' binding, use 'const' instead.
+    ╭─[no_mutable_exports.tsx:2:13]
+@@ -83,6 +93,7 @@ source: crates/oxc_linter/src/tester.rs
+    ·             ──────────
+  3 │             let c = 3;
+    ╰────
++  help: Replace 'var' with 'const' to export an immutable binding.
+ 
+   ⚠ eslint-plugin-import(no-mutable-exports): Exporting mutable 'let' binding, use 'const' instead.
+    ╭─[no_mutable_exports.tsx:2:13]
+@@ -91,3 +102,4 @@ source: crates/oxc_linter/src/tester.rs
+    ·             ─────────────────
+  3 │             export {
+    ╰────
++  help: Replace 'let' with 'const' to export an immutable binding.
+diff --git a/crates/oxc_linter/src/snapshots/import_no_self_import.snap b/crates/oxc_linter/src/snapshots/import_no_self_import.snap
+new file mode 100644
+index 0000000000000..c2cb6c50c722f
+--- /dev/null
++++ b/crates/oxc_linter/src/snapshots/import_no_self_import.snap
+@@ -0,0 +1,10 @@
++---
++source: crates/oxc_linter/src/tester.rs
++---
++
++  ⚠ eslint-plugin-import(no-self-import): A module importing itself is not allowed
++   ╭─[no-self-import.js:1:17]
++ 1 │ import bar from './no-self-import'
++   ·                 ──────────────────
++   ╰────
++  help: Remove this import. A module should not import itself.

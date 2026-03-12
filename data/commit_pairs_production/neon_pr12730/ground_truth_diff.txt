@@ -1,0 +1,695 @@
+diff --git a/compute_tools/src/compute.rs b/compute_tools/src/compute.rs
+index 1df837e1e6ea..c0f0289e064f 100644
+--- a/compute_tools/src/compute.rs
++++ b/compute_tools/src/compute.rs
+@@ -2780,7 +2780,7 @@ LIMIT 100",
+                 // 4. We start again and try to prewarm with the state from 2. instead of the previous complete state
+                 if matches!(
+                     prewarm_state,
+-                    LfcPrewarmState::Completed
++                    LfcPrewarmState::Completed { .. }
+                         | LfcPrewarmState::NotPrewarmed
+                         | LfcPrewarmState::Skipped
+                 ) {
+diff --git a/compute_tools/src/compute_prewarm.rs b/compute_tools/src/compute_prewarm.rs
+index 82cb28f1ac8a..c7051d35d053 100644
+--- a/compute_tools/src/compute_prewarm.rs
++++ b/compute_tools/src/compute_prewarm.rs
+@@ -7,19 +7,11 @@ use http::StatusCode;
+ use reqwest::Client;
+ use std::mem::replace;
+ use std::sync::Arc;
++use std::time::Instant;
+ use tokio::{io::AsyncReadExt, select, spawn};
+ use tokio_util::sync::CancellationToken;
+ use tracing::{error, info};
+ 
+-#[derive(serde::Serialize, Default)]
+-pub struct LfcPrewarmStateWithProgress {
+-    #[serde(flatten)]
+-    base: LfcPrewarmState,
+-    total: i32,
+-    prewarmed: i32,
+-    skipped: i32,
+-}
+-
+ /// A pair of url and a token to query endpoint storage for LFC prewarm-related tasks
+ struct EndpointStoragePair {
+     url: String,
+@@ -28,7 +20,7 @@ struct EndpointStoragePair {
+ 
+ const KEY: &str = "lfc_state";
+ impl EndpointStoragePair {
+-    /// endpoint_id is set to None while prewarming from other endpoint, see replica promotion
++    /// endpoint_id is set to None while prewarming from other endpoint, see compute_promote.rs
+     /// If not None, takes precedence over pspec.spec.endpoint_id
+     fn from_spec_and_endpoint(
+         pspec: &crate::compute::ParsedSpec,
+@@ -54,36 +46,8 @@ impl EndpointStoragePair {
+ }
+ 
+ impl ComputeNode {
+-    // If prewarm failed, we want to get overall number of segments as well as done ones.
+-    // However, this function should be reliable even if querying postgres failed.
+-    pub async fn lfc_prewarm_state(&self) -> LfcPrewarmStateWithProgress {
+-        info!("requesting LFC prewarm state from postgres");
+-        let mut state = LfcPrewarmStateWithProgress::default();
+-        {
+-            state.base = self.state.lock().unwrap().lfc_prewarm_state.clone();
+-        }
+-
+-        let client = match ComputeNode::get_maintenance_client(&self.tokio_conn_conf).await {
+-            Ok(client) => client,
+-            Err(err) => {
+-                error!(%err, "connecting to postgres");
+-                return state;
+-            }
+-        };
+-        let row = match client
+-            .query_one("select * from neon.get_prewarm_info()", &[])
+-            .await
+-        {
+-            Ok(row) => row,
+-            Err(err) => {
+-                error!(%err, "querying LFC prewarm status");
+-                return state;
+-            }
+-        };
+-        state.total = row.try_get(0).unwrap_or_default();
+-        state.prewarmed = row.try_get(1).unwrap_or_default();
+-        state.skipped = row.try_get(2).unwrap_or_default();
+-        state
++    pub async fn lfc_prewarm_state(&self) -> LfcPrewarmState {
++        self.state.lock().unwrap().lfc_prewarm_state.clone()
+     }
+ 
+     pub fn lfc_offload_state(&self) -> LfcOffloadState {
+@@ -133,7 +97,6 @@ impl ComputeNode {
+     }
+ 
+     /// Request LFC state from endpoint storage and load corresponding pages into Postgres.
+-    /// Returns a result with `false` if the LFC state is not found in endpoint storage.
+     async fn prewarm_impl(
+         &self,
+         from_endpoint: Option<String>,
+@@ -148,6 +111,7 @@ impl ComputeNode {
+         fail::fail_point!("compute-prewarm", |_| bail!("compute-prewarm failpoint"));
+ 
+         info!(%url, "requesting LFC state from endpoint storage");
++        let mut now = Instant::now();
+         let request = Client::new().get(&url).bearer_auth(storage_token);
+         let response = select! {
+             _ = token.cancelled() => return Ok(LfcPrewarmState::Cancelled),
+@@ -160,6 +124,8 @@ impl ComputeNode {
+             StatusCode::NOT_FOUND => return Ok(LfcPrewarmState::Skipped),
+             status => bail!("{status} querying endpoint storage"),
+         }
++        let state_download_time_ms = now.elapsed().as_millis() as u32;
++        now = Instant::now();
+ 
+         let mut uncompressed = Vec::new();
+         let lfc_state = select! {
+@@ -174,6 +140,8 @@ impl ComputeNode {
+             read = decoder.read_to_end(&mut uncompressed) => read
+         }
+         .context("decoding LFC state")?;
++        let uncompress_time_ms = now.elapsed().as_millis() as u32;
++        now = Instant::now();
+ 
+         let uncompressed_len = uncompressed.len();
+         info!(%url, "downloaded LFC state, uncompressed size {uncompressed_len}");
+@@ -196,15 +164,34 @@ impl ComputeNode {
+         }
+         .context("loading LFC state into postgres")
+         .map(|_| ())?;
++        let prewarm_time_ms = now.elapsed().as_millis() as u32;
++
++        let row = client
++            .query_one("select * from neon.get_prewarm_info()", &[])
++            .await
++            .context("querying prewarm info")?;
++        let total = row.try_get(0).unwrap_or_default();
++        let prewarmed = row.try_get(1).unwrap_or_default();
++        let skipped = row.try_get(2).unwrap_or_default();
+ 
+-        Ok(LfcPrewarmState::Completed)
++        Ok(LfcPrewarmState::Completed {
++            total,
++            prewarmed,
++            skipped,
++            state_download_time_ms,
++            uncompress_time_ms,
++            prewarm_time_ms,
++        })
+     }
+ 
+     /// If offload request is ongoing, return false, true otherwise
+     pub fn offload_lfc(self: &Arc<Self>) -> bool {
+         {
+             let state = &mut self.state.lock().unwrap().lfc_offload_state;
+-            if replace(state, LfcOffloadState::Offloading) == LfcOffloadState::Offloading {
++            if matches!(
++                replace(state, LfcOffloadState::Offloading),
++                LfcOffloadState::Offloading
++            ) {
+                 return false;
+             }
+         }
+@@ -216,7 +203,10 @@ impl ComputeNode {
+     pub async fn offload_lfc_async(self: &Arc<Self>) {
+         {
+             let state = &mut self.state.lock().unwrap().lfc_offload_state;
+-            if replace(state, LfcOffloadState::Offloading) == LfcOffloadState::Offloading {
++            if matches!(
++                replace(state, LfcOffloadState::Offloading),
++                LfcOffloadState::Offloading
++            ) {
+                 return;
+             }
+         }
+@@ -234,7 +224,6 @@ impl ComputeNode {
+                 LfcOffloadState::Failed { error }
+             }
+         };
+-
+         self.state.lock().unwrap().lfc_offload_state = state;
+     }
+ 
+@@ -242,6 +231,7 @@ impl ComputeNode {
+         let EndpointStoragePair { url, token } = self.endpoint_storage_pair(None)?;
+         info!(%url, "requesting LFC state from Postgres");
+ 
++        let mut now = Instant::now();
+         let row = ComputeNode::get_maintenance_client(&self.tokio_conn_conf)
+             .await
+             .context("connecting to postgres")?
+@@ -255,25 +245,36 @@ impl ComputeNode {
+             info!(%url, "empty LFC state, not exporting");
+             return Ok(LfcOffloadState::Skipped);
+         };
++        let state_query_time_ms = now.elapsed().as_millis() as u32;
++        now = Instant::now();
+ 
+         let mut compressed = Vec::new();
+         ZstdEncoder::new(state)
+             .read_to_end(&mut compressed)
+             .await
+             .context("compressing LFC state")?;
++        let compress_time_ms = now.elapsed().as_millis() as u32;
++        now = Instant::now();
+ 
+         let compressed_len = compressed.len();
+-        info!(%url, "downloaded LFC state, compressed size {compressed_len}, writing to endpoint storage");
++        info!(%url, "downloaded LFC state, compressed size {compressed_len}");
+ 
+         let request = Client::new().put(url).bearer_auth(token).body(compressed);
+-        match request.send().await {
+-            Ok(res) if res.status() == StatusCode::OK => Ok(LfcOffloadState::Completed),
+-            Ok(res) => bail!(
+-                "Request to endpoint storage failed with status: {}",
+-                res.status()
+-            ),
+-            Err(err) => Err(err).context("writing to endpoint storage"),
++        let response = request
++            .send()
++            .await
++            .context("writing to endpoint storage")?;
++        let state_upload_time_ms = now.elapsed().as_millis() as u32;
++        let status = response.status();
++        if status != StatusCode::OK {
++            bail!("request to endpoint storage failed: {status}");
+         }
++
++        Ok(LfcOffloadState::Completed {
++            compress_time_ms,
++            state_query_time_ms,
++            state_upload_time_ms,
++        })
+     }
+ 
+     pub fn cancel_prewarm(self: &Arc<Self>) {
+diff --git a/compute_tools/src/compute_promote.rs b/compute_tools/src/compute_promote.rs
+index 29195b60e950..15b5fcfb4675 100644
+--- a/compute_tools/src/compute_promote.rs
++++ b/compute_tools/src/compute_promote.rs
+@@ -1,32 +1,24 @@
+ use crate::compute::ComputeNode;
+-use anyhow::{Context, Result, bail};
++use anyhow::{Context, bail};
+ use compute_api::responses::{LfcPrewarmState, PromoteConfig, PromoteState};
+-use compute_api::spec::ComputeMode;
+-use itertools::Itertools;
+-use std::collections::HashMap;
+-use std::{sync::Arc, time::Duration};
+-use tokio::time::sleep;
++use std::time::Instant;
+ use tracing::info;
+-use utils::lsn::Lsn;
+ 
+ impl ComputeNode {
+-    /// Returns only when promote fails or succeeds. If a network error occurs
+-    /// and http client disconnects, this does not stop promotion, and subsequent
+-    /// calls block until promote finishes.
++    /// Returns only when promote fails or succeeds. If http client calling this function
++    /// disconnects, this does not stop promotion, and subsequent calls block until promote finishes.
+     /// Called by control plane on secondary after primary endpoint is terminated
+     /// Has a failpoint "compute-promotion"
+-    pub async fn promote(self: &Arc<Self>, cfg: PromoteConfig) -> PromoteState {
+-        let cloned = self.clone();
+-        let promote_fn = async move || {
+-            let Err(err) = cloned.promote_impl(cfg).await else {
+-                return PromoteState::Completed;
+-            };
+-            tracing::error!(%err, "promoting");
+-            PromoteState::Failed {
+-                error: format!("{err:#}"),
++    pub async fn promote(self: &std::sync::Arc<Self>, cfg: PromoteConfig) -> PromoteState {
++        let this = self.clone();
++        let promote_fn = async move || match this.promote_impl(cfg).await {
++            Ok(state) => state,
++            Err(err) => {
++                tracing::error!(%err, "promoting replica");
++                let error = format!("{err:#}");
++                PromoteState::Failed { error }
+             }
+         };
+-
+         let start_promotion = || {
+             let (tx, rx) = tokio::sync::watch::channel(PromoteState::NotPromoted);
+             tokio::spawn(async move { tx.send(promote_fn().await) });
+@@ -34,36 +26,31 @@ impl ComputeNode {
+         };
+ 
+         let mut task;
+-        // self.state is unlocked after block ends so we lock it in promote_impl
+-        // and task.changed() is reached
++        // promote_impl locks self.state so we need to unlock it before calling task.changed()
+         {
+-            task = self
+-                .state
+-                .lock()
+-                .unwrap()
+-                .promote_state
+-                .get_or_insert_with(start_promotion)
+-                .clone()
++            let promote_state = &mut self.state.lock().unwrap().promote_state;
++            task = promote_state.get_or_insert_with(start_promotion).clone()
++        }
++        if task.changed().await.is_err() {
++            let error = "promote sender dropped".to_string();
++            return PromoteState::Failed { error };
+         }
+-        task.changed().await.expect("promote sender dropped");
+         task.borrow().clone()
+     }
+ 
+-    async fn promote_impl(&self, mut cfg: PromoteConfig) -> Result<()> {
++    async fn promote_impl(&self, cfg: PromoteConfig) -> anyhow::Result<PromoteState> {
+         {
+             let state = self.state.lock().unwrap();
+             let mode = &state.pspec.as_ref().unwrap().spec.mode;
+-            if *mode != ComputeMode::Replica {
+-                bail!("{} is not replica", mode.to_type_str());
++            if *mode != compute_api::spec::ComputeMode::Replica {
++                bail!("compute mode \"{}\" is not replica", mode.to_type_str());
+             }
+-
+-            // we don't need to query Postgres so not self.lfc_prewarm_state()
+             match &state.lfc_prewarm_state {
+-                LfcPrewarmState::NotPrewarmed | LfcPrewarmState::Prewarming => {
+-                    bail!("prewarm not requested or pending")
++                status @ (LfcPrewarmState::NotPrewarmed | LfcPrewarmState::Prewarming) => {
++                    bail!("compute {status}")
+                 }
+                 LfcPrewarmState::Failed { error } => {
+-                    tracing::warn!(%error, "replica prewarm failed")
++                    tracing::warn!(%error, "compute prewarm failed")
+                 }
+                 _ => {}
+             }
+@@ -72,9 +59,10 @@ impl ComputeNode {
+         let client = ComputeNode::get_maintenance_client(&self.tokio_conn_conf)
+             .await
+             .context("connecting to postgres")?;
++        let mut now = Instant::now();
+ 
+         let primary_lsn = cfg.wal_flush_lsn;
+-        let mut last_wal_replay_lsn: Lsn = Lsn::INVALID;
++        let mut standby_lsn = utils::lsn::Lsn::INVALID;
+         const RETRIES: i32 = 20;
+         for i in 0..=RETRIES {
+             let row = client
+@@ -82,16 +70,18 @@ impl ComputeNode {
+                 .await
+                 .context("getting last replay lsn")?;
+             let lsn: u64 = row.get::<usize, postgres_types::PgLsn>(0).into();
+-            last_wal_replay_lsn = lsn.into();
+-            if last_wal_replay_lsn >= primary_lsn {
++            standby_lsn = lsn.into();
++            if standby_lsn >= primary_lsn {
+                 break;
+             }
+-            info!("Try {i}, replica lsn {last_wal_replay_lsn}, primary lsn {primary_lsn}");
+-            sleep(Duration::from_secs(1)).await;
++            info!(%standby_lsn, %primary_lsn, "catching up, try {i}");
++            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+         }
+-        if last_wal_replay_lsn < primary_lsn {
++        if standby_lsn < primary_lsn {
+             bail!("didn't catch up with primary in {RETRIES} retries");
+         }
++        let lsn_wait_time_ms = now.elapsed().as_millis() as u32;
++        now = Instant::now();
+ 
+         // using $1 doesn't work with ALTER SYSTEM SET
+         let safekeepers_sql = format!(
+@@ -102,27 +92,33 @@ impl ComputeNode {
+             .query(&safekeepers_sql, &[])
+             .await
+             .context("setting safekeepers")?;
++        client
++            .query(
++                "ALTER SYSTEM SET synchronous_standby_names=walproposer",
++                &[],
++            )
++            .await
++            .context("setting synchronous_standby_names")?;
+         client
+             .query("SELECT pg_catalog.pg_reload_conf()", &[])
+             .await
+             .context("reloading postgres config")?;
+ 
+         #[cfg(feature = "testing")]
+-        fail::fail_point!("compute-promotion", |_| {
+-            bail!("promotion configured to fail because of a failpoint")
+-        });
++        fail::fail_point!("compute-promotion", |_| bail!(
++            "compute-promotion failpoint"
++        ));
+ 
+         let row = client
+             .query_one("SELECT * FROM pg_catalog.pg_promote()", &[])
+             .await
+             .context("pg_promote")?;
+         if !row.get::<usize, bool>(0) {
+-            bail!("pg_promote() returned false");
++            bail!("pg_promote() failed");
+         }
++        let pg_promote_time_ms = now.elapsed().as_millis() as u32;
++        let now = Instant::now();
+ 
+-        let client = ComputeNode::get_maintenance_client(&self.tokio_conn_conf)
+-            .await
+-            .context("connecting to postgres")?;
+         let row = client
+             .query_one("SHOW transaction_read_only", &[])
+             .await
+@@ -131,36 +127,47 @@ impl ComputeNode {
+             bail!("replica in read only mode after promotion");
+         }
+ 
++        // Already checked validity in http handler
++        #[allow(unused_mut)]
++        let mut new_pspec = crate::compute::ParsedSpec::try_from(cfg.spec).expect("invalid spec");
+         {
+             let mut state = self.state.lock().unwrap();
+-            let spec = &mut state.pspec.as_mut().unwrap().spec;
+-            spec.mode = ComputeMode::Primary;
+-            let new_conf = cfg.spec.cluster.postgresql_conf.as_mut().unwrap();
+-            let existing_conf = spec.cluster.postgresql_conf.as_ref().unwrap();
+-            Self::merge_spec(new_conf, existing_conf);
++
++            // Local setup has different ports for pg process (port=) for primary and secondary.
++            // Primary is stopped so we need secondary's "port" value
++            #[cfg(feature = "testing")]
++            {
++                let old_spec = &state.pspec.as_ref().unwrap().spec;
++                let Some(old_conf) = old_spec.cluster.postgresql_conf.as_ref() else {
++                    bail!("pspec.spec.cluster.postgresql_conf missing for endpoint");
++                };
++                let set: std::collections::HashMap<&str, &str> = old_conf
++                    .split_terminator('\n')
++                    .map(|e| e.split_once("=").expect("invalid item"))
++                    .collect();
++
++                let Some(new_conf) = new_pspec.spec.cluster.postgresql_conf.as_mut() else {
++                    bail!("pspec.spec.cluster.postgresql_conf missing for supplied config");
++                };
++                new_conf.push_str(&format!("port={}\n", set["port"]));
++            }
++
++            tracing::debug!("applied spec: {:#?}", new_pspec.spec);
++            if self.params.lakebase_mode {
++                ComputeNode::set_spec(&self.params, &mut state, new_pspec);
++            } else {
++                state.pspec = Some(new_pspec);
++            }
+         }
+-        info!("applied new spec, reconfiguring as primary");
+-        self.reconfigure()
+-    }
+ 
+-    /// Merge old and new Postgres conf specs to apply on secondary.
+-    /// Change new spec's port and safekeepers since they are supplied
+-    /// differenly
+-    fn merge_spec(new_conf: &mut String, existing_conf: &str) {
+-        let mut new_conf_set: HashMap<&str, &str> = new_conf
+-            .split_terminator('\n')
+-            .map(|e| e.split_once("=").expect("invalid item"))
+-            .collect();
+-        new_conf_set.remove("neon.safekeepers");
++        info!("applied new spec, reconfiguring as primary");
++        self.reconfigure()?;
++        let reconfigure_time_ms = now.elapsed().as_millis() as u32;
+ 
+-        let existing_conf_set: HashMap<&str, &str> = existing_conf
+-            .split_terminator('\n')
+-            .map(|e| e.split_once("=").expect("invalid item"))
+-            .collect();
+-        new_conf_set.insert("port", existing_conf_set["port"]);
+-        *new_conf = new_conf_set
+-            .iter()
+-            .map(|(k, v)| format!("{k}={v}"))
+-            .join("\n");
++        Ok(PromoteState::Completed {
++            lsn_wait_time_ms,
++            pg_promote_time_ms,
++            reconfigure_time_ms,
++        })
+     }
+ }
+diff --git a/compute_tools/src/http/openapi_spec.yaml b/compute_tools/src/http/openapi_spec.yaml
+index 27e610a87da9..82e61acfdcdb 100644
+--- a/compute_tools/src/http/openapi_spec.yaml
++++ b/compute_tools/src/http/openapi_spec.yaml
+@@ -617,9 +617,6 @@ components:
+       type: object
+       required:
+         - status
+-        - total
+-        - prewarmed
+-        - skipped
+       properties:
+         status:
+           description: LFC prewarm status
+@@ -637,6 +634,15 @@ components:
+         skipped:
+           description: Pages processed but not prewarmed
+           type: integer
++        state_download_time_ms:
++          description: Time it takes to download LFC state to compute
++          type: integer
++        uncompress_time_ms:
++          description: Time it takes to uncompress LFC state
++          type: integer
++        prewarm_time_ms:
++          description: Time it takes to prewarm LFC state in Postgres
++          type: integer
+ 
+     LfcOffloadState:
+       type: object
+@@ -650,6 +656,16 @@ components:
+         error:
+           description: LFC offload error, if any
+           type: string
++        state_query_time_ms:
++          description: Time it takes to get LFC state from Postgres
++          type: integer
++        compress_time_ms:
++          description: Time it takes to compress LFC state
++          type: integer
++        state_upload_time_ms:
++          description: Time it takes to upload LFC state to endpoint storage
++          type: integer
++
+ 
+     PromoteState:
+       type: object
+@@ -663,6 +679,15 @@ components:
+         error:
+           description: Promote error, if any
+           type: string
++        lsn_wait_time_ms:
++          description: Time it takes for secondary to catch up with primary WAL flush LSN
++          type: integer
++        pg_promote_time_ms:
++          description: Time it takes to call pg_promote on secondary
++          type: integer
++        reconfigure_time_ms:
++          description: Time it takes to reconfigure promoted secondary
++          type: integer
+ 
+     SetRoleGrantsRequest:
+       type: object
+diff --git a/compute_tools/src/http/routes/lfc.rs b/compute_tools/src/http/routes/lfc.rs
+index 748319872395..6ad216778e0c 100644
+--- a/compute_tools/src/http/routes/lfc.rs
++++ b/compute_tools/src/http/routes/lfc.rs
+@@ -1,12 +1,11 @@
+-use crate::compute_prewarm::LfcPrewarmStateWithProgress;
+ use crate::http::JsonResponse;
+ use axum::response::{IntoResponse, Response};
+ use axum::{Json, http::StatusCode};
+ use axum_extra::extract::OptionalQuery;
+-use compute_api::responses::LfcOffloadState;
++use compute_api::responses::{LfcOffloadState, LfcPrewarmState};
+ type Compute = axum::extract::State<std::sync::Arc<crate::compute::ComputeNode>>;
+ 
+-pub(in crate::http) async fn prewarm_state(compute: Compute) -> Json<LfcPrewarmStateWithProgress> {
++pub(in crate::http) async fn prewarm_state(compute: Compute) -> Json<LfcPrewarmState> {
+     Json(compute.lfc_prewarm_state().await)
+ }
+ 
+diff --git a/compute_tools/src/http/routes/promote.rs b/compute_tools/src/http/routes/promote.rs
+index 7ca3464b63e2..865de0da9188 100644
+--- a/compute_tools/src/http/routes/promote.rs
++++ b/compute_tools/src/http/routes/promote.rs
+@@ -1,11 +1,22 @@
+ use crate::http::JsonResponse;
+ use axum::extract::Json;
++use compute_api::responses::PromoteConfig;
+ use http::StatusCode;
+ 
+ pub(in crate::http) async fn promote(
+     compute: axum::extract::State<std::sync::Arc<crate::compute::ComputeNode>>,
+-    Json(cfg): Json<compute_api::responses::PromoteConfig>,
++    Json(cfg): Json<PromoteConfig>,
+ ) -> axum::response::Response {
++    // Return early at the cost of extra parsing spec
++    let pspec = match crate::compute::ParsedSpec::try_from(cfg.spec) {
++        Ok(p) => p,
++        Err(e) => return JsonResponse::error(StatusCode::BAD_REQUEST, e),
++    };
++
++    let cfg = PromoteConfig {
++        spec: pspec.spec,
++        wal_flush_lsn: cfg.wal_flush_lsn,
++    };
+     let state = compute.promote(cfg).await;
+     if let compute_api::responses::PromoteState::Failed { error: _ } = state {
+         return JsonResponse::create_response(StatusCode::INTERNAL_SERVER_ERROR, state);
+diff --git a/libs/compute_api/src/responses.rs b/libs/compute_api/src/responses.rs
+index a918644e4ce2..a61d418dd18e 100644
+--- a/libs/compute_api/src/responses.rs
++++ b/libs/compute_api/src/responses.rs
+@@ -1,10 +1,9 @@
+ //! Structs representing the JSON formats used in the compute_ctl's HTTP API.
+ 
+-use std::fmt::Display;
+-
+ use chrono::{DateTime, Utc};
+ use jsonwebtoken::jwk::JwkSet;
+ use serde::{Deserialize, Serialize, Serializer};
++use std::fmt::Display;
+ 
+ use crate::privilege::Privilege;
+ use crate::spec::{ComputeSpec, Database, ExtVersion, PgIdent, Role};
+@@ -49,7 +48,7 @@ pub struct ExtensionInstallResponse {
+ /// Status of the LFC prewarm process. The same state machine is reused for
+ /// both autoprewarm (prewarm after compute/Postgres start using the previously
+ /// stored LFC state) and explicit prewarming via API.
+-#[derive(Serialize, Default, Debug, Clone, PartialEq)]
++#[derive(Serialize, Default, Debug, Clone)]
+ #[serde(tag = "status", rename_all = "snake_case")]
+ pub enum LfcPrewarmState {
+     /// Default value when compute boots up.
+@@ -59,7 +58,14 @@ pub enum LfcPrewarmState {
+     Prewarming,
+     /// We found requested LFC state in the endpoint storage and
+     /// completed prewarming successfully.
+-    Completed,
++    Completed {
++        total: i32,
++        prewarmed: i32,
++        skipped: i32,
++        state_download_time_ms: u32,
++        uncompress_time_ms: u32,
++        prewarm_time_ms: u32,
++    },
+     /// Unexpected error happened during prewarming. Note, `Not Found 404`
+     /// response from the endpoint storage is explicitly excluded here
+     /// because it can normally happen on the first compute start,
+@@ -84,7 +90,7 @@ impl Display for LfcPrewarmState {
+         match self {
+             LfcPrewarmState::NotPrewarmed => f.write_str("NotPrewarmed"),
+             LfcPrewarmState::Prewarming => f.write_str("Prewarming"),
+-            LfcPrewarmState::Completed => f.write_str("Completed"),
++            LfcPrewarmState::Completed { .. } => f.write_str("Completed"),
+             LfcPrewarmState::Skipped => f.write_str("Skipped"),
+             LfcPrewarmState::Failed { error } => write!(f, "Error({error})"),
+             LfcPrewarmState::Cancelled => f.write_str("Cancelled"),
+@@ -92,26 +98,36 @@ impl Display for LfcPrewarmState {
+     }
+ }
+ 
+-#[derive(Serialize, Default, Debug, Clone, PartialEq)]
++#[derive(Serialize, Default, Debug, Clone)]
+ #[serde(tag = "status", rename_all = "snake_case")]
+ pub enum LfcOffloadState {
+     #[default]
+     NotOffloaded,
+     Offloading,
+-    Completed,
++    Completed {
++        state_query_time_ms: u32,
++        compress_time_ms: u32,
++        state_upload_time_ms: u32,
++    },
+     Failed {
+         error: String,
+     },
++    /// LFC state was empty so it wasn't offloaded
+     Skipped,
+ }
+ 
+-#[derive(Serialize, Debug, Clone, PartialEq)]
++#[derive(Serialize, Debug, Clone)]
+ #[serde(tag = "status", rename_all = "snake_case")]
+-/// Response of /promote
+ pub enum PromoteState {
+     NotPromoted,
+-    Completed,
+-    Failed { error: String },
++    Completed {
++        lsn_wait_time_ms: u32,
++        pg_promote_time_ms: u32,
++        reconfigure_time_ms: u32,
++    },
++    Failed {
++        error: String,
++    },
+ }
+ 
+ #[derive(Deserialize, Default, Debug)]
+diff --git a/test_runner/regress/test_replica_promotes.py b/test_runner/regress/test_replica_promotes.py
+index 9415d6886cde..26165b40cd50 100644
+--- a/test_runner/regress/test_replica_promotes.py
++++ b/test_runner/regress/test_replica_promotes.py
+@@ -145,6 +145,7 @@ def test_replica_promote(neon_simple_env: NeonEnv, method: PromoteMethod):
+         stop_and_check_lsn(secondary, None)
+ 
+     if method == PromoteMethod.COMPUTE_CTL:
++        log.info("Restarting primary to check new config")
+         secondary.stop()
+         # In production, compute ultimately receives new compute spec from cplane.
+         secondary.respec(mode="Primary")

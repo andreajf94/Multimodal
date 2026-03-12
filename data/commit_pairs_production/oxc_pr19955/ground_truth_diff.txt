@@ -1,0 +1,416 @@
+diff --git a/apps/oxlint/fixtures/tsgolint/.oxlintrc.json b/apps/oxlint/fixtures/tsgolint/.oxlintrc.json
+index 47cdea0b4022a..444559ca6ffe4 100644
+--- a/apps/oxlint/fixtures/tsgolint/.oxlintrc.json
++++ b/apps/oxlint/fixtures/tsgolint/.oxlintrc.json
+@@ -25,6 +25,7 @@
+     "typescript/no-unnecessary-template-expression": "error",
+     "typescript/no-unnecessary-type-arguments": "error",
+     "typescript/no-unnecessary-type-assertion": "error",
++    "typescript/no-unnecessary-type-conversion": "error",
+     "typescript/no-unnecessary-type-parameters": "error",
+     "typescript/no-useless-default-assignment": "error",
+     "typescript/no-unsafe-argument": "error",
+diff --git a/apps/oxlint/fixtures/tsgolint/no-unnecessary-type-conversion.ts b/apps/oxlint/fixtures/tsgolint/no-unnecessary-type-conversion.ts
+new file mode 100644
+index 0000000000000..5cae62112a733
+--- /dev/null
++++ b/apps/oxlint/fixtures/tsgolint/no-unnecessary-type-conversion.ts
+@@ -0,0 +1,7 @@
++// Examples of incorrect code for no-unnecessary-type-conversion rule
++
++const a = String('asdf');
++const b = 'asdf'.toString();
++const c = '' + 'asdf';
++const d = Number(123);
++const e = !!true;
+diff --git a/apps/oxlint/src/snapshots/fixtures__tsgolint_--type-aware --silent@oxlint.snap b/apps/oxlint/src/snapshots/fixtures__tsgolint_--type-aware --silent@oxlint.snap
+index 073fa571b0578..a0a0ff4b55ac7 100644
+--- a/apps/oxlint/src/snapshots/fixtures__tsgolint_--type-aware --silent@oxlint.snap	
++++ b/apps/oxlint/src/snapshots/fixtures__tsgolint_--type-aware --silent@oxlint.snap	
+@@ -6,8 +6,8 @@ arguments: --type-aware --silent
+ working directory: fixtures/tsgolint
+ ----------
+ 
+-Found 0 warnings and 76 errors.
+-Finished in <variable>ms on 59 files with 58 rules using 1 threads.
++Found 0 warnings and 81 errors.
++Finished in <variable>ms on 60 files with 59 rules using 1 threads.
+ ----------
+ CLI result: LintFoundErrors
+ ----------
+diff --git a/apps/oxlint/src/snapshots/fixtures__tsgolint_--type-aware -c config-test.json@oxlint.snap b/apps/oxlint/src/snapshots/fixtures__tsgolint_--type-aware -c config-test.json@oxlint.snap
+index c8746e007f4d9..172f01a3d1ccc 100644
+--- a/apps/oxlint/src/snapshots/fixtures__tsgolint_--type-aware -c config-test.json@oxlint.snap	
++++ b/apps/oxlint/src/snapshots/fixtures__tsgolint_--type-aware -c config-test.json@oxlint.snap	
+@@ -40,7 +40,7 @@ working directory: fixtures/tsgolint
+   help: Remove the debugger statement
+ 
+ Found 2 warnings and 2 errors.
+-Finished in <variable>ms on 59 files with 1 rules using 1 threads.
++Finished in <variable>ms on 60 files with 1 rules using 1 threads.
+ ----------
+ CLI result: LintFoundErrors
+ ----------
+diff --git a/apps/oxlint/src/snapshots/fixtures__tsgolint_--type-aware test.svelte@oxlint.snap b/apps/oxlint/src/snapshots/fixtures__tsgolint_--type-aware test.svelte@oxlint.snap
+index 3c0bd55e8915d..1f75964ade943 100644
+--- a/apps/oxlint/src/snapshots/fixtures__tsgolint_--type-aware test.svelte@oxlint.snap	
++++ b/apps/oxlint/src/snapshots/fixtures__tsgolint_--type-aware test.svelte@oxlint.snap	
+@@ -16,7 +16,7 @@ working directory: fixtures/tsgolint
+   help: Remove the debugger statement
+ 
+ Found 0 warnings and 1 error.
+-Finished in <variable>ms on 1 file with 58 rules using 1 threads.
++Finished in <variable>ms on 1 file with 59 rules using 1 threads.
+ ----------
+ CLI result: LintFoundErrors
+ ----------
+diff --git a/apps/oxlint/src/snapshots/fixtures__tsgolint_--type-aware@oxlint.snap b/apps/oxlint/src/snapshots/fixtures__tsgolint_--type-aware@oxlint.snap
+index f89bf4f1fc181..24824b020cf0a 100644
+--- a/apps/oxlint/src/snapshots/fixtures__tsgolint_--type-aware@oxlint.snap
++++ b/apps/oxlint/src/snapshots/fixtures__tsgolint_--type-aware@oxlint.snap
+@@ -209,6 +209,50 @@ working directory: fixtures/tsgolint
+  3 | 
+    `----
+ 
++  x typescript-eslint(no-unnecessary-type-conversion): This type conversion does not change the type or value of the expression.
++   ,-[no-unnecessary-type-conversion.ts:3:11]
++ 2 | 
++ 3 | const a = String('asdf');
++   :           ^^^^^^ ^^^|^^
++   :              |      `-- This expression already has type '"asdf"'.
++ 4 | const b = 'asdf'.toString();
++   `----
++
++  x typescript-eslint(no-unnecessary-type-conversion): This type conversion does not change the type or value of the expression.
++   ,-[no-unnecessary-type-conversion.ts:4:18]
++ 3 | const a = String('asdf');
++ 4 | const b = 'asdf'.toString();
++   :           ^^^|^^ ^^^^^^^^^^
++   :              `-- This expression already has type '"asdf"'.
++ 5 | const c = '' + 'asdf';
++   `----
++
++  x typescript-eslint(no-unnecessary-type-conversion): This type conversion does not change the type or value of the expression.
++   ,-[no-unnecessary-type-conversion.ts:5:11]
++ 4 | const b = 'asdf'.toString();
++ 5 | const c = '' + 'asdf';
++   :           ^^^^^^^^|^^
++   :             |     `-- This expression already has type '"asdf"'.
++ 6 | const d = Number(123);
++   `----
++
++  x typescript-eslint(no-unnecessary-type-conversion): This type conversion does not change the type or value of the expression.
++   ,-[no-unnecessary-type-conversion.ts:6:11]
++ 5 | const c = '' + 'asdf';
++ 6 | const d = Number(123);
++   :           ^^^^^^ ^|^
++   :              |    `-- This expression already has type '123'.
++ 7 | const e = !!true;
++   `----
++
++  x typescript-eslint(no-unnecessary-type-conversion): This type conversion does not change the type or value of the expression.
++   ,-[no-unnecessary-type-conversion.ts:7:11]
++ 6 | const d = Number(123);
++ 7 | const e = !!true;
++   :           ^^^^|^
++   :            |  `-- This expression already has type 'true'.
++   `----
++
+   x typescript-eslint(no-unnecessary-type-parameters): Type parameter T is used only once in the function signature.
+    ,-[no-unnecessary-type-parameters.ts:3:20]
+  2 | 
+@@ -617,8 +661,8 @@ working directory: fixtures/tsgolint
+    `----
+   help: If your function does not access `this`, you can annotate it with `this: void`, or consider using an arrow function instead.
+ 
+-Found 0 warnings and 76 errors.
+-Finished in <variable>ms on 59 files with 58 rules using 1 threads.
++Found 0 warnings and 81 errors.
++Finished in <variable>ms on 60 files with 59 rules using 1 threads.
+ ----------
+ CLI result: LintFoundErrors
+ ----------
+diff --git a/apps/oxlint/src/snapshots/fixtures__tsgolint_-c config-type-aware.json@oxlint.snap b/apps/oxlint/src/snapshots/fixtures__tsgolint_-c config-type-aware.json@oxlint.snap
+index 63b1bfacd05ad..34115d4451703 100644
+--- a/apps/oxlint/src/snapshots/fixtures__tsgolint_-c config-type-aware.json@oxlint.snap	
++++ b/apps/oxlint/src/snapshots/fixtures__tsgolint_-c config-type-aware.json@oxlint.snap	
+@@ -40,7 +40,7 @@ working directory: fixtures/tsgolint
+   help: Remove the debugger statement
+ 
+ Found 2 warnings and 2 errors.
+-Finished in <variable>ms on 59 files with 1 rules using 1 threads.
++Finished in <variable>ms on 60 files with 1 rules using 1 threads.
+ ----------
+ CLI result: LintFoundErrors
+ ----------
+diff --git a/crates/oxc_linter/src/generated/rule_runner_impls.rs b/crates/oxc_linter/src/generated/rule_runner_impls.rs
+index 1df3cfb017e09..6237c69670eba 100644
+--- a/crates/oxc_linter/src/generated/rule_runner_impls.rs
++++ b/crates/oxc_linter/src/generated/rule_runner_impls.rs
+@@ -1744,6 +1744,13 @@ impl RuleRunner
+     const RUN_FUNCTIONS: RuleRunFunctionsImplemented = RuleRunFunctionsImplemented::Run;
+ }
+ 
++impl RuleRunner
++    for crate::rules::typescript::no_unnecessary_type_conversion::NoUnnecessaryTypeConversion
++{
++    const NODE_TYPES: Option<&AstTypesBitset> = None;
++    const RUN_FUNCTIONS: RuleRunFunctionsImplemented = RuleRunFunctionsImplemented::Unknown;
++}
++
+ impl RuleRunner
+     for crate::rules::typescript::no_unnecessary_type_parameters::NoUnnecessaryTypeParameters
+ {
+diff --git a/crates/oxc_linter/src/generated/rules_enum.rs b/crates/oxc_linter/src/generated/rules_enum.rs
+index cba7dd8edeeae..c163e843bfac0 100644
+--- a/crates/oxc_linter/src/generated/rules_enum.rs
++++ b/crates/oxc_linter/src/generated/rules_enum.rs
+@@ -495,6 +495,7 @@ pub use crate::rules::typescript::no_unnecessary_template_expression::NoUnnecess
+ pub use crate::rules::typescript::no_unnecessary_type_arguments::NoUnnecessaryTypeArguments as TypescriptNoUnnecessaryTypeArguments;
+ pub use crate::rules::typescript::no_unnecessary_type_assertion::NoUnnecessaryTypeAssertion as TypescriptNoUnnecessaryTypeAssertion;
+ pub use crate::rules::typescript::no_unnecessary_type_constraint::NoUnnecessaryTypeConstraint as TypescriptNoUnnecessaryTypeConstraint;
++pub use crate::rules::typescript::no_unnecessary_type_conversion::NoUnnecessaryTypeConversion as TypescriptNoUnnecessaryTypeConversion;
+ pub use crate::rules::typescript::no_unnecessary_type_parameters::NoUnnecessaryTypeParameters as TypescriptNoUnnecessaryTypeParameters;
+ pub use crate::rules::typescript::no_unsafe_argument::NoUnsafeArgument as TypescriptNoUnsafeArgument;
+ pub use crate::rules::typescript::no_unsafe_assignment::NoUnsafeAssignment as TypescriptNoUnsafeAssignment;
+@@ -973,6 +974,7 @@ pub enum RuleEnum {
+     TypescriptNoUnnecessaryTypeArguments(TypescriptNoUnnecessaryTypeArguments),
+     TypescriptNoUnnecessaryTypeAssertion(TypescriptNoUnnecessaryTypeAssertion),
+     TypescriptNoUnnecessaryTypeConstraint(TypescriptNoUnnecessaryTypeConstraint),
++    TypescriptNoUnnecessaryTypeConversion(TypescriptNoUnnecessaryTypeConversion),
+     TypescriptNoUnnecessaryTypeParameters(TypescriptNoUnnecessaryTypeParameters),
+     TypescriptNoUnsafeArgument(TypescriptNoUnsafeArgument),
+     TypescriptNoUnsafeAssignment(TypescriptNoUnsafeAssignment),
+@@ -1695,8 +1697,10 @@ const TYPESCRIPT_NO_UNNECESSARY_TYPE_ASSERTION_ID: usize =
+     TYPESCRIPT_NO_UNNECESSARY_TYPE_ARGUMENTS_ID + 1usize;
+ const TYPESCRIPT_NO_UNNECESSARY_TYPE_CONSTRAINT_ID: usize =
+     TYPESCRIPT_NO_UNNECESSARY_TYPE_ASSERTION_ID + 1usize;
+-const TYPESCRIPT_NO_UNNECESSARY_TYPE_PARAMETERS_ID: usize =
++const TYPESCRIPT_NO_UNNECESSARY_TYPE_CONVERSION_ID: usize =
+     TYPESCRIPT_NO_UNNECESSARY_TYPE_CONSTRAINT_ID + 1usize;
++const TYPESCRIPT_NO_UNNECESSARY_TYPE_PARAMETERS_ID: usize =
++    TYPESCRIPT_NO_UNNECESSARY_TYPE_CONVERSION_ID + 1usize;
+ const TYPESCRIPT_NO_UNSAFE_ARGUMENT_ID: usize =
+     TYPESCRIPT_NO_UNNECESSARY_TYPE_PARAMETERS_ID + 1usize;
+ const TYPESCRIPT_NO_UNSAFE_ASSIGNMENT_ID: usize = TYPESCRIPT_NO_UNSAFE_ARGUMENT_ID + 1usize;
+@@ -2493,6 +2497,9 @@ impl RuleEnum {
+             Self::TypescriptNoUnnecessaryTypeConstraint(_) => {
+                 TYPESCRIPT_NO_UNNECESSARY_TYPE_CONSTRAINT_ID
+             }
++            Self::TypescriptNoUnnecessaryTypeConversion(_) => {
++                TYPESCRIPT_NO_UNNECESSARY_TYPE_CONVERSION_ID
++            }
+             Self::TypescriptNoUnnecessaryTypeParameters(_) => {
+                 TYPESCRIPT_NO_UNNECESSARY_TYPE_PARAMETERS_ID
+             }
+@@ -3296,6 +3303,9 @@ impl RuleEnum {
+             Self::TypescriptNoUnnecessaryTypeConstraint(_) => {
+                 TypescriptNoUnnecessaryTypeConstraint::NAME
+             }
++            Self::TypescriptNoUnnecessaryTypeConversion(_) => {
++                TypescriptNoUnnecessaryTypeConversion::NAME
++            }
+             Self::TypescriptNoUnnecessaryTypeParameters(_) => {
+                 TypescriptNoUnnecessaryTypeParameters::NAME
+             }
+@@ -4101,6 +4111,9 @@ impl RuleEnum {
+             Self::TypescriptNoUnnecessaryTypeConstraint(_) => {
+                 TypescriptNoUnnecessaryTypeConstraint::CATEGORY
+             }
++            Self::TypescriptNoUnnecessaryTypeConversion(_) => {
++                TypescriptNoUnnecessaryTypeConversion::CATEGORY
++            }
+             Self::TypescriptNoUnnecessaryTypeParameters(_) => {
+                 TypescriptNoUnnecessaryTypeParameters::CATEGORY
+             }
+@@ -4929,6 +4942,9 @@ impl RuleEnum {
+             Self::TypescriptNoUnnecessaryTypeConstraint(_) => {
+                 TypescriptNoUnnecessaryTypeConstraint::FIX
+             }
++            Self::TypescriptNoUnnecessaryTypeConversion(_) => {
++                TypescriptNoUnnecessaryTypeConversion::FIX
++            }
+             Self::TypescriptNoUnnecessaryTypeParameters(_) => {
+                 TypescriptNoUnnecessaryTypeParameters::FIX
+             }
+@@ -5769,6 +5785,9 @@ impl RuleEnum {
+             Self::TypescriptNoUnnecessaryTypeConstraint(_) => {
+                 TypescriptNoUnnecessaryTypeConstraint::documentation()
+             }
++            Self::TypescriptNoUnnecessaryTypeConversion(_) => {
++                TypescriptNoUnnecessaryTypeConversion::documentation()
++            }
+             Self::TypescriptNoUnnecessaryTypeParameters(_) => {
+                 TypescriptNoUnnecessaryTypeParameters::documentation()
+             }
+@@ -7125,6 +7144,10 @@ impl RuleEnum {
+                 TypescriptNoUnnecessaryTypeConstraint::config_schema(generator)
+                     .or_else(|| TypescriptNoUnnecessaryTypeConstraint::schema(generator))
+             }
++            Self::TypescriptNoUnnecessaryTypeConversion(_) => {
++                TypescriptNoUnnecessaryTypeConversion::config_schema(generator)
++                    .or_else(|| TypescriptNoUnnecessaryTypeConversion::schema(generator))
++            }
+             Self::TypescriptNoUnnecessaryTypeParameters(_) => {
+                 TypescriptNoUnnecessaryTypeParameters::config_schema(generator)
+                     .or_else(|| TypescriptNoUnnecessaryTypeParameters::schema(generator))
+@@ -8651,6 +8674,7 @@ impl RuleEnum {
+             Self::TypescriptNoUnnecessaryTypeArguments(_) => "typescript",
+             Self::TypescriptNoUnnecessaryTypeAssertion(_) => "typescript",
+             Self::TypescriptNoUnnecessaryTypeConstraint(_) => "typescript",
++            Self::TypescriptNoUnnecessaryTypeConversion(_) => "typescript",
+             Self::TypescriptNoUnnecessaryTypeParameters(_) => "typescript",
+             Self::TypescriptNoUnsafeArgument(_) => "typescript",
+             Self::TypescriptNoUnsafeAssignment(_) => "typescript",
+@@ -9915,6 +9939,11 @@ impl RuleEnum {
+                     TypescriptNoUnnecessaryTypeConstraint::from_configuration(value)?,
+                 ))
+             }
++            Self::TypescriptNoUnnecessaryTypeConversion(_) => {
++                Ok(Self::TypescriptNoUnnecessaryTypeConversion(
++                    TypescriptNoUnnecessaryTypeConversion::from_configuration(value)?,
++                ))
++            }
+             Self::TypescriptNoUnnecessaryTypeParameters(_) => {
+                 Ok(Self::TypescriptNoUnnecessaryTypeParameters(
+                     TypescriptNoUnnecessaryTypeParameters::from_configuration(value)?,
+@@ -11586,6 +11615,7 @@ impl RuleEnum {
+             Self::TypescriptNoUnnecessaryTypeArguments(rule) => rule.to_configuration(),
+             Self::TypescriptNoUnnecessaryTypeAssertion(rule) => rule.to_configuration(),
+             Self::TypescriptNoUnnecessaryTypeConstraint(rule) => rule.to_configuration(),
++            Self::TypescriptNoUnnecessaryTypeConversion(rule) => rule.to_configuration(),
+             Self::TypescriptNoUnnecessaryTypeParameters(rule) => rule.to_configuration(),
+             Self::TypescriptNoUnsafeArgument(rule) => rule.to_configuration(),
+             Self::TypescriptNoUnsafeAssignment(rule) => rule.to_configuration(),
+@@ -12287,6 +12317,7 @@ impl RuleEnum {
+             Self::TypescriptNoUnnecessaryTypeArguments(rule) => rule.run(node, ctx),
+             Self::TypescriptNoUnnecessaryTypeAssertion(rule) => rule.run(node, ctx),
+             Self::TypescriptNoUnnecessaryTypeConstraint(rule) => rule.run(node, ctx),
++            Self::TypescriptNoUnnecessaryTypeConversion(rule) => rule.run(node, ctx),
+             Self::TypescriptNoUnnecessaryTypeParameters(rule) => rule.run(node, ctx),
+             Self::TypescriptNoUnsafeArgument(rule) => rule.run(node, ctx),
+             Self::TypescriptNoUnsafeAssignment(rule) => rule.run(node, ctx),
+@@ -12986,6 +13017,7 @@ impl RuleEnum {
+             Self::TypescriptNoUnnecessaryTypeArguments(rule) => rule.run_once(ctx),
+             Self::TypescriptNoUnnecessaryTypeAssertion(rule) => rule.run_once(ctx),
+             Self::TypescriptNoUnnecessaryTypeConstraint(rule) => rule.run_once(ctx),
++            Self::TypescriptNoUnnecessaryTypeConversion(rule) => rule.run_once(ctx),
+             Self::TypescriptNoUnnecessaryTypeParameters(rule) => rule.run_once(ctx),
+             Self::TypescriptNoUnsafeArgument(rule) => rule.run_once(ctx),
+             Self::TypescriptNoUnsafeAssignment(rule) => rule.run_once(ctx),
+@@ -13729,6 +13761,9 @@ impl RuleEnum {
+             Self::TypescriptNoUnnecessaryTypeConstraint(rule) => {
+                 rule.run_on_jest_node(jest_node, ctx)
+             }
++            Self::TypescriptNoUnnecessaryTypeConversion(rule) => {
++                rule.run_on_jest_node(jest_node, ctx)
++            }
+             Self::TypescriptNoUnnecessaryTypeParameters(rule) => {
+                 rule.run_on_jest_node(jest_node, ctx)
+             }
+@@ -14482,6 +14517,7 @@ impl RuleEnum {
+             Self::TypescriptNoUnnecessaryTypeArguments(rule) => rule.should_run(ctx),
+             Self::TypescriptNoUnnecessaryTypeAssertion(rule) => rule.should_run(ctx),
+             Self::TypescriptNoUnnecessaryTypeConstraint(rule) => rule.should_run(ctx),
++            Self::TypescriptNoUnnecessaryTypeConversion(rule) => rule.should_run(ctx),
+             Self::TypescriptNoUnnecessaryTypeParameters(rule) => rule.should_run(ctx),
+             Self::TypescriptNoUnsafeArgument(rule) => rule.should_run(ctx),
+             Self::TypescriptNoUnsafeAssignment(rule) => rule.should_run(ctx),
+@@ -15267,6 +15303,9 @@ impl RuleEnum {
+             Self::TypescriptNoUnnecessaryTypeConstraint(_) => {
+                 TypescriptNoUnnecessaryTypeConstraint::IS_TSGOLINT_RULE
+             }
++            Self::TypescriptNoUnnecessaryTypeConversion(_) => {
++                TypescriptNoUnnecessaryTypeConversion::IS_TSGOLINT_RULE
++            }
+             Self::TypescriptNoUnnecessaryTypeParameters(_) => {
+                 TypescriptNoUnnecessaryTypeParameters::IS_TSGOLINT_RULE
+             }
+@@ -16233,6 +16272,9 @@ impl RuleEnum {
+             Self::TypescriptNoUnnecessaryTypeConstraint(_) => {
+                 TypescriptNoUnnecessaryTypeConstraint::HAS_CONFIG
+             }
++            Self::TypescriptNoUnnecessaryTypeConversion(_) => {
++                TypescriptNoUnnecessaryTypeConversion::HAS_CONFIG
++            }
+             Self::TypescriptNoUnnecessaryTypeParameters(_) => {
+                 TypescriptNoUnnecessaryTypeParameters::HAS_CONFIG
+             }
+@@ -17038,6 +17080,7 @@ impl RuleEnum {
+             Self::TypescriptNoUnnecessaryTypeArguments(rule) => rule.types_info(),
+             Self::TypescriptNoUnnecessaryTypeAssertion(rule) => rule.types_info(),
+             Self::TypescriptNoUnnecessaryTypeConstraint(rule) => rule.types_info(),
++            Self::TypescriptNoUnnecessaryTypeConversion(rule) => rule.types_info(),
+             Self::TypescriptNoUnnecessaryTypeParameters(rule) => rule.types_info(),
+             Self::TypescriptNoUnsafeArgument(rule) => rule.types_info(),
+             Self::TypescriptNoUnsafeAssignment(rule) => rule.types_info(),
+@@ -17737,6 +17780,7 @@ impl RuleEnum {
+             Self::TypescriptNoUnnecessaryTypeArguments(rule) => rule.run_info(),
+             Self::TypescriptNoUnnecessaryTypeAssertion(rule) => rule.run_info(),
+             Self::TypescriptNoUnnecessaryTypeConstraint(rule) => rule.run_info(),
++            Self::TypescriptNoUnnecessaryTypeConversion(rule) => rule.run_info(),
+             Self::TypescriptNoUnnecessaryTypeParameters(rule) => rule.run_info(),
+             Self::TypescriptNoUnsafeArgument(rule) => rule.run_info(),
+             Self::TypescriptNoUnsafeAssignment(rule) => rule.run_info(),
+@@ -18498,6 +18542,9 @@ pub static RULES: std::sync::LazyLock<Vec<RuleEnum>> = std::sync::LazyLock::new(
+         RuleEnum::TypescriptNoUnnecessaryTypeConstraint(
+             TypescriptNoUnnecessaryTypeConstraint::default(),
+         ),
++        RuleEnum::TypescriptNoUnnecessaryTypeConversion(
++            TypescriptNoUnnecessaryTypeConversion::default(),
++        ),
+         RuleEnum::TypescriptNoUnnecessaryTypeParameters(
+             TypescriptNoUnnecessaryTypeParameters::default(),
+         ),
+diff --git a/crates/oxc_linter/src/rules.rs b/crates/oxc_linter/src/rules.rs
+index fe61d26c43158..52bc6fedbc335 100644
+--- a/crates/oxc_linter/src/rules.rs
++++ b/crates/oxc_linter/src/rules.rs
+@@ -270,6 +270,7 @@ pub(crate) mod typescript {
+     pub mod no_unnecessary_type_arguments;
+     pub mod no_unnecessary_type_assertion;
+     pub mod no_unnecessary_type_constraint;
++    pub mod no_unnecessary_type_conversion;
+     pub mod no_unnecessary_type_parameters;
+     pub mod no_unsafe_argument;
+     pub mod no_unsafe_assignment;
+diff --git a/crates/oxc_linter/src/rules/typescript/no_unnecessary_type_conversion.rs b/crates/oxc_linter/src/rules/typescript/no_unnecessary_type_conversion.rs
+new file mode 100644
+index 0000000000000..f1b98c5a5ae5b
+--- /dev/null
++++ b/crates/oxc_linter/src/rules/typescript/no_unnecessary_type_conversion.rs
+@@ -0,0 +1,34 @@
++use oxc_macros::declare_oxc_lint;
++
++use crate::rule::Rule;
++
++#[derive(Debug, Default, Clone)]
++pub struct NoUnnecessaryTypeConversion;
++
++declare_oxc_lint!(
++    /// ### What it does
++    ///
++    /// Disallow unnecessary type conversion expressions.
++    ///
++    /// ### Why is this bad?
++    ///
++    /// Type conversions that do not change a value's type or runtime behavior
++    /// add noise and can obscure intent.
++    ///
++    /// ### Examples
++    ///
++    /// Examples of **incorrect** code for this rule:
++    /// ```ts
++    /// const value = String('asdf');
++    /// ```
++    ///
++    /// Examples of **correct** code for this rule:
++    /// ```ts
++    /// const value = 'asdf';
++    /// ```
++    NoUnnecessaryTypeConversion(tsgolint),
++    typescript,
++    nursery,
++);
++
++impl Rule for NoUnnecessaryTypeConversion {}

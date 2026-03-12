@@ -1,0 +1,113 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "ci_cd_automation",
+      "recommendation": "Created a reusable shell script (.github/scripts/publish-if-needed.sh) that checks npm registry before publishing and only publishes if the version doesn't exist",
+      "rationale": "Shell script approach provides better integration with existing bash-based CI workflows and allows passing arbitrary publish flags through to pnpm. Using npm view with specific version specifier is more precise than checking package existence alone.",
+      "alternatives_considered": [
+        "Extending the existing JavaScript validation script to handle publishing",
+        "Implementing the logic directly in GitHub Actions steps",
+        "Using npm's built-in --if-not-exists flag (which doesn't exist)"
+      ],
+      "files_affected": [
+        ".github/scripts/publish-if-needed.sh"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Made npm registry queries resilient to expected failures (E404) while preserving error reporting for unexpected issues",
+      "rationale": "npm view returns E404 for non-existent packages/versions, which is an expected condition, not an error. The implementation catches this specific case and treats it as 'not published' while re-throwing other errors (network issues, auth failures) to maintain CI failure visibility for real problems.",
+      "alternatives_considered": [
+        "Silencing all npm view errors",
+        "Using curl to query npm registry API directly",
+        "Adding complex retry logic"
+      ],
+      "files_affected": [
+        ".github/scripts/check-npm-packages.js",
+        ".github/scripts/publish-if-needed.sh"
+      ]
+    },
+    {
+      "dimension": "api_design",
+      "recommendation": "Consolidated npm registry query logic into a single helper function (npmViewVersion) that can check both package existence and specific version existence",
+      "rationale": "Reduces code duplication and ensures consistent behavior across both validation and publishing workflows. The function returns the version string if found or null if not, providing more information than a simple boolean.",
+      "alternatives_considered": [
+        "Keeping separate functions for package existence and version checking",
+        "Using external npm package for registry queries",
+        "Implementing caching of registry queries"
+      ],
+      "files_affected": [
+        ".github/scripts/check-npm-packages.js"
+      ]
+    },
+    {
+      "dimension": "ci_cd_automation",
+      "recommendation": "Updated all trusted publish workflows to use the new version-checking script instead of direct pnpm publish commands",
+      "rationale": "Ensures consistent behavior across all publishing jobs (oxlint, oxfmt, NAPI packages) and prevents CI failures due to attempted republishing of existing versions. The script maintains the same interface as pnpm publish for backward compatibility.",
+      "alternatives_considered": [
+        "Only updating the most frequently failing workflow",
+        "Creating workflow-specific solutions",
+        "Using GitHub Actions conditionals instead of a script"
+      ],
+      "files_affected": [
+        ".github/workflows/release_apps.yml",
+        ".github/workflows/reusable_release_napi.yml"
+      ]
+    },
+    {
+      "dimension": "testing",
+      "recommendation": "Maintained dry-run functionality through the existing check-npm-packages.js script while adding version-specific checking",
+      "rationale": "The validation script now checks for exact version matches, providing accurate reporting of what would be skipped vs published in dry-run mode. This maintains the existing CI validation workflow while enhancing its accuracy.",
+      "alternatives_considered": [
+        "Removing dry-run functionality",
+        "Creating a separate dry-run script",
+        "Only implementing the check in the publish script"
+      ],
+      "files_affected": [
+        ".github/scripts/check-npm-packages.js"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Create npm version checking and conditional publish script",
+      "description": "Implement a reusable shell script that checks if a specific package version exists on npm registry before attempting to publish, skipping if already published",
+      "files_to_modify": [],
+      "files_to_create": [
+        ".github/scripts/publish-if-needed.sh"
+      ],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-002",
+      "title": "Enhance existing npm package validation script",
+      "description": "Update the check-npm-packages.js script to check for exact version matches rather than just package existence, improving dry-run accuracy",
+      "files_to_modify": [
+        ".github/scripts/check-npm-packages.js"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-003",
+      "title": "Update all publish workflows to use conditional publishing",
+      "description": "Replace direct pnpm publish commands with the new publish-if-needed.sh script in all CI workflows that publish to npm",
+      "files_to_modify": [
+        ".github/workflows/release_apps.yml",
+        ".github/workflows/reusable_release_napi.yml"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation addresses the need for robust CI re-runs by preventing failures when attempting to republish already-published npm package versions. The core approach creates a reusable shell script (publish-if-needed.sh) that queries the npm registry using 'npm view <package>@<version>' before attempting publication. If the exact version already exists, the script exits cleanly with a skip message; otherwise, it proceeds with the publish command.\n\nKey design patterns include: 1) Separation of concerns - the shell script handles the conditional publishing logic while the existing JavaScript validation script focuses on dry-run reporting; 2) Error resilience - the implementation distinguishes between expected 'not found' errors (E404) and unexpected failures, ensuring CI only fails for genuine problems; 3) Backward compatibility - the script maintains the same interface as pnpm publish, accepting arbitrary publish flags that are passed through unchanged.\n\nThe changes integrate seamlessly with the existing codebase by leveraging the established CI patterns. The publish-if-needed.sh script is invoked from the same locations where pnpm publish was previously called, requiring minimal changes to workflow files. The enhanced validation script provides more accurate dry-run reporting by checking for exact version matches rather than just package existence, maintaining the existing validation workflow while improving its accuracy. This approach makes CI re-runs more robust after partial publishes without compromising error detection for legitimate failures.",
+  "source_pr": "https://github.com/oxc-project/oxc/pull/20173",
+  "before_sha": "821ceef888b69bf5869a6401239d9d313bd3e2c3",
+  "after_sha": "4da5da8eed2d1fb4bc03664dc57092bddeb145f4",
+  "diff_stats": {
+    "additions": 58,
+    "deletions": 12,
+    "files_changed": 4
+  }
+}

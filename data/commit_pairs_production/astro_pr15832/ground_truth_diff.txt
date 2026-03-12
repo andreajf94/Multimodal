@@ -1,0 +1,57 @@
+diff --git a/.changeset/dull-clowns-sin.md b/.changeset/dull-clowns-sin.md
+new file mode 100644
+index 000000000000..8a77785964c9
+--- /dev/null
++++ b/.changeset/dull-clowns-sin.md
+@@ -0,0 +1,6 @@
++---
++'@astrojs/cloudflare': patch
++'astro': patch
++---
++
++Fixes `return;` syntax not working in the frontmatter correctly in certain contexts
+diff --git a/packages/astro/src/vite-plugin-astro/compile.ts b/packages/astro/src/vite-plugin-astro/compile.ts
+index 0d8b000b29d6..ebd7760d4048 100644
+--- a/packages/astro/src/vite-plugin-astro/compile.ts
++++ b/packages/astro/src/vite-plugin-astro/compile.ts
+@@ -110,7 +110,9 @@ async function enhanceCompileError({
+ 	const scannedFrontmatter = frontmatterRE.exec(source);
+ 	if (scannedFrontmatter) {
+ 		// Top-level return is not supported, so replace `return` with throw
+-		const frontmatter = scannedFrontmatter[1].replace(/\breturn\b/g, 'throw');
++		const frontmatter = scannedFrontmatter[1]
++			.replace(/\breturn\s*;/g, 'throw 0;')
++			.replace(/\breturn\b/g, 'throw ');
+ 
+ 		// If frontmatter does not actually include the offending line, skip
+ 		if (lineText && !frontmatter.includes(lineText)) throw err;
+diff --git a/packages/integrations/cloudflare/src/esbuild-plugin-astro-frontmatter.ts b/packages/integrations/cloudflare/src/esbuild-plugin-astro-frontmatter.ts
+index 44fbc3739d20..db8d117637ff 100644
+--- a/packages/integrations/cloudflare/src/esbuild-plugin-astro-frontmatter.ts
++++ b/packages/integrations/cloudflare/src/esbuild-plugin-astro-frontmatter.ts
+@@ -30,7 +30,9 @@ export function astroFrontmatterScanPlugin(): ESBuildPlugin {
+ 						//
+ 						// Known Limitation: Using regex /\breturn\b/ will incorrectly match
+ 						// identifiers like `$return` or aliases like `import { return as ret }`.
+-						const contents = frontmatterMatch[1].replace(/\breturn\b/g, 'throw ');
++						const contents = frontmatterMatch[1]
++							.replace(/\breturn\s*;/g, 'throw 0;')
++							.replace(/\breturn\b/g, 'throw ');
+ 
+ 						return {
+ 							contents,
+diff --git a/packages/integrations/cloudflare/test/fixtures/top-level-return/src/pages/index.astro b/packages/integrations/cloudflare/test/fixtures/top-level-return/src/pages/index.astro
+index 171a79ab888c..2912fa3b1a16 100644
+--- a/packages/integrations/cloudflare/test/fixtures/top-level-return/src/pages/index.astro
++++ b/packages/integrations/cloudflare/test/fixtures/top-level-return/src/pages/index.astro
+@@ -13,6 +13,10 @@ if (guard()) {
+   return Astro.redirect("/404")
+ }
+ 
++// Bare return (no value) — must not produce invalid `throw ;` syntax during dep scanning
++const source = "hello";
++if (!source) return;
++
+ ---
+ 
+ <html>

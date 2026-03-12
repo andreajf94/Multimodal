@@ -1,0 +1,71 @@
+diff --git a/litestar/dto/_codegen_backend.py b/litestar/dto/_codegen_backend.py
+index fe38df8c11..1ec3c1979a 100644
+--- a/litestar/dto/_codegen_backend.py
++++ b/litestar/dto/_codegen_backend.py
+@@ -639,9 +639,13 @@ def _handle_transfer_instance(simple_type_: SimpleType, conditional_: str) -> No
+                 )
+             return
+ 
++        # For unions like Optional[NestedModel], generate isinstance checks for
++        # nested types so their fields get transferred.
++        # Everything else (e.g. None) falls through to the else branch unchanged.
++        conditional = "if"
+         for inner_type in simple_types:
+             if inner_type.nested_field_info:
+-                _handle_transfer_instance(inner_type, conditional_="if")
+-                return
+-
+-        self._add_stmt(f"{assignment_target} = {source_value_name}")
++                _handle_transfer_instance(inner_type, conditional_=conditional)
++                conditional = "elif"
++        with self._start_block("else:"):
++            self._add_stmt(f"{assignment_target} = {source_value_name}")
+diff --git a/tests/unit/test_dto/test_factory/test_backends/test_backends.py b/tests/unit/test_dto/test_factory/test_backends/test_backends.py
+index 3b52d5107d..60de0eb8b5 100644
+--- a/tests/unit/test_dto/test_factory/test_backends/test_backends.py
++++ b/tests/unit/test_dto/test_factory/test_backends/test_backends.py
+@@ -38,6 +38,17 @@ class NestedDC:
+     b: str
+ 
+ 
++@dataclass
++class OptionalNestedInner:
++    value: str
++
++
++@dataclass
++class OptionalNestedOuter:
++    name: str
++    inner: Optional[OptionalNestedInner] = None
++
++
+ @dataclass
+ class DC:
+     a: int
+@@ -323,6 +334,26 @@ def test_backend_encode_collection_data(
+     assert encode_json(data) == COLLECTION_RAW
+ 
+ 
++def test_backend_encode_optional_nested_none(backend_cls: type[DTOBackend]) -> None:
++    """Encoding a model with an optional nested field set to None should not crash."""
++
++    class OuterDTO(DataclassDTO[OptionalNestedOuter]):
++        config = DTOConfig()
++
++    backend = backend_cls(
++        handler_id="test",
++        dto_factory=OuterDTO,
++        field_definition=FieldDefinition.from_annotation(OptionalNestedOuter),
++        model_type=OptionalNestedOuter,
++        wrapper_attribute_name=None,
++        is_data_field=False,
++    )
++    data = backend.encode_data(OptionalNestedOuter(name="test", inner=None))
++    result = to_builtins(data)
++    assert result["name"] == "test"
++    assert result["inner"] is None
++
++
+ def test_transfer_only_touches_included_attributes(backend_cls: type[DTOBackend]) -> None:
+     """Ensure attribute that are not included are never touched in any way during
+     transfer.

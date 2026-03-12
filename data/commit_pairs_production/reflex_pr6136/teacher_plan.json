@@ -1,0 +1,160 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "dependency_management",
+      "recommendation": "Updated all JavaScript/React dependencies to their latest compatible versions across multiple component libraries",
+      "rationale": "Keeping dependencies up-to-date ensures security patches, bug fixes, and access to new features. The updates were coordinated to maintain compatibility between related packages (e.g., react-error-boundary, react-dropzone, and their peer dependencies).",
+      "alternatives_considered": [
+        "Freezing versions for stability",
+        "Updating only security-critical packages",
+        "Creating a separate major version branch for breaking changes"
+      ],
+      "files_affected": [
+        "reflex/components/base/error_boundary.py",
+        "reflex/components/core/upload.py",
+        "reflex/components/datadisplay/dataeditor.py",
+        "reflex/components/moment/moment.py",
+        "reflex/components/radix/themes/base.py",
+        "reflex/components/recharts/recharts.py",
+        "reflex/constants/installer.py"
+      ]
+    },
+    {
+      "dimension": "component_library_enhancement",
+      "recommendation": "Added new Lucide icons and enhanced Moment component with from_now_short prop for better UX",
+      "rationale": "Expanding the icon library provides developers with more design options out-of-the-box. The from_now_short prop in Moment component addresses a common use case for displaying concise relative timestamps (e.g., '1h' instead of '1 hour ago').",
+      "alternatives_considered": [
+        "Creating custom icon components",
+        "Using a different icon library",
+        "Implementing relative time formatting in Python instead of JavaScript"
+      ],
+      "files_affected": [
+        "reflex/components/lucide/icon.py",
+        "reflex/components/moment/moment.py"
+      ]
+    },
+    {
+      "dimension": "testing_infrastructure",
+      "recommendation": "Improved test robustness by using math.isclose() for floating-point comparisons and fixing Selenium WebDriver imports",
+      "rationale": "Floating-point equality comparisons are unreliable due to precision issues. math.isclose() provides tolerance-based comparison. The WebDriver import changes ensure compatibility with newer Selenium versions and better type safety.",
+      "alternatives_considered": [
+        "Increasing decimal precision in test data",
+        "Using pytest.approx()",
+        "Converting floats to Decimal for exact comparisons"
+      ],
+      "files_affected": [
+        "tests/units/test_model.py",
+        "tests/units/test_sqlalchemy.py",
+        "tests/units/test_state.py",
+        "tests/integration/test_client_storage.py",
+        "reflex/testing.py"
+      ]
+    },
+    {
+      "dimension": "data_visualization",
+      "recommendation": "Updated Recharts library and removed deprecated Brush component props (fill, stroke) while adding new LiteralPolarRadiusType value",
+      "rationale": "Recharts 3.7.0 introduces improvements and the removed props were likely deprecated in the underlying library. Adding 'auto' to LiteralPolarRadiusType provides more flexibility for polar chart configurations.",
+      "alternatives_considered": [
+        "Maintaining backward compatibility with deprecated props",
+        "Creating wrapper components for version-specific behavior",
+        "Delaying updates until major version bump"
+      ],
+      "files_affected": [
+        "reflex/components/recharts/cartesian.py",
+        "reflex/components/recharts/recharts.py"
+      ]
+    },
+    {
+      "dimension": "tooling_and_dev_experience",
+      "recommendation": "Updated development tools (Bun, ruff, autoprefixer) and bumped framework version to 0.8.28dev1",
+      "rationale": "Keeping development tools current improves performance, adds new linting rules, and ensures compatibility with modern CSS features. The version bump signals these cumulative improvements.",
+      "alternatives_considered": [
+        "Keeping tool versions locked for consistency",
+        "Splitting tool updates into separate PRs",
+        "Only updating tools with security issues"
+      ],
+      "files_affected": [
+        "pyproject.toml",
+        "reflex/constants/installer.py",
+        "pyi_hashes.json",
+        "uv.lock"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Dependency Version Updates",
+      "description": "Update all JavaScript/React dependencies to latest compatible versions across component libraries including error-boundary, upload, data visualization, and theming components",
+      "files_to_modify": [
+        "reflex/components/base/error_boundary.py",
+        "reflex/components/core/upload.py",
+        "reflex/components/datadisplay/dataeditor.py",
+        "reflex/components/moment/moment.py",
+        "reflex/components/radix/themes/base.py",
+        "reflex/components/recharts/recharts.py",
+        "reflex/constants/installer.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-002",
+      "title": "Component Library Enhancements",
+      "description": "Add new Lucide icons and enhance Moment component with from_now_short prop for concise relative time display",
+      "files_to_modify": [
+        "reflex/components/lucide/icon.py",
+        "reflex/components/moment/moment.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-003",
+      "title": "Testing Infrastructure Improvements",
+      "description": "Fix floating-point comparison issues in tests and update Selenium WebDriver imports for better compatibility",
+      "files_to_modify": [
+        "tests/units/test_model.py",
+        "tests/units/test_sqlalchemy.py",
+        "tests/units/test_state.py",
+        "tests/integration/test_client_storage.py",
+        "reflex/testing.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-004",
+      "title": "Data Visualization Updates",
+      "description": "Update Recharts library to 3.7.0, remove deprecated Brush component props, and expand polar chart type options",
+      "files_to_modify": [
+        "reflex/components/recharts/cartesian.py",
+        "reflex/components/recharts/recharts.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-005",
+      "title": "Development Tooling Updates",
+      "description": "Update Bun, ruff, autoprefixer versions and bump framework version to 0.8.28dev1",
+      "files_to_modify": [
+        "pyproject.toml",
+        "reflex/constants/installer.py",
+        "pyi_hashes.json",
+        "uv.lock"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "This change set implements a comprehensive update to the Reflex framework's component libraries and testing infrastructure. The approach focuses on three main areas: dependency management, component enhancements, and test robustness.\n\nFor dependency management, all major JavaScript libraries were updated to their latest compatible versions. This includes react-error-boundary (6.1.1), react-dropzone (15.0.0), @radix-ui/themes (3.3.0), and recharts (3.7.0). These updates were coordinated to ensure compatibility between peer dependencies and maintain the framework's stability. The Bun version was also updated to 1.3.9 to improve frontend tooling performance.\n\nComponent enhancements include adding 20+ new Lucide icons (like database_search, git_merge_conflict, user_key) and extending the Moment component with a from_now_short prop for displaying concise relative timestamps. The Recharts library update also brings improvements to polar chart configurations with the new 'auto' option for LiteralPolarRadiusType.\n\nTesting improvements address floating-point precision issues by replacing direct equality comparisons with math.isclose() calls across multiple test files. This ensures tests are more robust across different Python implementations and hardware. Selenium WebDriver imports were also updated to use more specific import paths (e.g., from selenium.webdriver.firefox.webdriver import WebDriver as Firefox) for better type safety and compatibility with newer Selenium versions.\n\nThe changes integrate seamlessly with the existing codebase by maintaining backward compatibility where possible (deprecated Recharts Brush props were removed as they were likely already non-functional in the underlying library) and following the established patterns for component definition and testing. The version bump to 0.8.28dev1 appropriately signals these cumulative improvements as a development release.",
+  "source_pr": "https://github.com/reflex-dev/reflex/pull/6136",
+  "before_sha": "88155a7cb4a53968c30851e13c0733976a416d82",
+  "after_sha": "e7c374215e568ec32b5cdc1d64c11030cb453bfd",
+  "diff_stats": {
+    "additions": 696,
+    "deletions": 755,
+    "files_changed": 17
+  }
+}

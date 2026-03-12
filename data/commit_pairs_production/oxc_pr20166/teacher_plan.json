@@ -1,0 +1,98 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "error_handling",
+      "recommendation": "Added a call to finalizeCompiledVisitor() in resetStateAfterError() to clear visitor compilation state when errors occur",
+      "rationale": "When a JavaScript plugin returns an invalid visitor (e.g., non-function property), the visitor compilation process can leave partial state that bleeds into subsequent files. By calling finalizeCompiledVisitor() in the error reset path, we ensure all internal visitor compilation state is properly cleared, preventing cross-file contamination.",
+      "alternatives_considered": [
+        "Creating a separate reset function specifically for visitor compilation state",
+        "Adding more granular state tracking to identify exactly what needs resetting",
+        "Letting the error propagate and restarting the entire linting process"
+      ],
+      "files_affected": [
+        "apps/oxlint/src-js/plugins/lint.ts"
+      ]
+    },
+    {
+      "dimension": "testing",
+      "recommendation": "Created a comprehensive test fixture with a deliberately broken plugin to verify error handling and state reset behavior",
+      "rationale": "The test fixture simulates the exact failure scenario: a plugin that returns an invalid visitor (Program: 123) for the first file, then a valid visitor for the second file. By using single-threaded mode and deterministic file ordering, we can verify that: 1) errors are properly reported, and 2) state from the failed compilation doesn't affect subsequent files.",
+      "alternatives_considered": [
+        "Adding unit tests to the existing test suite",
+        "Mocking the error scenario in existing tests",
+        "Relying on existing conformance tests to catch the issue"
+      ],
+      "files_affected": [
+        "apps/oxlint/test/fixtures/lint_invalid_visitor/.oxlintrc.json",
+        "apps/oxlint/test/fixtures/lint_invalid_visitor/files/1.js",
+        "apps/oxlint/test/fixtures/lint_invalid_visitor/files/2.js",
+        "apps/oxlint/test/fixtures/lint_invalid_visitor/options.json",
+        "apps/oxlint/test/fixtures/lint_invalid_visitor/output.snap.md",
+        "apps/oxlint/test/fixtures/lint_invalid_visitor/plugin.ts"
+      ]
+    },
+    {
+      "dimension": "api_design",
+      "recommendation": "Extended existing resetStateAfterError() function rather than creating a new specialized function",
+      "rationale": "The comment explains that resetStateAfterError() should never be called in normal operation - only when rules return invalid visitors or malfunction. Therefore, it's better to reuse the existing error handling infrastructure rather than adding more code that should rarely execute. This keeps the codebase lean while still fixing the bug.",
+      "alternatives_considered": [
+        "Creating a separate resetVisitorCompilationState() function",
+        "Adding the cleanup logic directly in the try/catch block where linting occurs",
+        "Making finalizeCompiledVisitor() idempotent and calling it more frequently"
+      ],
+      "files_affected": [
+        "apps/oxlint/src-js/plugins/lint.ts"
+      ]
+    },
+    {
+      "dimension": "testing_strategy",
+      "recommendation": "Used deterministic single-threaded execution with explicit file ordering to test state isolation",
+      "rationale": "Since oxlint normally processes files in non-deterministic order (especially with multiple threads), the test forces single-threaded mode via options.json to guarantee that 1.js is processed before 2.js. This allows us to reliably test that state from the first file's failed compilation doesn't affect the second file.",
+      "alternatives_considered": [
+        "Using file locking or synchronization primitives",
+        "Adding deterministic ordering to the test runner",
+        "Testing with multiple threads and checking for any contamination"
+      ],
+      "files_affected": [
+        "apps/oxlint/test/fixtures/lint_invalid_visitor/options.json",
+        "apps/oxlint/test/fixtures/lint_invalid_visitor/plugin.ts"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Fix visitor compilation state leakage on error",
+      "description": "Ensure that when a JavaScript plugin returns an invalid visitor causing a compilation error, the internal visitor compilation state is properly reset so it doesn't affect subsequent files",
+      "files_to_modify": [
+        "apps/oxlint/src-js/plugins/lint.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-002",
+      "title": "Add test for invalid visitor error handling",
+      "description": "Create a comprehensive test fixture that verifies: 1) errors from invalid visitors are properly reported, and 2) state is correctly reset between files even after compilation failures",
+      "files_to_modify": [],
+      "files_to_create": [
+        "apps/oxlint/test/fixtures/lint_invalid_visitor/.oxlintrc.json",
+        "apps/oxlint/test/fixtures/lint_invalid_visitor/files/1.js",
+        "apps/oxlint/test/fixtures/lint_invalid_visitor/files/2.js",
+        "apps/oxlint/test/fixtures/lint_invalid_visitor/options.json",
+        "apps/oxlint/test/fixtures/lint_invalid_visitor/output.snap.md",
+        "apps/oxlint/test/fixtures/lint_invalid_visitor/plugin.ts"
+      ],
+      "estimated_effort": "medium"
+    }
+  ],
+  "implementation_summary": "The implementation addresses a subtle bug where invalid JavaScript plugin visitors could cause state leakage between files. The core fix is minimal: adding a single line to call `finalizeCompiledVisitor()` in the `resetStateAfterError()` function. This ensures that when an error occurs during visitor compilation (e.g., a plugin returns `Program: 123` instead of a function), all internal visitor compilation state is cleared before processing the next file.\n\nThe design decision to extend the existing error reset function rather than creating new cleanup logic is pragmatic - since this error path should rarely be hit (only with buggy plugins), it's better to keep the codebase lean. The extensive test fixture demonstrates the problem and verifies the fix works correctly. By forcing single-threaded execution, the test guarantees deterministic file ordering, allowing us to reliably test that state from the first file's failed compilation doesn't affect the second file.\n\nThis change integrates well with the existing architecture: it respects the separation between Rust core logic and JavaScript plugin infrastructure, and it maintains the existing error handling patterns while fixing a specific edge case. The test fixture follows the established pattern of using snapshot testing and configuration files, making it consistent with other tests in the codebase.",
+  "source_pr": "https://github.com/oxc-project/oxc/pull/20166",
+  "before_sha": "3dabb8ed4bf1450a0b00bda7310011f09ddac608",
+  "after_sha": "c4812ec50e88fea1adbcc74473dfd20e7c2f29dd",
+  "diff_stats": {
+    "additions": 105,
+    "deletions": 0,
+    "files_changed": 7
+  }
+}

@@ -1,0 +1,159 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "api_design",
+      "recommendation": "Added lifecycle hooks (onMount, onInitialize) and event subscription API (api.onEvent()) to provide both declarative and imperative ways to handle editor lifecycle events",
+      "rationale": "This addresses the need for better integration control by offering multiple consumption patterns: declarative props for simple use cases and imperative API for dynamic subscription. The dual approach maintains backward compatibility while providing more flexibility.",
+      "alternatives_considered": [
+        "Only adding props without imperative API",
+        "Creating separate subscription methods for each event type"
+      ],
+      "files_affected": [
+        "packages/excalidraw/CHANGELOG.md",
+        "packages/excalidraw/components/App.tsx"
+      ]
+    },
+    {
+      "dimension": "state_management",
+      "recommendation": "Created FileStatusStore using VersionedSnapshotStore to track image loading states across the application",
+      "rationale": "Needed a centralized, versioned store to coordinate image loading status between FileManager, LocalData, and export functionality. VersionedSnapshotStore provides efficient polling via pull() method for waiting on state changes without continuous subscriptions.",
+      "alternatives_considered": [
+        "Using existing Jotai atoms",
+        "Creating custom event emitters for each file status change"
+      ],
+      "files_affected": [
+        "excalidraw-app/data/fileStatusStore.ts",
+        "packages/common/src/versionedSnapshotStore.ts"
+      ]
+    },
+    {
+      "dimension": "event_system",
+      "recommendation": "Implemented AppEventBus with configurable behavior patterns (once/many, replay/none/last) for editor lifecycle events",
+      "rationale": "Required a flexible event system that supports different event patterns: 'once' events like initialization that should replay to late subscribers, and 'many' events like pointer interactions that shouldn't. The behavior configuration makes the system extensible for future events.",
+      "alternatives_considered": [
+        "Using existing Emitter class directly",
+        "Creating separate event buses for different event types"
+      ],
+      "files_affected": [
+        "packages/common/src/appEventBus.ts",
+        "packages/common/src/appEventBus.test.ts"
+      ]
+    },
+    {
+      "dimension": "react_integration",
+      "recommendation": "Added ExcalidrawAPIProvider and related hooks (useExcalidrawAPI, useAppStateValue) for React context-based API access",
+      "rationale": "Provides a cleaner way to access the editor API and state across component trees without prop drilling. This follows React best practices and makes integration with larger React applications more straightforward.",
+      "alternatives_considered": [
+        "Continuing with callback ref pattern only",
+        "Using global singleton for API access"
+      ],
+      "files_affected": [
+        "excalidraw-app/App.tsx",
+        "packages/excalidraw/components/App.tsx"
+      ]
+    },
+    {
+      "dimension": "export_handling",
+      "recommendation": "Added onExport prop with async generator support for progress reporting and waiting for pending operations",
+      "rationale": "Needed a way to delay exports until async operations (like image loading) complete. The async generator pattern allows host apps to yield progress updates that are displayed in the UI, providing better user experience during long operations.",
+      "alternatives_considered": [
+        "Simple callback returning Promise",
+        "Separate progress callback alongside Promise"
+      ],
+      "files_affected": [
+        "excalidraw-app/App.tsx",
+        "packages/excalidraw/actions/actionExport.tsx"
+      ]
+    },
+    {
+      "dimension": "code_organization",
+      "recommendation": "Added ESLint rule to prevent barrel file imports within packages to enforce direct module imports",
+      "rationale": "Improves build performance and prevents circular dependency issues by requiring direct imports rather than going through index.ts barrel files. This is particularly important in a monorepo with many interconnected packages.",
+      "alternatives_considered": [
+        "No restriction",
+        "Using TypeScript path mapping instead"
+      ],
+      "files_affected": [
+        ".eslintrc.json"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Lifecycle Events and API Provider System",
+      "description": "Implement editor lifecycle hooks (onMount, onInitialize) and React context utilities for API access",
+      "files_to_modify": [
+        "packages/excalidraw/components/App.tsx",
+        "excalidraw-app/App.tsx",
+        "packages/excalidraw/CHANGELOG.md"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-002",
+      "title": "File Status Tracking for Export Coordination",
+      "description": "Create centralized file status store to track image loading states and coordinate with export functionality",
+      "files_to_modify": [
+        "excalidraw-app/App.tsx",
+        "excalidraw-app/data/FileManager.ts",
+        "excalidraw-app/data/LocalData.ts",
+        "excalidraw-app/collab/Collab.tsx"
+      ],
+      "files_to_create": [
+        "excalidraw-app/data/fileStatusStore.ts",
+        "packages/common/src/versionedSnapshotStore.ts"
+      ],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-003",
+      "title": "Event Bus System for Lifecycle Management",
+      "description": "Build configurable event bus system to handle different types of editor events with appropriate replay behavior",
+      "files_to_modify": [
+        "packages/common/src/index.ts"
+      ],
+      "files_to_create": [
+        "packages/common/src/appEventBus.ts",
+        "packages/common/src/appEventBus.test.ts"
+      ],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-004",
+      "title": "Export Progress and Async Handling",
+      "description": "Add onExport prop with async generator support and integrate with existing save/export actions",
+      "files_to_modify": [
+        "packages/excalidraw/actions/actionExport.tsx",
+        "packages/excalidraw/actions/actionDeleteSelected.tsx",
+        "packages/excalidraw/actions/actionDuplicateSelection.tsx",
+        "packages/excalidraw/actions/actionHistory.tsx",
+        "packages/excalidraw/clipboard.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "large"
+    },
+    {
+      "id": "T-005",
+      "title": "Code Quality and Dependency Updates",
+      "description": "Update dependencies and add ESLint rules to improve code organization and prevent barrel file imports",
+      "files_to_modify": [
+        ".eslintrc.json",
+        "examples/with-script-in-browser/package.json",
+        "examples/with-script-in-browser/utils.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The changes implement a comprehensive editor lifecycle and state management API for Excalidraw, addressing the need for better integration control. The core approach centers around three interconnected systems: 1) A configurable AppEventBus that handles different event patterns (once/many with replay options), 2) A FileStatusStore built on VersionedSnapshotStore to coordinate image loading states across the application, and 3) React context utilities (ExcalidrawAPIProvider) for clean API access.\n\nKey patterns include the use of async generators for the onExport prop, allowing host applications to yield progress updates during long-running operations like image loading. The VersionedSnapshotStore pattern enables efficient polling for state changes without continuous subscriptions, which is crucial for coordinating between the FileManager, LocalData, and export functionality.\n\nThe changes integrate seamlessly with the existing codebase by extending rather than replacing existing patterns. The new lifecycle hooks complement the existing excalidrawAPI callback ref, and the event bus system is designed to eventually replace scattered subscription methods. The file status tracking integrates with existing FileManager and LocalData classes through callback injection, maintaining separation of concerns while enabling the new export coordination feature.\n\nTrade-offs include increased complexity in the export handling logic but provide significant benefits in user experience during file operations. The dual API approach (declarative props and imperative subscriptions) offers flexibility at the cost of some API surface area expansion.",
+  "source_pr": "https://github.com/excalidraw/excalidraw/pull/10870",
+  "before_sha": "fa1f7d9f2258375214b02a442b130185a5a1540c",
+  "after_sha": "21dd1cfacc6beb5d259fdda5c50582a1d9b29894",
+  "diff_stats": {
+    "additions": 1898,
+    "deletions": 580,
+    "files_changed": 46
+  }
+}

@@ -1,0 +1,75 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "release_management",
+      "recommendation": "Updated version number consistently across all package configuration files to maintain synchronization",
+      "rationale": "Package version must be consistent across pyproject.toml (build configuration), __init__.py (runtime access), and uv.lock (dependency resolution) to prevent version conflicts and ensure reproducible builds",
+      "alternatives_considered": [
+        "Only updating pyproject.toml and relying on build-time version extraction",
+        "Using a separate version.py file"
+      ],
+      "files_affected": [
+        "pyproject.toml",
+        "instructor/__init__.py",
+        "uv.lock"
+      ]
+    },
+    {
+      "dimension": "documentation",
+      "recommendation": "Added new changelog section with detailed release notes following Keep a Changelog format",
+      "rationale": "Changelog entries are organized with clear sections (Changed, Fixed) and reference specific pull requests for traceability. This maintains transparency about what changed in each release and helps users understand the impact of upgrading",
+      "alternatives_considered": [
+        "Minimal changelog entries without PR references",
+        "Using automated changelog generation tools"
+      ],
+      "files_affected": [
+        "CHANGELOG.md"
+      ]
+    },
+    {
+      "dimension": "dependency_management",
+      "recommendation": "Updated uv.lock file to reflect new package version for reproducible dependency resolution",
+      "rationale": "uv.lock ensures deterministic builds by pinning exact dependency versions. When the package version changes, the lock file must be updated to maintain consistency between the declared version and locked dependencies",
+      "alternatives_considered": [
+        "Not updating lock file and relying on dynamic resolution",
+        "Using separate lock files for development vs production"
+      ],
+      "files_affected": [
+        "uv.lock"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Version bump and release preparation",
+      "description": "Update package version from 1.14.3 to 1.14.4 across all configuration files to prepare for new release",
+      "files_to_modify": [
+        "pyproject.toml",
+        "instructor/__init__.py",
+        "uv.lock"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-002",
+      "title": "Changelog documentation update",
+      "description": "Add detailed release notes for version 1.14.4 documenting bug fixes and changes with PR references",
+      "files_to_modify": [
+        "CHANGELOG.md"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "This change implements a standard release preparation workflow for the instructor Python library. The approach follows established semantic versioning practices where a patch version increment (1.14.3 \u2192 1.14.4) indicates backward-compatible bug fixes.\n\nThe implementation updates version information in three key locations: pyproject.toml (the project's build configuration), instructor/__init__.py (runtime package metadata), and uv.lock (dependency lock file). This multi-file synchronization ensures consistency across build tools, runtime imports, and dependency resolution systems.\n\nThe changelog update follows the Keep a Changelog format with clear section headers (Changed, Fixed) and includes specific pull request references (#2000, #2002, etc.) for traceability. The entries document both new functionality (JsonCompleteness simplification) and bug fixes (Google GenAI safety settings, Responses API retries, list[T] response models). This structured approach to release management integrates well with the existing CI/CD infrastructure mentioned in the architectural summary, supporting automated testing and publishing workflows.",
+  "source_pr": "https://github.com/567-labs/instructor/pull/2013",
+  "before_sha": "f8cd6d1aa7f05c00d1af46829ce58ddedc2fadc8",
+  "after_sha": "2067118da6f651ba78799b4c8830e37437fc4253",
+  "diff_stats": {
+    "additions": 13,
+    "deletions": 4,
+    "files_changed": 4
+  }
+}

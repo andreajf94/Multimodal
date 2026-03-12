@@ -1,0 +1,302 @@
+diff --git a/package.json b/package.json
+index 42c5398f8e9c..1574efab49c8 100644
+--- a/package.json
++++ b/package.json
+@@ -162,7 +162,7 @@
+   "pnpm": {
+     "overrides": {
+       "form-data": ">=4.0.4",
+-      "hono": ">=4.11.10",
++      "hono": ">=4.12.2",
+       "jws": ">=4.0.1",
+       "tar-fs": ">=2.1.4",
+       "lodash": ">=4.17.23"
+diff --git a/packages/cli/package.json b/packages/cli/package.json
+index 588b36f7dce6..ca79486f1a5d 100644
+--- a/packages/cli/package.json
++++ b/packages/cli/package.json
+@@ -124,7 +124,7 @@
+     "@prisma/generator": "workspace:*",
+     "@prisma/get-platform": "workspace:*",
+     "@prisma/internals": "workspace:*",
+-    "@prisma/management-api-sdk": "0.2.0",
++    "@prisma/management-api-sdk": "1.12.0",
+     "@prisma/migrate": "workspace:*",
+     "@swc/core": "1.11.5",
+     "@swc/jest": "0.2.37",
+@@ -143,7 +143,7 @@
+     "fs-extra": "11.3.0",
+     "get-port-please": "3.2.0",
+     "get-tsconfig": "4.10.0",
+-    "hono": "4.11.7",
++    "hono": "4.12.3",
+     "jest": "29.7.0",
+     "jest-junit": "16.0.0",
+     "kleur": "4.1.5",
+diff --git a/packages/cli/src/Init.ts b/packages/cli/src/Init.ts
+index d594c58305eb..f10907f14f9b 100644
+--- a/packages/cli/src/Init.ts
++++ b/packages/cli/src/Init.ts
+@@ -544,15 +544,18 @@ export class Init implements Command {
+           throw new Error('Missing database info in response')
+         }
+ 
+-        if (!project.database.directConnection) {
+-          // This should never happen: OpenAPI types are not entirely correct,
+-          // `directConnection` is not independently nullable and must always
+-          // be present if `database` is in the response body.
++        const connection = project.database.connections?.find(
++          (c) => Boolean(c.endpoints?.direct?.connectionString) || Boolean(c.endpoints?.pooled?.connectionString),
++        )
++
++        const connectionString =
++          connection?.endpoints?.direct?.connectionString ?? connection?.endpoints?.pooled?.connectionString
++
++        if (!connectionString) {
+           throw new Error('Missing connection string in response')
+         }
+ 
+-        const { host, user, pass } = project.database.directConnection
+-        prismaPostgresDatabaseUrl = `postgres://${user}:${pass}@${host}/postgres?sslmode=require`
++        prismaPostgresDatabaseUrl = connectionString
+ 
+         workspaceId = project.workspace.id.replace(/^wksp_/, '')
+         projectId = project.id.replace(/^proj_/, '')
+diff --git a/packages/cli/src/management-api/auth-client.ts b/packages/cli/src/management-api/auth-client.ts
+index b829caccb58f..8511f064c634 100644
+--- a/packages/cli/src/management-api/auth-client.ts
++++ b/packages/cli/src/management-api/auth-client.ts
+@@ -1,16 +1,16 @@
+-import type { ManagementAPI } from '@prisma/management-api-sdk'
+-import { createManagementAPI } from '@prisma/management-api-sdk'
++import type { ManagementApiSdk } from '@prisma/management-api-sdk'
++import { createManagementApiSdk } from '@prisma/management-api-sdk'
+ 
+ import { FileTokenStorage } from './token-storage'
+ 
+ const CLIENT_ID = 'cmi4ttoor03pv2wco4526rnin'
+ 
+-export function createAuthenticatedManagementAPI(): ManagementAPI {
++export function createAuthenticatedManagementAPI(): ManagementApiSdk {
+   const tokenStorage = new FileTokenStorage()
+ 
+-  return createManagementAPI({
++  return createManagementApiSdk({
+     clientId: CLIENT_ID,
+-    redirectUri: 'http://localhost:0/auth/callback', // Not used when tokens already exist
++    redirectUri: 'http://localhost:0/auth/callback',
+     tokenStorage,
+   })
+ }
+diff --git a/packages/cli/src/management-api/auth.ts b/packages/cli/src/management-api/auth.ts
+index 099359b5bc01..94fdf19d26cf 100644
+--- a/packages/cli/src/management-api/auth.ts
++++ b/packages/cli/src/management-api/auth.ts
+@@ -2,8 +2,8 @@ import events from 'node:events'
+ import http from 'node:http'
+ import { AddressInfo } from 'node:net'
+ 
+-import type { ManagementAPI } from '@prisma/management-api-sdk'
+-import { AuthError as SDKAuthError, createManagementAPI } from '@prisma/management-api-sdk'
++import type { ManagementApiSdk } from '@prisma/management-api-sdk'
++import { AuthError as SDKAuthError, createManagementApiSdk } from '@prisma/management-api-sdk'
+ import open from 'open'
+ 
+ import { FileTokenStorage } from './token-storage'
+@@ -71,7 +71,7 @@ export async function login(options: LoginOptions): Promise<void> {
+ export class LoginState {
+   private latestVerifier?: string
+   private latestState?: string
+-  private managementAPI: ManagementAPI
++  private managementAPI: ManagementApiSdk
+   private tokenStorage: FileTokenStorage
+ 
+   constructor(
+@@ -80,7 +80,7 @@ export class LoginState {
+     private utmMedium: string,
+   ) {
+     this.tokenStorage = new FileTokenStorage()
+-    this.managementAPI = createManagementAPI({
++    this.managementAPI = createManagementApiSdk({
+       clientId: CLIENT_ID,
+       redirectUri: `http://${hostname}:${port}/auth/callback`,
+       tokenStorage: this.tokenStorage,
+diff --git a/pnpm-lock.yaml b/pnpm-lock.yaml
+index 7c12bcfdd210..6da299595636 100644
+--- a/pnpm-lock.yaml
++++ b/pnpm-lock.yaml
+@@ -6,7 +6,7 @@ settings:
+ 
+ overrides:
+   form-data: '>=4.0.4'
+-  hono: '>=4.11.10'
++  hono: '>=4.12.2'
+   jws: '>=4.0.1'
+   tar-fs: '>=2.1.4'
+   lodash: '>=4.17.23'
+@@ -442,7 +442,7 @@ importers:
+     devDependencies:
+       '@hono/node-server':
+         specifier: 1.19.9
+-        version: 1.19.9(hono@4.12.0)
++        version: 1.19.9(hono@4.12.3)
+       '@inquirer/prompts':
+         specifier: 7.3.3
+         version: 7.3.3(@types/node@20.19.25)
+@@ -495,8 +495,8 @@ importers:
+         specifier: workspace:*
+         version: link:../internals
+       '@prisma/management-api-sdk':
+-        specifier: 0.2.0
+-        version: 0.2.0
++        specifier: 1.12.0
++        version: 1.12.0
+       '@prisma/migrate':
+         specifier: workspace:*
+         version: link:../migrate
+@@ -552,8 +552,8 @@ importers:
+         specifier: 4.10.0
+         version: 4.10.0
+       hono:
+-        specifier: '>=4.11.10'
+-        version: 4.12.0
++        specifier: '>=4.12.2'
++        version: 4.12.3
+       jest:
+         specifier: 29.7.0
+         version: 29.7.0(@types/node@20.19.25)(ts-node@10.9.2(@swc/core@1.11.5)(@types/node@20.19.25)(typescript@5.4.5))
+@@ -638,7 +638,7 @@ importers:
+         version: 2.0.3(@jest/expect@29.7.0)(@jest/globals@29.7.0)
+       '@hono/node-server':
+         specifier: 1.19.0
+-        version: 1.19.0(hono@4.12.0)
++        version: 1.19.0(hono@4.12.3)
+       '@inquirer/prompts':
+         specifier: 7.3.3
+         version: 7.3.3(@types/node@20.19.25)
+@@ -1781,10 +1781,10 @@ importers:
+     devDependencies:
+       '@hono/node-server':
+         specifier: 1.19.0
+-        version: 1.19.0(hono@4.12.0)
++        version: 1.19.0(hono@4.12.3)
+       '@hono/zod-validator':
+         specifier: 0.7.2
+-        version: 0.7.2(hono@4.12.0)(zod@4.1.3)
++        version: 0.7.2(hono@4.12.3)(zod@4.1.3)
+       '@opentelemetry/api':
+         specifier: 1.9.0
+         version: 1.9.0
+@@ -1810,8 +1810,8 @@ importers:
+         specifier: workspace:*
+         version: link:../driver-adapter-utils
+       hono:
+-        specifier: '>=4.11.10'
+-        version: 4.12.0
++        specifier: '>=4.12.2'
++        version: 4.12.3
+       temporal-polyfill:
+         specifier: 0.3.0
+         version: 0.3.0
+@@ -2811,18 +2811,18 @@ packages:
+     resolution: {integrity: sha512-1k8/8OHf5VIymJEcJyVksFpT+AQ5euY0VA5hUkCnlKpD4mr8FSbvXaHblxeTTEr90OaqWzAkQaqD80qHZQKxBA==}
+     engines: {node: '>=18.14.1'}
+     peerDependencies:
+-      hono: '>=4.11.10'
++      hono: '>=4.12.2'
+ 
+   '@hono/node-server@1.19.9':
+     resolution: {integrity: sha512-vHL6w3ecZsky+8P5MD+eFfaGTyCeOHUIFYMGpQGbrBTSmNNoxv0if69rEZ5giu36weC5saFuznL411gRX7bJDw==}
+     engines: {node: '>=18.14.1'}
+     peerDependencies:
+-      hono: '>=4.11.10'
++      hono: '>=4.12.2'
+ 
+   '@hono/zod-validator@0.7.2':
+     resolution: {integrity: sha512-ub5eL/NeZ4eLZawu78JpW/J+dugDAYhwqUIdp9KYScI6PZECij4Hx4UsrthlEUutqDDhPwRI0MscUfNkvn/mqQ==}
+     peerDependencies:
+-      hono: '>=4.11.10'
++      hono: '>=4.12.2'
+       zod: ^3.25.0 || ^4.0.0
+ 
+   '@humanfs/core@0.19.1':
+@@ -3587,8 +3587,8 @@ packages:
+   '@prisma/get-platform@7.2.0':
+     resolution: {integrity: sha512-k1V0l0Td1732EHpAfi2eySTezyllok9dXb6UQanajkJQzPUGi3vO2z7jdkz67SypFTdmbnyGYxvEvYZdZsMAVA==}
+ 
+-  '@prisma/management-api-sdk@0.2.0':
+-    resolution: {integrity: sha512-ZFY5v3r2l4cx05zMNO4Wpu5ihW811xa9TytTS76Tal8oYHAPAUkSgNJZcRIPu5iYfs9LqOFegoonX1vIG0YVfw==}
++  '@prisma/management-api-sdk@1.12.0':
++    resolution: {integrity: sha512-fe9rOdWBx5u4N4q2brBWHZCMg+S8pHb6lBRWuINzwVAjyJqTdOhDG5RiGCPB0V8EQQ/HfQtIFrot9HDPfEJkOg==}
+ 
+   '@prisma/ppg@1.0.1':
+     resolution: {integrity: sha512-rRRXuPPerXwNWjSA3OE0e/bqXSTfsE82EsMvoiluc0fN0DizQSe3937/Tnl5+DPbxY5rdAOlYjWXG0A2wwTbKA==}
+@@ -5650,8 +5650,8 @@ packages:
+     resolution: {integrity: sha512-0hJU9SCPvmMzIBdZFqNPXWa6dqh7WdH0cII9y+CyS8rG3nL48Bclra9HmKhVVUHyPWNH5Y7xDwAB7bfgSjkUMQ==}
+     engines: {node: '>= 0.4'}
+ 
+-  hono@4.12.0:
+-    resolution: {integrity: sha512-NekXntS5M94pUfiVZ8oXXK/kkri+5WpX2/Ik+LVsl+uvw+soj4roXIsPqO+XsWrAw20mOzaXOZf3Q7PfB9A/IA==}
++  hono@4.12.3:
++    resolution: {integrity: sha512-SFsVSjp8sj5UumXOOFlkZOG6XS9SJDKw0TbwFeV+AJ8xlST8kxK5Z/5EYa111UY8732lK2S/xB653ceuaoGwpg==}
+     engines: {node: '>=16.9.0'}
+ 
+   hosted-git-info@2.8.9:
+@@ -9193,17 +9193,17 @@ snapshots:
+   '@gar/promisify@1.1.3':
+     optional: true
+ 
+-  '@hono/node-server@1.19.0(hono@4.12.0)':
++  '@hono/node-server@1.19.0(hono@4.12.3)':
+     dependencies:
+-      hono: 4.12.0
++      hono: 4.12.3
+ 
+-  '@hono/node-server@1.19.9(hono@4.12.0)':
++  '@hono/node-server@1.19.9(hono@4.12.3)':
+     dependencies:
+-      hono: 4.12.0
++      hono: 4.12.3
+ 
+-  '@hono/zod-validator@0.7.2(hono@4.12.0)(zod@4.1.3)':
++  '@hono/zod-validator@0.7.2(hono@4.12.3)(zod@4.1.3)':
+     dependencies:
+-      hono: 4.12.0
++      hono: 4.12.3
+       zod: 4.1.3
+ 
+   '@humanfs/core@0.19.1': {}
+@@ -10056,13 +10056,13 @@ snapshots:
+       '@electric-sql/pglite': 0.3.15
+       '@electric-sql/pglite-socket': 0.0.20(@electric-sql/pglite@0.3.15)
+       '@electric-sql/pglite-tools': 0.2.20(@electric-sql/pglite@0.3.15)
+-      '@hono/node-server': 1.19.9(hono@4.12.0)
++      '@hono/node-server': 1.19.9(hono@4.12.3)
+       '@mrleebo/prisma-ast': 0.13.1
+       '@prisma/get-platform': 7.2.0
+       '@prisma/query-plan-executor': 7.2.0
+       foreground-child: 3.3.1
+       get-port-please: 3.2.0
+-      hono: 4.12.0
++      hono: 4.12.3
+       http-status-codes: 2.3.0
+       pathe: 2.0.3
+       proper-lockfile: 4.1.2
+@@ -10079,7 +10079,7 @@ snapshots:
+     dependencies:
+       '@prisma/debug': 7.2.0
+ 
+-  '@prisma/management-api-sdk@0.2.0':
++  '@prisma/management-api-sdk@1.12.0':
+     dependencies:
+       openapi-fetch: 0.14.0
+ 
+@@ -12348,7 +12348,7 @@ snapshots:
+     dependencies:
+       function-bind: 1.1.2
+ 
+-  hono@4.12.0: {}
++  hono@4.12.3: {}
+ 
+   hosted-git-info@2.8.9: {}
+ 

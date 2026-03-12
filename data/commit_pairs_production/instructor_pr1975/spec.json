@@ -1,0 +1,12 @@
+{
+  "feature_name": "Improve Import Error Handling in Auto Client",
+  "description": "Update the auto client's provider initialization to properly distinguish between package import errors and runtime import errors during client setup. Currently, all ImportErrors are caught and masked, preventing users from seeing actual dependency issues like missing SOCKS proxy support. The fix should separate these error types so runtime dependency problems propagate with clear error messages.",
+  "functional_requirements": [
+    "Separate import error handling from client initialization errors in all affected provider implementations (Google, VertexAI, Generative-AI)",
+    "Ensure package import failures (missing provider library) still raise ConfigurationError with helpful installation instructions",
+    "Allow runtime ImportErrors (like missing socksio for SOCKS proxy support) to propagate with their original error messages",
+    "Maintain backward compatibility for existing error handling of legitimate missing packages"
+  ],
+  "project_name": "instructor",
+  "source_pr": "https://github.com/567-labs/instructor/pull/1975"
+}

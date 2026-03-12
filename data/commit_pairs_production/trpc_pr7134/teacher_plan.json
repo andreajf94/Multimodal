@@ -1,0 +1,98 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "error_handling",
+      "recommendation": "Enhanced TRPCClientError.from() to accept an optional cause parameter and pass it to the constructor, enabling preservation of original error context",
+      "rationale": "When client and server run in the same JavaScript context (localLink), the original error thrown from procedures should be accessible for better debugging. The Error.cause property (standardized in ES2022) provides a clean way to chain errors while maintaining the structured TRPC error response.",
+      "alternatives_considered": [
+        "Creating a custom property on TRPCClientError instead of using the standard cause property",
+        "Wrapping the original error in a different structure entirely",
+        "Modifying the error shape in TRPCErrorResponse to include the original error"
+      ],
+      "files_affected": [
+        "packages/client/src/TRPCClientError.ts"
+      ]
+    },
+    {
+      "dimension": "api_design",
+      "recommendation": "Modified unstable_localLink to pass the original thrown error as cause when coercing to TRPCClientError, but only if it's an Error instance",
+      "rationale": "The localLink is unique because client and server share the same JavaScript context, allowing direct error object passing. This preserves the original error stack trace and properties while maintaining the TRPC error structure. The conditional check (cause instanceof Error) ensures type safety and prevents passing non-Error objects.",
+      "alternatives_considered": [
+        "Always passing the cause regardless of type",
+        "Creating a separate link specifically for error forwarding",
+        "Modifying all links (HTTP, WebSocket) to support cause forwarding"
+      ],
+      "files_affected": [
+        "packages/client/src/links/localLink.ts"
+      ]
+    },
+    {
+      "dimension": "testing",
+      "recommendation": "Added comprehensive test coverage for both plain Error and TRPCError objects being forwarded as TRPCClientError.cause",
+      "rationale": "Testing both error types ensures the implementation works for standard JavaScript errors and framework-specific TRPCError instances. The tests verify that cause is properly set, maintains the correct type, and preserves error properties like message and code.",
+      "alternatives_considered": [
+        "Only testing one error type",
+        "Testing through integration tests instead of unit tests",
+        "Adding the tests to a different test file"
+      ],
+      "files_affected": [
+        "packages/client/src/links/localLink.test.ts"
+      ]
+    },
+    {
+      "dimension": "backward_compatibility",
+      "recommendation": "Made the cause parameter optional and kept HTTP/WebSocket links unchanged to maintain backward compatibility",
+      "rationale": "Existing code should continue to work without modification. The cause parameter is optional in both the from() method and the constructor, so existing calls remain valid. HTTP and WebSocket links don't get this enhancement because they serialize/deserialize errors across network boundaries.",
+      "alternatives_considered": [
+        "Making cause required for all error creation",
+        "Adding cause support to all links",
+        "Creating a breaking change to standardize error handling across all links"
+      ],
+      "files_affected": [
+        "packages/client/src/TRPCClientError.ts",
+        "packages/client/src/links/localLink.ts"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Enhance TRPCClientError to support error cause chaining",
+      "description": "Update TRPCClientError.from() method to accept an optional cause parameter and pass it to the constructor, enabling error chaining for better debugging",
+      "files_to_modify": [
+        "packages/client/src/TRPCClientError.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-002",
+      "title": "Forward original errors in localLink",
+      "description": "Modify unstable_localLink to pass thrown errors as cause property when creating TRPCClientError, preserving original error context for local execution",
+      "files_to_modify": [
+        "packages/client/src/links/localLink.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-003",
+      "title": "Add test coverage for error cause forwarding",
+      "description": "Create comprehensive tests verifying that both plain Error and TRPCError objects are correctly forwarded as TRPCClientError.cause in localLink scenarios",
+      "files_to_modify": [
+        "packages/client/src/links/localLink.test.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    }
+  ],
+  "implementation_summary": "The implementation enhances error handling in tRPC's localLink by preserving original error objects through the standard Error.cause property. This change is specifically targeted at the unstable_localLink because it's the only link where client and server run in the same JavaScript context, allowing direct error object passing without serialization.\n\nThe key pattern used is error chaining via the cause property, which is a standardized feature in modern JavaScript (ES2022). This approach maintains backward compatibility while providing better debugging capabilities for local development and testing scenarios. The TRPCClientError.from() method was extended with an optional cause parameter, and the localLink was modified to pass thrown errors as cause when coercing to TRPCClientError.\n\nAn important design choice was to limit this enhancement to localLink only, as HTTP and WebSocket links serialize errors across network boundaries, making direct error object passing impractical. The implementation includes comprehensive test coverage for both plain Error instances and framework-specific TRPCError objects, ensuring the feature works correctly for common use cases. The changes integrate seamlessly with the existing codebase by keeping all parameters optional and maintaining the existing error response structure.",
+  "source_pr": "https://github.com/trpc/trpc/pull/7134",
+  "before_sha": "2f40ba935ad7f7d29eec3f9c45d353450b43e852",
+  "after_sha": "9d4b3b975197890a71cac20a7a0836ef349c087b",
+  "diff_stats": {
+    "additions": 43,
+    "deletions": 4,
+    "files_changed": 3
+  }
+}

@@ -1,0 +1,59 @@
+diff --git a/litestar/security/jwt/token.py b/litestar/security/jwt/token.py
+index 34a6bd3b58..4180edafe2 100644
+--- a/litestar/security/jwt/token.py
++++ b/litestar/security/jwt/token.py
+@@ -91,7 +91,7 @@ def decode_payload(
+         encoded_token: str,
+         secret: str | bytes,
+         algorithms: list[str],
+-        issuer: list[str] | None = None,
++        issuer: str | Sequence[str] | None = None,
+         audience: str | Sequence[str] | None = None,
+         options: JWTDecodeOptions | None = None,
+     ) -> Any:
+@@ -172,7 +172,7 @@ def decode(
+                 secret=secret,
+                 algorithms=[algorithm],
+                 audience=audience,
+-                issuer=list(issuer) if issuer else None,
++                issuer=issuer,
+                 options=options,
+             )
+             # msgspec can do these conversions as well, but to keep backwards
+diff --git a/tests/unit/test_security/test_jwt/test_token.py b/tests/unit/test_security/test_jwt/test_token.py
+index d879371c71..bd99fc7ef2 100644
+--- a/tests/unit/test_security/test_jwt/test_token.py
++++ b/tests/unit/test_security/test_jwt/test_token.py
+@@ -236,7 +236,7 @@ def decode_payload(
+             encoded_token: str,
+             secret: str | bytes,
+             algorithms: list[str],
+-            issuer: list[str] | None = None,
++            issuer: str | Sequence[str] | None = None,
+             audience: str | Sequence[str] | None = None,
+             options: JWTDecodeOptions | None = None,
+         ) -> Any:
+@@ -262,3 +262,23 @@ def test_token_encode_includes_custom_headers() -> None:
+     assert header["alg"] == "HS256"
+     assert "kid" in header
+     assert header["kid"] == custom_headers["kid"]
++
++
++@pytest.mark.parametrize("issuer", [None, "text", ["list", "of", "values"]])
++def test_token_issuer(issuer: str | list[str] | None) -> None:
++    iss = issuer[0] if isinstance(issuer, list) else issuer
++    secret = secrets.token_hex()
++    encoded = Token(
++        exp=datetime.now() + timedelta(days=1),
++        sub="foo",
++        iss=iss,
++    ).encode(secret, "HS256")
++
++    token = Token.decode(
++        encoded,
++        secret=secret,
++        algorithm="HS256",
++        issuer=issuer,
++    )
++
++    assert token.iss == iss

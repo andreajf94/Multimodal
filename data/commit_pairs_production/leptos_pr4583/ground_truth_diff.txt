@@ -1,0 +1,59 @@
+diff --git a/Cargo.lock b/Cargo.lock
+index 12dca2bc72..316fd5c8dc 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -1079,7 +1079,7 @@ checksum = "48c757948c5ede0e46177b7add2e67155f70e33c07fea8284df6576da70b3719"
+ 
+ [[package]]
+ name = "either_of"
+-version = "0.1.6"
++version = "0.1.7"
+ dependencies = [
+  "paste",
+  "pin-project-lite",
+diff --git a/either_of/Cargo.toml b/either_of/Cargo.toml
+index a7b27739dc..5209cc0a64 100644
+--- a/either_of/Cargo.toml
++++ b/either_of/Cargo.toml
+@@ -1,6 +1,6 @@
+ [package]
+ name = "either_of"
+-version = "0.1.6"
++version = "0.1.7"
+ authors = ["Greg Johnston"]
+ license = "MIT"
+ readme = "../README.md"
+diff --git a/either_of/src/lib.rs b/either_of/src/lib.rs
+index ed86c2baac..ea59e70fd1 100644
+--- a/either_of/src/lib.rs
++++ b/either_of/src/lib.rs
+@@ -1,10 +1,11 @@
+-#![cfg_attr(feature = "no_std", no_std)]
++#![no_std]
+ #![forbid(unsafe_code)]
+ 
+ //! Utilities for working with enumerated types that contain one of `2..n` other types.
+ 
+ use core::{
+     cmp::Ordering,
++    error::Error,
+     fmt::Display,
+     future::Future,
+     iter::{Product, Sum},
+@@ -13,8 +14,6 @@ use core::{
+ };
+ use paste::paste;
+ use pin_project_lite::pin_project;
+-#[cfg(not(feature = "no_std"))]
+-use std::error::Error; // TODO: replace with core::error::Error once MSRV is >= 1.81.0
+ 
+ macro_rules! tuples {
+     ($name:ident + $fut_name:ident + $fut_proj:ident {
+@@ -113,7 +112,6 @@ macro_rules! tuples {
+             }
+         }
+ 
+-        #[cfg(not(feature = "no_std"))]
+         impl<$($ty),+> Error for $name<$($ty),+>
+         where
+             $($ty: Error,)+

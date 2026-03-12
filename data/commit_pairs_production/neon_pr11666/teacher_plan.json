@@ -1,0 +1,132 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "api_design",
+      "recommendation": "Implemented GCS provider that follows the same interface pattern as existing S3 and Azure providers, using the existing RemoteStorage trait abstraction. This ensures consistency across storage backends and allows the GCS provider to be used as a drop-in replacement.",
+      "rationale": "The existing codebase already had abstractions for S3 and Azure storage. By following the same pattern, we maintain architectural consistency and reduce cognitive load for developers working with multiple storage providers. The GCS provider implements the same core operations (upload, download, list, delete, metadata retrieval) using the same error types and concurrency patterns.",
+      "alternatives_considered": [
+        "Creating a completely new API surface for GCS",
+        "Wrapping the GCS API in an S3 compatibility layer"
+      ],
+      "files_affected": [
+        "libs/remote_storage/src/gcs_bucket.rs",
+        "libs/remote_storage/src/config.rs"
+      ]
+    },
+    {
+      "dimension": "dependency_management",
+      "recommendation": "Added gcp_auth crate as the primary authentication dependency and enabled additional reqwest features (multipart, stream) while avoiding adding unnecessary SDK dependencies. Updated existing dependencies (anyhow, futures) to newer versions.",
+      "rationale": "The gcp_auth crate provides proper GCP authentication handling without pulling in the entire Google Cloud SDK. Enabling multipart and stream features on reqwest was necessary for GCS multipart uploads and streaming downloads. Updating dependencies ensures compatibility and security fixes.",
+      "alternatives_considered": [
+        "Using the official google-cloud-storage Rust SDK",
+        "Implementing authentication from scratch"
+      ],
+      "files_affected": [
+        "Cargo.lock",
+        "libs/remote_storage/Cargo.toml"
+      ]
+    },
+    {
+      "dimension": "configuration_design",
+      "recommendation": "Extended the configuration system to support GCS with a GCSConfig struct that mirrors the structure of S3Config and AzureConfig, including bucket_name, prefix_in_bucket, concurrency_limit, and max_keys_per_list_response parameters.",
+      "rationale": "Consistent configuration patterns across storage providers make it easier for users to switch between backends and for operators to manage configurations. The GCSConfig struct reuses existing configuration patterns and validation logic.",
+      "alternatives_considered": [
+        "Creating a completely different configuration structure",
+        "Using environment variables instead of structured config"
+      ],
+      "files_affected": [
+        "libs/remote_storage/src/config.rs"
+      ]
+    },
+    {
+      "dimension": "authentication_handling",
+      "recommendation": "Used gcp_auth::provider() to obtain a TokenProvider that handles service account credentials and default application credentials automatically, supporting the standard GOOGLE_APPLICATION_CREDENTIALS environment variable.",
+      "rationale": "This approach follows GCP best practices for authentication and leverages the standard GCP credential discovery chain. It supports both service account JSON files and metadata server authentication (for GCE/GKE environments) without requiring manual credential management in the application.",
+      "alternatives_considered": [
+        "Manual JWT token generation",
+        "Using API keys instead of OAuth2"
+      ],
+      "files_affected": [
+        "libs/remote_storage/src/gcs_bucket.rs"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Integrated GCS-specific error responses into the existing DownloadError enum and error handling patterns, mapping GCS HTTP status codes to appropriate error variants (e.g., 404 \u2192 NotFound).",
+      "rationale": "Consistent error handling across storage providers simplifies client code and ensures that failures are handled uniformly regardless of the backend. The implementation properly distinguishes between network errors, authentication failures, and object-not-found scenarios.",
+      "alternatives_considered": [
+        "Creating a separate GCS-specific error type",
+        "Using anyhow::Error for all GCS errors"
+      ],
+      "files_affected": [
+        "libs/remote_storage/src/gcs_bucket.rs"
+      ]
+    },
+    {
+      "dimension": "performance_optimization",
+      "recommendation": "Implemented the same concurrency limiting pattern used by S3 and Azure providers, using ConcurrencyLimiter and semaphore permits to control parallel requests to GCS. Added proper timeout handling and cancellation support.",
+      "rationale": "GCS has similar rate limiting and quota considerations as other cloud storage services. Reusing the existing concurrency control mechanism prevents overwhelming the GCS API and ensures fair resource usage across storage operations.",
+      "alternatives_considered": [
+        "Unlimited concurrent requests",
+        "Fixed concurrency without dynamic control"
+      ],
+      "files_affected": [
+        "libs/remote_storage/src/gcs_bucket.rs"
+      ]
+    },
+    {
+      "dimension": "api_integration",
+      "recommendation": "Implemented direct REST API calls to GCS using reqwest instead of using the S3 compatibility layer, taking advantage of GCS-specific features like multipart uploads and versioning support.",
+      "rationale": "Direct GCS API integration provides better performance and access to GCS-specific features that aren't available through the S3 compatibility layer. It also avoids potential compatibility issues and gives more control over error handling and retry logic.",
+      "alternatives_considered": [
+        "Using the GCS XML API (S3-compatible)",
+        "Using a higher-level GCS client library"
+      ],
+      "files_affected": [
+        "libs/remote_storage/src/gcs_bucket.rs"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Add GCS configuration support",
+      "description": "Extend the configuration system to parse and validate GCS storage configuration, adding GCSConfig struct and integrating it into the existing RemoteStorageKind enum.",
+      "files_to_modify": [
+        "libs/remote_storage/src/config.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-002",
+      "title": "Implement GCS storage provider core",
+      "description": "Create the main GCSBucket struct that implements all storage operations (upload, download, list, delete, metadata) using direct GCS REST API calls with proper authentication, error handling, and concurrency control.",
+      "files_to_modify": [],
+      "files_to_create": [
+        "libs/remote_storage/src/gcs_bucket.rs"
+      ],
+      "estimated_effort": "large"
+    },
+    {
+      "id": "T-003",
+      "title": "Update dependencies and build configuration",
+      "description": "Add required dependencies (gcp_auth) and update existing ones, enable necessary reqwest features for GCS operations, and ensure proper compilation and linking.",
+      "files_to_modify": [
+        "Cargo.lock",
+        "libs/remote_storage/Cargo.toml"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The GCS storage provider implementation follows a consistent pattern established by the existing S3 and Azure providers in the Neon codebase. The core architectural decision was to implement direct GCS API integration rather than using the S3 compatibility layer, which provides better performance and access to GCS-specific features like native multipart uploads and object versioning.\n\nThe implementation introduces a new GCSBucket struct in `libs/remote_storage/src/gcs_bucket.rs` that handles all storage operations. It uses the gcp_auth crate for authentication, which automatically handles service account credentials and application default credentials following GCP best practices. The provider integrates with the existing concurrency limiting system, error handling patterns, and metrics collection already used by other storage backends.\n\nConfiguration support was added by extending the RemoteStorageKind enum to include a GCS variant with a corresponding GCSConfig struct that mirrors the structure of existing storage configurations. This ensures users can configure GCS storage using the same patterns they're already familiar with from S3 and Azure configurations. The implementation properly handles GCS-specific API details like multipart upload boundaries, batch deletions, and version listing while maintaining compatibility with the existing remote storage abstraction layer.",
+  "source_pr": "https://github.com/neondatabase/neon/pull/11666",
+  "before_sha": "77e22e4bf09d88b70b4a83a38c2f6de6301816b4",
+  "after_sha": "85ce109361be068ff890f9fece786a81f0724136",
+  "diff_stats": {
+    "additions": 1938,
+    "deletions": 9,
+    "files_changed": 10
+  }
+}

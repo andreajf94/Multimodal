@@ -1,0 +1,116 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "testing",
+      "recommendation": "Changed from aggregated snapshot file to individual diff files per test fixture",
+      "rationale": "Individual diff files make it easier for developers and AI tools to review specific formatting changes by isolating each failure. This improves the debugging experience by providing focused context for each discrepancy rather than burying them in a large aggregated file.",
+      "alternatives_considered": [
+        "Keeping the single aggregated snapshot file",
+        "Adding more granular sections within the existing snapshot file",
+        "Using a database or structured format instead of markdown files"
+      ],
+      "files_affected": [
+        "apps/oxfmt/conformance/run.ts",
+        "apps/oxfmt/conformance/snapshots/conformance.snap.md"
+      ]
+    },
+    {
+      "dimension": "data_modeling",
+      "recommendation": "Enhanced the Failure type to include oxfmt and prettier formatted outputs",
+      "rationale": "To generate comprehensive diff files, we need to store both the actual (oxfmt) and expected (prettier) formatted outputs. This allows creating detailed comparison documents that show the exact differences, formatted outputs, and configuration options used.",
+      "alternatives_considered": [
+        "Storing only the diff output without full formatted texts",
+        "Re-running formatting during diff generation",
+        "Storing hashes or references instead of full content"
+      ],
+      "files_affected": [
+        "apps/oxfmt/conformance/run.ts"
+      ]
+    },
+    {
+      "dimension": "file_organization",
+      "recommendation": "Created hierarchical directory structure mirroring test categories and using safe file names",
+      "rationale": "Organizing diff files in a directory structure that mirrors the test organization (diffs/{category}/{fixture}.md) makes it easy to navigate and find specific diffs. Using safe names (replacing '/' with '__') ensures compatibility with file systems while preserving the original fixture path in the content.",
+      "alternatives_considered": [
+        "Flat directory with all diff files",
+        "Using UUIDs or hashes as filenames",
+        "Storing in a single structured file (JSON/YAML)"
+      ],
+      "files_affected": [
+        "apps/oxfmt/conformance/run.ts",
+        "apps/oxfmt/conformance/snapshots/diffs/css-in-js/styled-components.js.md",
+        "apps/oxfmt/conformance/snapshots/diffs/gql-in-js/comment-tag.js.md",
+        "apps/oxfmt/conformance/snapshots/diffs/js-in-vue/vue__multiparser__lang-tsx.vue.md"
+      ]
+    },
+    {
+      "dimension": "dependency_management",
+      "recommendation": "Added 'diff' package dependency for generating unified diff output",
+      "rationale": "The 'diff' package provides reliable diff generation with proper formatting for the unified diff format. This is better than implementing custom diff logic, as it handles edge cases and produces standard diff output that developers are familiar with.",
+      "alternatives_considered": [
+        "Implementing custom diff algorithm",
+        "Using a different diff library",
+        "Storing only formatted outputs without diff"
+      ],
+      "files_affected": [
+        "apps/oxfmt/package.json",
+        "pnpm-lock.yaml"
+      ]
+    },
+    {
+      "dimension": "cleanup_management",
+      "recommendation": "Added automatic cleanup of old diff files before generating new ones",
+      "rationale": "Using rmSync to recursively remove the diffs directory ensures that removed or renamed test fixtures don't leave stale diff files. This prevents accumulation of orphaned files and ensures the diff directory accurately reflects the current test state.",
+      "alternatives_considered": [
+        "Manual cleanup by developers",
+        "Incremental updates with file tracking",
+        "Version-controlled diff files"
+      ],
+      "files_affected": [
+        "apps/oxfmt/conformance/run.ts"
+      ]
+    },
+    {
+      "dimension": "configuration",
+      "recommendation": "Excluded diff snapshots from formatting in oxfmtrc.jsonc",
+      "rationale": "Added 'apps/oxfmt/conformance/snapshots/**' to the ignore patterns to prevent the formatter from modifying the generated diff files. This ensures diffs remain stable and readable, as formatting them could break the diff output or make it harder to compare.",
+      "alternatives_considered": [
+        "Allowing formatting of diff files",
+        "Using a separate ignore file",
+        "Excluding only specific file patterns"
+      ],
+      "files_affected": [
+        "oxfmtrc.jsonc"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Implement individual diff file generation for conformance tests",
+      "description": "Modified the conformance test runner to generate separate markdown files for each failing test fixture, organized by category, with detailed diff output and formatted code comparisons.",
+      "files_to_modify": [
+        "apps/oxfmt/conformance/run.ts",
+        "apps/oxfmt/conformance/snapshots/conformance.snap.md",
+        "apps/oxfmt/package.json",
+        "oxfmtrc.jsonc",
+        "pnpm-lock.yaml"
+      ],
+      "files_to_create": [
+        "apps/oxfmt/conformance/snapshots/diffs/css-in-js/styled-components.js.md",
+        "apps/oxfmt/conformance/snapshots/diffs/gql-in-js/comment-tag.js.md",
+        "apps/oxfmt/conformance/snapshots/diffs/js-in-vue/vue__multiparser__lang-tsx.vue.md"
+      ],
+      "estimated_effort": "medium"
+    }
+  ],
+  "implementation_summary": "The implementation transforms the conformance testing system from using a single aggregated snapshot file to generating individual diff files for each failing test fixture. The core change is in the writeReport function in run.ts, which now creates a hierarchical directory structure under 'diffs/' that mirrors the test categories. Each diff file contains comprehensive information: the fixture name, any notes, configuration options used, a unified diff showing differences, and both the actual (oxfmt) and expected (prettier) formatted outputs.\n\nKey design decisions include storing both formatted outputs in the Failure type to enable detailed comparison, using the 'diff' package for professional diff generation, implementing automatic cleanup of old diff files to prevent accumulation, and excluding the diff directory from formatting to maintain stability. The main snapshot file (conformance.snap.md) is updated to link to individual diff files rather than listing failures inline, creating a navigable hierarchy where developers can drill down from the summary to specific issues.\n\nThis approach integrates well with the existing codebase by maintaining backward compatibility with the test runner's interface while significantly improving the debugging experience. The use of markdown files ensures diffs remain human-readable and version-control friendly, aligning with the project's existing practices for snapshot testing.",
+  "source_pr": "https://github.com/oxc-project/oxc/pull/20170",
+  "before_sha": "84e18a3f28584ee9d2cd426325cefb1da7b06845",
+  "after_sha": "ab446efc72b2a57ad402f338c140757cebbd33ad",
+  "diff_stats": {
+    "additions": 1590,
+    "deletions": 25,
+    "files_changed": 8
+  }
+}

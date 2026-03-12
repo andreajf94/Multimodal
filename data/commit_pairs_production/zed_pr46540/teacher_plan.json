@@ -1,0 +1,122 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "api_design",
+      "recommendation": "Added support for Anthropic's messages API endpoint alongside existing chat completions and responses endpoints",
+      "rationale": "Anthropic models require different API endpoints and request formats for extended reasoning features. The implementation adds a new `messages_url` method and `stream_messages` function to handle Anthropic's specific API format while maintaining backward compatibility with existing OpenAI-compatible endpoints.",
+      "alternatives_considered": [
+        "Extending existing chat completions endpoint",
+        "Creating a separate provider entirely"
+      ],
+      "files_affected": [
+        "crates/copilot_chat/src/copilot_chat.rs",
+        "crates/copilot_chat/src/responses.rs"
+      ]
+    },
+    {
+      "dimension": "data_modeling",
+      "recommendation": "Enhanced model capabilities tracking with thinking-related fields and added ChatLocation enum for request context",
+      "rationale": "Extended reasoning requires tracking model capabilities (thinking, adaptive_thinking, thinking_budget, reasoning_effort) to determine which features are available. ChatLocation provides context about where the chat is happening (panel, editor, terminal, etc.) which is needed for proper API headers and intent signaling.",
+      "alternatives_considered": [
+        "Adding thinking fields directly to LanguageModel trait",
+        "Using a separate configuration object"
+      ],
+      "files_affected": [
+        "crates/copilot_chat/src/copilot_chat.rs",
+        "crates/language_models/src/provider/copilot_chat.rs"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Maintained existing error handling patterns while adding Anthropic-specific error types",
+      "rationale": "The implementation reuses the existing streaming error handling infrastructure but adds proper mapping for Anthropic's error types through the AnthropicEventMapper. This ensures consistent error reporting across different model providers.",
+      "alternatives_considered": [
+        "Creating a unified error type for all providers",
+        "Propagating raw Anthropic errors"
+      ],
+      "files_affected": [
+        "crates/copilot_chat/src/copilot_chat.rs",
+        "crates/language_models/src/provider/copilot_chat.rs"
+      ]
+    },
+    {
+      "dimension": "integration_patterns",
+      "recommendation": "Added conditional routing based on model capabilities to select appropriate API endpoint",
+      "rationale": "Different models support different endpoints (messages, responses, chat/completions). The implementation checks `model.supports_messages()` first for Anthropic models, then falls back to responses endpoint, then chat completions endpoint. This ensures each model uses the most appropriate API format.",
+      "alternatives_considered": [
+        "Single endpoint with conditional request formatting",
+        "Model-specific provider implementations"
+      ],
+      "files_affected": [
+        "crates/language_models/src/provider/copilot_chat.rs"
+      ]
+    },
+    {
+      "dimension": "configuration_management",
+      "recommendation": "Added thinking budget computation and reasoning effort configuration",
+      "rationale": "Extended reasoning requires configuring thinking budgets and effort levels. The implementation computes appropriate thinking budgets based on model limits and provides reasoning effort levels from model capabilities. This allows users to control the depth of reasoning when available.",
+      "alternatives_considered": [
+        "Hardcoded thinking budgets",
+        "External configuration files"
+      ],
+      "files_affected": [
+        "crates/language_models/src/provider/copilot_chat.rs"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Add Anthropic messages API endpoint support",
+      "description": "Implement streaming support for Anthropic's messages API format to enable extended reasoning capabilities",
+      "files_to_modify": [
+        "crates/copilot_chat/src/copilot_chat.rs",
+        "crates/copilot_chat/Cargo.toml",
+        "Cargo.lock"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-002",
+      "title": "Enhance model capabilities tracking",
+      "description": "Add thinking-related capability fields to model metadata and create ChatLocation enum for request context",
+      "files_to_modify": [
+        "crates/copilot_chat/src/copilot_chat.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-003",
+      "title": "Update request headers and routing logic",
+      "description": "Add location-based headers and implement conditional endpoint routing based on model capabilities",
+      "files_to_modify": [
+        "crates/copilot_chat/src/copilot_chat.rs",
+        "crates/copilot_chat/src/responses.rs",
+        "crates/language_models/src/provider/copilot_chat.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-004",
+      "title": "Expose Anthropic struct for cross-crate usage",
+      "description": "Make StreamingRequest public in anthropic crate to allow usage from copilot_chat",
+      "files_to_modify": [
+        "crates/anthropic/src/anthropic.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation adds extended reasoning support for Anthropic models through a multi-layered approach. First, the anthropic crate's StreamingRequest struct is made public to enable cross-crate usage. The copilot_chat crate gains a new dependency on anthropic and adds support for Anthropic's messages API endpoint via a new `stream_messages` function and corresponding URL builder.\n\nKey architectural decisions include the addition of a ChatLocation enum to track where chat interactions occur (panel, editor, terminal, etc.), which is used to set appropriate HTTP headers (X-Interaction-Type, OpenAI-Intent). Model capabilities are enhanced with thinking-related fields (thinking, adaptive_thinking, thinking_budget, reasoning_effort) to determine which extended reasoning features are available.\n\nThe routing logic in the provider layer intelligently selects the appropriate API endpoint: for Anthropic models supporting the messages endpoint, it uses Anthropic's native API format; for other models, it falls back to existing responses or chat completions endpoints. Thinking budgets are computed based on model limits, and reasoning effort levels are exposed through the LanguageModel interface.\n\nThe implementation maintains backward compatibility by preserving existing API paths and request formats while adding new capabilities. All changes integrate with the existing streaming infrastructure, error handling patterns, and rate limiting mechanisms, ensuring consistent behavior across different model providers.",
+  "source_pr": "https://github.com/zed-industries/zed/pull/46540",
+  "before_sha": "af2b35a83ddbdcb3132c044b22696a386d3990cd",
+  "after_sha": "dde76cd5f8a1cad88f7231681cf146f2bb697ea5",
+  "diff_stats": {
+    "additions": 370,
+    "deletions": 31,
+    "files_changed": 6
+  }
+}

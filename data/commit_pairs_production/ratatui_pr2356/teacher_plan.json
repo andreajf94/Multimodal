@@ -1,0 +1,125 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "api_design",
+      "recommendation": "Added a new `Custom(char)` variant to the `Marker` enum instead of adding separate `Cross` and `Plus` variants",
+      "rationale": "This approach provides maximum flexibility for users to define any character as a marker, not just the requested '\u00d7' and '+' symbols. It follows the open-closed principle by extending functionality without modifying existing enum variants. The custom variant can handle any Unicode character the terminal supports.",
+      "alternatives_considered": [
+        "Adding separate `Cross` and `Plus` enum variants",
+        "Creating a separate `CustomMarker` struct",
+        "Using a trait-based approach for extensible markers"
+      ],
+      "files_affected": [
+        "ratatui-core/src/symbols/marker.rs",
+        "ratatui-widgets/src/chart.rs"
+      ]
+    },
+    {
+      "dimension": "rendering_engine",
+      "recommendation": "Extended the canvas rendering system to handle custom characters through a new `CharGrid` implementation for the `Custom` marker variant",
+      "rationale": "The existing rendering architecture already had a `CharGrid` struct for simple character-based markers like `Dot`. Reusing this pattern for custom characters maintains consistency and minimizes code duplication. The `CharGrid` simply repeats the provided character across the grid, which works well for symbols like '\u00d7' and '+' that occupy a single cell.",
+      "alternatives_considered": [
+        "Creating a new `CustomGrid` type",
+        "Modifying existing grid types to accept character parameters",
+        "Implementing a trait-based grid system"
+      ],
+      "files_affected": [
+        "ratatui-widgets/src/canvas.rs"
+      ]
+    },
+    {
+      "dimension": "testing_strategy",
+      "recommendation": "Added comprehensive test cases for the new custom markers and refactored rectangle drawing tests to use a helper function",
+      "rationale": "The tests verify that '\u00d7' and '+' markers render correctly in both isolated patterns and rectangle outlines. The refactoring of rectangle tests into a `render_rectangle` helper function reduces code duplication and makes tests more maintainable. Test cases include both the visual pattern verification and proper styling application.",
+      "alternatives_considered": [
+        "Adding minimal tests only for the new functionality",
+        "Keeping existing test structure unchanged",
+        "Creating separate test files for custom markers"
+      ],
+      "files_affected": [
+        "ratatui-widgets/src/canvas/rectangle.rs"
+      ]
+    },
+    {
+      "dimension": "backward_compatibility",
+      "recommendation": "Maintained full backward compatibility by adding the new variant at the end of the enum and updating documentation",
+      "rationale": "Adding a new variant to an existing enum is a non-breaking change in Rust. The `Custom` variant was added after all existing variants, preserving the discriminant values of existing variants. The documentation was updated to mention the new capability without removing or changing existing documentation.",
+      "alternatives_considered": [
+        "Making `Marker` a trait instead of an enum",
+        "Using feature flags for the new functionality",
+        "Creating a separate `Marker2` enum"
+      ],
+      "files_affected": [
+        "ratatui-core/src/symbols/marker.rs",
+        "ratatui-widgets/src/chart.rs"
+      ]
+    },
+    {
+      "dimension": "example_demonstration",
+      "recommendation": "Updated existing example applications to showcase the new custom markers in practical scenarios",
+      "rationale": "The canvas example now cycles through the new '\u00d7' marker in its demonstration loop, showing how custom markers integrate with the existing marker cycling system. The chart example uses both '\u00d7' and '+' markers for different datasets in a scatter plot, demonstrating their practical use for data differentiation.",
+      "alternatives_considered": [
+        "Creating a new dedicated example application",
+        "Only adding the markers without example updates",
+        "Adding minimal comments without actual usage"
+      ],
+      "files_affected": [
+        "examples/apps/canvas/src/main.rs",
+        "examples/apps/chart/src/main.rs"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Extend Marker enum with custom character support",
+      "description": "Add a Custom variant to the Marker enum that accepts any char, enabling users to define custom marker symbols like '\u00d7' and '+' for scatter plots and other visualizations",
+      "files_to_modify": [
+        "ratatui-core/src/symbols/marker.rs",
+        "ratatui-widgets/src/chart.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-002",
+      "title": "Implement rendering support for custom markers",
+      "description": "Update the canvas rendering engine to handle the new Custom marker variant by reusing the existing CharGrid infrastructure with the provided character",
+      "files_to_modify": [
+        "ratatui-widgets/src/canvas.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-003",
+      "title": "Add comprehensive tests for custom markers",
+      "description": "Create test cases for '\u00d7' and '+' markers in both pattern rendering and rectangle drawing scenarios, and refactor rectangle tests to reduce duplication",
+      "files_to_modify": [
+        "ratatui-widgets/src/canvas/rectangle.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-004",
+      "title": "Update examples to demonstrate new markers",
+      "description": "Modify existing example applications to showcase practical usage of custom markers in both canvas drawing and chart visualization contexts",
+      "files_to_modify": [
+        "examples/apps/canvas/src/main.rs",
+        "examples/apps/chart/src/main.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation extends ratatui's marker system to support custom character markers through a new `Custom(char)` variant in the `Marker` enum. This approach provides maximum flexibility while maintaining backward compatibility. The rendering engine was updated to handle custom markers by reusing the existing `CharGrid` infrastructure, which simply repeats the provided character across the canvas grid.\n\nKey design decisions include placing the new variant at the end of the enum to preserve discriminant values, updating documentation to guide users on the new capability, and adding comprehensive tests that verify both visual rendering and proper styling application. The example applications were updated to demonstrate practical usage: the canvas example now cycles through the '\u00d7' marker, while the chart example uses both '\u00d7' and '+' markers to differentiate datasets in a scatter plot.\n\nThe implementation follows established patterns in the codebase, particularly the reuse of `CharGrid` for character-based markers. The test refactoring into a `render_rectangle` helper function improves maintainability while adding thorough coverage for the new functionality. This change enhances ratatui's visualization capabilities for scatter plots and other data-dense displays where clear symbol differentiation is crucial.",
+  "source_pr": "https://github.com/ratatui/ratatui/pull/2356",
+  "before_sha": "88441cff52cc40e380be964429956bb0b1c471da",
+  "after_sha": "09a3027bfce906b86bf20bdcf36fc5e365892b7c",
+  "diff_stats": {
+    "additions": 117,
+    "deletions": 42,
+    "files_changed": 6
+  }
+}

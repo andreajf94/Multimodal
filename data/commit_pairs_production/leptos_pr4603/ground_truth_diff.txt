@@ -1,0 +1,98 @@
+diff --git a/reactive_graph/src/actions/action.rs b/reactive_graph/src/actions/action.rs
+index 938fd04ee2..3d574f8ec8 100644
+--- a/reactive_graph/src/actions/action.rs
++++ b/reactive_graph/src/actions/action.rs
+@@ -200,7 +200,7 @@ where
+         I: Send + Sync,
+         O: Send + Sync,
+     {
+-        let owner = Owner::current().unwrap_or_default();
++        let weak_owner = Owner::current().map(|o| o.downgrade());
+         ArcAction {
+             in_flight: ArcRwSignal::new(0),
+             input: ArcRwSignal::new(SendOption::new(None)),
+@@ -208,9 +208,14 @@ where
+             version: Default::default(),
+             dispatched: Default::default(),
+             action_fn: Arc::new(move |input| {
+-                Box::pin(owner.with(|| {
+-                    ScopedFuture::new_untracked(untrack(|| action_fn(input)))
+-                }))
++                let fut = untrack(|| action_fn(input));
++                match weak_owner.as_ref().and_then(|w| w.upgrade()) {
++                    Some(owner) => Box::pin(
++                        owner.with(|| ScopedFuture::new_untracked(fut)),
++                    )
++                        as Pin<Box<dyn Future<Output = O> + Send>>,
++                    None => Box::pin(ScopedFuture::new_untracked(fut)),
++                }
+             }),
+             #[cfg(any(debug_assertions, leptos_debuginfo))]
+             defined_at: Location::caller(),
+@@ -376,7 +381,7 @@ where
+         F: Fn(&I) -> Fu + 'static,
+         Fu: Future<Output = O> + 'static,
+     {
+-        let owner = Owner::current().unwrap_or_default();
++        let weak_owner = Owner::current().map(|o| o.downgrade());
+         let action_fn = SendWrapper::new(action_fn);
+         ArcAction {
+             in_flight: ArcRwSignal::new(0),
+@@ -385,9 +390,15 @@ where
+             version: Default::default(),
+             dispatched: Default::default(),
+             action_fn: Arc::new(move |input| {
+-                Box::pin(SendWrapper::new(owner.with(|| {
+-                    ScopedFuture::new_untracked(untrack(|| action_fn(input)))
+-                })))
++                let fut = untrack(|| action_fn(input));
++                match weak_owner.as_ref().and_then(|w| w.upgrade()) {
++                    Some(owner) => Box::pin(SendWrapper::new(
++                        owner.with(|| ScopedFuture::new_untracked(fut)),
++                    )),
++                    None => Box::pin(SendWrapper::new(
++                        ScopedFuture::new_untracked(fut),
++                    )),
++                }
+             }),
+             #[cfg(any(debug_assertions, leptos_debuginfo))]
+             defined_at: Location::caller(),
+diff --git a/reactive_graph/src/owner.rs b/reactive_graph/src/owner.rs
+index 44ed27c33e..38eed20c6e 100644
+--- a/reactive_graph/src/owner.rs
++++ b/reactive_graph/src/owner.rs
+@@ -61,7 +61,8 @@ pub struct Owner {
+ }
+ 
+ impl Owner {
+-    fn downgrade(&self) -> WeakOwner {
++    /// Creates a [`WeakOwner`] reference to this owner that does not prevent cleanup.
++    pub fn downgrade(&self) -> WeakOwner {
+         WeakOwner {
+             inner: Arc::downgrade(&self.inner),
+             #[cfg(feature = "hydration")]
+@@ -70,15 +71,22 @@ impl Owner {
+     }
+ }
+ 
++/// A weak reference to an [`Owner`] that does not prevent cleanup.
++///
++/// This is useful for capturing an owner reference without creating reference
++/// cycles that would prevent the owner from being dropped and cleaned up.
+ #[derive(Clone)]
+-struct WeakOwner {
++pub struct WeakOwner {
+     inner: Weak<RwLock<OwnerInner>>,
+     #[cfg(feature = "hydration")]
+     shared_context: Option<Weak<dyn SharedContext + Send + Sync>>,
+ }
+ 
+ impl WeakOwner {
+-    fn upgrade(&self) -> Option<Owner> {
++    /// Attempts to upgrade this weak reference to a strong [`Owner`].
++    ///
++    /// Returns `None` if the owner has already been dropped.
++    pub fn upgrade(&self) -> Option<Owner> {
+         self.inner.upgrade().map(|inner| {
+             #[cfg(feature = "hydration")]
+             let shared_context =

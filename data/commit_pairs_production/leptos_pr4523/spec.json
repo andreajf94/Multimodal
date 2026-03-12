@@ -1,0 +1,13 @@
+{
+  "feature_name": "Signal API Alignment for Stable and Nightly",
+  "description": "Modify the Signal API to provide consistent behavior between stable and nightly Rust compilers for the IntoReactiveValue trait. This change will remove the Fn() implementation for Signal<T> and ArcSignal<T> while maintaining function-call syntax through dereferencing, enabling automatic conversion of closures to Signal<_> with #[prop(into)] without requiring Signal::derive() wrappers.",
+  "functional_requirements": [
+    "Remove the Fn() trait implementation from Signal<T> and ArcSignal<T> types",
+    "Maintain function-call syntax support for Signal<T> through dereferencing mechanisms",
+    "Ensure IntoReactiveValue trait works identically on both stable and nightly Rust compilers",
+    "Allow automatic conversion of closures to Signal<_> when using #[prop(into)] attribute without manual Signal::derive() wrapping",
+    "Document the workaround for components expecting impl Fn() parameters (manual dereferencing of Signal wrapper)"
+  ],
+  "project_name": "leptos",
+  "source_pr": "https://github.com/leptos-rs/leptos/pull/4523"
+}

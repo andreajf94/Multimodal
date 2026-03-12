@@ -1,0 +1,155 @@
+diff --git a/.changeset/nervous-keys-grin.md b/.changeset/nervous-keys-grin.md
+new file mode 100644
+index 000000000000..3734f1592a56
+--- /dev/null
++++ b/.changeset/nervous-keys-grin.md
+@@ -0,0 +1,5 @@
++---
++"@astrojs/cloudflare": patch
++---
++
++Fixes the Cloudflare adapter adding a `SESSION` KV binding even when sessions are explicitly configured to use a different driver, such as `unstorage/drivers/null`.
+diff --git a/packages/integrations/cloudflare/src/index.ts b/packages/integrations/cloudflare/src/index.ts
+index abd80abe0d2b..013db549d128 100644
+--- a/packages/integrations/cloudflare/src/index.ts
++++ b/packages/integrations/cloudflare/src/index.ts
+@@ -23,6 +23,28 @@ import { sessionDrivers } from 'astro/config';
+ import { createCloudflarePrerenderer } from './prerenderer.js';
+ import { createRequire } from 'node:module';
+ 
++const CLOUDFLARE_KV_SESSION_DRIVER_ENTRYPOINT = sessionDrivers.cloudflareKVBinding().entrypoint;
++
++function usesCloudflareKVSessionDriver(session: AstroConfig['session']): boolean {
++	const driver = session?.driver;
++
++	if (!driver) {
++		return false;
++	}
++
++	if (typeof driver === 'string') {
++		return driver === 'cloudflareKVBinding' || driver === 'cloudflare-kv-binding';
++	}
++
++	const entrypoint =
++		typeof driver.entrypoint === 'string' ? driver.entrypoint : driver.entrypoint.toString();
++
++	return (
++		entrypoint === CLOUDFLARE_KV_SESSION_DRIVER_ENTRYPOINT ||
++		entrypoint.endsWith('cloudflare-kv-binding')
++	);
++}
++
+ export type { Runtime } from './utils/handler.js';
+ 
+ export interface Options
+@@ -111,6 +133,8 @@ export default function createIntegration({
+ 					};
+ 				}
+ 
++				const needsSessionKVBinding = usesCloudflareKVSessionDriver(session);
++
+ 				// In dev, `compile` needs the IMAGES binding for real transforms
+ 				// (the image-transform-endpoint uses it). At build time,
+ 				// `compile` uses Sharp on the Node side instead.
+@@ -118,6 +142,7 @@ export default function createIntegration({
+ 
+ 				cfPluginConfig = {
+ 					config: cloudflareConfigCustomizer({
++						needsSessionKVBinding,
+ 						sessionKVBindingName,
+ 						imagesBindingName:
+ 							needsImagesBinding || needsImagesBindingForDev ? imagesBindingName : false,
+diff --git a/packages/integrations/cloudflare/src/wrangler.ts b/packages/integrations/cloudflare/src/wrangler.ts
+index 36898bf98d6c..a1582474dd8e 100644
+--- a/packages/integrations/cloudflare/src/wrangler.ts
++++ b/packages/integrations/cloudflare/src/wrangler.ts
+@@ -6,6 +6,7 @@ export const DEFAULT_ASSETS_BINDING_NAME = 'ASSETS';
+ 
+ interface CloudflareConfigOptions {
+ 	sessionKVBindingName: string | undefined;
++	needsSessionKVBinding?: boolean;
+ 	imagesBindingName: string | false | undefined;
+ }
+ 
+@@ -17,6 +18,7 @@ export function cloudflareConfigCustomizer(
+ 	options: CloudflareConfigOptions,
+ ): PluginConfig['config'] {
+ 	const sessionKVBindingName = options?.sessionKVBindingName ?? DEFAULT_SESSION_KV_BINDING_NAME;
++	const needsSessionKVBinding = options?.needsSessionKVBinding ?? true;
+ 	const imagesBindingName =
+ 		options?.imagesBindingName === false
+ 			? undefined
+@@ -31,7 +33,7 @@ export function cloudflareConfigCustomizer(
+ 
+ 		return {
+ 			main: config.main ?? '@astrojs/cloudflare/entrypoints/server',
+-			kv_namespaces: hasSessionBinding
++			kv_namespaces: !needsSessionKVBinding || hasSessionBinding
+ 				? undefined
+ 				: [
+ 						{
+diff --git a/packages/integrations/cloudflare/test/sessions.test.js b/packages/integrations/cloudflare/test/sessions.test.js
+index b1df629d776a..cd2a3de04fcc 100644
+--- a/packages/integrations/cloudflare/test/sessions.test.js
++++ b/packages/integrations/cloudflare/test/sessions.test.js
+@@ -106,3 +106,42 @@ describe('sessions with custom binding name', () => {
+ 		);
+ 	});
+ });
++
++describe('session wrangler config', () => {
++	it('does not include the SESSION KV binding when sessions are disabled', async () => {
++		const fixture = await loadFixture({
++			root: './fixtures/static/',
++		});
++
++		await fixture.build({
++			session: {
++				driver: {
++					entrypoint: 'unstorage/drivers/null',
++				},
++			},
++		});
++
++		const wrangler = JSON.parse(await fixture.readFile('/server/wrangler.json'));
++		assert.equal(
++			wrangler.kv_namespaces?.some(({ binding }) => binding === 'SESSION'),
++			false,
++		);
++	});
++
++	it('includes the SESSION KV binding when Cloudflare KV is configured explicitly', async () => {
++		const fixture = await loadFixture({
++			root: './fixtures/static/',
++		});
++
++		await fixture.build({
++			session: {
++				driver: {
++					entrypoint: 'unstorage/drivers/cloudflare-kv-binding',
++				},
++			},
++		});
++
++		const wrangler = JSON.parse(await fixture.readFile('/server/wrangler.json'));
++		assert.deepEqual(wrangler.kv_namespaces, [{ binding: 'SESSION' }]);
++	});
++});
+diff --git a/packages/integrations/cloudflare/test/wrangler.test.js b/packages/integrations/cloudflare/test/wrangler.test.js
+index b9d176f54d60..0304b2237a43 100644
+--- a/packages/integrations/cloudflare/test/wrangler.test.js
++++ b/packages/integrations/cloudflare/test/wrangler.test.js
+@@ -65,6 +65,13 @@ describe('cloudflareConfigCustomizer', () => {
+ 
+ 			assert.deepEqual(result.kv_namespaces, [{ binding: DEFAULT_SESSION_KV_BINDING_NAME }]);
+ 		});
++
++		it('does not add SESSION binding when session KV binding is disabled', () => {
++			const customizer = cloudflareConfigCustomizer({ needsSessionKVBinding: false });
++			const result = customizer({});
++
++			assert.equal(result.kv_namespaces, undefined);
++		});
+ 	});
+ 
+ 	describe('images binding', () => {

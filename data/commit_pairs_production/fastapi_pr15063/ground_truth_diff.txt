@@ -1,0 +1,101 @@
+diff --git a/docs/en/docs/css/custom.css b/docs/en/docs/css/custom.css
+index b88d694845391..e207197c7527e 100644
+--- a/docs/en/docs/css/custom.css
++++ b/docs/en/docs/css/custom.css
+@@ -32,15 +32,16 @@
+   display: none;
+ }
+ 
+-/* External links: absolute URLs opening in new tab
++/* External links: detected by JS comparing origin to site origin
++   JS sets data-external-link on links pointing outside the site
+    Skip image links, .no-link-icon, and .announce-link */
+-a[target="_blank"][href^="http"]:not(:has(img)):not(.no-link-icon):not(.announce-link) {
++a[data-external-link]:not(:has(img)):not(.no-link-icon):not(.announce-link) {
+   /* For right to left languages */
+   direction: ltr;
+   display: inline-block;
+ }
+ 
+-a[target="_blank"][href^="http"]:not(:has(img)):not(.no-link-icon):not(.announce-link)::after {
++a[data-external-link]:not(:has(img)):not(.no-link-icon):not(.announce-link)::after {
+   content: "";
+   display: inline-block;
+   width: 0.75em;
+@@ -57,19 +58,20 @@ a[target="_blank"][href^="http"]:not(:has(img)):not(.no-link-icon):not(.announce
+   mask-repeat: no-repeat;
+ }
+ 
+-a[target="_blank"][href^="http"]:not(:has(img)):not(.no-link-icon):not(.announce-link):hover::after {
++a[data-external-link]:not(:has(img)):not(.no-link-icon):not(.announce-link):hover::after {
+   opacity: 0.85;
+ }
+ 
+-/* Internal links opening in new tab: relative URLs with target=_blank
++/* Internal links opening in new tab: same-origin links with target=_blank
++   JS sets data-internal-link on links pointing to the same site origin
+    Skip image links, .no-link-icon, and .announce-link */
+-a[target="_blank"]:not([href^="http"]):not(:has(img)):not(.no-link-icon):not(.announce-link) {
++a[data-internal-link][target="_blank"]:not(:has(img)):not(.no-link-icon):not(.announce-link) {
+   /* For right to left languages */
+   direction: ltr;
+   display: inline-block;
+ }
+ 
+-a[target="_blank"]:not([href^="http"]):not(:has(img)):not(.no-link-icon):not(.announce-link)::after {
++a[data-internal-link][target="_blank"]:not(:has(img)):not(.no-link-icon):not(.announce-link)::after {
+   content: "";
+   display: inline-block;
+   width: 0.75em;
+@@ -86,7 +88,7 @@ a[target="_blank"]:not([href^="http"]):not(:has(img)):not(.no-link-icon):not(.an
+   mask-repeat: no-repeat;
+ }
+ 
+-a[target="_blank"]:not([href^="http"]):not(:has(img)):not(.no-link-icon):not(.announce-link):hover::after {
++a[data-internal-link][target="_blank"]:not(:has(img)):not(.no-link-icon):not(.announce-link):hover::after {
+   opacity: 0.85;
+ }
+ 
+diff --git a/docs/en/docs/js/custom.js b/docs/en/docs/js/custom.js
+index be326d30297ac..311995d7cd98e 100644
+--- a/docs/en/docs/js/custom.js
++++ b/docs/en/docs/js/custom.js
+@@ -174,10 +174,38 @@ function handleSponsorImages() {
+         });
+ }
+ 
++function openLinksInNewTab() {
++    const siteUrl = document.querySelector("link[rel='canonical']")?.href
++        || window.location.origin;
++    const siteOrigin = new URL(siteUrl).origin;
++    document.querySelectorAll(".md-content a[href]").forEach(a => {
++        if (a.getAttribute("target") === "_self") return;
++        const href = a.getAttribute("href");
++        if (!href) return;
++        try {
++            const url = new URL(href, window.location.href);
++            // Skip same-page anchor links (only the hash differs)
++            if (url.origin === window.location.origin
++                && url.pathname === window.location.pathname
++                && url.search === window.location.search) return;
++            if (!a.hasAttribute("target")) {
++                a.setAttribute("target", "_blank");
++                a.setAttribute("rel", "noopener");
++            }
++            if (url.origin !== siteOrigin) {
++                a.dataset.externalLink = "";
++            } else {
++                a.dataset.internalLink = "";
++            }
++        } catch (_) {}
++    });
++}
++
+ async function main() {
+     setupTermynal();
+     showRandomAnnouncement('announce-left', 5000)
+     handleSponsorImages();
++    openLinksInNewTab();
+ }
+ document$.subscribe(() => {
+     main()

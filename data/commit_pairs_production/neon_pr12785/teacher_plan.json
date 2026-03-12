@@ -1,0 +1,143 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "api_design",
+      "recommendation": "Added DELETE endpoint at /lfc/prewarm for cancellation, maintaining RESTful semantics where DELETE represents stopping/canceling an operation",
+      "rationale": "DELETE is the appropriate HTTP verb for cancellation operations in REST APIs. This follows existing API patterns in the codebase and provides clear semantics to API consumers. The endpoint returns 202 Accepted to indicate the cancellation request was received and is being processed.",
+      "alternatives_considered": [
+        "POST /lfc/prewarm/cancel endpoint",
+        "PUT /lfc/prewarm with cancellation payload",
+        "PATCH operation to update prewarm state"
+      ],
+      "files_affected": [
+        "compute_tools/src/http/openapi_spec.yaml",
+        "compute_tools/src/http/routes/lfc.rs",
+        "compute_tools/src/http/server.rs"
+      ]
+    },
+    {
+      "dimension": "concurrency_control",
+      "recommendation": "Used tokio_util::sync::CancellationToken for cooperative cancellation across async tasks, with proper synchronization via Arc<Mutex<ComputeState>>",
+      "rationale": "CancellationToken provides lightweight, thread-safe cancellation primitives that work well with async Rust. It allows propagating cancellation signals through multiple async operations (HTTP request, decompression, database query) without requiring complex state management. The token is stored in ComputeState to ensure it's accessible across the compute node lifecycle.",
+      "alternatives_considered": [
+        "Atomic boolean flags with manual checking",
+        "Future cancellation via drop semantics",
+        "Channel-based cancellation signals"
+      ],
+      "files_affected": [
+        "compute_tools/src/compute.rs",
+        "compute_tools/src/compute_prewarm.rs"
+      ]
+    },
+    {
+      "dimension": "state_management",
+      "recommendation": "Added 'Cancelled' state to LfcPrewarmState enum and 'Skipped' state to LfcOffloadState enum, with proper state transitions in the prewarm_impl method",
+      "rationale": "Explicit state enumeration ensures all possible outcomes are handled and prevents invalid state transitions. The 'Cancelled' state distinguishes intentional cancellation from failures, while 'Skipped' for offload handles the case where LFC is not initialized. State transitions are atomic within the locked ComputeState to prevent race conditions.",
+      "alternatives_considered": [
+        "Using optional error fields to indicate cancellation",
+        "Separate cancellation flag alongside state",
+        "Removing cancelled operations from state entirely"
+      ],
+      "files_affected": [
+        "compute_tools/src/compute_prewarm.rs",
+        "libs/compute_api/src/responses.rs"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Implemented cooperative cancellation at multiple checkpoints in prewarm_impl using tokio::select! to poll cancellation token alongside async operations",
+      "rationale": "Cancellation must be checked at natural breakpoints in the prewarm pipeline: before HTTP request completion, during response body reading, during decompression, and before database query execution. Using select! ensures cancellation is responsive while allowing each operation to complete cleanly if not cancelled. PostgreSQL query cancellation uses the client's cancel_token() for proper query termination.",
+      "alternatives_considered": [
+        "Forced abort of async tasks",
+        "Timeout-based cancellation",
+        "Only checking cancellation at operation boundaries"
+      ],
+      "files_affected": [
+        "compute_tools/src/compute_prewarm.rs"
+      ]
+    },
+    {
+      "dimension": "testing",
+      "recommendation": "Added comprehensive integration test for cancellation flow, including thread-based concurrency to simulate real cancellation scenarios",
+      "rationale": "Testing cancellation requires simulating the timing window where prewarm is in progress. Using threading.Thread allows the test to start prewarm, wait briefly, then cancel. The test verifies cancellation state, then successful subsequent prewarm, ensuring the system recovers properly. Test helpers were updated to return results for better assertion capabilities.",
+      "alternatives_considered": [
+        "Mock-based unit tests only",
+        "Time-based synchronization without threads",
+        "Skipping cancellation tests due to timing complexity"
+      ],
+      "files_affected": [
+        "test_runner/regress/test_lfc_prewarm.py",
+        "test_runner/fixtures/endpoint/http.py"
+      ]
+    },
+    {
+      "dimension": "backward_compatibility",
+      "recommendation": "Maintained existing API responses and added new states as additional enum variants, ensuring existing clients continue to work",
+      "rationale": "Adding new enum variants (Cancelled, Skipped) is backward compatible as existing deserialization code will ignore unknown variants or treat them gracefully. API endpoints maintain their existing behavior while adding new functionality. Test updates maintain compatibility with existing test patterns.",
+      "alternatives_considered": [
+        "Versioning the API",
+        "Breaking changes with migration path",
+        "Separate cancellation API with different response format"
+      ],
+      "files_affected": [
+        "libs/compute_api/src/responses.rs",
+        "test_runner/fixtures/endpoint/http.py"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Implement LFC Prewarm Cancellation Core Logic",
+      "description": "Add cancellation token infrastructure to ComputeState, implement cooperative cancellation in prewarm pipeline, and add cancel_prewarm method",
+      "files_to_modify": [
+        "compute_tools/src/compute.rs",
+        "compute_tools/src/compute_prewarm.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-002",
+      "title": "Add Cancellation API Endpoint",
+      "description": "Implement DELETE /lfc/prewarm endpoint with proper routing, OpenAPI documentation, and HTTP handler",
+      "files_to_modify": [
+        "compute_tools/src/http/openapi_spec.yaml",
+        "compute_tools/src/http/routes/lfc.rs",
+        "compute_tools/src/http/server.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-003",
+      "title": "Update API Response Models",
+      "description": "Add 'Cancelled' state to LfcPrewarmState and 'Skipped' state to LfcOffloadState enums with proper serialization/display implementations",
+      "files_to_modify": [
+        "libs/compute_api/src/responses.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-004",
+      "title": "Update Test Infrastructure and Add Cancellation Tests",
+      "description": "Add cancellation methods to HTTP client fixture, update test helpers to return results, and implement comprehensive cancellation integration test",
+      "files_to_modify": [
+        "test_runner/fixtures/endpoint/http.py",
+        "test_runner/regress/test_lfc_prewarm.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    }
+  ],
+  "implementation_summary": "The implementation adds a cancellation mechanism for LFC (Local Function Compute) prewarm operations through a well-designed cooperative cancellation pattern. The core architecture decision was to use tokio_util::sync::CancellationToken stored in ComputeState, allowing cancellation signals to propagate through the async prewarm pipeline. This token is checked at multiple strategic points using tokio::select! to ensure responsive cancellation while allowing operations to complete cleanly if not cancelled.\n\nThe API design follows RESTful principles with a DELETE endpoint at /lfc/prewarm, returning 202 Accepted. State management was enhanced with explicit 'Cancelled' and 'Skipped' enum variants to clearly distinguish cancellation from failures and handle edge cases. The implementation carefully handles PostgreSQL query cancellation using the client's cancel_token() method, ensuring database resources are properly cleaned up.\n\nTesting was a key consideration, with a comprehensive integration test that uses threading to simulate the timing-sensitive nature of cancellation. The test infrastructure was updated to support cancellation and improve assertion capabilities. Throughout the changes, backward compatibility was maintained by adding new enum variants rather than modifying existing ones, ensuring existing API consumers continue to work correctly. The implementation integrates seamlessly with the existing compute node architecture, leveraging the existing state management and HTTP server infrastructure.",
+  "source_pr": "https://github.com/neondatabase/neon/pull/12785",
+  "before_sha": "4d3b28bd2eecaf38b8700281e17d027b7920fdc3",
+  "after_sha": "01c39f378e0a81037ead9108ea83feb146310de8",
+  "diff_stats": {
+    "additions": 208,
+    "deletions": 86,
+    "files_changed": 8
+  }
+}

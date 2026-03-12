@@ -1,0 +1,123 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "rule_implementation",
+      "recommendation": "Created a new TypeScript-specific lint rule in the nursery category rather than a mature category, indicating it's experimental and needs real-world testing before promotion",
+      "rationale": "The rule is placed in the 'nursery' category which is appropriate for new rules that need community feedback. This follows the established pattern of the codebase where new rules start in nursery before being promoted to recommended categories.",
+      "alternatives_considered": [
+        "Implementing as a core JavaScript rule",
+        "Placing directly in the 'typescript' recommended rules"
+      ],
+      "files_affected": [
+        "crates/oxc_linter/src/rules/typescript/no_unnecessary_type_conversion.rs"
+      ]
+    },
+    {
+      "dimension": "type_system_integration",
+      "recommendation": "Implemented the rule with type-aware analysis enabled by default, as indicated by the 'tsgolint' tag in the macro declaration",
+      "rationale": "The rule fundamentally requires type information to determine if a conversion is unnecessary. The 'tsgolint' tag ensures the rule only runs when TypeScript type checking is available, preventing false positives in JavaScript-only contexts.",
+      "alternatives_considered": [
+        "Creating a separate JavaScript version of the rule",
+        "Using runtime type checking instead of compile-time type analysis"
+      ],
+      "files_affected": [
+        "crates/oxc_linter/src/rules/typescript/no_unnecessary_type_conversion.rs"
+      ]
+    },
+    {
+      "dimension": "testing_strategy",
+      "recommendation": "Added comprehensive test fixtures demonstrating various unnecessary conversion patterns and updated snapshot tests to verify rule behavior",
+      "rationale": "The test file includes multiple conversion patterns (String(), .toString(), concatenation, Number(), !!boolean) to ensure the rule catches different syntactic forms of unnecessary conversions. Snapshot tests provide regression protection.",
+      "alternatives_considered": [
+        "Unit tests instead of fixture-based tests",
+        "Manual testing without snapshots"
+      ],
+      "files_affected": [
+        "apps/oxlint/fixtures/tsgolint/no-unnecessary-type-conversion.ts",
+        "apps/oxlint/src/snapshots/fixtures__tsgolint_--type-aware@oxlint.snap",
+        "apps/oxlint/src/snapshots/fixtures__tsgolint_--type-aware --silent@oxlint.snap",
+        "apps/oxlint/src/snapshots/fixtures__tsgolint_--type-aware -c config-test.json@oxlint.snap",
+        "apps/oxlint/src/snapshots/fixtures__tsgolint_--type-aware test.svelte@oxlint.snap",
+        "apps/oxlint/src/snapshots/fixtures__tsgolint_-c config-type-aware.json@oxlint.snap"
+      ]
+    },
+    {
+      "dimension": "build_system_integration",
+      "recommendation": "Updated generated code files to include the new rule in the linter's rule registry and runner system",
+      "rationale": "The oxc_linter uses code generation to maintain a registry of all rules. Adding the rule to rules_enum.rs and rule_runner_impls.rs ensures it's properly integrated into the linter's dispatch system and can be invoked during linting passes.",
+      "alternatives_considered": [
+        "Manual registration of rules",
+        "Dynamic plugin system"
+      ],
+      "files_affected": [
+        "crates/oxc_linter/src/generated/rule_runner_impls.rs",
+        "crates/oxc_linter/src/generated/rules_enum.rs"
+      ]
+    },
+    {
+      "dimension": "configuration_management",
+      "recommendation": "Added the rule to the default TypeScript configuration file to enable it for all TypeScript projects using oxlint",
+      "rationale": "By adding the rule to .oxlintrc.json in the tsgolint fixtures, it becomes part of the standard TypeScript rule set. This follows the convention of the codebase where useful TypeScript rules are enabled by default in TypeScript contexts.",
+      "alternatives_considered": [
+        "Making the rule opt-in only",
+        "Creating a separate configuration preset"
+      ],
+      "files_affected": [
+        "apps/oxlint/fixtures/tsgolint/.oxlintrc.json"
+      ]
+    },
+    {
+      "dimension": "rule_engine_design",
+      "recommendation": "Set RUN_FUNCTIONS to 'Unknown' in rule_runner_impls.rs, indicating this rule doesn't use the standard AST node type filtering optimization",
+      "rationale": "The rule likely needs to inspect multiple node types (CallExpression for String(), UnaryExpression for !!, BinaryExpression for +) and perform type analysis, so it can't be optimized with simple node type filtering. This is common for complex type-aware rules.",
+      "alternatives_considered": [
+        "Implementing node type filtering",
+        "Creating multiple specialized rules for different conversion patterns"
+      ],
+      "files_affected": [
+        "crates/oxc_linter/src/generated/rule_runner_impls.rs"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Implement TypeScript No Unnecessary Type Conversion Rule",
+      "description": "Create a new TypeScript-specific lint rule that detects redundant type conversions like String('already_string') or Number(123)",
+      "files_to_modify": [
+        "apps/oxlint/fixtures/tsgolint/.oxlintrc.json",
+        "crates/oxc_linter/src/generated/rule_runner_impls.rs",
+        "crates/oxc_linter/src/generated/rules_enum.rs",
+        "crates/oxc_linter/src/rules.rs"
+      ],
+      "files_to_create": [
+        "apps/oxlint/fixtures/tsgolint/no-unnecessary-type-conversion.ts",
+        "crates/oxc_linter/src/rules/typescript/no_unnecessary_type_conversion.rs"
+      ],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-002",
+      "title": "Update Test Infrastructure for New Rule",
+      "description": "Add test fixtures and update snapshot tests to verify the new rule works correctly with TypeScript type analysis",
+      "files_to_modify": [
+        "apps/oxlint/src/snapshots/fixtures__tsgolint_--type-aware@oxlint.snap",
+        "apps/oxlint/src/snapshots/fixtures__tsgolint_--type-aware --silent@oxlint.snap",
+        "apps/oxlint/src/snapshots/fixtures__tsgolint_--type-aware -c config-test.json@oxlint.snap",
+        "apps/oxlint/src/snapshots/fixtures__tsgolint_--type-aware test.svelte@oxlint.snap",
+        "apps/oxlint/src/snapshots/fixtures__tsgolint_-c config-type-aware.json@oxlint.snap"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation adds a new TypeScript-specific lint rule 'no-unnecessary-type-conversion' to the oxc linter. The rule is designed to detect redundant type conversions where developers explicitly convert values to types they already have, such as String('text') or Number(123).\n\nThe rule follows the established architecture pattern of the oxc project: it's implemented as a Rust module in the crates/oxc_linter crate, uses the declare_oxc_lint macro for boilerplate code generation, and is tagged with 'tsgolint' to indicate it requires TypeScript type information. The rule is placed in the 'nursery' category, which is appropriate for new experimental rules.\n\nKey integration points include updating the generated rule registry files (rules_enum.rs and rule_runner_impls.rs) to include the new rule in the linter's dispatch system, adding the rule to the default TypeScript configuration, and creating comprehensive test fixtures. The test file demonstrates various unnecessary conversion patterns including constructor calls, method calls, and operators. Snapshot tests were updated to verify the rule produces correct error messages with helpful explanations showing the existing type of the expression.\n\nThe implementation leverages the existing type analysis infrastructure of the project, ensuring the rule only triggers when it can accurately determine that a conversion doesn't change the type. This prevents false positives in JavaScript contexts or when type information is incomplete.",
+  "source_pr": "https://github.com/oxc-project/oxc/pull/19955",
+  "before_sha": "57bbbd367851fdd2c454125a3a2727796ef94b17",
+  "after_sha": "0337c6dc1f7b198a14f65e0c4ff5e0bc78066439",
+  "diff_stats": {
+    "additions": 149,
+    "deletions": 8,
+    "files_changed": 11
+  }
+}

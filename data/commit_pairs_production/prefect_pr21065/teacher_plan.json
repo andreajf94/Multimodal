@@ -1,0 +1,97 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "error_handling",
+      "recommendation": "Added retry logic with exponential backoff to the concurrency lease renewal function using the existing `retry_async_fn` decorator with max_attempts=3",
+      "rationale": "Transient network or server errors were causing permanent termination of flow runs. The existing `retry_async_fn` utility provides battle-tested retry logic with exponential backoff, preventing the need to reinvent this pattern. Wrapping only the renewal operation ensures other concurrency functions remain unaffected.",
+      "alternatives_considered": [
+        "Implementing custom retry logic directly in the renewal loop",
+        "Using a different retry library or pattern",
+        "Increasing lease duration instead of adding retries"
+      ],
+      "files_affected": [
+        "src/prefect/concurrency/_leases.py"
+      ]
+    },
+    {
+      "dimension": "logging",
+      "recommendation": "Enhanced error logging by adding `exc_info=(type(exc), exc, exc.__traceback__)` to all lease renewal failure log messages",
+      "rationale": "Previous error messages lacked diagnostic information, making troubleshooting difficult. Adding full exception info provides users with stack traces and context for debugging renewal failures while maintaining backward compatibility with existing log formats.",
+      "alternatives_considered": [
+        "Creating separate debug-level logs with exception details",
+        "Adding structured logging with exception metadata",
+        "Sending exceptions to a separate monitoring system"
+      ],
+      "files_affected": [
+        "src/prefect/concurrency/_leases.py"
+      ]
+    },
+    {
+      "dimension": "testing",
+      "recommendation": "Created comprehensive test suite covering normal operation, retry behavior, and failure scenarios for the lease renewal loop",
+      "rationale": "The retry logic introduces complexity that requires validation. Tests verify: 1) normal lease renewal works, 2) transient failures are retried successfully, 3) persistent failures propagate after max attempts. Mocking the client and sleep functions allows isolated testing without external dependencies.",
+      "alternatives_considered": [
+        "Adding tests to existing test files rather than creating new ones",
+        "Using integration tests instead of unit tests",
+        "Skipping tests due to time constraints"
+      ],
+      "files_affected": [
+        "tests/concurrency/test_leases.py"
+      ]
+    },
+    {
+      "dimension": "api_design",
+      "recommendation": "Maintained the existing function signatures and public API while improving internal resilience",
+      "rationale": "The changes are purely internal improvements - no external interfaces were modified. This ensures backward compatibility and minimizes impact on existing integrations. The retry logic is transparent to callers of the concurrency system.",
+      "alternatives_considered": [
+        "Adding new configuration parameters for retry behavior",
+        "Creating a new public API for lease management",
+        "Breaking changes to improve error handling semantics"
+      ],
+      "files_affected": [
+        "src/prefect/concurrency/_leases.py"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Add retry logic to concurrency lease renewal",
+      "description": "Implement retry mechanism with exponential backoff for transient failures during concurrency lease renewal to prevent unnecessary flow run termination",
+      "files_to_modify": [
+        "src/prefect/concurrency/_leases.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-002",
+      "title": "Enhance lease renewal error logging",
+      "description": "Add exception information to lease renewal failure logs to improve debugging and troubleshooting capabilities",
+      "files_to_modify": [
+        "src/prefect/concurrency/_leases.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-003",
+      "title": "Create test suite for lease renewal retry logic",
+      "description": "Develop comprehensive unit tests to validate retry behavior, success scenarios, and failure propagation in the lease renewal system",
+      "files_to_modify": [],
+      "files_to_create": [
+        "tests/concurrency/test_leases.py"
+      ],
+      "estimated_effort": "medium"
+    }
+  ],
+  "implementation_summary": "The implementation adds resilience to the concurrency lease renewal system by wrapping the renewal operation with retry logic. The key change is in `_lease_renewal_loop()` where the `renew_concurrency_lease()` call is now wrapped with `@retry_async_fn(max_attempts=3, operation_name='concurrency lease renewal')`. This leverages Prefect's existing retry infrastructure to handle transient failures with exponential backoff.\n\nThe retry logic is applied specifically to the renewal operation while maintaining the existing sleep interval (75% of lease duration) between successful renewals. This ensures that even with retries, the renewal frequency doesn't change under normal operation. The implementation also enhances error logging by adding `exc_info` parameters to all failure log messages, providing developers with stack traces for debugging.\n\nA new test file `tests/concurrency/test_leases.py` was created to validate the behavior. The tests cover three scenarios: normal operation with successful renewals, transient failures that recover after retry, and persistent failures that exhaust retry attempts. The tests use mocking to isolate the renewal logic from external dependencies, ensuring reliable test execution. The changes maintain full backward compatibility while significantly improving system resilience against network or server transient issues.",
+  "source_pr": "https://github.com/PrefectHQ/prefect/pull/21065",
+  "before_sha": "38ec354af7a280c168a13a53b94e1cddc4eb3230",
+  "after_sha": "e34bd69dc3f5689fb0c9676c96127f46bf9dabed",
+  "diff_stats": {
+    "additions": 80,
+    "deletions": 7,
+    "files_changed": 2
+  }
+}

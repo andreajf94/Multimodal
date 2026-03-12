@@ -1,0 +1,139 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "type_safety",
+      "recommendation": "Added DeepReadonly and DeepUnreadonly utility types to enforce immutability at the type level",
+      "rationale": "TypeScript's type system can prevent accidental mutations at compile time. By wrapping query plan structures in DeepReadonly, we ensure the compiler catches any attempts to modify these objects. DeepUnreadonly provides a safe escape hatch when we need to clone and modify.",
+      "alternatives_considered": [
+        "Using Object.freeze() at runtime (less type-safe, runtime overhead)",
+        "Creating immutable copies everywhere (more verbose, harder to maintain)",
+        "Using third-party immutable libraries (adds dependencies, learning curve)"
+      ],
+      "files_affected": [
+        "packages/client-engine-runtime/src/utils.ts"
+      ]
+    },
+    {
+      "dimension": "api_design",
+      "recommendation": "Made query plan parameters and fields readonly in public API signatures",
+      "rationale": "Public APIs should communicate intent clearly. Marking parameters as readonly signals to consumers that these values won't be modified, which is especially important for cached query plans that might be reused. This prevents subtle bugs where cached data gets mutated.",
+      "alternatives_considered": [
+        "Keeping mutable APIs (riskier, less clear intent)",
+        "Creating separate immutable interfaces (more complex API surface)"
+      ],
+      "files_affected": [
+        "packages/client-engine-runtime/src/events.ts",
+        "packages/client-engine-runtime/src/interpreter/in-memory-processing.ts"
+      ]
+    },
+    {
+      "dimension": "performance",
+      "recommendation": "Used klona library for cloning query plans only where modifications are necessary",
+      "rationale": "Deep cloning has performance costs, so we only clone when actually needed (before passing to executeRaw/queryRaw and before processing operations). klona is a well-optimized cloning library that handles complex structures efficiently. This balances safety with performance.",
+      "alternatives_considered": [
+        "Cloning everything (significant performance hit)",
+        "Using structuredClone (Node 17+, less control)",
+        "Manual cloning (error-prone, maintenance burden)"
+      ],
+      "files_affected": [
+        "packages/client-engine-runtime/src/interpreter/query-interpreter.ts"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Added comprehensive test for query plan cache mutation scenario",
+      "rationale": "The test reproduces a specific bug (issue #29254) where cached query plans with pagination would mutate and cause incorrect results. By testing this edge case across all database providers, we ensure the immutability fixes work correctly in real-world scenarios.",
+      "alternatives_considered": [
+        "No specific test (risk of regression)",
+        "Unit tests only (might miss integration issues)",
+        "Testing only specific providers (incomplete coverage)"
+      ],
+      "files_affected": [
+        "packages/client/tests/functional/issues/29254-query-plan-cache-mutation/_matrix.ts",
+        "packages/client/tests/functional/issues/29254-query-plan-cache-mutation/prisma/_schema.ts",
+        "packages/client/tests/functional/issues/29254-query-plan-cache-mutation/tests.ts"
+      ]
+    },
+    {
+      "dimension": "code_organization",
+      "recommendation": "Applied DeepReadonly consistently across query interpreter, rendering, and validation components",
+      "rationale": "Query plans flow through multiple components (interpreter, renderer, validator). Applying immutability consistently ensures safety throughout the entire pipeline. This prevents mutations at any stage, which is crucial for cached query plans.",
+      "alternatives_considered": [
+        "Partial application (leaves gaps for mutations)",
+        "Component-specific solutions (inconsistent, harder to reason about)"
+      ],
+      "files_affected": [
+        "packages/client-engine-runtime/src/interpreter/query-interpreter.ts",
+        "packages/client-engine-runtime/src/interpreter/render-query.ts",
+        "packages/client-engine-runtime/src/interpreter/validation.ts",
+        "packages/client-engine-runtime/src/tracing.ts"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Add type-level immutability utilities",
+      "description": "Create DeepReadonly and DeepUnreadonly type utilities to enforce immutability at compile time for query plan structures",
+      "files_to_modify": [
+        "packages/client-engine-runtime/src/utils.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-002",
+      "title": "Apply immutability to query interpreter",
+      "description": "Update QueryInterpreter to use DeepReadonly for query plans and clone objects before mutation using klona library",
+      "files_to_modify": [
+        "packages/client-engine-runtime/src/interpreter/query-interpreter.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-003",
+      "title": "Update rendering and validation components",
+      "description": "Apply DeepReadonly to query rendering and validation functions to ensure immutability throughout the execution pipeline",
+      "files_to_modify": [
+        "packages/client-engine-runtime/src/interpreter/render-query.ts",
+        "packages/client-engine-runtime/src/interpreter/validation.ts",
+        "packages/client-engine-runtime/src/tracing.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-004",
+      "title": "Fix public API signatures",
+      "description": "Update public API signatures to use readonly arrays for parameters and fields to communicate immutability intent",
+      "files_to_modify": [
+        "packages/client-engine-runtime/src/events.ts",
+        "packages/client-engine-runtime/src/interpreter/in-memory-processing.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-005",
+      "title": "Add test for query plan cache mutation bug",
+      "description": "Create comprehensive test that reproduces and verifies fix for pagination bug caused by mutated cached query plans",
+      "files_to_modify": [],
+      "files_to_create": [
+        "packages/client/tests/functional/issues/29254-query-plan-cache-mutation/_matrix.ts",
+        "packages/client/tests/functional/issues/29254-query-plan-cache-mutation/prisma/_schema.ts",
+        "packages/client/tests/functional/issues/29254-query-plan-cache-mutation/tests.ts"
+      ],
+      "estimated_effort": "medium"
+    }
+  ],
+  "implementation_summary": "The implementation addresses query plan immutability through a multi-layered approach that combines compile-time type safety with runtime cloning where necessary. At the type level, we introduced DeepReadonly and DeepUnreadonly utility types that recursively apply readonly modifiers to all properties of query plan structures. This ensures TypeScript catches mutation attempts during development.\n\nIn the query interpreter, we now accept query plans as DeepReadonly<QueryPlanNode> and clone objects before any modifications using the klona library. This is done strategically: before passing queries to executeRaw/queryRaw methods and before processing operations. The klona library provides efficient deep cloning without the overhead of cloning everything indiscriminately.\n\nThe changes propagate consistently through the query execution pipeline, affecting the rendering engine, validation system, and tracing components. Public API signatures were updated to use readonly arrays for parameters and fields, clearly communicating immutability intent to consumers.\n\nA comprehensive test was added to reproduce and verify the fix for issue #29254, where cached query plans with pagination would mutate and cause incorrect results. The test runs across all database providers using Prisma's test matrix system, ensuring the fix works in real-world scenarios. This layered approach balances safety, performance, and maintainability while preventing subtle bugs in query plan caching.",
+  "source_pr": "https://github.com/prisma/prisma/pull/29262",
+  "before_sha": "90d119c1dd9a69bf4ac2a53976c6dc52a11686eb",
+  "after_sha": "658697212823ac3aae4b84c206ec091106eda1ae",
+  "diff_stats": {
+    "additions": 141,
+    "deletions": 33,
+    "files_changed": 10
+  }
+}

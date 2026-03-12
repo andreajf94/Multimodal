@@ -1,0 +1,139 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "data_modeling",
+      "recommendation": "Created ListResponse class that subclasses list[T] to preserve raw response metadata for batch processing",
+      "rationale": "When users request list[T] response models, the library previously returned plain Python lists which couldn't carry the _raw_response attribute needed by create_with_completion(). By creating a custom list subclass, we maintain list semantics while adding metadata storage.",
+      "alternatives_considered": [
+        "Modifying existing list objects in-place",
+        "Returning a tuple of (list, raw_response)",
+        "Using a wrapper class instead of subclassing"
+      ],
+      "files_affected": [
+        "instructor/dsl/response_list.py",
+        "instructor/dsl/__init__.py"
+      ]
+    },
+    {
+      "dimension": "api_design",
+      "recommendation": "Updated response model preparation to treat list[T] similarly to Iterable[T] for consistency",
+      "rationale": "Users expect list[T] and Iterable[T] to work similarly for batch extraction scenarios. The prepare_response_model function now recognizes list origins and converts them to IterableModel instances, ensuring uniform processing.",
+      "alternatives_considered": [
+        "Keeping list and Iterable as separate code paths",
+        "Creating a separate ListModel class",
+        "Requiring users to explicitly use Iterable[T]"
+      ],
+      "files_affected": [
+        "instructor/utils/core.py"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Added try-except blocks around vertexai imports to prevent import crashes when dependencies are misconfigured",
+      "rationale": "Optional dependencies should be truly optional. If vertexai is installed but misconfigured (missing credentials, wrong version), the library should still import successfully for users not using that provider.",
+      "alternatives_considered": [
+        "Letting the import fail",
+        "Adding configuration flags",
+        "Moving vertexai to extra dependencies"
+      ],
+      "files_affected": [
+        "instructor/__init__.py",
+        "instructor/providers/__init__.py"
+      ]
+    },
+    {
+      "dimension": "testing",
+      "recommendation": "Created comprehensive tests for ListResponse behavior and list[T] response model processing",
+      "rationale": "The fix involves subtle type system interactions and slicing behavior. Tests verify that ListResponse preserves raw_response through slicing operations and that prepare_response_model correctly handles both list[T] and Iterable[T] types.",
+      "alternatives_considered": [
+        "Relying on existing tests",
+        "Adding minimal smoke tests",
+        "Testing only through integration tests"
+      ],
+      "files_affected": [
+        "tests/test_list_response.py"
+      ]
+    },
+    {
+      "dimension": "documentation",
+      "recommendation": "Updated raw_response documentation with list[T] examples and usage patterns",
+      "rationale": "Users need clear guidance on how to use create_with_completion() with list response models. The documentation now shows the exact API pattern and demonstrates that ListResponse behaves like a normal list while preserving raw response access.",
+      "alternatives_considered": [
+        "Adding separate documentation page",
+        "Only updating API reference",
+        "Relying on code comments"
+      ],
+      "files_affected": [
+        "docs/concepts/raw_response.md"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Implement ListResponse class for batch extraction",
+      "description": "Create a list subclass that preserves raw response metadata to fix AttributeError in create_with_completion() with list[T] models",
+      "files_to_modify": [
+        "instructor/dsl/__init__.py"
+      ],
+      "files_to_create": [
+        "instructor/dsl/response_list.py"
+      ],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-002",
+      "title": "Update response processing to handle list[T] types",
+      "description": "Modify prepare_response_model and process_response functions to treat list[T] similarly to Iterable[T] and wrap results in ListResponse",
+      "files_to_modify": [
+        "instructor/utils/core.py",
+        "instructor/processing/response.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-003",
+      "title": "Harden optional dependency imports",
+      "description": "Add error handling around vertexai imports to prevent import failures when optional dependencies are misconfigured",
+      "files_to_modify": [
+        "instructor/__init__.py",
+        "instructor/providers/__init__.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-004",
+      "title": "Add tests and documentation for list response handling",
+      "description": "Create tests for ListResponse behavior and update documentation with list[T] usage examples",
+      "files_to_modify": [
+        "docs/concepts/raw_response.md"
+      ],
+      "files_to_create": [
+        "tests/test_list_response.py"
+      ],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-005",
+      "title": "Update changelog and fix edge cases",
+      "description": "Document the fix in CHANGELOG and handle edge cases like Union types in IterableModel naming",
+      "files_to_modify": [
+        "CHANGELOG.md",
+        "instructor/dsl/iterable.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation addresses a critical bug where using list[T] response models with create_with_completion() would crash with AttributeError. The core solution introduces a ListResponse class that subclasses list[T] while preserving the raw_response metadata needed for batch processing. This maintains backward compatibility by ensuring ListResponse behaves exactly like a normal list for all standard operations while adding the get_raw_response() method.\n\nKey design decisions include treating list[T] and Iterable[T] uniformly in the type preparation system, which simplifies user experience and reduces cognitive load. The prepare_response_model function was updated to recognize list origins and convert them to IterableModel instances, ensuring consistent processing pipelines. This approach leverages existing IterableBase infrastructure rather than creating a parallel system.\n\nThe implementation also includes defensive programming improvements, particularly around optional dependencies. The vertexai import handling now uses try-except blocks to prevent import failures when the dependency is present but misconfigured, making the library more robust in production environments. The changes integrate seamlessly with the existing architecture, maintaining the library's provider-agnostic design while fixing a specific pain point for batch extraction workflows.",
+  "source_pr": "https://github.com/567-labs/instructor/pull/2011",
+  "before_sha": "3b692a7d66aefcdbc769150cc7413feb0a0403db",
+  "after_sha": "f8cd6d1aa7f05c00d1af46829ce58ddedc2fadc8",
+  "diff_stats": {
+    "additions": 220,
+    "deletions": 18,
+    "files_changed": 10
+  }
+}

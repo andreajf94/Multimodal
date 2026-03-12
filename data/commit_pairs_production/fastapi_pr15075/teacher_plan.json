@@ -1,0 +1,130 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "api_design",
+      "recommendation": "Changed the FastAPI CLI command examples from `fastapi dev main.py` to `fastapi dev` without the explicit file path parameter",
+      "rationale": "The FastAPI CLI now supports automatic app discovery and configuration via pyproject.toml entrypoints, making the explicit file path optional. This simplifies the user experience and encourages the use of modern Python packaging standards.",
+      "alternatives_considered": [
+        "Keep requiring explicit file paths for all commands",
+        "Create a separate command for pyproject.toml-based configuration",
+        "Use environment variables instead of pyproject.toml"
+      ],
+      "files_affected": [
+        "README.md",
+        "docs/en/docs/advanced/sub-applications.md",
+        "docs/en/docs/advanced/websockets.md",
+        "docs/en/docs/index.md",
+        "docs/en/docs/tutorial/bigger-applications.md",
+        "docs/en/docs/tutorial/first-steps.md",
+        "docs/en/docs/tutorial/index.md",
+        "docs/en/docs/tutorial/security/first-steps.md",
+        "docs/en/docs/tutorial/sql-databases.md"
+      ]
+    },
+    {
+      "dimension": "documentation",
+      "recommendation": "Added comprehensive documentation about pyproject.toml entrypoint configuration in the FastAPI CLI documentation and tutorial sections",
+      "rationale": "Modern Python projects increasingly use pyproject.toml for configuration. Documenting this approach helps users adopt best practices, enables better tool integration (like VS Code extension and FastAPI Cloud), and provides a cleaner project structure.",
+      "alternatives_considered": [
+        "Create a separate documentation page just for pyproject.toml configuration",
+        "Only mention it in the CLI documentation without tutorial integration",
+        "Rely on external documentation or blog posts"
+      ],
+      "files_affected": [
+        "docs/en/docs/fastapi-cli.md",
+        "docs/en/docs/tutorial/bigger-applications.md",
+        "docs/en/docs/tutorial/first-steps.md"
+      ]
+    },
+    {
+      "dimension": "user_experience",
+      "recommendation": "Removed the mandatory login step from FastAPI Cloud deployment instructions in README.md and index.md",
+      "rationale": "Simplifying the deployment flow reduces friction for new users. The login requirement can be handled implicitly or prompted when needed, rather than being a mandatory upfront step.",
+      "alternatives_considered": [
+        "Keep the login step as mandatory documentation",
+        "Move login instructions to a separate deployment guide",
+        "Add conditional logic in documentation based on user state"
+      ],
+      "files_affected": [
+        "README.md",
+        "docs/en/docs/index.md"
+      ]
+    },
+    {
+      "dimension": "tooling_integration",
+      "recommendation": "Emphasized that pyproject.toml entrypoints enable better integration with external tools like VS Code Extension and FastAPI Cloud",
+      "rationale": "By standardizing on pyproject.toml configuration, third-party tools can reliably discover and work with FastAPI applications without requiring users to manually specify paths each time. This creates a more cohesive ecosystem.",
+      "alternatives_considered": [
+        "Rely on convention-over-configuration without explicit documentation",
+        "Create tool-specific configuration files for each integration",
+        "Use a separate .fastapi config file instead of pyproject.toml"
+      ],
+      "files_affected": [
+        "docs/en/docs/fastapi-cli.md",
+        "docs/en/docs/tutorial/bigger-applications.md",
+        "docs/en/docs/tutorial/first-steps.md"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Update CLI command examples to support automatic app discovery",
+      "description": "Remove explicit file paths from `fastapi dev` command examples across all documentation to reflect the new automatic app discovery capability",
+      "files_to_modify": [
+        "README.md",
+        "docs/en/docs/advanced/sub-applications.md",
+        "docs/en/docs/advanced/websockets.md",
+        "docs/en/docs/index.md",
+        "docs/en/docs/tutorial/bigger-applications.md",
+        "docs/en/docs/tutorial/first-steps.md",
+        "docs/en/docs/tutorial/index.md",
+        "docs/en/docs/tutorial/security/first-steps.md",
+        "docs/en/docs/tutorial/sql-databases.md"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-002",
+      "title": "Add pyproject.toml entrypoint documentation to CLI guide",
+      "description": "Create comprehensive documentation explaining how to configure FastAPI applications using pyproject.toml entrypoints, including examples and integration benefits",
+      "files_to_modify": [
+        "docs/en/docs/fastapi-cli.md"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-003",
+      "title": "Integrate pyproject.toml documentation into tutorial sections",
+      "description": "Add pyproject.toml configuration examples to relevant tutorial pages where application structure is discussed",
+      "files_to_modify": [
+        "docs/en/docs/tutorial/bigger-applications.md",
+        "docs/en/docs/tutorial/first-steps.md"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-004",
+      "title": "Simplify FastAPI Cloud deployment flow in documentation",
+      "description": "Remove the mandatory login step from deployment instructions to streamline the user experience",
+      "files_to_modify": [
+        "README.md",
+        "docs/en/docs/index.md"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The changes implement a shift toward modern Python packaging standards by promoting the use of pyproject.toml for FastAPI application configuration. Instead of requiring users to explicitly pass file paths to the `fastapi dev` command, the CLI now supports automatic app discovery through pyproject.toml entrypoints. This approach follows the broader Python ecosystem trend where pyproject.toml serves as the central configuration file for Python projects.\n\nKey patterns used include: 1) Convention over configuration - assuming `main:app` as the default entrypoint, 2) Progressive disclosure - documenting both the simple path-based approach and the recommended pyproject.toml approach, and 3) Ecosystem integration - emphasizing how this configuration enables better tooling support. The changes are backward compatible, as users can still pass explicit file paths, but the documentation now guides them toward the more maintainable pyproject.toml approach.\n\nThe implementation integrates seamlessly with the existing codebase by updating documentation rather than modifying core framework code. This minimizes risk while providing immediate value to users. The documentation changes are consistent across multiple languages (though only English was shown in the diff) and maintain the same pedagogical approach used throughout FastAPI's tutorials - showing concrete examples, explaining the equivalent Python import statements, and highlighting practical benefits.",
+  "source_pr": "https://github.com/fastapi/fastapi/pull/15075",
+  "before_sha": "627c10a293dcc323255c8c42165fc86fb52cfc76",
+  "after_sha": "edaf23943c2959d1b59eec4f8322f534ddc21033",
+  "diff_stats": {
+    "additions": 159,
+    "deletions": 54,
+    "files_changed": 10
+  }
+}

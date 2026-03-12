@@ -1,0 +1,150 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "data_modeling",
+      "recommendation": "Added a new trait `PatchFieldKeyed<K>` for key-aware collection patching, implemented it for `Vec<T>` and `HashMap<K, V>`, and extended the existing `PatchField` trait to accept a `KeyMap` parameter",
+      "rationale": "The existing patching system treated collections as unkeyed lists, causing unnecessary notifications when items were reordered. By introducing key-based patching, we can identify moved items and generate minimal diffs. This required a new trait because keyed patching has fundamentally different semantics (needs key functions, path resolution per key) than unkeyed patching.",
+      "alternatives_considered": [
+        "Modify existing `PatchField` trait to handle both cases",
+        "Create separate patching system entirely",
+        "Use runtime type checking instead of traits"
+      ],
+      "files_affected": [
+        "reactive_stores/src/patch.rs"
+      ]
+    },
+    {
+      "dimension": "api_design",
+      "recommendation": "Added `path_at_key` method to `KeyedSubfield` to resolve paths for specific keys, and exposed the `key_fn` field as `pub(crate)`",
+      "rationale": "Keyed patching needs to know the exact store path for each keyed item to properly notify changes. The `path_at_key` method encapsulates the logic for mapping keys to store paths using the existing `KeyMap` infrastructure. Making `key_fn` accessible allows the patching system to use the same key function that was originally defined for the field.",
+      "alternatives_considered": [
+        "Pass key function as parameter to patch methods",
+        "Store key function in a separate registry",
+        "Use reflection to discover key functions"
+      ],
+      "files_affected": [
+        "reactive_stores/src/keyed.rs"
+      ]
+    },
+    {
+      "dimension": "performance_optimization",
+      "recommendation": "Used `IndexMap` for `Vec<T>` patching to preserve insertion order while allowing O(1) key lookups, and implemented efficient diffing algorithms that avoid O(n\u00b2) comparisons",
+      "rationale": "For `Vec<T>`, we need to detect both key matches and position changes. `IndexMap` provides the right balance: hash-based key lookup for efficiency while maintaining order for position comparison. The algorithm builds maps of old and new items by key, then iterates through new order to rebuild the collection, patching items in place when keys match.",
+      "alternatives_considered": [
+        "Naive O(n\u00b2) pairwise comparison",
+        "Sorting both collections before comparison",
+        "Using `BTreeMap` for ordered key storage"
+      ],
+      "files_affected": [
+        "reactive_stores/src/patch.rs"
+      ]
+    },
+    {
+      "dimension": "notification_strategy",
+      "recommendation": "Implemented dual notification strategy: keyed items notify only when their specific content changes, while collection-level changes notify all children when structure (add/remove/reorder) changes",
+      "rationale": "When items move positions but don't change content, only the collection itself should be notified (for re-rendering order), not the individual items. This prevents spurious updates to components that depend on specific keyed items. The implementation returns a `bool` indicating structural changes and handles notifications accordingly.",
+      "alternatives_considered": [
+        "Always notify all keyed items on any collection change",
+        "Complex diffing to determine exactly which notifications are needed",
+        "Deferring all notifications to a later batch"
+      ],
+      "files_affected": [
+        "reactive_stores/src/patch.rs",
+        "reactive_stores/src/keyed.rs"
+      ]
+    },
+    {
+      "dimension": "backward_compatibility",
+      "recommendation": "Added optional `keys` parameter to `PatchField::patch_field` with default `None` value, and maintained existing behavior for collections without key functions",
+      "rationale": "Existing code using unkeyed patching should continue to work unchanged. By making the `keys` parameter optional and defaulting to `None`, we avoid breaking changes. The macro code generates different implementations based on whether a field has a `#[store(keyed = ...)]` attribute.",
+      "alternatives_considered": [
+        "Create a completely separate API for keyed patching",
+        "Use feature flags to toggle behavior",
+        "Require migration of all existing code"
+      ],
+      "files_affected": [
+        "reactive_stores/src/patch.rs",
+        "reactive_stores_macro/src/lib.rs"
+      ]
+    },
+    {
+      "dimension": "dependency_management",
+      "recommendation": "Added `indexmap` dependency to `reactive_stores` for efficient ordered map operations needed by `Vec<T>` keyed patching",
+      "rationale": "`IndexMap` provides the specific combination of hash-based lookup and insertion order preservation that's essential for efficient `Vec<T>` patching. Regular `HashMap` doesn't preserve order, and `BTreeMap` has different performance characteristics. This is a focused dependency addition for a specific algorithmic need.",
+      "alternatives_considered": [
+        "Implement custom ordered hash map",
+        "Use `Vec` of key-value pairs with linear search",
+        "Require users to implement their own ordered collections"
+      ],
+      "files_affected": [
+        "Cargo.lock",
+        "Cargo.toml",
+        "reactive_stores/Cargo.toml"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Core Keyed Patching Infrastructure",
+      "description": "Implement the `PatchFieldKeyed<K>` trait and concrete implementations for `Vec<T>` and `HashMap<K, V>`, including the diffing algorithms and notification logic",
+      "files_to_modify": [
+        "reactive_stores/src/patch.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "large"
+    },
+    {
+      "id": "T-002",
+      "title": "KeyedSubfield Integration",
+      "description": "Extend `KeyedSubfield` with `path_at_key` method and custom `patch` implementation that uses keyed patching, plus expose `key_fn` for use by patching system",
+      "files_to_modify": [
+        "reactive_stores/src/keyed.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-003",
+      "title": "Macro Code Generation Updates",
+      "description": "Update the procedural macro to generate appropriate patching code based on whether fields have `#[store(keyed = ...)]` attributes, handling both keyed and unkeyed cases",
+      "files_to_modify": [
+        "reactive_stores_macro/src/lib.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-004",
+      "title": "Dependency and Version Management",
+      "description": "Add `indexmap` dependency, update version numbers for `reactive_stores_macro`, and ensure proper dependency resolution across the workspace",
+      "files_to_modify": [
+        "Cargo.lock",
+        "Cargo.toml",
+        "reactive_stores/Cargo.toml",
+        "reactive_stores_macro/Cargo.toml"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-005",
+      "title": "Comprehensive Testing",
+      "description": "Add integration test to verify that keyed field patching only notifies changed keys and handles reordering efficiently",
+      "files_to_modify": [
+        "reactive_stores/src/keyed.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation introduces key-aware patching for collection fields in reactive stores through a new `PatchFieldKeyed<K>` trait that complements the existing `PatchField` system. The core innovation is the ability to identify items across patches using key functions, enabling efficient updates when items are reordered rather than replaced.\n\nFor `Vec<T>`, the algorithm uses `IndexMap` to map keys to items while preserving order, allowing O(1) key lookups while detecting position changes. When patching, it builds maps of old and new items by key, then iterates through the new order, reusing existing items when keys match and patching them in place. This generates minimal diffs: moved items trigger collection-level notifications but not individual item notifications unless their content actually changed.\n\nThe system integrates seamlessly with the existing reactive infrastructure. `KeyedSubfield` gets a new `path_at_key` method to resolve store paths for specific keys, and its `patch` method now uses the keyed patching logic. The procedural macro generates different code based on whether fields have keyed attributes, maintaining backward compatibility for unkeyed collections.\n\nKey design decisions include: using traits for extensibility to future collection types, optional `keys` parameter to avoid breaking changes, efficient notification strategies that prevent spurious updates, and comprehensive testing to ensure correctness. The addition of `indexmap` as a dependency is a focused choice to enable the specific algorithmic needs of `Vec<T>` patching without implementing custom collection types.",
+  "source_pr": "https://github.com/leptos-rs/leptos/pull/4544",
+  "before_sha": "61205eaefe98ddd9c28c40c2ae8c844e4d13e43a",
+  "after_sha": "35af19cbcd9aca194418ff1041ac80ae1cca7b6e",
+  "diff_stats": {
+    "additions": 461,
+    "deletions": 10,
+    "files_changed": 7
+  }
+}

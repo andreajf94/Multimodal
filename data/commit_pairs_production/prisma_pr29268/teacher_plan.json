@@ -1,0 +1,91 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "data_modeling",
+      "recommendation": "Replace JSON.stringify with safeJsonStringify for Json field serialization to handle Uint8Array values nested in objects and arrays",
+      "rationale": "JSON.stringify doesn't properly serialize Uint8Array values when they appear nested within objects or arrays - it converts them to objects with numeric keys instead of base64 strings. This breaks round-trip consistency because the database expects base64-encoded strings for binary data in Json fields. The safeJsonStringify function from @prisma/client-engine-runtime already handles ArrayBuffer.isView values correctly by converting them to base64 strings.",
+      "alternatives_considered": [
+        "Creating a custom JSON.stringify replacer function",
+        "Implementing a recursive traversal function to convert Uint8Array values before stringification",
+        "Modifying the deserializeJsonObject function to handle serialization"
+      ],
+      "files_affected": [
+        "packages/client/src/runtime/core/engines/client/parameterization/parameterize.ts"
+      ]
+    },
+    {
+      "dimension": "testing",
+      "recommendation": "Create comprehensive test suite for Uint8Array serialization in Json fields across all database providers except SQL Server",
+      "rationale": "SQL Server doesn't support native Json fields, so it's excluded from testing. The test matrix uses the existing defineMatrix utility to run tests against all other providers (PostgreSQL, MySQL, SQLite, etc.). Tests cover four scenarios: Uint8Array nested in objects, nested in arrays, as direct values, and deeply nested structures to ensure the fix works at all levels of nesting.",
+      "alternatives_considered": [
+        "Adding tests to existing test files instead of creating new ones",
+        "Testing only with a single database provider",
+        "Creating provider-specific test files"
+      ],
+      "files_affected": [
+        "packages/client/tests/functional/issues/29267-uint8array-in-json/_matrix.ts",
+        "packages/client/tests/functional/issues/29267-uint8array-in-json/prisma/_schema.ts",
+        "packages/client/tests/functional/issues/29267-uint8array-in-json/tests.ts"
+      ]
+    },
+    {
+      "dimension": "api_design",
+      "recommendation": "Maintain backward compatibility by leveraging existing safeJsonStringify function from the engine runtime",
+      "rationale": "The safeJsonStringify function already exists in the @prisma/client-engine-runtime package and is designed to handle binary data serialization. By using this existing function instead of creating a new implementation, we ensure consistency with other parts of the codebase and reduce maintenance overhead. This also means the fix automatically benefits from any future improvements to safeJsonStringify.",
+      "alternatives_considered": [
+        "Implementing a new serialization function specific to the parameterization module",
+        "Modifying JSON.stringify globally with a custom replacer",
+        "Creating a separate utility function in the client package"
+      ],
+      "files_affected": [
+        "packages/client/src/runtime/core/engines/client/parameterization/parameterize.ts"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Use type assertions (as any) in tests to bypass TypeScript type checking for Json field values",
+      "rationale": "The Prisma Client's TypeScript types don't allow Uint8Array values to be assigned to Json fields directly, since Json fields are typed as Prisma.JsonValue. The tests use 'as any' assertions to work around this type safety, which is appropriate for testing the runtime behavior without requiring changes to the public TypeScript API. This keeps the fix focused on the runtime serialization issue.",
+      "alternatives_considered": [
+        "Updating the Prisma.JsonValue type definition to include Uint8Array",
+        "Creating a separate test client with relaxed types",
+        "Using a different testing approach that doesn't require type assertions"
+      ],
+      "files_affected": [
+        "packages/client/tests/functional/issues/29267-uint8array-in-json/tests.ts"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Fix Uint8Array serialization in nested JSON fields",
+      "description": "Update parameterization logic to properly serialize Uint8Array values when they appear nested within objects or arrays in Json fields, ensuring they are converted to base64 strings instead of numeric-keyed objects",
+      "files_to_modify": [
+        "packages/client/src/runtime/core/engines/client/parameterization/parameterize.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-002",
+      "title": "Add test coverage for Uint8Array in JSON fields",
+      "description": "Create comprehensive test suite to verify Uint8Array serialization works correctly in all nesting scenarios (objects, arrays, direct values, deep nesting) across all supported database providers except SQL Server",
+      "files_to_modify": [],
+      "files_to_create": [
+        "packages/client/tests/functional/issues/29267-uint8array-in-json/_matrix.ts",
+        "packages/client/tests/functional/issues/29267-uint8array-in-json/prisma/_schema.ts",
+        "packages/client/tests/functional/issues/29267-uint8array-in-json/tests.ts"
+      ],
+      "estimated_effort": "medium"
+    }
+  ],
+  "implementation_summary": "The implementation addresses a serialization bug where Uint8Array values nested within objects or arrays in Json fields were incorrectly converted to objects with numeric keys instead of base64 strings. The core fix is minimal and elegant: replacing JSON.stringify with safeJsonStringify in two locations within the parameterization module. This leverages an existing function from the engine runtime that already handles binary data serialization correctly.\n\nThe safeJsonStringify function properly detects ArrayBuffer.isView values (including Uint8Array) and converts them to base64 strings, maintaining round-trip consistency with the database. This approach ensures that binary data stored in Json fields can be correctly serialized and deserialized regardless of its nesting depth or structure.\n\nComplementing the fix is a comprehensive test suite that validates the behavior across all database providers that support Json fields (excluding SQL Server). The tests follow the established patterns in the Prisma monorepo, using the matrix testing system to run against multiple providers. The tests cover the key scenarios: Uint8Array nested in objects, nested in arrays, as direct values, and deeply nested structures. This ensures the fix works consistently across the entire Prisma ecosystem while maintaining backward compatibility with existing functionality.",
+  "source_pr": "https://github.com/prisma/prisma/pull/29268",
+  "before_sha": "658697212823ac3aae4b84c206ec091106eda1ae",
+  "after_sha": "455853d0ddae89da28ff9f9fa65c5ed0a803c908",
+  "diff_stats": {
+    "additions": 94,
+    "deletions": 3,
+    "files_changed": 4
+  }
+}

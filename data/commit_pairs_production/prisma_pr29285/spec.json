@@ -1,0 +1,12 @@
+{
+  "feature_name": "MySQL Binary Protocol Support",
+  "description": "Modify the MariaDB adapter to use the MySQL binary protocol for all queries when possible to prevent precision loss with large numbers. Since the binary protocol doesn't support transactions, implement phantom queries for transaction operations to maintain compatibility.",
+  "functional_requirements": [
+    "Update the MariaDB adapter to default to the binary protocol for query execution to ensure numeric precision is preserved",
+    "Implement phantom query handling for transaction operations (commit, rollback, savepoints) since the binary protocol doesn't support transactions",
+    "Add comprehensive end-to-end tests that validate decimal precision preservation with MySQL/MariaDB databases",
+    "Update existing test assertions to accommodate Float32 representation variance when using the binary protocol"
+  ],
+  "project_name": "prisma",
+  "source_pr": "https://github.com/prisma/prisma/pull/29285"
+}

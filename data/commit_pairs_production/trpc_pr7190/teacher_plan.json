@@ -1,0 +1,69 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "api_design",
+      "recommendation": "Changed the second parameter of infiniteQueryOptions overload from optional to required by removing the '?' from 'opts?: UndefinedTRPCInfiniteQueryOptionsIn' to 'opts: UndefinedTRPCInfiniteQueryOptionsIn'",
+      "rationale": "This fixes TypeScript's overload resolution to correctly select the appropriate method signature. When the second parameter was optional, TypeScript could incorrectly match the overload that supports skipToken, even when getNextPageParam was missing. Making it required forces TypeScript to properly validate that getNextPageParam is provided, which is mandatory for infinite queries in TanStack Query.",
+      "alternatives_considered": [
+        "Adding explicit type guards or conditional types to distinguish between overloads",
+        "Creating separate functions for skipToken and non-skipToken cases",
+        "Using different method names for the two use cases"
+      ],
+      "files_affected": [
+        "packages/tanstack-react-query/src/internals/infiniteQueryOptions.ts"
+      ]
+    },
+    {
+      "dimension": "testing",
+      "recommendation": "Added comprehensive TypeScript tests to verify the fix prevents skipToken type errors when getNextPageParam is missing, and to ensure proper error messages for incorrect usage",
+      "rationale": "The tests validate that: 1) getNextPageParam is now properly required, 2) TypeScript correctly errors when it's missing, 3) skipToken compatibility works correctly with the required getNextPageParam, and 4) suspense queries properly reject skipToken. This prevents regression and documents the expected behavior.",
+      "alternatives_considered": [
+        "Only fixing the type definition without adding tests",
+        "Adding runtime validation instead of TypeScript checks",
+        "Creating separate test files for skipToken behavior"
+      ],
+      "files_affected": [
+        "packages/tanstack-react-query/test/infiniteQueryOptions.test.tsx",
+        "packages/tanstack-react-query/test/queryOptions.test.tsx",
+        "packages/tanstack-react-query/test/skipToken.test.tsx"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Updated existing skipToken test to include required getNextPageParam when calling infiniteQueryOptions with skipToken",
+      "rationale": "Even when using skipToken to disable a query, infinite queries still require getNextPageParam because it's part of the query's type definition. The test needed to be updated to reflect the correct API usage after the type fix.",
+      "alternatives_considered": [
+        "Making getNextPageParam optional when using skipToken",
+        "Creating a special case for skipToken in infinite queries",
+        "Removing skipToken support for infinite queries entirely"
+      ],
+      "files_affected": [
+        "packages/tanstack-react-query/test/skipToken.test.tsx"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Fix TypeScript overload resolution for infiniteQueryOptions",
+      "description": "Update TypeScript definitions to properly resolve method overloads and ensure getNextPageParam is required when not using skipToken",
+      "files_to_modify": [
+        "packages/tanstack-react-query/src/internals/infiniteQueryOptions.ts",
+        "packages/tanstack-react-query/test/infiniteQueryOptions.test.tsx",
+        "packages/tanstack-react-query/test/queryOptions.test.tsx",
+        "packages/tanstack-react-query/test/skipToken.test.tsx"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The changes fix a TypeScript overload resolution issue in the tRPC TanStack React Query integration. The core problem was that TypeScript incorrectly selected an overload for infiniteQueryOptions that allowed skipToken compatibility, even when getNextPageParam was missing. This happened because the second parameter was marked as optional ('opts?:'), causing TypeScript to match the wrong overload.\n\nThe fix changes the type definition to make the second parameter required ('opts:'), which forces TypeScript to properly validate that getNextPageParam is provided. This aligns with TanStack Query's requirement that infinite queries must have a getNextPageParam function. The change maintains backward compatibility for correct usage while fixing the type errors for incorrect usage.\n\nComprehensive tests were added to verify the fix: 1) Tests ensure TypeScript correctly errors when getNextPageParam is missing, 2) Tests verify skipToken still works when getNextPageParam is provided, and 3) Tests confirm that suspense queries properly reject skipToken. The existing skipToken test was also updated to include the required getNextPageParam parameter. This approach ensures type safety while maintaining the existing API surface and compatibility with TanStack Query's infinite query patterns.",
+  "source_pr": "https://github.com/trpc/trpc/pull/7190",
+  "before_sha": "6c2e9b3d1870433c6b24c1718799960c7d1f7036",
+  "after_sha": "f489af012c77c29ffef4ae14f5edd8186f42b460",
+  "diff_stats": {
+    "additions": 122,
+    "deletions": 3,
+    "files_changed": 4
+  }
+}

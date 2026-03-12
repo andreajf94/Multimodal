@@ -1,0 +1,105 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "error_handling",
+      "recommendation": "Modified the reask_genai_tools function to preserve thought_signature and other metadata during validation retries by replaying the original model content and appending tool responses with validation errors.",
+      "rationale": "The original implementation discarded the model's original content when validation failed, which meant metadata like thought_signature was lost. This is critical for GenAI's tool calling mode where thought_signature provides cryptographic verification of the model's reasoning process. By preserving and replaying the original content, we maintain the complete conversation history including metadata.",
+      "alternatives_considered": [
+        "Creating a new response from scratch without preserving metadata",
+        "Extracting only the thought_signature and attaching it to a new response",
+        "Modifying the existing response in-place rather than creating a new one"
+      ],
+      "files_affected": [
+        "instructor/providers/gemini/utils.py"
+      ]
+    },
+    {
+      "dimension": "api_design",
+      "recommendation": "Implemented robust content handling that works with various response structures, including cases where function calls aren't the first part of the response or are absent entirely.",
+      "rationale": "GenAI responses can have complex structures with multiple parts (text, function calls, etc.). The implementation needed to handle edge cases: 1) When function calls appear after text content, 2) When there's no function call at all, 3) When the response is None. This ensures the reask mechanism works reliably across different GenAI response patterns.",
+      "alternatives_considered": [
+        "Assuming function calls are always the first part",
+        "Failing when function calls aren't found",
+        "Using simpler but less robust parsing logic"
+      ],
+      "files_affected": [
+        "instructor/providers/gemini/utils.py"
+      ]
+    },
+    {
+      "dimension": "testing",
+      "recommendation": "Added comprehensive unit tests for the GenAI reask functionality, including both isolated unit tests and end-to-end integration tests.",
+      "rationale": "The reask mechanism is complex and critical for validation workflows. Unit tests verify the core logic handles edge cases correctly, while integration tests ensure the entire flow works end-to-end with actual LLM calls. This prevents regressions in a feature that's essential for reliable structured output generation.",
+      "alternatives_considered": [
+        "Only adding unit tests without integration tests",
+        "Testing only the happy path",
+        "Relying on existing tests without adding new ones"
+      ],
+      "files_affected": [
+        "tests/llm/test_genai/test_reask.py",
+        "tests/test_genai_reask.py"
+      ]
+    },
+    {
+      "dimension": "code_maintenance",
+      "recommendation": "Cleaned up unused imports in several script files to maintain code quality and reduce technical debt.",
+      "rationale": "Unused imports can cause confusion, increase maintenance burden, and sometimes lead to circular import issues. Regular cleanup of imports keeps the codebase clean and follows Python best practices. This was likely done as part of the broader change to ensure code quality.",
+      "alternatives_considered": [
+        "Leaving unused imports in place",
+        "Using automated tools like ruff or isort",
+        "Creating a separate cleanup PR"
+      ],
+      "files_affected": [
+        "scripts/audit_patterns.py",
+        "scripts/check_links.py",
+        "scripts/fix_old_patterns.py",
+        "scripts/validate_meta_tags.py"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Preserve thought_signature in GenAI validation retries",
+      "description": "Update the reask_genai_tools function to preserve metadata (especially thought_signature) when validation fails, ensuring the complete conversation history including cryptographic signatures is maintained across retry attempts.",
+      "files_to_modify": [
+        "instructor/providers/gemini/utils.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-002",
+      "title": "Add comprehensive tests for GenAI reask functionality",
+      "description": "Create unit and integration tests to verify the reask mechanism works correctly, including edge cases and preservation of thought_signature metadata.",
+      "files_to_modify": [],
+      "files_to_create": [
+        "tests/llm/test_genai/test_reask.py",
+        "tests/test_genai_reask.py"
+      ],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-003",
+      "title": "Clean up unused imports in utility scripts",
+      "description": "Remove unused imports from various script files to maintain code quality and reduce technical debt.",
+      "files_to_modify": [
+        "scripts/audit_patterns.py",
+        "scripts/check_links.py",
+        "scripts/fix_old_patterns.py",
+        "scripts/validate_meta_tags.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation addresses a critical issue in the GenAI provider's validation retry mechanism where metadata like thought_signature was being discarded during reask attempts. The core change is in the reask_genai_tools function in instructor/providers/gemini/utils.py, which now carefully preserves the original model content (including thought_signature) and appends tool responses containing validation errors, rather than creating entirely new content.\n\nThe solution follows a defensive programming approach with robust handling of edge cases: it checks for None responses, handles cases where function calls aren't present or aren't the first part of the response, and properly manages the contents list in kwargs. The implementation maintains backward compatibility while fixing the metadata preservation issue.\n\nComplementing the core fix, comprehensive tests were added to verify the functionality works correctly. Two test files were created: one for end-to-end integration testing with actual LLM calls, and another for unit testing the reask_genai_tools function directly with mocked responses. Additionally, several utility scripts had unused imports cleaned up as part of general code maintenance. This holistic approach ensures the feature works reliably while maintaining code quality standards across the codebase.",
+  "source_pr": "https://github.com/567-labs/instructor/pull/2001",
+  "before_sha": "3fe0c7664bd19a7b6c3305ed1ebd5afb3cc0c1ed",
+  "after_sha": "61c2663b54d49ce57f6217694dcd74dffb1837f8",
+  "diff_stats": {
+    "additions": 182,
+    "deletions": 17,
+    "files_changed": 7
+  }
+}

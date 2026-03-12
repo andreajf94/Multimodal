@@ -1,0 +1,75 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "data_modeling",
+      "recommendation": "Changed join table preference key generation to use parent metadata for isolation instead of collection slug alone",
+      "rationale": "The original implementation used the collection slug as the preference key for all table states, causing join tables to share preferences with their related collection's list view. This created conflicts where configuring default columns for a join table would overwrite the main collection's list view preferences. By scoping join table preferences to the parent document field path, we ensure complete isolation between different table contexts.",
+      "alternatives_considered": [
+        "Adding a separate preference namespace for join tables",
+        "Using a composite key combining collection slug and field path",
+        "Storing join preferences as nested objects within collection preferences"
+      ],
+      "files_affected": [
+        "packages/ui/src/utilities/buildTableState.ts"
+      ]
+    },
+    {
+      "dimension": "api_design",
+      "recommendation": "Modified the Join field component to properly pass parent metadata for all join types, including monomorphic joins",
+      "rationale": "The original condition `Array.isArray(collection)` was insufficient for determining when to pass parent metadata. Some join fields (like monomorphic joins) don't have an array collection but still need parent metadata for preference isolation. Changing to `typeof docID !== 'undefined'` ensures all join fields that have a parent document context pass the necessary metadata for proper preference scoping.",
+      "alternatives_considered": [
+        "Adding a new prop to explicitly indicate join context",
+        "Creating separate components for join vs list view tables",
+        "Using a more complex type guard to detect join contexts"
+      ],
+      "files_affected": [
+        "packages/ui/src/fields/Join/index.tsx"
+      ]
+    },
+    {
+      "dimension": "testing",
+      "recommendation": "Added end-to-end test to verify join table column preferences don't affect related collection list views",
+      "rationale": "The test validates the core requirement by simulating the exact user scenario: configuring a join table with default columns should not overwrite the related collection's list view columns. This provides regression protection and documents the expected behavior through executable specifications.",
+      "alternatives_considered": [
+        "Unit tests for individual utility functions",
+        "Integration tests at the component level",
+        "Manual testing documentation only"
+      ],
+      "files_affected": [
+        "test/joins/e2e.spec.ts"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Fix join table preference isolation",
+      "description": "Implement preference key isolation for join relationship tables to prevent them from overwriting main collection list view preferences",
+      "files_to_modify": [
+        "packages/ui/src/fields/Join/index.tsx",
+        "packages/ui/src/utilities/buildTableState.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-002",
+      "title": "Add end-to-end test for join table preference isolation",
+      "description": "Create test that verifies join table column preferences are isolated from related collection list view preferences",
+      "files_to_modify": [
+        "test/joins/e2e.spec.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation addresses a critical issue where join relationship tables were sharing preference storage keys with their related collection's list views, causing configuration conflicts. The solution involves two key changes: first, modifying the Join field component to properly pass parent metadata for all join types (including monomorphic joins) by changing the condition from checking if the collection is an array to checking if a document ID exists. This ensures the necessary context is available for preference isolation.\n\nSecond, the buildTableState utility was updated to generate preference keys that incorporate the parent collection slug and join field path when parent metadata is present, creating a unique namespace for join table preferences. This scoping mechanism ensures that configuring default columns for a join table doesn't affect the main collection's list view. The preference key format changes from simply `collection-${collectionSlug}` to `${parent.collectionSlug}-${parent.joinPath}` for join contexts.\n\nAn end-to-end test was added to validate the fix by simulating the exact user scenario: navigating to a join table, verifying it shows default columns, then confirming the related collection's list view remains unaffected. This test provides regression protection and documents the expected behavior. The changes maintain backward compatibility while fixing the isolation issue, ensuring join tables and list views can have independent column configurations.",
+  "source_pr": "https://github.com/payloadcms/payload/pull/15846",
+  "before_sha": "70099b7cfae40aa02403c18b9a28e046d47fb185",
+  "after_sha": "649f1178135e1110c367bc370661a4c52f56f552",
+  "diff_stats": {
+    "additions": 24,
+    "deletions": 7,
+    "files_changed": 3
+  }
+}

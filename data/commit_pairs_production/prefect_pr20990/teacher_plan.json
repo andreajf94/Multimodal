@@ -1,0 +1,97 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "logging_and_observability",
+      "recommendation": "Replaced flow run IDs with flow run names in all worker log messages to improve human readability and debugging experience",
+      "rationale": "Flow run names are more meaningful to users than UUIDs when scanning logs. This change makes it easier for operators to quickly identify which specific flow run is being referenced in log messages without needing to cross-reference IDs with a database or UI.",
+      "alternatives_considered": [
+        "Keeping IDs for machine readability",
+        "Including both name and ID in logs",
+        "Using a configurable logging format"
+      ],
+      "files_affected": [
+        "src/prefect/workers/base.py"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Standardized error message format to 'Failed to submit flow run to infrastructure: {type(exc).__name__}: {exc}' and separated exit code resolution hints into distinct INFO-level log messages",
+      "rationale": "The new format provides clearer error categorization by including the exception type, while separating resolution hints into INFO logs prevents error messages from becoming overly verbose. This separation allows users to see the error clearly while still getting helpful debugging information at a different log level.",
+      "alternatives_considered": [
+        "Keeping the old multi-line error format",
+        "Embedding resolution hints in error messages",
+        "Creating a separate logging channel for resolution hints"
+      ],
+      "files_affected": [
+        "src/prefect/workers/base.py"
+      ]
+    },
+    {
+      "dimension": "user_experience",
+      "recommendation": "Updated monitoring error message to clearly indicate that the flow run's final state will be determined by the execution environment when connection is lost",
+      "rationale": "The previous message was ambiguous about whether the flow run would be marked as failed. The new message provides clearer expectations about system behavior, reducing confusion for users when monitoring connections are interrupted.",
+      "alternatives_considered": [
+        "Keeping the original ambiguous message",
+        "Creating different messages for different types of monitoring failures",
+        "Adding more technical details about the connection loss"
+      ],
+      "files_affected": [
+        "src/prefect/workers/base.py"
+      ]
+    },
+    {
+      "dimension": "testing",
+      "recommendation": "Added comprehensive tests to verify the new logging behavior, including flow run name usage, resolution hint separation, and monitoring error messages",
+      "rationale": "The tests ensure that the logging improvements work correctly across different scenarios (submission failures, non-zero exit codes, monitoring errors) and prevent regression. They validate both the content and log level of the new messages.",
+      "alternatives_considered": [
+        "Relying on existing tests without adding new ones",
+        "Only testing the happy path",
+        "Using integration tests instead of unit tests"
+      ],
+      "files_affected": [
+        "tests/workers/test_base_worker.py"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Improve worker lifecycle logging readability",
+      "description": "Replace flow run IDs with names in all worker log messages and update submission success message to be more descriptive",
+      "files_to_modify": [
+        "src/prefect/workers/base.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-002",
+      "title": "Standardize error message formats and separate resolution hints",
+      "description": "Update error message formats to include exception types, separate exit code resolution hints into INFO logs, and improve monitoring error clarity",
+      "files_to_modify": [
+        "src/prefect/workers/base.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-003",
+      "title": "Add comprehensive tests for new logging behavior",
+      "description": "Create tests to verify flow run name usage in logs, resolution hint separation, and monitoring error message updates",
+      "files_to_modify": [
+        "tests/workers/test_base_worker.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    }
+  ],
+  "implementation_summary": "The implementation focuses on improving the user experience of worker lifecycle logging through several coordinated changes. First, flow run IDs were replaced with flow run names throughout the worker's logging code, making logs more readable and actionable for human operators. This change affects both submission and monitoring code paths, ensuring consistency across the worker's operations.\n\nSecond, error message formats were standardized to provide clearer information. The submission error message now includes the exception type alongside the error details, while the monitoring error message was rewritten to clearly indicate that the flow run's final state will be determined by the execution environment when connections are lost. This reduces ambiguity and helps users understand system behavior during failures.\n\nThird, exit code resolution hints were separated from error messages and emitted as distinct INFO-level logs. This architectural decision improves log clarity by preventing error messages from becoming overly verbose while still providing helpful debugging information at an appropriate log level. The implementation checks if a resolution exists before logging it, maintaining backward compatibility.\n\nThe changes integrate seamlessly with the existing codebase by following established patterns in the worker infrastructure. The testing strategy is comprehensive, covering the new logging behaviors across different failure scenarios while maintaining existing functionality. This approach balances improved user experience with minimal disruption to the existing system architecture.",
+  "source_pr": "https://github.com/PrefectHQ/prefect/pull/20990",
+  "before_sha": "a66aa9d5c27513a23d523a7a304105428646ff71",
+  "after_sha": "d1d0f4d663f4b421fccaa78fda0cd1fd70da7f0f",
+  "diff_stats": {
+    "additions": 127,
+    "deletions": 11,
+    "files_changed": 2
+  }
+}

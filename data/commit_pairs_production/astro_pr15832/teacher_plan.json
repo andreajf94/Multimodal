@@ -1,0 +1,87 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "error_handling",
+      "recommendation": "Updated regex patterns to handle bare return statements (e.g., `return;`) by replacing them with valid throw statements (`throw 0;`) instead of invalid syntax (`throw ;`)",
+      "rationale": "Bare return statements were producing invalid JavaScript when transformed to throw statements. The original regex `\\breturn\\b` would match `return;` and replace it with `throw ;`, which is syntactically invalid. The fix ensures valid JavaScript output while maintaining the semantic intent of preventing top-level returns.",
+      "alternatives_considered": [
+        "Using a single regex with lookahead for semicolons",
+        "Creating a more sophisticated AST-based transformation instead of regex",
+        "Leaving bare returns as-is and handling them differently in the error reporting"
+      ],
+      "files_affected": [
+        "packages/astro/src/vite-plugin-astro/compile.ts",
+        "packages/integrations/cloudflare/src/esbuild-plugin-astro-frontmatter.ts"
+      ]
+    },
+    {
+      "dimension": "api_design",
+      "recommendation": "Applied the same fix in both the core Astro compiler and Cloudflare adapter to ensure consistent behavior across the codebase",
+      "rationale": "The frontmatter processing logic exists in two places: the core Astro compiler (for development/build errors) and the Cloudflare adapter (for import analysis during SSR). Both needed the same fix to prevent inconsistent behavior where bare returns might work in one context but break in another.",
+      "alternatives_considered": [
+        "Creating a shared utility function for frontmatter transformation",
+        "Only fixing the Cloudflare adapter since that's where the issue was reported",
+        "Refactoring both implementations to use a common library"
+      ],
+      "files_affected": [
+        "packages/astro/src/vite-plugin-astro/compile.ts",
+        "packages/integrations/cloudflare/src/esbuild-plugin-astro-frontmatter.ts"
+      ]
+    },
+    {
+      "dimension": "testing",
+      "recommendation": "Added a test case for bare return statements in the Cloudflare adapter's test fixture to ensure the fix works and prevents regressions",
+      "rationale": "The existing test fixture for top-level returns only tested returns with values (`return Astro.redirect()`). Adding a bare return test case validates that the regex fix handles edge cases correctly and ensures the transformation produces valid JavaScript syntax.",
+      "alternatives_considered": [
+        "Creating a separate test file specifically for bare returns",
+        "Adding unit tests for the regex transformation logic directly",
+        "Relying on existing tests without adding new coverage"
+      ],
+      "files_affected": [
+        "packages/integrations/cloudflare/test/fixtures/top-level-return/src/pages/index.astro"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Fix bare return statement handling in frontmatter processing",
+      "description": "Update regex patterns in both core Astro compiler and Cloudflare adapter to correctly transform bare return statements (`return;`) into valid throw statements (`throw 0;`) instead of invalid syntax (`throw ;`)",
+      "files_to_modify": [
+        "packages/astro/src/vite-plugin-astro/compile.ts",
+        "packages/integrations/cloudflare/src/esbuild-plugin-astro-frontmatter.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-002",
+      "title": "Add test coverage for bare return statements",
+      "description": "Extend existing Cloudflare adapter test fixture to include a bare return statement case, ensuring the fix works correctly and prevents future regressions",
+      "files_to_modify": [
+        "packages/integrations/cloudflare/test/fixtures/top-level-return/src/pages/index.astro"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-003",
+      "title": "Document the change with changeset",
+      "description": "Create a changeset entry to document the patch for both @astrojs/cloudflare and astro packages, explaining the fix for bare return syntax in frontmatter",
+      "files_to_modify": [],
+      "files_to_create": [
+        ".changeset/dull-clowns-sin.md"
+      ],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation addresses a subtle bug in Astro's frontmatter processing where bare return statements (`return;`) were being transformed into invalid JavaScript syntax (`throw ;`). The fix was applied in two key locations: the core Astro compiler's error enhancement logic and the Cloudflare adapter's import analysis plugin. Both used similar regex-based transformations to convert frontmatter JavaScript code, but the original pattern `\\breturn\\b` didn't account for the semicolon that follows bare returns.\n\nThe solution uses a two-step regex replacement: first handling `return;` specifically with `throw 0;`, then handling other return statements with `throw `. This ensures valid JavaScript output while maintaining the semantic intent of preventing top-level returns in Astro frontmatter. The `throw 0;` pattern was chosen because it's minimal valid JavaScript that preserves the control flow interruption of a return statement.\n\nA test case was added to the Cloudflare adapter's existing test fixture to validate the fix works correctly. The changeset documents the patch for both affected packages, ensuring users are aware of the fix. This approach maintains backward compatibility while fixing a specific edge case that could cause build failures or runtime errors in projects using bare returns in frontmatter logic.",
+  "source_pr": "https://github.com/withastro/astro/pull/15832",
+  "before_sha": "a2fff742a4a073a9cb5ea30a956af89195a73269",
+  "after_sha": "95e12a250ece206f55f8c0c07c9c05489f3df93f",
+  "diff_stats": {
+    "additions": 16,
+    "deletions": 2,
+    "files_changed": 4
+  }
+}

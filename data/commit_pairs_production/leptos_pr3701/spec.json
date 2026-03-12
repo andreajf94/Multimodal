@@ -1,0 +1,11 @@
+{
+  "feature_name": "Generalize StoreFieldIterator with Len Trait",
+  "description": "Replace the restrictive `AsRef<[T]>` bound on the `StoreFieldIterator` blanket implementation with a more flexible `Len` trait. This will allow the iterator to work with collection types that aren't contiguous in memory and therefore don't implement `AsRef<[T]>`. The change involves extracting the `len` method into a new public trait.",
+  "functional_requirements": [
+    "Create a new public `Len` trait in the reactive_stores crate that defines a single `len` method returning a `usize`.",
+    "Update the blanket implementation for `StoreFieldIterator` to require the `Len` trait instead of `AsRef<[T]>`.",
+    "Ensure the new implementation maintains the same iteration behavior and performance characteristics for existing collection types."
+  ],
+  "project_name": "leptos",
+  "source_pr": "https://github.com/leptos-rs/leptos/pull/3701"
+}

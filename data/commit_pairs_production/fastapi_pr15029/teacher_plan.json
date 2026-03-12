@@ -1,0 +1,72 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "data_modeling",
+      "recommendation": "Updated YAML data files to maintain contributor recognition system with sorted entries by contribution count",
+      "rationale": "The YAML files serve as a simple, human-readable database for tracking community contributions. Sorting by count (descending) provides immediate visibility into top contributors while maintaining a consistent structure for automated processing. This approach leverages YAML's readability and ease of maintenance for frequently updated data.",
+      "alternatives_considered": [
+        "Relational database",
+        "JSON files",
+        "External API service"
+      ],
+      "files_affected": [
+        "docs/en/data/contributors.yml",
+        "docs/en/data/translation_reviewers.yml",
+        "docs/en/data/translators.yml"
+      ]
+    },
+    {
+      "dimension": "community_management",
+      "recommendation": "Implemented automated contributor tracking with count-based ranking to incentivize and recognize community participation",
+      "rationale": "Maintaining accurate contributor counts and rankings encourages ongoing community engagement by providing public recognition. The system tracks three distinct contribution types (code/docs, translation review, translation) to properly acknowledge different forms of community support. This transparency builds trust and motivates continued participation.",
+      "alternatives_considered": [
+        "Manual updates only",
+        "Single combined contributor list",
+        "No public recognition system"
+      ],
+      "files_affected": [
+        "docs/en/data/contributors.yml",
+        "docs/en/data/translation_reviewers.yml",
+        "docs/en/data/translators.yml"
+      ]
+    },
+    {
+      "dimension": "maintenance_automation",
+      "recommendation": "Used consistent data structure across all three YAML files to enable automated updates and processing",
+      "rationale": "Each entry follows the same pattern: login, count, avatarUrl, url. This consistency allows for automated scripts to update these files programmatically, reducing manual maintenance effort. The structure is simple enough for manual editing when needed but structured enough for automation.",
+      "alternatives_considered": [
+        "Inconsistent formats per file",
+        "Complex nested structures",
+        "Database-driven approach"
+      ],
+      "files_affected": [
+        "docs/en/data/contributors.yml",
+        "docs/en/data/translation_reviewers.yml",
+        "docs/en/data/translators.yml"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Update Contributor Recognition Data",
+      "description": "Refresh all contributor data files with latest contribution counts and properly sort entries to maintain recognition system accuracy",
+      "files_to_modify": [
+        "docs/en/data/contributors.yml",
+        "docs/en/data/translation_reviewers.yml",
+        "docs/en/data/translators.yml"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The changes implement a routine maintenance update to FastAPI's community recognition system. Three YAML data files were modified to reflect the latest contribution statistics from community members. The implementation follows a consistent pattern across all files: each contributor entry contains login, count, avatarUrl, and url fields, with entries sorted in descending order by contribution count.\n\nKey patterns observed include the use of simple, human-readable YAML files for data storage rather than a complex database system. This aligns with the documentation-focused nature of the FastAPI project, where these files are likely consumed by documentation generators or displayed on the project website. The sorting by count provides immediate visibility into top contributors, serving as both recognition and motivation for community participation.\n\nThe changes integrate seamlessly with the existing codebase by maintaining the exact same data structure and file organization. Updates include incrementing contribution counts for existing contributors, adding new contributors (like YuriiMotov, jonathan-fulton, valentinDruzhinin), updating avatar URLs when they change, and reordering entries to maintain the count-based sorting. This approach ensures the community recognition system remains accurate and up-to-date with minimal disruption to existing workflows.",
+  "source_pr": "https://github.com/fastapi/fastapi/pull/15029",
+  "before_sha": "1084d42c3eb9f31c3c5e108ed0560d1fec8d60ab",
+  "after_sha": "cf514e6d3839ca69ca45a55a6f862e74892339b9",
+  "diff_stats": {
+    "additions": 83,
+    "deletions": 73,
+    "files_changed": 3
+  }
+}

@@ -1,0 +1,72 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "language_configuration",
+      "recommendation": "Added trailing spaces to comment character definitions in language configuration files",
+      "rationale": "The editor's comment toggling functionality uses the `line_comments` configuration to determine how to add/remove comments. By including the trailing space in the configuration, the editor will consistently add and remove the space when toggling comments, ensuring uniform behavior across all languages. This approach leverages the existing comment toggling infrastructure rather than creating language-specific logic.",
+      "alternatives_considered": [
+        "Adding language-specific comment toggling logic in the editor core",
+        "Creating a separate configuration for comment spacing",
+        "Modifying the comment toggling algorithm to always add spaces regardless of configuration"
+      ],
+      "files_affected": [
+        "crates/languages/src/gitcommit/config.toml",
+        "crates/languages/src/gomod/config.toml",
+        "crates/languages/src/gowork/config.toml"
+      ]
+    },
+    {
+      "dimension": "consistency_and_ux",
+      "recommendation": "Made comment behavior consistent across Git Commit, Go Mod, and Go Work languages with other languages in the codebase",
+      "rationale": "Most languages in Zed already include trailing spaces in their comment configurations. This change brings these three languages into alignment with the established pattern, providing a more predictable user experience. Users expect consistent behavior when using keyboard shortcuts like Ctrl+/ across different file types.",
+      "alternatives_considered": [
+        "Leaving the inconsistency as-is since it's a minor issue",
+        "Removing trailing spaces from all language configurations instead",
+        "Making the trailing space optional via user settings"
+      ],
+      "files_affected": [
+        "crates/languages/src/gitcommit/config.toml",
+        "crates/languages/src/gomod/config.toml",
+        "crates/languages/src/gowork/config.toml"
+      ]
+    },
+    {
+      "dimension": "minimal_change",
+      "recommendation": "Modified only the language configuration files without touching editor logic or tests",
+      "rationale": "The change is isolated to configuration files, making it low-risk and easy to review. Since the comment toggling functionality already respects the `line_comments` configuration, no code changes were needed. This follows the principle of keeping changes minimal and focused.",
+      "alternatives_considered": [
+        "Refactoring the comment toggling system to handle spacing separately",
+        "Adding validation or migration logic for existing configurations",
+        "Creating a test suite specifically for comment spacing behavior"
+      ],
+      "files_affected": [
+        "crates/languages/src/gitcommit/config.toml",
+        "crates/languages/src/gomod/config.toml",
+        "crates/languages/src/gowork/config.toml"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Normalize comment spacing for Git Commit, Go Mod, and Go Work languages",
+      "description": "Update language configurations to include trailing spaces in comment character definitions, ensuring consistent comment toggling behavior across all languages",
+      "files_to_modify": [
+        "crates/languages/src/gitcommit/config.toml",
+        "crates/languages/src/gomod/config.toml",
+        "crates/languages/src/gowork/config.toml"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "This change addresses a consistency issue in comment toggling behavior by updating the language configuration files for Git Commit, Go Mod, and Go Work. The implementation adds trailing spaces to the `line_comments` configuration values, changing '#', '//', and '//' to '# ', '// ', and '// ' respectively.\n\nThe approach leverages Zed's existing language configuration system, where the `line_comments` field defines both the comment character(s) and any associated spacing. By including the space in the configuration, the editor's comment toggling functionality will automatically handle adding and removing the space when users toggle comments via keyboard shortcuts. This ensures that comment toggling behaves consistently across different file types, matching the behavior already established in most other languages in the codebase.\n\nThis minimal change follows the existing patterns in the codebase and requires no modifications to the editor's core logic. The change is isolated to configuration files, making it low-risk and easy to understand. The implementation assumes that the comment toggling system already properly handles the spacing defined in the `line_comments` configuration, which is a reasonable assumption given that most other languages already include trailing spaces in their configurations.",
+  "source_pr": "https://github.com/zed-industries/zed/pull/51033",
+  "before_sha": "95aa4f274daf690c7c7048ba6c135c81af0d3347",
+  "after_sha": "7132b67962e2827f73f8486793ab5d5dcee53862",
+  "diff_stats": {
+    "additions": 3,
+    "deletions": 3,
+    "files_changed": 3
+  }
+}

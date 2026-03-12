@@ -1,0 +1,12 @@
+{
+  "feature_name": "Forward Original Errors in Local Link",
+  "description": "Enhance the unstable_localLink to preserve and forward the original error object as the cause property in TRPCClientError. When client and server run in the same JavaScript context, thrown errors (including TRPCError instances) should be accessible through error.cause for better debugging and error handling.",
+  "functional_requirements": [
+    "Modify TRPCClientError.from() to accept an optional cause parameter of type Error and pass it to the constructor",
+    "Update unstable_localLink to pass the original thrown error as the cause when coercing to TRPCClientError, but only if it's an Error instance",
+    "Ensure HTTP and WebSocket links remain unchanged and do not pass cause parameters",
+    "Add test coverage verifying that both plain Error and TRPCError objects thrown from procedures are correctly forwarded as TRPCClientError.cause"
+  ],
+  "project_name": "trpc",
+  "source_pr": "https://github.com/trpc/trpc/pull/7134"
+}

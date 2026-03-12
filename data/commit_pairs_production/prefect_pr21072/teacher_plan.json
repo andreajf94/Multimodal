@@ -1,0 +1,71 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "security",
+      "recommendation": "Replaced insecure string comparison operators with `hmac.compare_digest()` for authentication token validation",
+      "rationale": "Standard string comparison (`==` or `!=`) in Python uses short-circuit evaluation, where comparison stops at the first mismatched character. This creates timing side-channels that allow attackers to gradually guess authentication tokens by measuring response times. `hmac.compare_digest()` performs constant-time comparison regardless of input length or content, preventing timing attacks.",
+      "alternatives_considered": [
+        "Using `secrets.compare_digest()` (similar function but from different module)",
+        "Implementing custom constant-time comparison function",
+        "Leaving as-is and accepting the security risk"
+      ],
+      "files_affected": [
+        "src/prefect/server/api/middleware.py",
+        "src/prefect/server/api/server.py",
+        "src/prefect/server/utilities/subscriptions.py"
+      ]
+    },
+    {
+      "dimension": "api_design",
+      "recommendation": "Maintained existing API interfaces while upgrading security implementation",
+      "rationale": "The changes are purely internal implementation details that don't affect the public API surface. Authentication tokens continue to be validated in the same way from the user's perspective, but now with enhanced security. This ensures backward compatibility while improving security posture.",
+      "alternatives_considered": [
+        "Changing the authentication token format or validation protocol",
+        "Adding new authentication methods alongside existing ones",
+        "Requiring clients to upgrade their authentication mechanisms"
+      ],
+      "files_affected": [
+        "src/prefect/server/api/middleware.py",
+        "src/prefect/server/api/server.py",
+        "src/prefect/server/utilities/subscriptions.py"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Preserved existing error responses and status codes while changing comparison logic",
+      "rationale": "The security enhancement should be transparent to users - invalid tokens should still return the same HTTP status codes (401 Unauthorized, 403 Forbidden) and error messages. This maintains consistency in client error handling while fixing the underlying security vulnerability.",
+      "alternatives_considered": [
+        "Changing error messages to indicate timing attack protection",
+        "Adding additional logging for failed authentication attempts",
+        "Implementing progressive delays for repeated failed attempts"
+      ],
+      "files_affected": [
+        "src/prefect/server/api/middleware.py",
+        "src/prefect/server/api/server.py"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Implement constant-time authentication token comparison",
+      "description": "Replace insecure string comparison operators with hmac.compare_digest() across all authentication token validation points to prevent timing attacks",
+      "files_to_modify": [
+        "src/prefect/server/api/middleware.py",
+        "src/prefect/server/api/server.py",
+        "src/prefect/server/utilities/subscriptions.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "This change implements a critical security enhancement by replacing insecure string comparison operators with constant-time comparison functions for authentication token validation across the Prefect codebase. The implementation follows a consistent pattern across three key security-sensitive modules: basic authentication middleware, CSRF token validation, and WebSocket authentication.\n\nIn each file, the pattern is the same: import the `hmac` module and replace direct string comparisons (`!=` or `==`) with `hmac.compare_digest()`. This function compares strings in constant time regardless of input length or content, preventing timing attacks where attackers could gradually guess authentication tokens by measuring response time differences. The changes are minimal and focused - only the comparison logic is modified while preserving all existing error handling, status codes, and API contracts.\n\nThe implementation demonstrates good security hygiene by addressing a subtle but serious vulnerability without disrupting the existing authentication flow. By using Python's built-in `hmac.compare_digest()` function, the solution leverages a well-tested, standard library implementation rather than rolling custom cryptographic code. This approach ensures the security fix is robust and maintainable while keeping the changes minimal and focused on the specific vulnerability.",
+  "source_pr": "https://github.com/PrefectHQ/prefect/pull/21072",
+  "before_sha": "af54e125f399b6ef44fa28f40007d44cda6f938b",
+  "after_sha": "a072125a2f8aabd63d7d4763cde190aa69117451",
+  "diff_stats": {
+    "additions": 8,
+    "deletions": 3,
+    "files_changed": 3
+  }
+}

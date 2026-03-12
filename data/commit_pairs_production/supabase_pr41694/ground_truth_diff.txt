@@ -1,0 +1,68 @@
+diff --git a/apps/studio/components/interfaces/Functions/EdgeFunctionSecrets/EdgeFunctionSecret.tsx b/apps/studio/components/interfaces/Functions/EdgeFunctionSecrets/EdgeFunctionSecret.tsx
+index 4fbdd2e7a2ec5..207e280314e81 100644
+--- a/apps/studio/components/interfaces/Functions/EdgeFunctionSecrets/EdgeFunctionSecret.tsx
++++ b/apps/studio/components/interfaces/Functions/EdgeFunctionSecrets/EdgeFunctionSecret.tsx
+@@ -1,9 +1,8 @@
+ import { PermissionAction } from '@supabase/shared-types/out/constants'
+-import { Edit2, MoreVertical, Trash } from 'lucide-react'
+-
+ import { ButtonTooltip } from 'components/ui/ButtonTooltip'
+ import type { ProjectSecret } from 'data/secrets/secrets-query'
+ import { useAsyncCheckPermissions } from 'hooks/misc/useCheckPermissions'
++import { Edit2, MoreVertical, Trash } from 'lucide-react'
+ import {
+   Button,
+   DropdownMenu,
+diff --git a/apps/studio/components/interfaces/SignIn/SignUpForm.tsx b/apps/studio/components/interfaces/SignIn/SignUpForm.tsx
+index c8e54c963d63c..03a4aa3bf691c 100644
+--- a/apps/studio/components/interfaces/SignIn/SignUpForm.tsx
++++ b/apps/studio/components/interfaces/SignIn/SignUpForm.tsx
+@@ -1,29 +1,29 @@
+ import HCaptcha from '@hcaptcha/react-hcaptcha'
+ import { zodResolver } from '@hookform/resolvers/zod'
++import { useSignUpMutation } from 'data/misc/signup-mutation'
+ import { motion } from 'framer-motion'
++import { BASE_PATH } from 'lib/constants'
++import { buildPathWithParams } from 'lib/gotrue'
+ import { CheckCircle, Eye, EyeOff } from 'lucide-react'
+ import { useRouter } from 'next/router'
+ import { parseAsString, useQueryStates } from 'nuqs'
+ import { useRef, useState } from 'react'
+ import { SubmitHandler, useForm } from 'react-hook-form'
+ import { toast } from 'sonner'
+-import z from 'zod'
+-
+-import { useSignUpMutation } from 'data/misc/signup-mutation'
+-import { BASE_PATH } from 'lib/constants'
+-import { buildPathWithParams } from 'lib/gotrue'
+ import {
++  Alert_Shadcn_,
+   AlertDescription_Shadcn_,
+   AlertTitle_Shadcn_,
+-  Alert_Shadcn_,
+   Button,
++  cn,
++  Form_Shadcn_,
+   FormControl_Shadcn_,
+   FormField_Shadcn_,
+-  Form_Shadcn_,
+   Input_Shadcn_,
+-  cn,
+ } from 'ui'
+ import { FormItemLayout } from 'ui-patterns/form/FormItemLayout/FormItemLayout'
++import z from 'zod'
++
+ import PasswordConditionsHelper from './PasswordConditionsHelper'
+ 
+ const schema = z.object({
+@@ -183,8 +183,8 @@ export const SignUpForm = () => {
+                       />
+                       <Button
+                         type="default"
+-                        title={passwordHidden ? `Hide password` : `Show password`}
+-                        aria-label={passwordHidden ? `Hide password` : `Show password`}
++                        title={passwordHidden ? `Show password` : `Hide password`}
++                        aria-label={passwordHidden ? `Show password` : `Hide password`}
+                         className="absolute right-1 top-1 px-1.5"
+                         icon={passwordHidden ? <Eye /> : <EyeOff />}
+                         disabled={isSubmitting}

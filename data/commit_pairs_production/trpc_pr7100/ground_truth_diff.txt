@@ -1,0 +1,1753 @@
+diff --git a/examples/next-websockets-encoder/README.md b/examples/next-websockets-encoder/README.md
+new file mode 100644
+index 00000000000..f04981f6e4a
+--- /dev/null
++++ b/examples/next-websockets-encoder/README.md
+@@ -0,0 +1,71 @@
++# Next.js + tRPC WebSocket + MessagePack Encoder
++
++This example demonstrates using **MessagePack binary encoding** with tRPC WebSocket connections for improved performance and smaller payloads.
++
++## Features
++
++- Next.js 15 with Pages Router
++- tRPC WebSocket subscriptions
++- MessagePack binary encoding via `experimental_encoder`
++- Tailwind CSS
++
++## How it works
++
++The `experimental_encoder` option allows you to plug in custom encoding for WebSocket messages:
++
++```typescript
++// Server (wssDevServer.ts)
++applyWSSHandler({
++  wss,
++  router: appRouter,
++  experimental_encoder: msgpackEncoder,
++});
++
++// Client (trpc.ts)
++createWSClient({
++  url: WS_URL,
++  experimental_encoder: msgpackEncoder,
++});
++```
++
++The encoder is defined in `src/utils/encoder.ts`:
++
++```typescript
++import { decode, encode } from '@msgpack/msgpack';
++import type { Encoder } from '@trpc/client';
++
++// MessagePack converts undefined to null, but tRPC expects undefined for optional fields.
++// Strip undefined values before encoding to match JSON's behavior.
++function stripUndefined<T>(value: T): T {
++  if (value === null || typeof value !== 'object') return value;
++  if (Array.isArray(value)) return value.map(stripUndefined) as T;
++  const result: Record<string, unknown> = {};
++  for (const [k, v] of Object.entries(value)) {
++    if (v !== undefined) result[k] = stripUndefined(v);
++  }
++  return result as T;
++}
++
++export const msgpackEncoder: Encoder = {
++  encode: (data) => encode(stripUndefined(data)),
++  decode: (data) => {
++    if (typeof data === 'string') {
++      throw new Error(
++        'msgpackEncoder expected binary data but received a string.',
++      );
++    }
++    return decode(data instanceof ArrayBuffer ? new Uint8Array(data) : data);
++  },
++};
++```
++
++## Running the example
++
++```bash
++pnpm install
++pnpm dev
++```
++
++Then open [http://localhost:3000](http://localhost:3000).
++
++Open DevTools → Network → WS to see the binary MessagePack frames being sent over WebSocket.
+diff --git a/examples/next-websockets-encoder/next-env.d.ts b/examples/next-websockets-encoder/next-env.d.ts
+new file mode 100644
+index 00000000000..52e831b4342
+--- /dev/null
++++ b/examples/next-websockets-encoder/next-env.d.ts
+@@ -0,0 +1,5 @@
++/// <reference types="next" />
++/// <reference types="next/image-types/global" />
++
++// NOTE: This file should not be edited
++// see https://nextjs.org/docs/pages/api-reference/config/typescript for more information.
+diff --git a/examples/next-websockets-encoder/next.config.ts b/examples/next-websockets-encoder/next.config.ts
+new file mode 100644
+index 00000000000..2b39994c809
+--- /dev/null
++++ b/examples/next-websockets-encoder/next.config.ts
+@@ -0,0 +1,9 @@
++import { NextConfig } from 'next';
++
++export default {
++  publicRuntimeConfig: {
++    APP_URL: process.env.APP_URL ?? 'http://localhost:3000',
++    WS_URL: process.env.WS_URL ?? 'ws://localhost:3001',
++  },
++  eslint: { ignoreDuringBuilds: !!process.env.CI },
++} satisfies NextConfig;
+diff --git a/examples/next-websockets-encoder/package.json b/examples/next-websockets-encoder/package.json
+new file mode 100644
+index 00000000000..7f2b19f4947
+--- /dev/null
++++ b/examples/next-websockets-encoder/package.json
+@@ -0,0 +1,54 @@
++{
++  "name": "examples-next-websockets-encoder",
++  "private": true,
++  "engines": {
++    "node": ">=18.15.0"
++  },
++  "packageManager": "pnpm@9.12.2",
++  "scripts": {
++    "build:1-next": "cross-env NODE_ENV=production next build",
++    "build:2-server": "tsc --project tsconfig.server.json",
++    "build": "run-s build:*",
++    "dev:wss": "cross-env PORT=3001 tsx watch src/server/wssDevServer.ts --tsconfig tsconfig.server.json",
++    "dev:next": "next dev",
++    "dev": "run-p dev:*",
++    "start": "cross-env NODE_ENV=production node dist/server/prodServer.js",
++    "lint": "eslint --cache src",
++    "typecheck": "tsc --noEmit"
++  },
++  "dependencies": {
++    "@msgpack/msgpack": "^3.1.3",
++    "@tanstack/react-query": "^5.80.3",
++    "@trpc/client": "npm:@trpc/client",
++    "@trpc/next": "npm:@trpc/next",
++    "@trpc/react-query": "npm:@trpc/react-query",
++    "@trpc/server": "npm:@trpc/server",
++    "next": "^15.3.8",
++    "react": "^19.1.0",
++    "react-dom": "^19.1.0",
++    "tsx": "^4.19.3",
++    "ws": "^8.0.0",
++    "zod": "^4.2.1"
++  },
++  "devDependencies": {
++    "@tanstack/react-query-devtools": "^5.80.3",
++    "@types/node": "^22.13.5",
++    "@types/react": "^19.1.0",
++    "@types/ws": "^8.2.0",
++    "autoprefixer": "^10.4.7",
++    "cross-env": "^7.0.3",
++    "eslint": "^9.26.0",
++    "eslint-config-next": "^15.3.1",
++    "eslint-plugin-react": "^7.37.5",
++    "eslint-plugin-react-hooks": "6.0.0-rc.1",
++    "npm-run-all": "^4.1.5",
++    "postcss": "^8.4.39",
++    "tailwindcss": "^3.4.6",
++    "typescript": "^5.9.2",
++    "typescript-eslint": "^8.31.1"
++  },
++  "publishConfig": {
++    "access": "restricted"
++  },
++  "version": "11.8.1"
++}
+diff --git a/examples/next-websockets-encoder/postcss.config.js b/examples/next-websockets-encoder/postcss.config.js
+new file mode 100644
+index 00000000000..12a703d900d
+--- /dev/null
++++ b/examples/next-websockets-encoder/postcss.config.js
+@@ -0,0 +1,6 @@
++module.exports = {
++  plugins: {
++    tailwindcss: {},
++    autoprefixer: {},
++  },
++};
+diff --git a/examples/next-websockets-encoder/src/pages/_app.tsx b/examples/next-websockets-encoder/src/pages/_app.tsx
+new file mode 100644
+index 00000000000..4a75e63fa0e
+--- /dev/null
++++ b/examples/next-websockets-encoder/src/pages/_app.tsx
+@@ -0,0 +1,9 @@
++import '../styles/global.css';
++import { trpc } from '~/utils/trpc';
++import type { AppType } from 'next/app';
++
++const MyApp: AppType = ({ Component, pageProps }) => {
++  return <Component {...pageProps} />;
++};
++
++export default trpc.withTRPC(MyApp);
+diff --git a/examples/next-websockets-encoder/src/pages/api/trpc/[trpc].ts b/examples/next-websockets-encoder/src/pages/api/trpc/[trpc].ts
+new file mode 100644
+index 00000000000..1bdd76417a3
+--- /dev/null
++++ b/examples/next-websockets-encoder/src/pages/api/trpc/[trpc].ts
+@@ -0,0 +1,6 @@
++import * as trpcNext from '@trpc/server/adapters/next';
++import { appRouter } from '~/server/routers/_app';
++
++export default trpcNext.createNextApiHandler({
++  router: appRouter,
++});
+diff --git a/examples/next-websockets-encoder/src/pages/index.tsx b/examples/next-websockets-encoder/src/pages/index.tsx
+new file mode 100644
+index 00000000000..99df1c543e7
+--- /dev/null
++++ b/examples/next-websockets-encoder/src/pages/index.tsx
+@@ -0,0 +1,112 @@
++import { trpc } from '~/utils/trpc';
++import Head from 'next/head';
++import { useState } from 'react';
++
++export default function IndexPage() {
++  const [name, setName] = useState('world');
++  const [messages, setMessages] = useState<number[]>([]);
++
++  const greetQuery = trpc.greet.useQuery({ name });
++  const healthQuery = trpc.healthcheck.useQuery();
++  const randomNumberSub = trpc.randomNumber.useSubscription(undefined, {
++    onData: (data) => {
++      console.log('onData received:', data, typeof data);
++      setMessages((prev) => [...prev.slice(-9), data]);
++    },
++    onStarted: () => {
++      console.log('Subscription started!');
++    },
++    onError: (err) => {
++      console.error('Subscription error:', err);
++    },
++  });
++
++  return (
++    <>
++      <Head>
++        <title>tRPC WebSocket + MessagePack Encoder</title>
++        <link rel="icon" href="/favicon.ico" />
++      </Head>
++      <div className="min-h-screen bg-gray-900 p-8 text-white">
++        <div className="mx-auto max-w-2xl space-y-8">
++          <header>
++            <h1 className="text-3xl font-bold">
++              tRPC WebSocket + MessagePack Encoder
++            </h1>
++            <p className="mt-2 text-gray-400">
++              This example demonstrates using MessagePack binary serialization
++              over WebSocket connections for improved performance.
++            </p>
++          </header>
++
++          <section className="space-y-4 rounded-lg bg-gray-800 p-6">
++            <h2 className="text-xl font-semibold">Health Check (HTTP)</h2>
++            <p className="font-mono text-green-400">
++              {healthQuery.data ?? 'Loading...'}
++            </p>
++          </section>
++
++          <section className="space-y-4 rounded-lg bg-gray-800 p-6">
++            <h2 className="text-xl font-semibold">Greeting (HTTP)</h2>
++            <div className="flex gap-4">
++              <input
++                type="text"
++                value={name}
++                onChange={(e) => setName(e.target.value)}
++                placeholder="Enter your name"
++                className="flex-1 rounded bg-gray-700 px-4 py-2 text-white outline-none focus:ring-2 focus:ring-indigo-500"
++              />
++            </div>
++            <p className="font-mono text-blue-400">
++              {greetQuery.data ?? 'Loading...'}
++            </p>
++          </section>
++
++          <section className="space-y-4 rounded-lg bg-gray-800 p-6">
++            <h2 className="text-xl font-semibold">
++              Random Number Subscription (WebSocket + MessagePack)
++            </h2>
++            <p className="text-sm text-gray-400">
++              Open DevTools → Network → WS to see binary frames
++            </p>
++            <p className="font-mono text-2xl text-indigo-400">
++              {typeof randomNumberSub.data === 'number'
++                ? randomNumberSub.data.toFixed(6)
++                : 'Waiting for data...'}
++            </p>
++            <p className="text-xs text-gray-500">
++              Status: {randomNumberSub.status}
++              {randomNumberSub.error &&
++                ` | Error: ${randomNumberSub.error.message}`}
++            </p>
++            <p className="font-mono text-xs text-gray-400">
++              Raw data: {JSON.stringify(randomNumberSub.data)}
++            </p>
++
++            {messages.length > 0 && (
++              <div className="mt-4 space-y-1">
++                <p className="text-xs text-gray-500">
++                  Recent messages ({messages.length}):
++                </p>
++                <div className="max-h-32 overflow-y-auto rounded bg-gray-900 p-2 font-mono text-xs text-gray-400">
++                  {messages.map((msg, i) => (
++                    <div key={i}>{msg.toFixed(8)}</div>
++                  ))}
++                </div>
++              </div>
++            )}
++          </section>
++
++          <footer className="text-center text-sm text-gray-500">
++            <p>
++              Messages are serialized using{' '}
++              <code className="rounded bg-gray-800 px-2 py-1">
++                @msgpack/msgpack
++              </code>
++            </p>
++          </footer>
++        </div>
++      </div>
++    </>
++  );
++}
+diff --git a/examples/next-websockets-encoder/src/server/prodServer.ts b/examples/next-websockets-encoder/src/server/prodServer.ts
+new file mode 100644
+index 00000000000..aeb57d015cb
+--- /dev/null
++++ b/examples/next-websockets-encoder/src/server/prodServer.ts
+@@ -0,0 +1,52 @@
++import type { Socket } from 'net';
++import { createServer } from 'node:http';
++import { parse } from 'node:url';
++import { applyWSSHandler } from '@trpc/server/adapters/ws';
++import next from 'next';
++import { WebSocketServer } from 'ws';
++import { msgpackEncoder } from '../utils/encoder';
++import { appRouter } from './routers/_app';
++
++const port = parseInt(process.env.PORT ?? '3000', 10);
++const dev = process.env.NODE_ENV !== 'production';
++const app = next({ dev });
++const handle = app.getRequestHandler();
++
++void app.prepare().then(() => {
++  const server = createServer(async (req, res) => {
++    if (!req.url) return;
++    const parsedUrl = parse(req.url, true);
++    await handle(req, res, parsedUrl);
++  });
++
++  const wss = new WebSocketServer({ server });
++  const handler = applyWSSHandler({
++    wss,
++    router: appRouter,
++    experimental_encoder: msgpackEncoder,
++  });
++
++  process.on('SIGTERM', () => {
++    console.log('SIGTERM');
++    handler.broadcastReconnectNotification();
++  });
++
++  server.on('upgrade', (req, socket, head) => {
++    wss.handleUpgrade(req, socket as Socket, head, (ws) => {
++      wss.emit('connection', ws, req);
++    });
++  });
++
++  const originalOn = server.on.bind(server);
++  server.on = function (event, listener) {
++    return event !== 'upgrade' ? originalOn(event, listener) : server;
++  };
++  server.listen(port);
++
++  console.log(
++    `> Server listening at http://localhost:${port} as ${
++      dev ? 'development' : process.env.NODE_ENV
++    }`,
++  );
++  console.log('📦 Using MessagePack encoding');
++});
+diff --git a/examples/next-websockets-encoder/src/server/routers/_app.ts b/examples/next-websockets-encoder/src/server/routers/_app.ts
+new file mode 100644
+index 00000000000..3fa969027c1
+--- /dev/null
++++ b/examples/next-websockets-encoder/src/server/routers/_app.ts
+@@ -0,0 +1,28 @@
++/**
++ * This file contains the root router of your tRPC-backend
++ */
++import { clearInterval } from 'timers';
++import { observable } from '@trpc/server/observable';
++import { z } from 'zod';
++import { publicProcedure, router } from '../trpc';
++
++export const appRouter = router({
++  healthcheck: publicProcedure.query(() => 'yay!'),
++
++  greet: publicProcedure
++    .input(z.object({ name: z.string() }))
++    .query(({ input }) => `Hello, ${input.name}!`),
++
++  randomNumber: publicProcedure.subscription(() => {
++    return observable<number>((emit) => {
++      const int = setInterval(() => {
++        emit.next(Math.random());
++      }, 1000);
++      return () => {
++        clearInterval(int);
++      };
++    });
++  }),
++});
++
++export type AppRouter = typeof appRouter;
+diff --git a/examples/next-websockets-encoder/src/server/trpc.ts b/examples/next-websockets-encoder/src/server/trpc.ts
+new file mode 100644
+index 00000000000..eaf563feb68
+--- /dev/null
++++ b/examples/next-websockets-encoder/src/server/trpc.ts
+@@ -0,0 +1,20 @@
++/**
++ * This is your entry point to setup the root configuration for tRPC on the server.
++ * - `initTRPC` should only be used once per app.
++ * - We export only the functionality that we use so we can enforce which base procedures should be used
++ */
++import { initTRPC } from '@trpc/server';
++
++const t = initTRPC.create();
++
++/**
++ * Create a router
++ * @see https://trpc.io/docs/v11/router
++ */
++export const router = t.router;
++
++/**
++ * Create an unprotected procedure
++ * @see https://trpc.io/docs/v11/procedures
++ **/
++export const publicProcedure = t.procedure;
+diff --git a/examples/next-websockets-encoder/src/server/wssDevServer.ts b/examples/next-websockets-encoder/src/server/wssDevServer.ts
+new file mode 100644
+index 00000000000..68a03b54f39
+--- /dev/null
++++ b/examples/next-websockets-encoder/src/server/wssDevServer.ts
+@@ -0,0 +1,30 @@
++import { applyWSSHandler } from '@trpc/server/adapters/ws';
++import { WebSocketServer } from 'ws';
++import { msgpackEncoder } from '../utils/encoder';
++import { appRouter } from './routers/_app';
++
++const wss = new WebSocketServer({
++  port: 3001,
++});
++
++const handler = applyWSSHandler({
++  wss,
++  router: appRouter,
++  experimental_encoder: msgpackEncoder,
++});
++
++wss.on('connection', (ws) => {
++  console.log(`➕➕ Connection (${wss.clients.size})`);
++  ws.once('close', () => {
++    console.log(`➖➖ Connection (${wss.clients.size})`);
++  });
++});
++
++console.log('✅ WebSocket Server listening on ws://localhost:3001');
++console.log('📦 Using MessagePack encoding');
++
++process.on('SIGTERM', () => {
++  console.log('SIGTERM');
++  handler.broadcastReconnectNotification();
++  wss.close();
++});
+diff --git a/examples/next-websockets-encoder/src/styles/global.css b/examples/next-websockets-encoder/src/styles/global.css
+new file mode 100644
+index 00000000000..b5c61c95671
+--- /dev/null
++++ b/examples/next-websockets-encoder/src/styles/global.css
+@@ -0,0 +1,3 @@
++@tailwind base;
++@tailwind components;
++@tailwind utilities;
+diff --git a/examples/next-websockets-encoder/src/utils/encoder.ts b/examples/next-websockets-encoder/src/utils/encoder.ts
+new file mode 100644
+index 00000000000..7faad25bc50
+--- /dev/null
++++ b/examples/next-websockets-encoder/src/utils/encoder.ts
+@@ -0,0 +1,35 @@
++import { decode, encode } from '@msgpack/msgpack';
++import type { Encoder } from '@trpc/client';
++
++/**
++ * Recursively strips undefined values from objects to match JSON.stringify behavior.
++ * This ensures msgpack encoding is compatible with tRPC's optional field handling,
++ * since msgpack converts undefined → null, but tRPC expects undefined for missing fields.
++ */
++function stripUndefined<T>(value: T): T {
++  if (value === null || typeof value !== 'object') return value;
++  if (Array.isArray(value)) return value.map(stripUndefined) as T;
++  const result: Record<string, unknown> = {};
++  for (const [k, v] of Object.entries(value)) {
++    if (v !== undefined) result[k] = stripUndefined(v);
++  }
++  return result as T;
++}
++
++/**
++ * MessagePack encoder for tRPC WebSocket connections.
++ * Provides binary encoding for improved performance and smaller payloads.
++ */
++export const msgpackEncoder: Encoder = {
++  encode: (data) => encode(stripUndefined(data)),
++  decode: (data) => {
++    if (typeof data === 'string') {
++      throw new Error(
++        'msgpackEncoder received string data but expected binary. ' +
++          'Ensure both client and server are configured with experimental_encoder.',
++      );
++    }
++    const uint8 = data instanceof ArrayBuffer ? new Uint8Array(data) : data;
++    return decode(uint8);
++  },
++};
+diff --git a/examples/next-websockets-encoder/src/utils/trpc.ts b/examples/next-websockets-encoder/src/utils/trpc.ts
+new file mode 100644
+index 00000000000..0d0781e475b
+--- /dev/null
++++ b/examples/next-websockets-encoder/src/utils/trpc.ts
+@@ -0,0 +1,46 @@
++import type { TRPCLink } from '@trpc/client';
++import {
++  createWSClient,
++  httpBatchLink,
++  loggerLink,
++  wsLink,
++} from '@trpc/client';
++import { createTRPCNext } from '@trpc/next';
++import { ssrPrepass } from '@trpc/next/ssrPrepass';
++import type { AppRouter } from '~/server/routers/_app';
++import type { NextPageContext } from 'next';
++import { msgpackEncoder } from './encoder';
++
++const WS_URL = 'ws://localhost:3001';
++const APP_URL = 'http://localhost:3000';
++
++function getEndingLink(ctx: NextPageContext | undefined): TRPCLink<AppRouter> {
++  if (typeof window === 'undefined') {
++    return httpBatchLink({
++      url: `${APP_URL}/api/trpc`,
++      headers() {
++        if (!ctx?.req?.headers) {
++          return {};
++        }
++        return { ...ctx.req.headers, 'x-ssr': '1' };
++      },
++    });
++  }
++
++  const client = createWSClient({
++    url: WS_URL,
++    experimental_encoder: msgpackEncoder,
++  });
++
++  return wsLink({ client });
++}
++
++export const trpc = createTRPCNext<AppRouter>({
++  ssr: true,
++  ssrPrepass,
++  config({ ctx }) {
++    return {
++      links: [loggerLink({ enabled: () => true }), getEndingLink(ctx)],
++    };
++  },
++});
+diff --git a/examples/next-websockets-encoder/tailwind.config.ts b/examples/next-websockets-encoder/tailwind.config.ts
+new file mode 100644
+index 00000000000..8394c8bc599
+--- /dev/null
++++ b/examples/next-websockets-encoder/tailwind.config.ts
+@@ -0,0 +1,11 @@
++import type { Config } from 'tailwindcss';
++
++const config: Config = {
++  content: ['./src/pages/**/*.{js,ts,jsx,tsx}'],
++  theme: {
++    extend: {},
++  },
++  plugins: [],
++};
++
++export default config;
+diff --git a/examples/next-websockets-encoder/tsconfig.json b/examples/next-websockets-encoder/tsconfig.json
+new file mode 100644
+index 00000000000..e0a10bed793
+--- /dev/null
++++ b/examples/next-websockets-encoder/tsconfig.json
+@@ -0,0 +1,24 @@
++{
++  "compilerOptions": {
++    "target": "es5",
++    "lib": ["dom", "dom.iterable", "esnext"],
++    "allowJs": true,
++    "skipLibCheck": true,
++    "strict": true,
++    "strictNullChecks": true,
++    "forceConsistentCasingInFileNames": true,
++    "noEmit": true,
++    "esModuleInterop": true,
++    "module": "esnext",
++    "moduleResolution": "node",
++    "resolveJsonModule": true,
++    "isolatedModules": true,
++    "jsx": "preserve",
++    "paths": {
++      "~/*": ["./src/*"]
++    },
++    "incremental": true
++  },
++  "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx"],
++  "exclude": ["node_modules"]
++}
+diff --git a/examples/next-websockets-encoder/tsconfig.server.json b/examples/next-websockets-encoder/tsconfig.server.json
+new file mode 100644
+index 00000000000..d37756cc1f0
+--- /dev/null
++++ b/examples/next-websockets-encoder/tsconfig.server.json
+@@ -0,0 +1,12 @@
++{
++  "extends": "./tsconfig.json",
++  "compilerOptions": {
++    "module": "commonjs",
++    "outDir": "dist",
++    "target": "ES2019",
++    "lib": ["ES2019", "DOM"],
++    "isolatedModules": false,
++    "noEmit": false
++  },
++  "include": ["next-env.d.ts", "src/**/*.ts", "src/**/*.tsx"]
++}
+diff --git a/packages/client/src/links/wsLink/createWsClient.ts b/packages/client/src/links/wsLink/createWsClient.ts
+index cb22744f59e..74f80af56de 100644
+--- a/packages/client/src/links/wsLink/createWsClient.ts
++++ b/packages/client/src/links/wsLink/createWsClient.ts
+@@ -1,3 +1,5 @@
++import type { Encoder } from './wsClient/encoder';
++import { jsonEncoder } from './wsClient/encoder';
+ import type { WebSocketClientOptions } from './wsClient/options';
+ import { WsClient } from './wsClient/wsClient';
+ 
+@@ -7,4 +9,4 @@ export function createWSClient(opts: WebSocketClientOptions) {
+ 
+ export type TRPCWebSocketClient = ReturnType<typeof createWSClient>;
+ 
+-export { WebSocketClientOptions };
++export { jsonEncoder, type Encoder, type WebSocketClientOptions };
+diff --git a/packages/client/src/links/wsLink/wsClient/encoder.ts b/packages/client/src/links/wsLink/wsClient/encoder.ts
+new file mode 100644
+index 00000000000..2d741785276
+--- /dev/null
++++ b/packages/client/src/links/wsLink/wsClient/encoder.ts
+@@ -0,0 +1,16 @@
++import type { Encoder } from '@trpc/server/adapters/ws';
++
++export type { Encoder };
++
++export const jsonEncoder: Encoder = {
++  encode: (data) => JSON.stringify(data),
++  decode: (data) => {
++    if (typeof data !== 'string') {
++      throw new Error(
++        'jsonEncoder received binary data. JSON uses text frames. ' +
++          'Use a binary encoder for binary data.',
++      );
++    }
++    return JSON.parse(data);
++  },
++};
+diff --git a/packages/client/src/links/wsLink/wsClient/options.ts b/packages/client/src/links/wsLink/wsClient/options.ts
+index e2a903562f1..c1864b9ccdb 100644
+--- a/packages/client/src/links/wsLink/wsClient/options.ts
++++ b/packages/client/src/links/wsLink/wsClient/options.ts
+@@ -1,4 +1,5 @@
+ import type { UrlOptionsWithConnectionParams } from '../../internals/urlWithConnectionParams';
++import type { Encoder } from './encoder';
+ 
+ export interface WebSocketClientOptions extends UrlOptionsWithConnectionParams {
+   /**
+@@ -56,6 +57,11 @@ export interface WebSocketClientOptions extends UrlOptionsWithConnectionParams {
+      */
+     pongTimeoutMs?: number;
+   };
++  /**
++   * Custom encoder for wire encoding (e.g. custom binary formats)
++   * @default jsonEncoder
++   */
++  experimental_encoder?: Encoder;
+ }
+ 
+ /**
+diff --git a/packages/client/src/links/wsLink/wsClient/wsClient.ts b/packages/client/src/links/wsLink/wsClient/wsClient.ts
+index 13632acc44c..48ea3938c30 100644
+--- a/packages/client/src/links/wsLink/wsClient/wsClient.ts
++++ b/packages/client/src/links/wsLink/wsClient/wsClient.ts
+@@ -16,6 +16,8 @@ import {
+ import { TRPCClientError } from '../../../TRPCClientError';
+ import type { TRPCConnectionState } from '../../internals/subscriptions';
+ import type { Operation, OperationResultEnvelope } from '../../types';
++import type { Encoder } from './encoder';
++import { jsonEncoder } from './encoder';
+ import type { WebSocketClientOptions } from './options';
+ import { exponentialBackoff, keepAliveDefaults, lazyDefaults } from './options';
+ import type { TCallbacks } from './requestManager';
+@@ -45,8 +47,10 @@ export class WsClient {
+     'onOpen' | 'onClose' | 'onError'
+   >;
+   private readonly lazyMode: boolean;
++  private readonly encoder: Encoder;
+ 
+   constructor(opts: WebSocketClientOptions) {
++    this.encoder = opts.experimental_encoder ?? jsonEncoder;
+     // Initialize callbacks, connection parameters, and options.
+     this.callbacks = {
+       onOpen: opts.onOpen,
+@@ -315,9 +319,12 @@ export class WsClient {
+     ws.addEventListener('message', ({ data }) => {
+       this.inactivityTimeout.reset();
+ 
+-      if (typeof data !== 'string' || ['PING', 'PONG'].includes(data)) return;
++      // Handle PING/PONG as text regardless of encoder
++      if (['PING', 'PONG'].includes(data)) return;
+ 
+-      const incomingMessage = JSON.parse(data) as TRPCClientIncomingMessage;
++      const incomingMessage = this.encoder.decode(
++        data,
++      ) as TRPCClientIncomingMessage;
+       if ('method' in incomingMessage) {
+         this.handleIncomingRequest(incomingMessage);
+         return;
+@@ -401,7 +408,7 @@ export class WsClient {
+         ? messageOrMessages
+         : [messageOrMessages];
+     this.activeConnection.ws.send(
+-      JSON.stringify(messages.length === 1 ? messages[0] : messages),
++      this.encoder.encode(messages.length === 1 ? messages[0] : messages),
+     );
+   }
+ 
+diff --git a/packages/client/src/links/wsLink/wsClient/wsConnection.ts b/packages/client/src/links/wsLink/wsClient/wsConnection.ts
+index b49f52e300b..bbc6b50ac5d 100644
+--- a/packages/client/src/links/wsLink/wsClient/wsConnection.ts
++++ b/packages/client/src/links/wsLink/wsClient/wsConnection.ts
+@@ -167,6 +167,9 @@ export class WsConnection {
+     this.openPromise = wsPromise.then(async (ws) => {
+       this.ws = ws;
+ 
++      // Set binaryType to handle both text and binary messages consistently
++      ws.binaryType = 'arraybuffer';
++
+       // Setup ping listener
+       ws.addEventListener('message', function ({ data }) {
+         if (data === 'PING') {
+diff --git a/packages/client/src/links/wsLink/wsLink.ts b/packages/client/src/links/wsLink/wsLink.ts
+index 1f5470034b5..247b0348f60 100644
+--- a/packages/client/src/links/wsLink/wsLink.ts
++++ b/packages/client/src/links/wsLink/wsLink.ts
+@@ -7,10 +7,11 @@ import type { TransformerOptions } from '../../unstable-internals';
+ import { getTransformer } from '../../unstable-internals';
+ import type { TRPCLink } from '../types';
+ import type {
++  Encoder,
+   TRPCWebSocketClient,
+   WebSocketClientOptions,
+ } from './createWsClient';
+-import { createWSClient } from './createWsClient';
++import { createWSClient, jsonEncoder } from './createWsClient';
+ 
+ export type WebSocketLinkOptions<TRouter extends AnyRouter> = {
+   client: TRPCWebSocketClient;
+@@ -52,4 +53,10 @@ export function wsLink<TRouter extends AnyRouter>(
+   };
+ }
+ 
+-export { TRPCWebSocketClient, WebSocketClientOptions, createWSClient };
++export {
++  createWSClient,
++  jsonEncoder,
++  type Encoder,
++  type TRPCWebSocketClient,
++  type WebSocketClientOptions,
++};
+diff --git a/packages/server/src/adapters/ws.ts b/packages/server/src/adapters/ws.ts
+index 05706146665..a73691443df 100644
+--- a/packages/server/src/adapters/ws.ts
++++ b/packages/server/src/adapters/ws.ts
+@@ -39,6 +39,8 @@ import type { Result } from '../unstable-core-do-not-import';
+ import { iteratorResource } from '../unstable-core-do-not-import/stream/utils/asyncIterable';
+ import { Unpromise } from '../vendor/unpromise';
+ import { createURL, type NodeHTTPCreateContextFnOptions } from './node-http';
++import type { Encoder } from './wsEncoder';
++import { jsonEncoder } from './wsEncoder';
+ 
+ /**
+  * Importing ws causes a build error
+@@ -98,6 +100,11 @@ export type WSSHandlerOptions<TRouter extends AnyRouter> =
+      * @default false
+      */
+     dangerouslyDisablePong?: boolean;
++    /**
++     * Custom encoder for wire encoding (e.g. custom binary formats)
++     * @default jsonEncoder
++     */
++    experimental_encoder?: Encoder;
+   };
+ 
+ export function getWSConnectionHandler<TRouter extends AnyRouter>(
+@@ -105,6 +112,7 @@ export function getWSConnectionHandler<TRouter extends AnyRouter>(
+ ) {
+   const { createContext, router } = opts;
+   const { transformer } = router._def._config;
++  const encoder = opts.experimental_encoder ?? jsonEncoder;
+ 
+   return (client: ws.WebSocket, req: IncomingMessage) => {
+     type Context = inferRouterContext<TRouter>;
+@@ -120,7 +128,7 @@ export function getWSConnectionHandler<TRouter extends AnyRouter>(
+ 
+     function respond(untransformedJSON: TRPCResponseMessage) {
+       client.send(
+-        JSON.stringify(
++        encoder.encode(
+           transformTRPCResponse(router._def._config, untransformedJSON),
+         ),
+       );
+@@ -440,24 +448,52 @@ export function getWSConnectionHandler<TRouter extends AnyRouter>(
+         });
+       });
+     }
+-    client.on('message', (rawData) => {
+-      // eslint-disable-next-line @typescript-eslint/no-base-to-string
+-      const msgStr = rawData.toString();
+-      if (msgStr === 'PONG') {
+-        return;
+-      }
+-      if (msgStr === 'PING') {
+-        if (!opts.dangerouslyDisablePong) {
+-          client.send('PONG');
++    client.on('message', (rawData, isBinary) => {
++      // Handle PING/PONG as text regardless of encoder
++      if (!isBinary) {
++        // eslint-disable-next-line @typescript-eslint/no-base-to-string
++        const msgStr = rawData.toString();
++        if (msgStr === 'PONG') {
++          return;
++        }
++        if (msgStr === 'PING') {
++          if (!opts.dangerouslyDisablePong) {
++            client.send('PONG');
++          }
++          return;
+         }
++      }
++
++      // Convert rawData to a format our encoder accepts
++      // ws gives us Buffer for both text and binary frames
++      if (!Buffer.isBuffer(rawData)) {
++        const error = new TRPCError({
++          code: 'UNPROCESSABLE_CONTENT',
++          message: 'Unexpected WebSocket message format',
++        });
++        respond({
++          id: null,
++          error: getErrorShape({
++            config: router._def._config,
++            error,
++            type: 'unknown',
++            path: undefined,
++            input: undefined,
++            ctx,
++          }),
++        });
+         return;
+       }
++      const data: string | Uint8Array = isBinary
++        ? rawData
++        : rawData.toString('utf8');
++
+       if (!ctxPromise) {
+         // If the ctxPromise wasn't created immediately, we're expecting the first message to be a TRPCConnectionParamsMessage
+         ctxPromise = createCtxPromise(() => {
+           let msg;
+           try {
+-            msg = JSON.parse(msgStr) as TRPCConnectionParamsMessage;
++            msg = encoder.decode(data) as TRPCConnectionParamsMessage;
+ 
+             if (!isObject(msg)) {
+               throw new Error('Message was not an object');
+@@ -479,7 +515,7 @@ export function getWSConnectionHandler<TRouter extends AnyRouter>(
+ 
+       const parsedMsgs = run(() => {
+         try {
+-          const msgJSON: unknown = JSON.parse(msgStr);
++          const msgJSON: unknown = encoder.decode(data);
+           const msgs: unknown[] = Array.isArray(msgJSON) ? msgJSON : [msgJSON];
+ 
+           return msgs.map((raw) => parseTRPCMessage(raw, transformer));
+@@ -577,6 +613,7 @@ export function handleKeepAlive(
+ export function applyWSSHandler<TRouter extends AnyRouter>(
+   opts: WSSHandlerOptions<TRouter>,
+ ) {
++  const encoder = opts.experimental_encoder ?? jsonEncoder;
+   const onConnection = getWSConnectionHandler(opts);
+   opts.wss.on('connection', (client, req) => {
+     if (opts.prefix && !req.url?.startsWith(opts.prefix)) {
+@@ -592,7 +629,7 @@ export function applyWSSHandler<TRouter extends AnyRouter>(
+         id: null,
+         method: 'reconnect',
+       };
+-      const data = JSON.stringify(response);
++      const data = encoder.encode(response);
+       for (const client of opts.wss.clients) {
+         if (client.readyState === WEBSOCKET_OPEN) {
+           client.send(data);
+@@ -601,3 +638,6 @@ export function applyWSSHandler<TRouter extends AnyRouter>(
+     },
+   };
+ }
++
++export type { Encoder } from './wsEncoder';
++export { jsonEncoder } from './wsEncoder';
+diff --git a/packages/server/src/adapters/wsEncoder.ts b/packages/server/src/adapters/wsEncoder.ts
+new file mode 100644
+index 00000000000..98844f33d05
+--- /dev/null
++++ b/packages/server/src/adapters/wsEncoder.ts
+@@ -0,0 +1,35 @@
++/**
++ * Encoder for WebSocket wire format.
++ * Encodes outgoing messages and decodes incoming messages.
++ *
++ * @example
++ * ```ts
++ * const customEncoder: Encoder = {
++ *   encode: (data) => myFormat.stringify(data),
++ *   decode: (data) => myFormat.parse(data),
++ * };
++ * ```
++ */
++export interface Encoder {
++  /** Encode data for transmission over the wire */
++  encode(data: unknown): string | Uint8Array;
++  /** Decode data received from the wire */
++  decode(data: string | ArrayBuffer | Uint8Array): unknown;
++}
++
++/**
++ * Default JSON encoder - used when no encoder is specified.
++ * This maintains backwards compatibility with existing behavior.
++ */
++export const jsonEncoder: Encoder = {
++  encode: (data) => JSON.stringify(data),
++  decode: (data) => {
++    if (typeof data !== 'string') {
++      throw new Error(
++        'jsonEncoder received binary data. JSON uses text frames. ' +
++          'Use a binary encoder for binary data.',
++      );
++    }
++    return JSON.parse(data);
++  },
++};
+diff --git a/packages/tests/server/websockets.encoder.test.ts b/packages/tests/server/websockets.encoder.test.ts
+new file mode 100644
+index 00000000000..b4f4024d1c7
+--- /dev/null
++++ b/packages/tests/server/websockets.encoder.test.ts
+@@ -0,0 +1,485 @@
++import { EventEmitter } from 'node:events';
++import { testServerAndClientResource } from '@trpc/client/__tests__/testClientResource';
++import { createTRPCClient, createWSClient, wsLink } from '@trpc/client';
++import { initTRPC, tracked } from '@trpc/server';
++import { jsonEncoder, type Encoder } from '@trpc/server/adapters/ws';
++import type { Observer } from '@trpc/server/observable';
++import { observable } from '@trpc/server/observable';
++import { createDeferred } from '@trpc/server/unstable-core-do-not-import';
++import WebSocket from 'ws';
++import { z } from 'zod';
++
++type Message = {
++  id: string;
++  title?: string;
++};
++
++const mockBinaryEncoder: Encoder = {
++  encode: (data) => {
++    const json = JSON.stringify(data);
++    return new TextEncoder().encode(`BINARY:${json}`);
++  },
++  decode: (data) => {
++    const str =
++      typeof data === 'string'
++        ? data
++        : new TextDecoder().decode(
++            data instanceof ArrayBuffer ? new Uint8Array(data) : data,
++          );
++    if (str.startsWith('BINARY:')) {
++      return JSON.parse(str.slice(7));
++    }
++    return JSON.parse(str);
++  },
++};
++
++function factory(config?: {
++  serverEncoder?: Encoder;
++  clientEncoder?: Encoder;
++}) {
++  const ee = new EventEmitter();
++  const subRef: { current: Observer<Message, unknown> } = {} as any;
++  const onNewMessageSubscription = vi.fn();
++  const subscriptionEnded = vi.fn();
++
++  const t = initTRPC.create();
++
++  let iterableDeferred = createDeferred();
++  const nextIterable = () => {
++    iterableDeferred.resolve();
++    iterableDeferred = createDeferred();
++  };
++
++  const appRouter = t.router({
++    greeting: t.procedure.input(z.string().nullish()).query(({ input }) => {
++      return `hello ${input ?? 'world'}`;
++    }),
++    echo: t.procedure
++      .input(
++        z.object({
++          message: z.string(),
++        }),
++      )
++      .mutation(({ input }) => {
++        return { received: input.message };
++      }),
++    iterable: t.procedure
++      .input(
++        z
++          .object({
++            lastEventId: z.coerce.number().nullish(),
++          })
++          .nullish(),
++      )
++      .subscription(async function* (opts) {
++        let from = opts?.input?.lastEventId ?? 0;
++
++        while (true) {
++          from++;
++          await iterableDeferred.promise;
++          const msg: Message = {
++            id: String(from),
++            title: 'hello ' + from,
++          };
++
++          yield tracked(String(from), msg);
++        }
++      }),
++    onMessage: t.procedure.input(z.string().nullish()).subscription(() => {
++      const sub = observable<Message>((emit) => {
++        subRef.current = emit;
++        const onMessage = (data: Message) => {
++          emit.next(data);
++        };
++        ee.on('server:msg', onMessage);
++        return () => {
++          subscriptionEnded();
++          ee.off('server:msg', onMessage);
++        };
++      });
++      ee.emit('subscription:created');
++      onNewMessageSubscription();
++      return sub;
++    }),
++  });
++
++  const onOpenMock = vi.fn();
++  const onCloseMock = vi.fn();
++
++  const opts = testServerAndClientResource(appRouter, {
++    wsClient: {
++      lazy: {
++        enabled: false,
++        closeMs: 0,
++      },
++      retryDelayMs: () => 50,
++      onOpen: onOpenMock,
++      onClose: onCloseMock,
++      experimental_encoder: config?.clientEncoder,
++    },
++    client({ wsClient }) {
++      return {
++        links: [wsLink({ client: wsClient })],
++      };
++    },
++    wssServer: {
++      createContext: () => ({}),
++      router: appRouter,
++      experimental_encoder: config?.serverEncoder,
++    },
++  });
++
++  return {
++    ...opts,
++    ee,
++    subRef,
++    onNewMessageSubscription,
++    onOpenMock,
++    onCloseMock,
++    subscriptionEnded,
++    nextIterable,
++  };
++}
++
++describe('experimental_encoder', () => {
++  describe('default JSON encoder', () => {
++    test('query works without explicit encoder', async () => {
++      await using ctx = factory();
++      expect(await ctx.client.greeting.query()).toBe('hello world');
++      expect(await ctx.client.greeting.query('test')).toBe('hello test');
++    });
++
++    test('mutation works without explicit encoder', async () => {
++      await using ctx = factory();
++      const result = await ctx.client.echo.mutate({ message: 'hello' });
++      expect(result).toEqual({ received: 'hello' });
++    });
++
++    test('subscription works without explicit encoder', async () => {
++      await using ctx = factory();
++      ctx.ee.once('subscription:created', () => {
++        setTimeout(() => {
++          ctx.ee.emit('server:msg', { id: '1' });
++          ctx.ee.emit('server:msg', { id: '2' });
++        });
++      });
++
++      const onDataMock = vi.fn();
++      const subscription = ctx.client.onMessage.subscribe(undefined, {
++        onData: onDataMock,
++      });
++
++      await vi.waitFor(() => {
++        expect(onDataMock).toHaveBeenCalledTimes(2);
++      });
++
++      expect(onDataMock.mock.calls).toMatchInlineSnapshot(`
++        Array [
++          Array [
++            Object {
++              "id": "1",
++            },
++          ],
++          Array [
++            Object {
++              "id": "2",
++            },
++          ],
++        ]
++      `);
++
++      subscription.unsubscribe();
++    });
++  });
++
++  describe('explicit JSON encoder', () => {
++    test('query works with explicit jsonEncoder', async () => {
++      await using ctx = factory({
++        serverEncoder: jsonEncoder,
++        clientEncoder: jsonEncoder,
++      });
++      expect(await ctx.client.greeting.query()).toBe('hello world');
++    });
++
++    test('subscription works with explicit jsonEncoder', async () => {
++      await using ctx = factory({
++        serverEncoder: jsonEncoder,
++        clientEncoder: jsonEncoder,
++      });
++
++      ctx.ee.once('subscription:created', () => {
++        setTimeout(() => {
++          ctx.ee.emit('server:msg', { id: '1' });
++        });
++      });
++
++      const onDataMock = vi.fn();
++      const subscription = ctx.client.onMessage.subscribe(undefined, {
++        onData: onDataMock,
++      });
++
++      await vi.waitFor(() => {
++        expect(onDataMock).toHaveBeenCalledTimes(1);
++      });
++
++      subscription.unsubscribe();
++    });
++  });
++
++  describe('binary encoder', () => {
++    test('query works with binary encoder', async () => {
++      await using ctx = factory({
++        serverEncoder: mockBinaryEncoder,
++        clientEncoder: mockBinaryEncoder,
++      });
++
++      expect(await ctx.client.greeting.query()).toBe('hello world');
++      expect(await ctx.client.greeting.query('binary')).toBe('hello binary');
++    });
++
++    test('mutation works with binary encoder', async () => {
++      await using ctx = factory({
++        serverEncoder: mockBinaryEncoder,
++        clientEncoder: mockBinaryEncoder,
++      });
++
++      const result = await ctx.client.echo.mutate({ message: 'binary data' });
++      expect(result).toEqual({ received: 'binary data' });
++    });
++
++    test('subscription works with binary encoder', async () => {
++      await using ctx = factory({
++        serverEncoder: mockBinaryEncoder,
++        clientEncoder: mockBinaryEncoder,
++      });
++
++      ctx.ee.once('subscription:created', () => {
++        setTimeout(() => {
++          ctx.ee.emit('server:msg', { id: '1', title: 'first' });
++          ctx.ee.emit('server:msg', { id: '2', title: 'second' });
++        });
++      });
++
++      const onDataMock = vi.fn();
++      const subscription = ctx.client.onMessage.subscribe(undefined, {
++        onData: onDataMock,
++      });
++
++      await vi.waitFor(() => {
++        expect(onDataMock).toHaveBeenCalledTimes(2);
++      });
++
++      expect(onDataMock.mock.calls.map((c) => c[0])).toEqual([
++        { id: '1', title: 'first' },
++        { id: '2', title: 'second' },
++      ]);
++
++      subscription.unsubscribe();
++    });
++
++    test('tracked subscription (iterable) works with binary encoder', async () => {
++      await using ctx = factory({
++        serverEncoder: mockBinaryEncoder,
++        clientEncoder: mockBinaryEncoder,
++      });
++
++      const onData = vi.fn<(val: { id: string; data: Message }) => void>();
++      const onStarted = vi.fn();
++
++      const sub = ctx.client.iterable.subscribe(undefined, {
++        onStarted,
++        onData,
++      });
++
++      await vi.waitFor(() => {
++        expect(onStarted).toHaveBeenCalledTimes(1);
++      });
++
++      ctx.nextIterable();
++
++      await vi.waitFor(() => {
++        expect(onData).toHaveBeenCalledTimes(1);
++      });
++
++      expect(onData.mock.calls[0]![0]).toEqual({
++        id: '1',
++        data: { id: '1', title: 'hello 1' },
++      });
++
++      sub.unsubscribe();
++    });
++  });
++
++  describe('PING/PONG with binary encoder', () => {
++    test('client responds to PING with PONG when using binary encoder', async () => {
++      await using ctx = factory({
++        serverEncoder: mockBinaryEncoder,
++        clientEncoder: mockBinaryEncoder,
++      });
++
++      // Wait for connection to be established
++      await vi.waitFor(() => {
++        expect(ctx.wsClient.connection).not.toBe(null);
++      });
++
++      // Get the server-side WebSocket client
++      const serverWsClients = Array.from(ctx.wss.clients);
++      expect(serverWsClients.length).toBe(1);
++      const serverWs = serverWsClients[0]!;
++
++      // Set up PONG listener
++      const onPong = vi.fn();
++      serverWs.on('message', (raw) => {
++        // eslint-disable-next-line @typescript-eslint/no-base-to-string
++        if (raw.toString() === 'PONG') {
++          onPong();
++        }
++      });
++
++      // Send PING from server
++      serverWs.send('PING');
++
++      // Wait for PONG response
++      await vi.waitFor(() => {
++        expect(onPong).toHaveBeenCalled();
++      });
++    });
++  });
++
++  describe('broadcastReconnectNotification', () => {
++    test('broadcastReconnectNotification works with binary encoder', async () => {
++      await using ctx = factory({
++        serverEncoder: mockBinaryEncoder,
++        clientEncoder: mockBinaryEncoder,
++      });
++
++      ctx.ee.once('subscription:created', () => {
++        setTimeout(() => {
++          ctx.ee.emit('server:msg', { id: '1' });
++        });
++      });
++
++      const onStartedMock = vi.fn();
++      const onDataMock = vi.fn();
++
++      ctx.client.onMessage.subscribe(undefined, {
++        onStarted: onStartedMock,
++        onData: onDataMock,
++      });
++
++      await vi.waitFor(() => {
++        expect(onStartedMock).toHaveBeenCalledTimes(1);
++        expect(onDataMock).toHaveBeenCalledTimes(1);
++      });
++
++      ctx.wssHandler.broadcastReconnectNotification();
++
++      await vi.waitFor(() => {
++        expect(ctx.wss.clients.size).toBe(1);
++        expect(ctx.onOpenMock).toHaveBeenCalledTimes(2);
++        expect(ctx.onCloseMock).toHaveBeenCalledTimes(1);
++      });
++
++      ctx.ee.emit('server:msg', { id: '2' });
++
++      await vi.waitFor(() => {
++        expect(onDataMock).toHaveBeenCalledTimes(2);
++      });
++    });
++  });
++
++  describe('error handling', () => {
++    test('parse errors are handled with binary encoder', async () => {
++      await using ctx = factory({
++        serverEncoder: mockBinaryEncoder,
++        clientEncoder: mockBinaryEncoder,
++      });
++
++      const rawClient = new WebSocket(ctx.wssUrl);
++
++      rawClient.onopen = () => {
++        rawClient.send('invalid data that is not serialized correctly');
++      };
++
++      const res: any = await new Promise<string>((resolve) => {
++        rawClient.addEventListener('message', (msg) => {
++          const str =
++            typeof msg.data === 'string'
++              ? msg.data
++              : new TextDecoder().decode(msg.data as ArrayBuffer);
++          resolve(mockBinaryEncoder.decode(str) as string);
++        });
++      });
++
++      expect(res).toHaveProperty('error');
++      expect(res.error.data.code).toBe('PARSE_ERROR');
++      rawClient.close();
++    });
++  });
++
++  describe('connection params', () => {
++    test('connection params work with binary encoder', async () => {
++      const USER_TOKEN = 'secret123';
++      const t = initTRPC.context<{ user: { id: string } | null }>().create();
++
++      const router = t.router({
++        whoami: t.procedure.query((opts) => opts.ctx.user),
++      });
++
++      await using ctx = testServerAndClientResource(router, {
++        wssServer: {
++          async createContext(opts) {
++            const token = opts.info.connectionParams?.['token'];
++            return {
++              user: token === USER_TOKEN ? { id: '123' } : null,
++            };
++          },
++          experimental_encoder: mockBinaryEncoder,
++        },
++      });
++
++      const wsClient = createWSClient({
++        url: ctx.wssUrl,
++        connectionParams: async () => ({ token: USER_TOKEN }),
++        lazy: { enabled: true, closeMs: 0 },
++        experimental_encoder: mockBinaryEncoder,
++      });
++
++      const client = createTRPCClient<typeof router>({
++        links: [wsLink({ client: wsClient })],
++      });
++
++      const result = await client.whoami.query();
++      expect(result).toEqual({ id: '123' });
++
++      wsClient.close();
++    });
++  });
++});
++
++describe('encoder interface', () => {
++  test('jsonEncoder handles string input', () => {
++    const data = { foo: 'bar', num: 42 };
++    const serialized = jsonEncoder.encode(data);
++    expect(typeof serialized).toBe('string');
++    expect(jsonEncoder.decode(serialized)).toEqual(data);
++  });
++
++  test('jsonEncoder throws on ArrayBuffer input', () => {
++    const data = { foo: 'bar', num: 42 };
++    const json = JSON.stringify(data);
++    const buffer = new TextEncoder().encode(json).buffer;
++    expect(() => jsonEncoder.decode(buffer)).toThrow(
++      'jsonEncoder received binary data',
++    );
++  });
++
++  test('jsonEncoder throws on Uint8Array input', () => {
++    const data = { foo: 'bar', num: 42 };
++    const json = JSON.stringify(data);
++    const uint8 = new TextEncoder().encode(json);
++    expect(() => jsonEncoder.decode(uint8)).toThrow(
++      'jsonEncoder received binary data',
++    );
++  });
++});
+diff --git a/pnpm-lock.yaml b/pnpm-lock.yaml
+index 7f1597c3f2c..d3ad6162076 100644
+--- a/pnpm-lock.yaml
++++ b/pnpm-lock.yaml
+@@ -154,10 +154,10 @@ importers:
+         version: 19.1.1(@types/react@19.1.0)
+       next:
+         specifier: ^15.3.8
+-        version: 15.4.10(@babel/core@7.26.9)(@playwright/test@1.50.1)(react-dom@19.1.0(react@19.1.0))(react@19.1.0)
++        version: 15.4.10(@playwright/test@1.50.1)(react-dom@19.1.0(react@19.1.0))(react@19.1.0)
+       next-auth:
+         specifier: 5.0.0-beta.25
+-        version: 5.0.0-beta.25(next@15.4.10(@babel/core@7.26.9)(@playwright/test@1.50.1)(react-dom@19.1.0(react@19.1.0))(react@19.1.0))(react@19.1.0)
++        version: 5.0.0-beta.25(next@15.4.10(@playwright/test@1.50.1)(react-dom@19.1.0(react@19.1.0))(react@19.1.0))(react@19.1.0)
+       react:
+         specifier: ^19.1.0
+         version: 19.1.0
+@@ -215,7 +215,7 @@ importers:
+         version: link:../../../packages/server
+       next:
+         specifier: ^15.3.8
+-        version: 15.4.10(@babel/core@7.26.9)(@playwright/test@1.51.1)(react-dom@19.1.0(react@19.1.0))(react@19.1.0)
++        version: 15.4.10(@babel/core@7.23.2)(@playwright/test@1.51.1)(react-dom@19.1.0(react@19.1.0))(react@19.1.0)
+       react:
+         specifier: ^19.1.0
+         version: 19.1.0
+@@ -261,7 +261,7 @@ importers:
+         version: link:../../../packages/server
+       next:
+         specifier: ^15.3.8
+-        version: 15.4.10(@babel/core@7.26.9)(@playwright/test@1.51.1)(react-dom@19.1.0(react@19.1.0))(react@19.1.0)
++        version: 15.4.10(@babel/core@7.23.2)(@playwright/test@1.51.1)(react-dom@19.1.0(react@19.1.0))(react@19.1.0)
+     devDependencies:
+       '@tsconfig/esm':
+         specifier: ^1.0.3
+@@ -382,7 +382,7 @@ importers:
+         version: link:../../../packages/server
+       next:
+         specifier: ^15.3.8
+-        version: 15.4.10(@babel/core@7.26.9)(@playwright/test@1.50.1)(react-dom@19.1.0(react@19.1.0))(react@19.1.0)
++        version: 15.4.10(@playwright/test@1.50.1)(react-dom@19.1.0(react@19.1.0))(react@19.1.0)
+       react:
+         specifier: ^19.1.0
+         version: 19.1.0
+@@ -437,7 +437,7 @@ importers:
+         version: link:../../../packages/server
+       next:
+         specifier: ^15.3.8
+-        version: 15.4.10(@babel/core@7.26.9)(@playwright/test@1.50.1)(react-dom@19.1.0(react@19.1.0))(react@19.1.0)
++        version: 15.4.10(@playwright/test@1.50.1)(react-dom@19.1.0(react@19.1.0))(react@19.1.0)
+       react:
+         specifier: ^19.1.0
+         version: 19.1.0
+@@ -1034,7 +1034,7 @@ importers:
+         version: link:../../packages/server
+       next:
+         specifier: ^15.3.8
+-        version: 15.4.10(@babel/core@7.26.9)(@playwright/test@1.51.1)(react-dom@19.1.0(react@19.1.0))(react@19.1.0)
++        version: 15.4.10(@babel/core@7.23.2)(@playwright/test@1.51.1)(react-dom@19.1.0(react@19.1.0))(react@19.1.0)
+       react:
+         specifier: ^19.1.0
+         version: 19.1.0
+@@ -1083,7 +1083,7 @@ importers:
+         version: link:../../packages/server
+       next:
+         specifier: ^15.3.8
+-        version: 15.4.10(@babel/core@7.26.9)(@playwright/test@1.51.1)(react-dom@19.1.0(react@19.1.0))(react@19.1.0)
++        version: 15.4.10(@babel/core@7.23.2)(@playwright/test@1.51.1)(react-dom@19.1.0(react@19.1.0))(react@19.1.0)
+       react:
+         specifier: ^19.1.0
+         version: 19.1.0
+@@ -1135,7 +1135,7 @@ importers:
+         version: link:../../packages/server
+       next:
+         specifier: ^15.3.8
+-        version: 15.4.10(@babel/core@7.26.9)(@playwright/test@1.51.1)(react-dom@19.1.0(react@19.1.0))(react@19.1.0)
++        version: 15.4.10(@babel/core@7.23.2)(@playwright/test@1.51.1)(react-dom@19.1.0(react@19.1.0))(react@19.1.0)
+       react:
+         specifier: ^19.1.0
+         version: 19.1.0
+@@ -1187,7 +1187,7 @@ importers:
+         version: link:../../packages/server
+       next:
+         specifier: ^15.3.8
+-        version: 15.4.10(@babel/core@7.26.9)(@playwright/test@1.51.1)(react-dom@19.1.0(react@19.1.0))(react@19.1.0)
++        version: 15.4.10(@babel/core@7.23.2)(@playwright/test@1.51.1)(react-dom@19.1.0(react@19.1.0))(react@19.1.0)
+       react:
+         specifier: ^19.1.0
+         version: 19.1.0
+@@ -1242,7 +1242,7 @@ importers:
+         version: 2.0.0
+       next:
+         specifier: ^15.3.8
+-        version: 15.4.10(@babel/core@7.27.4)(@playwright/test@1.50.1)(react-dom@19.1.0(react@19.1.0))(react@19.1.0)
++        version: 15.4.10(@playwright/test@1.50.1)(react-dom@19.1.0(react@19.1.0))(react@19.1.0)
+       react:
+         specifier: ^19.1.0
+         version: 19.1.0
+@@ -1342,7 +1342,7 @@ importers:
+         version: 2.0.0
+       next:
+         specifier: ^15.3.8
+-        version: 15.4.10(@babel/core@7.26.9)(@playwright/test@1.50.1)(react-dom@19.1.0(react@19.1.0))(react@19.1.0)
++        version: 15.4.10(@playwright/test@1.50.1)(react-dom@19.1.0(react@19.1.0))(react@19.1.0)
+       react:
+         specifier: ^19.1.0
+         version: 19.1.0
+@@ -1415,10 +1415,10 @@ importers:
+         version: 2.0.0
+       next:
+         specifier: ^15.3.8
+-        version: 15.4.10(@babel/core@7.27.4)(@playwright/test@1.50.1)(react-dom@19.1.0(react@19.1.0))(react@19.1.0)
++        version: 15.4.10(@playwright/test@1.50.1)(react-dom@19.1.0(react@19.1.0))(react@19.1.0)
+       next-auth:
+         specifier: npm:next-auth@^4.24.11
+-        version: 4.24.11(next@15.4.10(@babel/core@7.27.4)(@playwright/test@1.50.1)(react-dom@19.1.0(react@19.1.0))(react@19.1.0))(react-dom@19.1.0(react@19.1.0))(react@19.1.0)
++        version: 4.24.11(next@15.4.10(@playwright/test@1.50.1)(react-dom@19.1.0(react@19.1.0))(react@19.1.0))(react-dom@19.1.0(react@19.1.0))(react@19.1.0)
+       react:
+         specifier: ^19.1.0
+         version: 19.1.0
+@@ -1533,10 +1533,10 @@ importers:
+         version: 0.31.2(@cloudflare/workers-types@4.20250505.0)(@types/better-sqlite3@7.6.2)(@types/react@19.1.0)(bun-types@1.1.32)(postgres@3.4.4)(react@19.1.0)
+       next:
+         specifier: ^15.3.8
+-        version: 15.4.10(@babel/core@7.26.9)(@playwright/test@1.51.1)(react-dom@19.1.0(react@19.1.0))(react@19.1.0)
++        version: 15.4.10(@babel/core@7.23.2)(@playwright/test@1.51.1)(react-dom@19.1.0(react@19.1.0))(react@19.1.0)
+       next-auth:
+         specifier: 5.0.0-beta.25
+-        version: 5.0.0-beta.25(next@15.4.10(@babel/core@7.26.9)(@playwright/test@1.51.1)(react-dom@19.1.0(react@19.1.0))(react@19.1.0))(react@19.1.0)
++        version: 5.0.0-beta.25(next@15.4.10(@playwright/test@1.51.1)(react-dom@19.1.0(react@19.1.0))(react@19.1.0))(react@19.1.0)
+       postgres:
+         specifier: ^3.4.4
+         version: 3.4.4
+@@ -1584,6 +1584,91 @@ importers:
+         specifier: ^5.9.2
+         version: 5.9.2
+ 
++  examples/next-websockets-encoder:
++    dependencies:
++      '@msgpack/msgpack':
++        specifier: ^3.1.3
++        version: 3.1.3
++      '@tanstack/react-query':
++        specifier: ^5.80.3
++        version: 5.80.3(react@19.1.0)
++      '@trpc/client':
++        specifier: npm:@trpc/client
++        version: link:../../packages/client
++      '@trpc/next':
++        specifier: npm:@trpc/next
++        version: link:../../packages/next
++      '@trpc/react-query':
++        specifier: npm:@trpc/react-query
++        version: link:../../packages/react-query
++      '@trpc/server':
++        specifier: npm:@trpc/server
++        version: link:../../packages/server
++      next:
++        specifier: ^15.3.8
++        version: 15.4.10(@babel/core@7.26.9)(@playwright/test@1.51.1)(react-dom@19.1.0(react@19.1.0))(react@19.1.0)
++      react:
++        specifier: ^19.1.0
++        version: 19.1.0
++      react-dom:
++        specifier: ^19.1.0
++        version: 19.1.0(react@19.1.0)
++      tsx:
++        specifier: ^4.19.3
++        version: 4.19.4
++      ws:
++        specifier: ^8.0.0
++        version: 8.18.1
++      zod:
++        specifier: ^4.2.1
++        version: 4.2.1
++    devDependencies:
++      '@tanstack/react-query-devtools':
++        specifier: ^5.80.3
++        version: 5.80.3(@tanstack/react-query@5.80.3(react@19.1.0))(react@19.1.0)
++      '@types/node':
++        specifier: ^22.13.5
++        version: 22.19.7
++      '@types/react':
++        specifier: ^19.1.0
++        version: 19.1.0
++      '@types/ws':
++        specifier: ^8.2.0
++        version: 8.5.10
++      autoprefixer:
++        specifier: ^10.4.7
++        version: 10.4.21(postcss@8.5.6)
++      cross-env:
++        specifier: ^7.0.3
++        version: 7.0.3
++      eslint:
++        specifier: ^9.26.0
++        version: 9.26.0(jiti@2.4.2)
++      eslint-config-next:
++        specifier: ^15.3.1
++        version: 15.3.2(eslint@9.26.0(jiti@2.4.2))(typescript@5.9.2)
++      eslint-plugin-react:
++        specifier: ^7.37.5
++        version: 7.37.5(eslint@9.26.0(jiti@2.4.2))
++      eslint-plugin-react-hooks:
++        specifier: 6.0.0-rc.1
++        version: 6.0.0-rc.1(eslint@9.26.0(jiti@2.4.2))
++      npm-run-all:
++        specifier: ^4.1.5
++        version: 4.1.5
++      postcss:
++        specifier: ^8.4.39
++        version: 8.5.6
++      tailwindcss:
++        specifier: ^3.4.6
++        version: 3.4.6
++      typescript:
++        specifier: ^5.9.2
++        version: 5.9.2
++      typescript-eslint:
++        specifier: ^8.31.1
++        version: 8.32.1(eslint@9.26.0(jiti@2.4.2))(typescript@5.9.2)
++
+   examples/nuxt:
+     dependencies:
+       '@trpc/client':
+@@ -1789,7 +1874,7 @@ importers:
+         version: 5.2.0
+       next:
+         specifier: ^15.3.8
+-        version: 15.4.10(@babel/core@7.26.9)(@playwright/test@1.51.1)(react-dom@19.1.0(react@19.1.0))(react@19.1.0)
++        version: 15.4.10(@babel/core@7.23.2)(@playwright/test@1.51.1)(react-dom@19.1.0(react@19.1.0))(react@19.1.0)
+       react:
+         specifier: ^19.1.0
+         version: 19.1.0
+@@ -1852,7 +1937,7 @@ importers:
+         version: 5.2.0
+       next:
+         specifier: ^15.3.8
+-        version: 15.4.10(@babel/core@7.26.9)(@playwright/test@1.51.1)(react-dom@19.1.0(react@19.1.0))(react@19.1.0)
++        version: 15.4.10(@babel/core@7.23.2)(@playwright/test@1.51.1)(react-dom@19.1.0(react@19.1.0))(react@19.1.0)
+       react:
+         specifier: ^19.1.0
+         version: 19.1.0
+@@ -1930,7 +2015,7 @@ importers:
+         version: 1.8.8
+       next:
+         specifier: ^15.3.8
+-        version: 15.4.10(@babel/core@7.26.9)(@playwright/test@1.51.1)(react-dom@19.1.0(react@19.1.0))(react@19.1.0)
++        version: 15.4.10(@babel/core@7.23.2)(@playwright/test@1.51.1)(react-dom@19.1.0(react@19.1.0))(react@19.1.0)
+       react:
+         specifier: ^19.1.0
+         version: 19.1.0
+@@ -2376,7 +2461,7 @@ importers:
+         version: 1.0.0
+       next:
+         specifier: ^15.3.8
+-        version: 15.4.10(@babel/core@7.26.9)(@playwright/test@1.51.1)(react-dom@19.1.0(react@19.1.0))(react@19.1.0)
++        version: 15.4.10(@babel/core@7.23.2)(@playwright/test@1.51.1)(react-dom@19.1.0(react@19.1.0))(react@19.1.0)
+       react:
+         specifier: ^19.1.0
+         version: 19.1.0
+@@ -6549,6 +6634,10 @@ packages:
+   '@module-federation/webpack-bundler-runtime@0.8.4':
+     resolution: {integrity: sha512-HggROJhvHPUX7uqBD/XlajGygMNM1DG0+4OAkk8MBQe4a18QzrRNzZt6XQbRTSG4OaEoyRWhQHvYD3Yps405tQ==}
+ 
++  '@msgpack/msgpack@3.1.3':
++    resolution: {integrity: sha512-47XIizs9XZXvuJgoaJUIE2lFoID8ugvc0jzSHP+Ptfk8nTbnR8g788wv48N03Kx0UkAv559HWRQ3yzOgzlRNUA==}
++    engines: {node: '>= 18'}
++
+   '@napi-rs/wasm-runtime@0.2.11':
+     resolution: {integrity: sha512-9DPkXtvHydrcOsopiYpUgPHpmj0HWZKMUnL2dZqpvC42lsratuBG06V5ipyno0fUek5VlFsNQ+AcFATSrJXgMA==}
+ 
+@@ -9296,13 +9385,6 @@ packages:
+     peerDependencies:
+       postcss: ^8.1.0
+ 
+-  autoprefixer@10.4.20:
+-    resolution: {integrity: sha512-XY25y5xSv/wEoqzDyXXME4AFfkZI0P23z6Fs3YgymDnKJkCGOnkL0iTxCa85UTqaSgfcqyf3UA6+c7wUvx/16g==}
+-    engines: {node: ^10 || ^12 || >=14}
+-    hasBin: true
+-    peerDependencies:
+-      postcss: ^8.1.0
+-
+   autoprefixer@10.4.21:
+     resolution: {integrity: sha512-O+A6LWV5LDHSJD3LjHYoNi4VLsj/Whi7k6zG12xTYaU4cQ8oxQGckXNX8cRHK5yOZ/ppVHe0ZBXGzSV9jXdVbQ==}
+     engines: {node: ^10 || ^12 || >=14}
+@@ -9497,21 +9579,11 @@ packages:
+     engines: {node: ^6 || ^7 || ^8 || ^9 || ^10 || ^11 || ^12 || >=13.7}
+     hasBin:
+
+... [truncated, 131635 chars total]

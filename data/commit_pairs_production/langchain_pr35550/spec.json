@@ -1,0 +1,11 @@
+{
+  "feature_name": "Preserve default_factory in tool call schema generation",
+  "description": "Fix the issue where fields with default_factory in a tool's args_schema are incorrectly marked as required in the generated JSON schema. Currently, when creating subset models for tool calls, the default_factory attribute is dropped during field reconstruction, causing Pydantic to treat these fields as required. The solution should ensure both default and default_factory are properly forwarded when rebuilding FieldInfo objects.",
+  "functional_requirements": [
+    "Modify the subset model creation logic to preserve the default_factory attribute alongside the default attribute when reconstructing fields",
+    "Ensure fields with default_factory are correctly marked as optional (not required) in the generated JSON schema for tool calls",
+    "Add test coverage to verify that tools with default_factory in their args_schema properly generate schemas where those fields are optional"
+  ],
+  "project_name": "langchain",
+  "source_pr": "https://github.com/langchain-ai/langchain/pull/35550"
+}

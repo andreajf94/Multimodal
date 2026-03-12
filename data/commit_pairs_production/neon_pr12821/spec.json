@@ -1,0 +1,14 @@
+{
+  "feature_name": "Configurable Direct IO Alignment",
+  "description": "Add support for configurable Direct IO alignment to enable Neon's storage system to work correctly on systems with different disk block sizes. Currently, the system only supports 512-byte alignment, which causes I/O errors on hardware with 4096-byte block sizes. This feature will make the alignment configurable at build time while maintaining backward compatibility.",
+  "functional_requirements": [
+    "Add cargo features to configure IO alignment (512-byte default, 4096-byte option) in the pageserver and pageserver_api crates",
+    "Make the default IO buffer alignment configurable via cargo features and use this value throughout the codebase instead of hard-coded constants",
+    "Update the vectored Direct IO read implementation to use the configured alignment value for chunk size calculations",
+    "Add build-time configuration to the Dockerfile to allow building images with different alignment settings",
+    "Add startup logging to display the configured IO buffer alignment for operational visibility",
+    "Fix validation logic in virtual file operations to use the configured alignment instead of hard-coded values"
+  ],
+  "project_name": "neon",
+  "source_pr": "https://github.com/neondatabase/neon/pull/12821"
+}

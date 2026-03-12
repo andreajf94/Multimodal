@@ -1,0 +1,27 @@
+diff --git a/libs/partners/anthropic/langchain_anthropic/chat_models.py b/libs/partners/anthropic/langchain_anthropic/chat_models.py
+index af7045d74aeb2..36317fdd513ea 100644
+--- a/libs/partners/anthropic/langchain_anthropic/chat_models.py
++++ b/libs/partners/anthropic/langchain_anthropic/chat_models.py
+@@ -636,7 +636,7 @@ def _identifying_params(self) -> Dict[str, Any]:
+     def _get_ls_params(
+         self, stop: Optional[List[str]] = None, **kwargs: Any
+     ) -> LangSmithParams:
+-        """Get the parameters used to invoke the model."""
++        """Get standard params for tracing."""
+         params = self._get_invocation_params(stop=stop, **kwargs)
+         ls_params = LangSmithParams(
+             ls_provider="anthropic",
+diff --git a/libs/partners/mistralai/langchain_mistralai/embeddings.py b/libs/partners/mistralai/langchain_mistralai/embeddings.py
+index 7c14536a31503..9b97c8a1e3dd9 100644
+--- a/libs/partners/mistralai/langchain_mistralai/embeddings.py
++++ b/libs/partners/mistralai/langchain_mistralai/embeddings.py
+@@ -32,7 +32,8 @@
+ class DummyTokenizer:
+     """Dummy tokenizer for when tokenizer cannot be accessed (e.g., via Huggingface)"""
+ 
+-    def encode_batch(self, texts: List[str]) -> List[List[str]]:
++    @staticmethod
++    def encode_batch(texts: List[str]) -> List[List[str]]:
+         return [list(text) for text in texts]
+ 
+ 

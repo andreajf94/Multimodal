@@ -1,0 +1,88 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "api_design",
+      "recommendation": "Replaced static PROD command with a factory method get_prod_command() that accepts frontend_path parameter",
+      "rationale": "The static PROD command couldn't adapt to different frontend_path configurations. By making it a method, we can dynamically construct the correct path to 404.html based on the actual frontend_path configuration. This follows the dependency injection pattern where configuration drives behavior.",
+      "alternatives_considered": [
+        "Hardcoding the path logic in frontend_skeleton.py",
+        "Using environment variables to pass the frontend_path",
+        "Keeping the static command and modifying it at runtime with string replacement"
+      ],
+      "files_affected": [
+        "reflex/constants/installer.py"
+      ]
+    },
+    {
+      "dimension": "data_modeling",
+      "recommendation": "Added proper path normalization by stripping leading/trailing slashes from frontend_path",
+      "rationale": "Users might configure frontend_path with or without leading/trailing slashes (e.g., '/app', 'app/', '/app/'). The implementation handles all variations consistently by stripping slashes, then constructing the correct relative path. This ensures the sirv static file server can locate 404.html regardless of how the path is configured.",
+      "alternatives_considered": [
+        "Requiring users to always provide paths without slashes",
+        "Using path.join() with platform-specific separators",
+        "Validating the path format and rejecting malformed inputs"
+      ],
+      "files_affected": [
+        "reflex/constants/installer.py"
+      ]
+    },
+    {
+      "dimension": "testing",
+      "recommendation": "Added comprehensive parameterized tests for get_prod_command() and compile_package_json()",
+      "rationale": "The fix handles edge cases like empty paths, paths with slashes, and deeply nested paths. Parameterized tests ensure all variations work correctly. Tests also verify integration by checking the actual package.json output contains the correct prod script.",
+      "alternatives_considered": [
+        "Only testing the happy path",
+        "Testing at a higher level through end-to-end tests",
+        "Skipping tests for edge cases"
+      ],
+      "files_affected": [
+        "tests/units/test_prerequisites.py"
+      ]
+    },
+    {
+      "dimension": "configuration_management",
+      "recommendation": "Modified frontend_skeleton.py to read config.frontend_path at compile time and pass it to get_prod_command()",
+      "rationale": "The package.json is generated during build time, so we need to inject the current configuration's frontend_path. This ensures the production server command is correctly configured for the specific deployment. The change maintains separation of concerns by keeping configuration reading in the skeleton generation code.",
+      "alternatives_considered": [
+        "Making frontend_path an environment variable read at runtime by sirv",
+        "Generating a separate configuration file for sirv",
+        "Using a template variable that gets replaced during deployment"
+      ],
+      "files_affected": [
+        "reflex/utils/frontend_skeleton.py"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Fix dynamic route fallback for custom frontend_path",
+      "description": "Update static file server configuration to correctly locate 404.html when frontend_path is configured, ensuring dynamic routes in production properly fall back to the frontend application",
+      "files_to_modify": [
+        "reflex/constants/installer.py",
+        "reflex/utils/frontend_skeleton.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-002",
+      "title": "Add comprehensive tests for frontend_path handling",
+      "description": "Create parameterized tests to verify get_prod_command() handles all path variations correctly and ensure package.json generation includes the proper production command",
+      "files_to_modify": [
+        "tests/units/test_prerequisites.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation addresses a production issue where dynamic routes would break when a custom frontend_path is configured. The root cause was that the static file server (sirv) was looking for 404.html at the wrong location when static files were built into a subdirectory.\n\nThe solution replaces the static PROD command constant with a factory method get_prod_command() that dynamically constructs the correct path based on the configured frontend_path. The method properly normalizes the path by stripping leading/trailing slashes, then constructs the fallback path as either '404.html' (for root deployments) or 'path/404.html' (for subdirectory deployments).\n\nDuring package.json generation in frontend_skeleton.py, the current configuration's frontend_path is read and passed to get_prod_command(), ensuring the production server command is correctly configured for each specific deployment. Comprehensive tests verify all path variations work correctly, including edge cases like empty paths, paths with slashes, and deeply nested paths. This maintains backward compatibility for deployments without a custom frontend_path while fixing the issue for those with custom paths.",
+  "source_pr": "https://github.com/reflex-dev/reflex/pull/6154",
+  "before_sha": "0b848fab6c264becb89e186165a051b425b3c681",
+  "after_sha": "b9845ba4411ecbb84026e0c06471badfadbf211e",
+  "diff_stats": {
+    "additions": 61,
+    "deletions": 2,
+    "files_changed": 3
+  }
+}

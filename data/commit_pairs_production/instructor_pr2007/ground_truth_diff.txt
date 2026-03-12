@@ -1,0 +1,447 @@
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index 30335de4b..9f926eaf4 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -6,6 +6,9 @@ All notable changes to this project will be documented in this file. The format
+ 
+ <!-- Add upcoming changes here -->
+ 
++### Fixed
++- Fixed Google GenAI `safety_settings` causing `400 INVALID_ARGUMENT` when requests include image content by using image-specific harm categories when needed (#1773)
++
+ ## [1.14.3] - 2026-01-13
+ 
+ ### Added
+diff --git a/docs/integrations/google.md b/docs/integrations/google.md
+index f251d6f19..e49d2ff99 100644
+--- a/docs/integrations/google.md
++++ b/docs/integrations/google.md
+@@ -139,6 +139,50 @@ resp = client.create(
+ print(resp)
+ ```
+ 
++## Safety settings with images
++
++Google GenAI uses a different set of harm categories for image inputs (for example, `HARM_CATEGORY_IMAGE_HATE`).
++
++When your request includes image content, Instructor will:
++
++- Use the image-specific categories in the request config
++- Map thresholds you pass for text categories (like `HARM_CATEGORY_HATE_SPEECH`) to the matching image category (like `HARM_CATEGORY_IMAGE_HATE`)
++
++This avoids `400 INVALID_ARGUMENT` errors when you combine `safety_settings` with images.
++
++```python
++import instructor
++from google.genai.types import HarmBlockThreshold, HarmCategory
++from instructor.processing.multimodal import Image
++from pydantic import BaseModel
++
++
++class Result(BaseModel):
++    summary: str
++
++
++client = instructor.from_provider("google/gemini-3-flash")
++
++result = client.create(
++    response_model=Result,
++    messages=[
++        {
++            "role": "user",
++            "content": [
++                "Describe the image in one sentence.",
++                Image.autodetect("path/to/image.png"),
++            ],
++        }
++    ],
++    # You can still pass text categories. Instructor will map them for image inputs.
++    safety_settings={
++        HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_LOW_AND_ABOVE,
++    },
++)
++
++print(result)
++```
++
+ ## Nested Example
+ 
+ ```python
+diff --git a/instructor/providers/gemini/utils.py b/instructor/providers/gemini/utils.py
+index b78081d77..3b0212f7a 100644
+--- a/instructor/providers/gemini/utils.py
++++ b/instructor/providers/gemini/utils.py
+@@ -304,9 +304,75 @@ def update_genai_kwargs(
+             if val is not None:  # Only set if value is not None
+                 base_config[gemini_key] = val
+ 
++    def _genai_kwargs_has_image_content(genai_kwargs: dict[str, Any]) -> bool:
++        """
++        Best-effort check for image content in a GenAI request.
++
++        We use this to decide whether to send text vs image harm categories in
++        `safety_settings`. The google-genai SDK has separate image categories
++        (e.g., `HARM_CATEGORY_IMAGE_HATE`) which are required for image content.
++        """
++        # Prefer typed GenAI contents if present (works with autodetect_images)
++        contents = genai_kwargs.get("contents")
++        if isinstance(contents, list):
++            for content in contents:
++                parts = getattr(content, "parts", None)
++                if not parts:
++                    continue
++                for part in parts:
++                    inline_data = getattr(part, "inline_data", None)
++                    if inline_data is not None:
++                        mime_type = getattr(inline_data, "mime_type", None)
++                        if isinstance(mime_type, str) and mime_type.startswith(
++                            "image/"
++                        ):
++                            return True
++
++                    file_data = getattr(part, "file_data", None)
++                    if file_data is not None:
++                        mime_type = getattr(file_data, "mime_type", None)
++                        if isinstance(mime_type, str) and mime_type.startswith(
++                            "image/"
++                        ):
++                            return True
++
++        # Fall back to OpenAI-style messages if present
++        messages = genai_kwargs.get("messages")
++        if isinstance(messages, list):
++            for message in messages:
++                if not isinstance(message, dict):
++                    continue
++                content = message.get("content")
++                if isinstance(content, Image):
++                    return True
++                if isinstance(content, list):
++                    for item in content:
++                        if isinstance(item, Image):
++                            return True
++                        if isinstance(item, dict) and item.get("type") in {
++                            "image",
++                            "image_url",
++                            "input_image",
++                        }:
++                            return True
++                if isinstance(content, dict) and content.get("type") in {
++                    "image",
++                    "image_url",
++                    "input_image",
++                }:
++                    return True
++
++        return False
++
+     safety_settings = new_kwargs.pop("safety_settings", {})
+     base_config["safety_settings"] = []
+ 
++    # If users pass a list of settings, assume it's already in SDK format.
++    # This preserves compatibility with advanced usage.
++    if isinstance(safety_settings, list):
++        base_config["safety_settings"] = safety_settings
++        safety_settings = None
++
+     # Filter out image related harm categories which are not
+     # supported for text based models
+     # Exclude JAILBREAK category as it's only for Vertex AI, not google.genai
+@@ -314,22 +380,53 @@ def update_genai_kwargs(
+     if hasattr(HarmCategory, "HARM_CATEGORY_JAILBREAK"):
+         excluded_categories.add(HarmCategory.HARM_CATEGORY_JAILBREAK)
+ 
+-    supported_categories = [
+-        c
+-        for c in HarmCategory
+-        if c not in excluded_categories
+-        and not c.name.startswith("HARM_CATEGORY_IMAGE_")
+-    ]
++    if safety_settings is not None:
++        # google-genai has separate categories for image content.
++        has_image = _genai_kwargs_has_image_content(new_kwargs)
++        image_categories = [
++            c
++            for c in HarmCategory
++            if c not in excluded_categories
++            and c.name.startswith("HARM_CATEGORY_IMAGE_")
++        ]
++        text_categories = [
++            c
++            for c in HarmCategory
++            if c not in excluded_categories
++            and not c.name.startswith("HARM_CATEGORY_IMAGE_")
++        ]
+ 
+-    for category in supported_categories:
+-        threshold = safety_settings.get(category, HarmBlockThreshold.OFF)
+-        base_config["safety_settings"].append(
+-            {
+-                "category": category,
+-                "threshold": threshold,
+-            }
++        supported_categories = (
++            image_categories if (has_image and image_categories) else text_categories
+         )
+ 
++        def _map_text_to_image_category_name(image_category_name: str) -> str | None:
++            suffix = image_category_name.removeprefix("HARM_CATEGORY_IMAGE_")
++            # google-genai uses IMAGE_HATE while text uses HATE_SPEECH
++            if suffix == "HATE":
++                return "HARM_CATEGORY_HATE_SPEECH"
++            return f"HARM_CATEGORY_{suffix}"
++
++        for category in supported_categories:
++            threshold = HarmBlockThreshold.OFF
++            if isinstance(safety_settings, dict):
++                if category in safety_settings:
++                    threshold = safety_settings[category]
++                # If we are using image categories, try to honor thresholds passed via text categories.
++                elif has_image and category.name.startswith("HARM_CATEGORY_IMAGE_"):
++                    mapped_name = _map_text_to_image_category_name(category.name)
++                    if mapped_name is not None and hasattr(HarmCategory, mapped_name):
++                        mapped_category = getattr(HarmCategory, mapped_name)
++                        if mapped_category in safety_settings:
++                            threshold = safety_settings[mapped_category]
++
++            base_config["safety_settings"].append(
++                {
++                    "category": category,
++                    "threshold": threshold,
++                }
++            )
++
+     # Extract thinking_config from user's config if provided (dict or object)
+     # This ensures thinking_config inside config parameter is not ignored.
+     user_config = new_kwargs.get("config")
+@@ -1026,18 +1123,21 @@ def handle_genai_tools(
+             ),
+         )
+ 
+-    generation_config = update_genai_kwargs(new_kwargs, base_config)
+-
+-    new_kwargs["config"] = types.GenerateContentConfig(**generation_config)
++    # Convert messages before building config so we can correctly infer whether
++    # this request includes image content (which affects safety_settings).
+     new_kwargs["contents"] = convert_to_genai_messages(new_kwargs["messages"])
+ 
+-    # Extract multimodal content for GenAI
++    # Extract multimodal content for GenAI (autodetect_images may turn URLs into images)
+     from ...processing.multimodal import extract_genai_multimodal_content
+ 
+     new_kwargs["contents"] = extract_genai_multimodal_content(
+         new_kwargs["contents"], autodetect_images
+     )
+ 
++    generation_config = update_genai_kwargs(new_kwargs, base_config)
++
++    new_kwargs["config"] = types.GenerateContentConfig(**generation_config)
++
+     new_kwargs.pop("response_model", None)
+     new_kwargs.pop("messages", None)
+     new_kwargs.pop("generation_config", None)
+diff --git a/tests/genai/test_safety_settings.py b/tests/genai/test_safety_settings.py
+new file mode 100644
+index 000000000..ab3d70aad
+--- /dev/null
++++ b/tests/genai/test_safety_settings.py
+@@ -0,0 +1,111 @@
++from instructor.providers.gemini.utils import update_genai_kwargs
++
++
++def test_update_genai_kwargs_safety_settings_with_image_content_uses_image_categories():
++    """Image inputs should use IMAGE_* harm categories when available."""
++    from google.genai import types
++    from google.genai.types import HarmCategory
++
++    excluded_categories = {HarmCategory.HARM_CATEGORY_UNSPECIFIED}
++    if hasattr(HarmCategory, "HARM_CATEGORY_JAILBREAK"):
++        excluded_categories.add(HarmCategory.HARM_CATEGORY_JAILBREAK)
++
++    image_categories = [
++        c
++        for c in HarmCategory
++        if c not in excluded_categories and c.name.startswith("HARM_CATEGORY_IMAGE_")
++    ]
++
++    # Older SDKs may not expose separate image categories.
++    if not image_categories:
++        return
++
++    kwargs = {
++        "contents": [
++            types.Content(
++                role="user",
++                parts=[types.Part.from_bytes(data=b"123", mime_type="image/png")],
++            )
++        ]
++    }
++    base_config = {}
++
++    result = update_genai_kwargs(kwargs, base_config)
++
++    assert "safety_settings" in result
++    assert isinstance(result["safety_settings"], list)
++    assert len(result["safety_settings"]) == len(image_categories)
++    assert {s["category"] for s in result["safety_settings"]} == set(image_categories)
++
++
++def test_update_genai_kwargs_maps_text_thresholds_to_image_categories():
++    """Text thresholds should carry over to equivalent IMAGE_* categories."""
++    from google.genai import types
++    from google.genai.types import HarmBlockThreshold, HarmCategory
++
++    excluded_categories = {HarmCategory.HARM_CATEGORY_UNSPECIFIED}
++    if hasattr(HarmCategory, "HARM_CATEGORY_JAILBREAK"):
++        excluded_categories.add(HarmCategory.HARM_CATEGORY_JAILBREAK)
++
++    image_categories = [
++        c
++        for c in HarmCategory
++        if c not in excluded_categories and c.name.startswith("HARM_CATEGORY_IMAGE_")
++    ]
++
++    if not image_categories or not hasattr(HarmCategory, "HARM_CATEGORY_IMAGE_HATE"):
++        return
++
++    custom_safety = {
++        HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_LOW_AND_ABOVE
++    }
++
++    kwargs = {
++        "contents": [
++            types.Content(
++                role="user",
++                parts=[types.Part.from_bytes(data=b"123", mime_type="image/png")],
++            )
++        ],
++        "safety_settings": custom_safety,
++    }
++    base_config = {}
++
++    result = update_genai_kwargs(kwargs, base_config)
++
++    for setting in result["safety_settings"]:
++        if setting["category"] == HarmCategory.HARM_CATEGORY_IMAGE_HATE:
++            assert setting["threshold"] == HarmBlockThreshold.BLOCK_LOW_AND_ABOVE
++
++
++def test_handle_genai_tools_autodetect_images_uses_image_categories():
++    """Autodetected image content should switch safety_settings to IMAGE_* categories."""
++    from pydantic import BaseModel
++
++    from instructor.providers.gemini.utils import handle_genai_tools
++
++    class SimpleModel(BaseModel):
++        text: str
++
++    data_uri = (
++        "data:image/png;base64,"
++        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO6q0S8AAAAASUVORK5CYII="
++    )
++
++    kwargs = {
++        "messages": [
++            {
++                "role": "user",
++                "content": ["What is in this image?", data_uri],
++            }
++        ]
++    }
++
++    _, out = handle_genai_tools(SimpleModel, kwargs, autodetect_images=True)
++
++    assert "config" in out
++    assert out["config"].safety_settings is not None
++    assert any(
++        s.category.name.startswith("HARM_CATEGORY_IMAGE_")
++        for s in out["config"].safety_settings
++    )
+diff --git a/tests/llm/test_genai/test_utils.py b/tests/llm/test_genai/test_utils.py
+index 500b238a7..693f428ca 100644
+--- a/tests/llm/test_genai/test_utils.py
++++ b/tests/llm/test_genai/test_utils.py
+@@ -108,6 +108,83 @@ def test_update_genai_kwargs_with_custom_safety_settings():
+             assert setting["threshold"] == HarmBlockThreshold.OFF
+ 
+ 
++def test_update_genai_kwargs_safety_settings_with_image_content_uses_image_categories():
++    """Test that image content switches to IMAGE_* harm categories when available."""
++    from google.genai import types
++    from google.genai.types import HarmCategory
++
++    excluded_categories = {HarmCategory.HARM_CATEGORY_UNSPECIFIED}
++    if hasattr(HarmCategory, "HARM_CATEGORY_JAILBREAK"):
++        excluded_categories.add(HarmCategory.HARM_CATEGORY_JAILBREAK)
++
++    image_categories = [
++        c
++        for c in HarmCategory
++        if c not in excluded_categories and c.name.startswith("HARM_CATEGORY_IMAGE_")
++    ]
++
++    # Older SDKs may not expose separate image categories.
++    if not image_categories:
++        return
++
++    kwargs = {
++        "contents": [
++            types.Content(
++                role="user",
++                parts=[types.Part.from_bytes(data=b"123", mime_type="image/png")],
++            )
++        ]
++    }
++    base_config = {}
++
++    result = update_genai_kwargs(kwargs, base_config)
++
++    assert "safety_settings" in result
++    assert isinstance(result["safety_settings"], list)
++    assert len(result["safety_settings"]) == len(image_categories)
++    assert {s["category"] for s in result["safety_settings"]} == set(image_categories)
++
++
++def test_update_genai_kwargs_maps_text_thresholds_to_image_categories():
++    """Test that text-based safety settings are applied to equivalent IMAGE_* categories."""
++    from google.genai import types
++    from google.genai.types import HarmCategory, HarmBlockThreshold
++
++    excluded_categories = {HarmCategory.HARM_CATEGORY_UNSPECIFIED}
++    if hasattr(HarmCategory, "HARM_CATEGORY_JAILBREAK"):
++        excluded_categories.add(HarmCategory.HARM_CATEGORY_JAILBREAK)
++
++    image_categories = [
++        c
++        for c in HarmCategory
++        if c not in excluded_categories and c.name.startswith("HARM_CATEGORY_IMAGE_")
++    ]
++
++    if not image_categories or not hasattr(HarmCategory, "HARM_CATEGORY_IMAGE_HATE"):
++        return
++
++    custom_safety = {
++        HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_LOW_AND_ABOVE
++    }
++
++    kwargs = {
++        "contents": [
++            types.Content(
++                role="user",
++                parts=[types.Part.from_bytes(data=b"123", mime_type="image/png")],
++            )
++        ],
++        "safety_settings": custom_safety,
++    }
++    base_config = {}
++
++    result = update_genai_kwargs(kwargs, base_config)
++
++    for setting in result["safety_settings"]:
++        if setting["category"] == HarmCategory.HARM_CATEGORY_IMAGE_HATE:
++            assert setting["threshold"] == HarmBlockThreshold.BLOCK_LOW_AND_ABOVE
++
++
+ def test_update_genai_kwargs_none_values():
+     """Test that None values are not set in the result."""
+     kwargs = {

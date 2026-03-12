@@ -1,0 +1,165 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "exception_handling",
+      "recommendation": "Removed the catch-all exception handler and allowed unhandled exceptions to bubble up to the ASGI server instead of being automatically caught by Litestar",
+      "rationale": "This aligns with user expectations where unhandled exceptions should propagate to the server layer rather than being silently transformed into 500 responses. It provides clearer separation of concerns - Litestar handles framework-specific exceptions (HTTPException, LitestarException) while letting the server handle truly unexpected errors.",
+      "alternatives_considered": [
+        "Keeping the catch-all handler but improving its behavior",
+        "Adding configuration flags to toggle between catching and propagating exceptions",
+        "Creating a more sophisticated exception classification system"
+      ],
+      "files_affected": [
+        "litestar/middleware/_internal/exceptions/middleware.py",
+        "docs/usage/exceptions.rst",
+        "docs/release-notes/changelog.rst"
+      ]
+    },
+    {
+      "dimension": "api_design",
+      "recommendation": "Changed default behavior of test clients from raising exceptions (raise_server_exceptions=True) to not raising them (raise_server_exceptions=False)",
+      "rationale": "This fixes a long-standing bug where the flag was non-functional. The new default (False) is safer for testing as it prevents tests from crashing due to unhandled exceptions while still allowing developers to opt into exception raising when they want to test error scenarios.",
+      "alternatives_considered": [
+        "Keeping the old default but fixing the implementation",
+        "Removing the flag entirely and always raising exceptions",
+        "Making the flag required rather than optional"
+      ],
+      "files_affected": [
+        "litestar/testing/client/async_client.py",
+        "litestar/testing/client/sync_client.py",
+        "litestar/testing/helpers.py",
+        "litestar/testing/transport.py"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Created a utility function to collapse single-exception ExceptionGroups for cleaner exception handling",
+      "rationale": "ExceptionGroups (introduced in Python 3.11) can contain single exceptions, which complicates exception dispatch logic. By collapsing these single-exception groups, we maintain backward compatibility and simplify the exception handling flow while still supporting the new ExceptionGroup paradigm.",
+      "alternatives_considered": [
+        "Treating ExceptionGroups as a special case throughout the codebase",
+        "Requiring Python 3.11+ and using native ExceptionGroup handling",
+        "Ignoring ExceptionGroups and letting them propagate as-is"
+      ],
+      "files_affected": [
+        "litestar/utils/_exceptions.py",
+        "litestar/middleware/_internal/exceptions/middleware.py",
+        "litestar/testing/client/async_client.py",
+        "litestar/testing/client/sync_client.py"
+      ]
+    },
+    {
+      "dimension": "websocket_handling",
+      "recommendation": "Fixed WebSocket exception swallowing by properly propagating unhandled exceptions and adding null checks for send operations",
+      "rationale": "WebSocket connections were silently closing without proper error indication when unhandled exceptions occurred. Now exceptions are properly raised, and send operations check for None values to prevent sending empty/null data.",
+      "alternatives_considered": [
+        "Adding WebSocket-specific exception handlers",
+        "Logging exceptions but still closing connections silently",
+        "Creating a WebSocket exception hierarchy"
+      ],
+      "files_affected": [
+        "litestar/handlers/websocket_handlers/_utils.py",
+        "litestar/middleware/_internal/exceptions/middleware.py",
+        "tests/unit/test_connection/test_websocket.py",
+        "tests/unit/test_handlers/test_websocket_handlers/test_listeners.py",
+        "tests/unit/test_middleware/test_exception_handler_middleware.py"
+      ]
+    },
+    {
+      "dimension": "testing",
+      "recommendation": "Updated test expectations to match new exception handling behavior and fixed test client context management",
+      "rationale": "Tests needed to be updated to reflect the new exception propagation behavior. The test client context management was also fixed to properly handle exception groups and ensure cleanup happens correctly.",
+      "alternatives_considered": [
+        "Keeping old test expectations with mocking",
+        "Creating a separate test suite for the new behavior",
+        "Using feature flags to maintain backward compatibility in tests"
+      ],
+      "files_affected": [
+        "tests/e2e/test_exception_handlers/test_exception_handlers.py",
+        "tests/unit/test_app.py",
+        "tests/unit/test_exceptions.py",
+        "tests/unit/test_kwargs/test_dependency_batches.py",
+        "tests/unit/test_kwargs/test_generator_dependencies.py",
+        "tests/unit/test_logging/test_structlog_config.py",
+        "tests/unit/test_middleware/test_exception_handler_middleware.py",
+        "tests/unit/test_plugins/test_prometheus.py",
+        "tests/unit/test_signature/test_parsing.py",
+        "tests/unit/test_static_files/test_file_serving_resolution.py",
+        "tests/unit/test_template/test_template.py",
+        "tests/unit/test_testing/test_test_client.py"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Remove catch-all exception handler and propagate unhandled exceptions",
+      "description": "Refactor exception handling middleware to remove the default handler for all unhandled exceptions, allowing them to bubble up to the ASGI server. Update documentation to reflect new exception handling priority.",
+      "files_to_modify": [
+        "litestar/middleware/_internal/exceptions/middleware.py",
+        "docs/usage/exceptions.rst",
+        "docs/release-notes/changelog.rst",
+        "docs/examples/exceptions/implicit_media_type.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-002",
+      "title": "Fix test client exception handling and raise_server_exceptions flag",
+      "description": "Fix the broken raise_server_exceptions flag in test clients to properly control exception behavior during testing. Update default values and ensure proper exception propagation in test scenarios.",
+      "files_to_modify": [
+        "litestar/testing/client/async_client.py",
+        "litestar/testing/client/sync_client.py",
+        "litestar/testing/helpers.py",
+        "litestar/testing/transport.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-003",
+      "title": "Add ExceptionGroup handling utility and fix WebSocket exception swallowing",
+      "description": "Create utility to collapse single-exception ExceptionGroups and fix WebSocket exception handling to prevent silent swallowing of unhandled exceptions.",
+      "files_to_modify": [
+        "litestar/handlers/websocket_handlers/_utils.py",
+        "litestar/middleware/_internal/exceptions/middleware.py"
+      ],
+      "files_to_create": [
+        "litestar/utils/_exceptions.py"
+      ],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-004",
+      "title": "Update test suite for new exception handling behavior",
+      "description": "Update all affected tests to match the new exception propagation behavior and ensure test client context management works correctly with the changes.",
+      "files_to_modify": [
+        "tests/e2e/test_exception_handlers/test_exception_handlers.py",
+        "tests/unit/test_app.py",
+        "tests/unit/test_connection/test_websocket.py",
+        "tests/unit/test_exceptions.py",
+        "tests/unit/test_handlers/test_websocket_handlers/test_listeners.py",
+        "tests/unit/test_kwargs/test_dependency_batches.py",
+        "tests/unit/test_kwargs/test_generator_dependencies.py",
+        "tests/unit/test_logging/test_structlog_config.py",
+        "tests/unit/test_middleware/test_exception_handler_middleware.py",
+        "tests/unit/test_plugins/test_prometheus.py",
+        "tests/unit/test_signature/test_parsing.py",
+        "tests/unit/test_static_files/test_file_serving_resolution.py",
+        "tests/unit/test_template/test_template.py",
+        "tests/unit/test_testing/test_test_client.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "large"
+    }
+  ],
+  "implementation_summary": "The changes implement a significant refactor of Litestar's exception handling system to align with user expectations and fix long-standing bugs. The core change removes the catch-all exception handler that was automatically converting all unhandled exceptions into 500 responses. Now, exceptions that don't derive from HTTPException or LitestarException will propagate to the ASGI server, which is more consistent with how other web frameworks behave.\n\nKey patterns used include: 1) A clear exception handling priority system (user handlers \u2192 built-in handlers \u2192 server handling), 2) Utility functions for handling Python 3.11's ExceptionGroups, and 3) Proper context management in test clients to ensure cleanup happens correctly even when exceptions are raised.\n\nThe changes integrate with the existing codebase by maintaining backward compatibility for framework-specific exceptions while changing behavior for truly unexpected errors. The test suite was comprehensively updated to reflect the new behavior, with special attention to WebSocket handling which had a bug where exceptions were silently swallowed. The documentation was also updated to clearly explain the new exception handling philosophy and provide migration guidance for users.",
+  "source_pr": "https://github.com/litestar-org/litestar/pull/4610",
+  "before_sha": "ded682af0b269d2b070f80c8856ed4bbbf63853c",
+  "after_sha": "30ae1fa5ef197e816bd89968625ad395e367ba0b",
+  "diff_stats": {
+    "additions": 333,
+    "deletions": 138,
+    "files_changed": 24
+  }
+}

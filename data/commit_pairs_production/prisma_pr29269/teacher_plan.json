@@ -1,0 +1,68 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "api_design",
+      "recommendation": "Added JSDoc documentation for the 'distinct' option in find operations by referencing the existing JSDocFields.distinct constant",
+      "rationale": "The 'distinct' option was already supported in the Prisma query API but lacked proper documentation in the generated client code. By adding it to the JSDoc configuration, we ensure developers using autocomplete and IDE tooltips see clear documentation for this feature. This approach maintains consistency with how other query options (skip, take, cursor) are documented.",
+      "alternatives_considered": [
+        "Creating custom JSDoc text for distinct instead of using the shared JSDocFields constant",
+        "Adding distinct documentation only to findMany operations instead of all find operations",
+        "Creating a separate documentation system instead of extending the existing JSDoc infrastructure"
+      ],
+      "files_affected": [
+        "packages/client-generator-js/src/TSClient/jsdoc.ts",
+        "packages/client-generator-ts/src/TSClient/jsdoc.ts"
+      ]
+    },
+    {
+      "dimension": "code_maintenance",
+      "recommendation": "Used the existing JSDocFields.distinct constant rather than inline documentation strings",
+      "rationale": "The JSDocFields module already contains standardized documentation strings for common query options. By referencing JSDocFields.distinct, we ensure consistency across the codebase and make future updates easier (only need to update in one place). This follows the DRY principle and maintains the established pattern used for other query options like skip and take.",
+      "alternatives_considered": [
+        "Writing inline JSDoc strings specific to each generator",
+        "Creating generator-specific distinct documentation constants",
+        "Adding distinct documentation directly in the template files instead of the JSDoc configuration"
+      ],
+      "files_affected": [
+        "packages/client-generator-js/src/TSClient/jsdoc.ts",
+        "packages/client-generator-ts/src/TSClient/jsdoc.ts"
+      ]
+    },
+    {
+      "dimension": "consistency",
+      "recommendation": "Applied the same change to both JavaScript and TypeScript client generators simultaneously",
+      "rationale": "Both generators share the same JSDoc configuration structure and should provide consistent documentation to users regardless of whether they're using TypeScript or JavaScript. The identical diff in both files ensures that developers get the same documentation experience across both language targets, maintaining parity between the two generators.",
+      "alternatives_considered": [
+        "Adding distinct documentation only to the TypeScript generator since TypeScript users might benefit more from type hints",
+        "Adding different documentation for JavaScript vs TypeScript generators",
+        "Prioritizing one generator over the other based on usage statistics"
+      ],
+      "files_affected": [
+        "packages/client-generator-js/src/TSClient/jsdoc.ts",
+        "packages/client-generator-ts/src/TSClient/jsdoc.ts"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Add JSDoc documentation for distinct option in find operations",
+      "description": "Enhance generated client documentation to include the 'distinct' query option in findMany, findFirst, and findFirstOrThrow operations for both JavaScript and TypeScript clients",
+      "files_to_modify": [
+        "packages/client-generator-js/src/TSClient/jsdoc.ts",
+        "packages/client-generator-ts/src/TSClient/jsdoc.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation adds JSDoc documentation support for the 'distinct' query option in Prisma's client generators. This was a straightforward enhancement that involved adding a single line to the JSDoc configuration in both the JavaScript and TypeScript generator packages.\n\nThe key insight is that the 'distinct' functionality was already implemented in the Prisma query engine but lacked proper documentation in the generated client code. By adding `distinct: JSDocFields.distinct` to the find operations configuration, we ensure that when developers use methods like `findMany()`, `findFirst()`, or `findFirstOrThrow()`, they'll see documentation for the distinct option in their IDE's autocomplete and tooltips.\n\nThe change follows established patterns in the codebase by using the shared `JSDocFields.distinct` constant rather than creating new documentation strings. This maintains consistency with how other query options (skip, take, cursor) are documented and ensures that any future updates to the distinct documentation only need to be made in one place. The identical implementation in both generators ensures parity between JavaScript and TypeScript users, which is crucial for a database toolkit that supports both ecosystems equally.",
+  "source_pr": "https://github.com/prisma/prisma/pull/29269",
+  "before_sha": "fc38fb73825773025c0163336c966ffb3bfa3f93",
+  "after_sha": "8e66b69afb2583bc6a58ab0bf73fdcfe186bbe1e",
+  "diff_stats": {
+    "additions": 2,
+    "deletions": 0,
+    "files_changed": 2
+  }
+}

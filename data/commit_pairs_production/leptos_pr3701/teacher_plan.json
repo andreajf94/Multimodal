@@ -1,0 +1,81 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "api_design",
+      "recommendation": "Created a new public `Len` trait to replace the restrictive `AsRef<[T]>` bound, allowing more collection types to work with `StoreFieldIterator`",
+      "rationale": "The `AsRef<[T]>` bound was too restrictive because it only works with contiguous memory collections. Many useful Rust collections like `VecDeque`, `LinkedList`, and `Cow` types don't implement `AsRef<[T]>` even though they have a length. By extracting the length requirement into its own trait, we maintain the same functionality while supporting a wider range of collection types.",
+      "alternatives_considered": [
+        "Keep using `AsRef<[T]>` and accept the limitation",
+        "Use multiple trait bounds with specialization",
+        "Create a custom trait that combines both length and indexing requirements"
+      ],
+      "files_affected": [
+        "reactive_stores/src/len.rs",
+        "reactive_stores/src/lib.rs"
+      ]
+    },
+    {
+      "dimension": "trait_design",
+      "recommendation": "Implemented comprehensive blanket implementations for the `Len` trait using a macro to reduce boilerplate",
+      "rationale": "The `delegate_impl_len!` macro generates implementations for owned, immutable reference, and mutable reference versions of each type. This ensures consistency and reduces maintenance burden. The macro approach follows Rust's convention of providing implementations for all reference types to maximize usability.",
+      "alternatives_considered": [
+        "Manual implementation for each type without macros",
+        "Using a derive macro",
+        "Only implementing for owned types and relying on deref coercion"
+      ],
+      "files_affected": [
+        "reactive_stores/src/len.rs"
+      ]
+    },
+    {
+      "dimension": "backward_compatibility",
+      "recommendation": "Maintained the same iteration behavior and performance while updating the trait bound",
+      "rationale": "The change only modifies the trait bound from `AsRef<[T]>` to `Len`, keeping all other logic identical. The `len()` method call was updated from `n.as_ref().len()` to `n.len()`, which is semantically equivalent for types that previously worked. This ensures existing code continues to work without modification.",
+      "alternatives_considered": [
+        "Breaking change with different API",
+        "Creating a parallel iterator with different name",
+        "Using feature flags to maintain old behavior"
+      ],
+      "files_affected": [
+        "reactive_stores/src/iter.rs"
+      ]
+    },
+    {
+      "dimension": "collection_support",
+      "recommendation": "Implemented `Len` for a comprehensive set of standard library collections including slices, vectors, strings, and non-contiguous collections",
+      "rationale": "The implementation covers all common Rust collection types: `[T]`, `Vec<T>`, `str`, `String`, `Cow<'a, str>`, `Cow<'a, [T]>`, `VecDeque<T>`, and `LinkedList<T>`. This ensures maximum compatibility with existing Rust codebases and provides immediate value to users who want to use these collections with reactive stores.",
+      "alternatives_considered": [
+        "Only implement for core types and let users implement for others",
+        "Use a more minimal set to reduce maintenance",
+        "Rely on third-party crates for trait implementations"
+      ],
+      "files_affected": [
+        "reactive_stores/src/len.rs"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Create Len trait for flexible collection iteration",
+      "description": "Extract the length requirement from StoreFieldIterator into a separate Len trait to support non-contiguous collections",
+      "files_to_modify": [
+        "reactive_stores/src/iter.rs",
+        "reactive_stores/src/lib.rs"
+      ],
+      "files_to_create": [
+        "reactive_stores/src/len.rs"
+      ],
+      "estimated_effort": "medium"
+    }
+  ],
+  "implementation_summary": "The implementation generalizes the StoreFieldIterator by replacing the restrictive AsRef<[T]> bound with a new Len trait. This change allows the iterator to work with collection types that aren't contiguous in memory, such as VecDeque and LinkedList, which don't implement AsRef<[T]> but do have a length.\n\nThe key pattern used is trait extraction - taking a specific requirement (getting the length of a collection) and making it a first-class trait. This follows the Rust philosophy of using traits to define capabilities rather than concrete implementations. The Len trait is minimal and focused, with just a len() method and a default is_empty() implementation.\n\nThe implementation integrates seamlessly with the existing codebase by maintaining the same StoreFieldIterator behavior while expanding its compatibility. The macro-based approach for implementing Len on multiple types ensures consistency and reduces boilerplate. By implementing Len for references (&T and &mut T) as well as owned types, the change maintains Rust's ergonomic patterns around borrowing and mutation.\n\nThis change demonstrates good API evolution: it expands functionality without breaking existing code, uses Rust's trait system effectively, and follows established patterns in the Leptos framework for reactive state management.",
+  "source_pr": "https://github.com/leptos-rs/leptos/pull/3701",
+  "before_sha": "6b453845f907d1a6450c57990a6ff25560f24e47",
+  "after_sha": "95e8ae84af1ed5fd889ad1801adad7e66ea364e8",
+  "diff_stats": {
+    "additions": 222,
+    "deletions": 2,
+    "files_changed": 3
+  }
+}

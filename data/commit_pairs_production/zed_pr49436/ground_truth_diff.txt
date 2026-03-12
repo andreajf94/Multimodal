@@ -1,0 +1,134 @@
+diff --git a/crates/copilot/src/copilot.rs b/crates/copilot/src/copilot.rs
+index 3506672b2e7941..4a08cf2803aaa5 100644
+--- a/crates/copilot/src/copilot.rs
++++ b/crates/copilot/src/copilot.rs
+@@ -1779,6 +1779,7 @@ mod tests {
+         fn disk_state(&self) -> language::DiskState {
+             language::DiskState::Present {
+                 mtime: ::fs::MTime::from_seconds_and_nanos(100, 42),
++                size: 0,
+             }
+         }
+ 
+diff --git a/crates/language/src/buffer.rs b/crates/language/src/buffer.rs
+index f92ae2419edf61..6724b5b1c2e6b6 100644
+--- a/crates/language/src/buffer.rs
++++ b/crates/language/src/buffer.rs
+@@ -435,7 +435,7 @@ pub enum DiskState {
+     /// File created in Zed that has not been saved.
+     New,
+     /// File present on the filesystem.
+-    Present { mtime: MTime },
++    Present { mtime: MTime, size: u64 },
+     /// Deleted file that was previously present.
+     Deleted,
+     /// An old version of a file that was previously present
+@@ -448,7 +448,17 @@ impl DiskState {
+     pub fn mtime(self) -> Option<MTime> {
+         match self {
+             DiskState::New => None,
+-            DiskState::Present { mtime } => Some(mtime),
++            DiskState::Present { mtime, .. } => Some(mtime),
++            DiskState::Deleted => None,
++            DiskState::Historic { .. } => None,
++        }
++    }
++
++    /// Returns the file's size on disk in bytes.
++    pub fn size(self) -> Option<u64> {
++        match self {
++            DiskState::New => None,
++            DiskState::Present { size, .. } => Some(size),
+             DiskState::Deleted => None,
+             DiskState::Historic { .. } => None,
+         }
+@@ -2377,7 +2387,7 @@ impl Buffer {
+         };
+         match file.disk_state() {
+             DiskState::New => false,
+-            DiskState::Present { mtime } => match self.saved_mtime {
++            DiskState::Present { mtime, .. } => match self.saved_mtime {
+                 Some(saved_mtime) => {
+                     mtime.bad_is_greater_than(saved_mtime) && self.has_unsaved_edits()
+                 }
+diff --git a/crates/project/src/buffer_store.rs b/crates/project/src/buffer_store.rs
+index b9d1105ad02415..d2f05a119a1883 100644
+--- a/crates/project/src/buffer_store.rs
++++ b/crates/project/src/buffer_store.rs
+@@ -527,7 +527,10 @@ impl LocalBufferStore {
+             let new_file = if let Some(entry) = snapshot_entry {
+                 File {
+                     disk_state: match entry.mtime {
+-                        Some(mtime) => DiskState::Present { mtime },
++                        Some(mtime) => DiskState::Present {
++                            mtime,
++                            size: entry.size,
++                        },
+                         None => old_file.disk_state,
+                     },
+                     is_local: true,
+diff --git a/crates/project/src/image_store.rs b/crates/project/src/image_store.rs
+index 654fb0344db4b7..0ba9787d2e4144 100644
+--- a/crates/project/src/image_store.rs
++++ b/crates/project/src/image_store.rs
+@@ -808,7 +808,10 @@ impl LocalImageStore {
+             let new_file = if let Some(entry) = snapshot_entry {
+                 worktree::File {
+                     disk_state: match entry.mtime {
+-                        Some(mtime) => DiskState::Present { mtime },
++                        Some(mtime) => DiskState::Present {
++                            mtime,
++                            size: entry.size,
++                        },
+                         None => old_file.disk_state,
+                     },
+                     is_local: true,
+diff --git a/crates/worktree/src/worktree.rs b/crates/worktree/src/worktree.rs
+index 9e62beb3c375fb..44ba4e752cff77 100644
+--- a/crates/worktree/src/worktree.rs
++++ b/crates/worktree/src/worktree.rs
+@@ -1322,6 +1322,7 @@ impl LocalWorktree {
+                         path,
+                         disk_state: DiskState::Present {
+                             mtime: metadata.mtime,
++                            size: metadata.len,
+                         },
+                         is_local: true,
+                         is_private,
+@@ -1378,6 +1379,7 @@ impl LocalWorktree {
+                         path,
+                         disk_state: DiskState::Present {
+                             mtime: metadata.mtime,
++                            size: metadata.len,
+                         },
+                         is_local: true,
+                         is_private,
+@@ -1575,6 +1577,7 @@ impl LocalWorktree {
+                     path,
+                     disk_state: DiskState::Present {
+                         mtime: metadata.mtime,
++                        size: metadata.len,
+                     },
+                     entry_id: None,
+                     is_local: true,
+@@ -3289,7 +3292,10 @@ impl File {
+             worktree,
+             path: entry.path.clone(),
+             disk_state: if let Some(mtime) = entry.mtime {
+-                DiskState::Present { mtime }
++                DiskState::Present {
++                    mtime,
++                    size: entry.size,
++                }
+             } else {
+                 DiskState::New
+             },
+@@ -3318,7 +3324,7 @@ impl File {
+         } else if proto.is_deleted {
+             DiskState::Deleted
+         } else if let Some(mtime) = proto.mtime.map(&Into::into) {
+-            DiskState::Present { mtime }
++            DiskState::Present { mtime, size: 0 }
+         } else {
+             DiskState::New
+         };

@@ -1,0 +1,175 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "api_design",
+      "recommendation": "Removed Litestar's internal logging configuration system entirely, pushing logging configuration responsibility to the user's application",
+      "rationale": "The previous logging system was overly complex and opinionated, forcing users into Litestar's logging patterns. By removing it, users gain full control over logging configuration using any library they prefer (standard logging, structlog, etc.), reducing framework complexity and eliminating maintenance burden for logging integrations.",
+      "alternatives_considered": [
+        "Keeping the logging system but making it optional",
+        "Providing adapters for different logging libraries",
+        "Simplifying the existing configuration classes"
+      ],
+      "files_affected": [
+        "litestar/app.py",
+        "litestar/config/app.py",
+        "litestar/connection/base.py",
+        "litestar/logging/__init__.py",
+        "litestar/logging/_utils.py",
+        "litestar/logging/config.py"
+      ]
+    },
+    {
+      "dimension": "api_design",
+      "recommendation": "Modified LoggingMiddleware to accept logger instances directly instead of through configuration objects",
+      "rationale": "Simplifies the API by removing the indirection of LoggingMiddlewareConfig. Users can now pass any logger object (standard logging.Logger, structlog logger, etc.) directly to LoggingMiddleware, making integration with existing logging setups trivial. This aligns with the principle of 'explicit is better than implicit'.",
+      "alternatives_considered": [
+        "Keeping LoggingMiddlewareConfig but adding a logger parameter",
+        "Creating separate middleware classes for different logging libraries",
+        "Using dependency injection for logger provision"
+      ],
+      "files_affected": [
+        "docs/examples/middleware/logging_middleware.py",
+        "litestar/middleware/logging.py"
+      ]
+    },
+    {
+      "dimension": "dependency_management",
+      "recommendation": "Removed picologging dependency and Python 3.12 pin from documentation builds",
+      "rationale": "Since logging configuration is now entirely user-controlled, Litestar no longer needs to depend on or support specific logging libraries. This reduces maintenance burden and allows users to choose any logging library without framework constraints. The Python 3.12 pin was only needed for picologging compatibility.",
+      "alternatives_considered": [
+        "Keeping optional dependencies for logging libraries",
+        "Making picologging an optional extra",
+        "Providing logging adapters as separate packages"
+      ],
+      "files_affected": [
+        "Makefile",
+        "docs/conf.py",
+        "docs/getting-started.rst"
+      ]
+    },
+    {
+      "dimension": "documentation",
+      "recommendation": "Completely rewrote logging documentation to focus on request logging with external logger integration",
+      "rationale": "The documentation needed to reflect the new paradigm where users configure logging externally and simply pass logger instances to Litestar. The new documentation demonstrates practical examples with both standard logging and structlog, clearly showing the simplified integration path.",
+      "alternatives_considered": [
+        "Keeping old documentation with deprecation warnings",
+        "Creating migration guides alongside old documentation",
+        "Minimal documentation changes with focus on examples"
+      ],
+      "files_affected": [
+        "docs/usage/logging.rst",
+        "docs/usage/middleware/builtin-middleware.rst",
+        "docs/examples/middleware/logging_middleware_structlog.py"
+      ]
+    },
+    {
+      "dimension": "backward_compatibility",
+      "recommendation": "Added comprehensive changelog entries documenting the breaking changes and migration path",
+      "rationale": "This is a major breaking change that removes significant functionality. Clear documentation of what was removed and how to migrate is essential for users upgrading. The changelog explicitly lists all removed classes, methods, and modules, and provides guidance on the new approach.",
+      "alternatives_considered": [
+        "Providing compatibility shims",
+        "Deprecation period before removal",
+        "Keeping some functionality with warnings"
+      ],
+      "files_affected": [
+        "docs/release-notes/changelog.rst",
+        "docs/release-notes/2.x-changelog.rst",
+        "docs/release-notes/whats-new-2.rst"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Removed logger property from ASGIConnection and Litestar app instances",
+      "rationale": "Since logging is now entirely external, the framework shouldn't provide logger instances. Users who need logging in request handlers should use their own logger instances obtained through their logging configuration. This eliminates the ImproperlyConfiguredException that was previously raised when logging_config wasn't set.",
+      "alternatives_considered": [
+        "Making logger property return a no-op logger",
+        "Keeping the property with deprecation warning",
+        "Providing a get_logger method that raises with helpful error"
+      ],
+      "files_affected": [
+        "litestar/app.py",
+        "litestar/connection/base.py",
+        "litestar/connection/__init__.py"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Remove internal logging configuration system",
+      "description": "Delete all logging configuration classes, utilities, and related modules to push logging configuration entirely to user applications",
+      "files_to_modify": [
+        "litestar/logging/__init__.py",
+        "litestar/logging/_utils.py",
+        "litestar/logging/config.py",
+        "litestar/app.py",
+        "litestar/config/app.py",
+        "litestar/connection/base.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-002",
+      "title": "Simplify LoggingMiddleware API",
+      "description": "Modify LoggingMiddleware to accept logger instances directly and remove LoggingMiddlewareConfig wrapper",
+      "files_to_modify": [
+        "docs/examples/middleware/logging_middleware.py",
+        "litestar/middleware/logging.py",
+        "litestar/data_extractors.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-003",
+      "title": "Update documentation and examples",
+      "description": "Rewrite logging documentation to demonstrate external logging configuration and create new examples showing integration with different logging libraries",
+      "files_to_modify": [
+        "docs/usage/logging.rst",
+        "docs/usage/middleware/builtin-middleware.rst",
+        "docs/getting-started.rst",
+        "docs/reference/index.rst",
+        "docs/reference/plugins/index.rst",
+        "docs/conf.py"
+      ],
+      "files_to_create": [
+        "docs/examples/middleware/logging_middleware_structlog.py"
+      ],
+      "estimated_effort": "large"
+    },
+    {
+      "id": "T-004",
+      "title": "Update build and dependency configuration",
+      "description": "Remove picologging dependency and Python version pin from documentation build process",
+      "files_to_modify": [
+        "Makefile",
+        "docs/conf.py",
+        "docs/getting-started.rst"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-005",
+      "title": "Document breaking changes in changelog",
+      "description": "Add comprehensive changelog entries explaining removed functionality and migration path for users",
+      "files_to_modify": [
+        "docs/release-notes/changelog.rst",
+        "docs/release-notes/2.x-changelog.rst",
+        "docs/release-notes/whats-new-2.rst"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    }
+  ],
+  "implementation_summary": "This change represents a significant simplification of Litestar's logging architecture by completely removing the framework's internal logging configuration system. The core decision was to push logging configuration entirely to user applications, allowing them to use any logging library (standard logging, structlog, picologging, etc.) without framework constraints.\n\nThe implementation involved several coordinated changes: First, all logging configuration classes (BaseLoggingConfig, LoggingConfig, StructLoggingConfig) and related utilities were deleted. Second, the LoggingMiddleware was modified to accept logger instances directly rather than through a configuration wrapper, making integration with external logging setups trivial. Third, all logger properties and methods were removed from framework objects (Litestar.logger, Request.logger), eliminating framework-managed logging entirely.\n\nKey patterns used include the 'dependency inversion' principle - instead of Litestar providing logging infrastructure, it accepts logging dependencies from users. This reduces framework complexity and maintenance burden while increasing flexibility. The changes integrate with the existing codebase by removing logging-specific code paths and simplifying the middleware API, making Litestar more focused on its core responsibilities as a web framework while allowing users full control over their logging strategy.",
+  "source_pr": "https://github.com/litestar-org/litestar/pull/4615",
+  "before_sha": "4e6c3f24bac978ea3e38a034e65a933b1b3a2f3f",
+  "after_sha": "c31aa519bc26a357e595c9a522b9db06ea5a3136",
+  "diff_stats": {
+    "additions": 411,
+    "deletions": 2451,
+    "files_changed": 45
+  }
+}

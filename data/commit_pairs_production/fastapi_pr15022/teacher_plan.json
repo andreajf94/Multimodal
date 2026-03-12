@@ -1,0 +1,178 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "api_design",
+      "recommendation": "Added support for streaming JSON Lines and binary data using Python's `yield` syntax in FastAPI endpoints",
+      "rationale": "The implementation leverages existing Python generator patterns to enable incremental data streaming without breaking backward compatibility. By detecting generator endpoints and handling them specially in the routing layer, we maintain the familiar FastAPI developer experience while adding streaming capabilities.",
+      "alternatives_considered": [
+        "Creating separate streaming-specific decorators",
+        "Requiring explicit streaming response types for all streaming endpoints",
+        "Implementing streaming as middleware rather than core routing logic"
+      ],
+      "files_affected": [
+        "fastapi/routing.py",
+        "fastapi/dependencies/utils.py"
+      ]
+    },
+    {
+      "dimension": "response_handling",
+      "recommendation": "Implemented dual streaming modes: JSON Lines for structured data and raw streaming for binary/text data",
+      "rationale": "JSON Lines provides a standardized format for streaming structured JSON objects with automatic serialization and validation, while raw streaming gives developers full control over binary/text data. The system automatically detects which mode to use based on the presence of a response_class parameter - JSON Lines for default responses, raw streaming for explicit StreamingResponse classes.",
+      "alternatives_considered": [
+        "Using only one streaming format",
+        "Requiring manual format specification for all streaming endpoints",
+        "Implementing streaming as a separate response class hierarchy"
+      ],
+      "files_affected": [
+        "fastapi/routing.py",
+        "fastapi/openapi/utils.py"
+      ]
+    },
+    {
+      "dimension": "type_system_integration",
+      "recommendation": "Extended FastAPI's type system to detect and handle generator return types (AsyncIterable, Iterable, etc.)",
+      "rationale": "By adding `get_stream_item_type()` function and tracking stream item types in APIRoute, we maintain FastAPI's strong typing benefits for streaming endpoints. This allows for automatic validation, serialization, and OpenAPI documentation of streamed items while preserving the performance benefits of Pydantic's Rust-based serialization.",
+      "alternatives_considered": [
+        "Treating all generator endpoints as untyped",
+        "Requiring manual type annotations for streaming",
+        "Not supporting type validation for streaming endpoints"
+      ],
+      "files_affected": [
+        "fastapi/dependencies/utils.py",
+        "fastapi/routing.py"
+      ]
+    },
+    {
+      "dimension": "openapi_documentation",
+      "recommendation": "Added OpenAPI support for streaming endpoints with proper response schemas and content types",
+      "rationale": "Updated the OpenAPI generation to distinguish between JSON Lines streaming (application/jsonl) and regular JSON responses. For JSON Lines endpoints, the schema includes an 'itemSchema' field describing the structure of each streamed item, maintaining the self-documenting nature of FastAPI APIs.",
+      "alternatives_considered": [
+        "Not documenting streaming endpoints in OpenAPI",
+        "Using generic streaming response schemas",
+        "Treating streaming endpoints as regular JSON endpoints in documentation"
+      ],
+      "files_affected": [
+        "fastapi/openapi/utils.py"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Maintained proper exception handling and validation error propagation for streaming endpoints",
+      "rationale": "The implementation preserves FastAPI's validation error handling by validating each streamed item individually and raising ResponseValidationError for invalid items. This ensures data quality in streaming scenarios while maintaining consistency with non-streaming endpoint behavior.",
+      "alternatives_considered": [
+        "Skipping validation for streaming endpoints",
+        "Buffering all items and validating at once",
+        "Silently dropping invalid stream items"
+      ],
+      "files_affected": [
+        "fastapi/routing.py"
+      ]
+    },
+    {
+      "dimension": "async_handling",
+      "recommendation": "Supported both async and synchronous generator functions with proper event loop management",
+      "rationale": "Implemented separate handling for async generators (async def with yield) and synchronous generators (def with yield). For synchronous generators in async contexts, FastAPI automatically runs them in threadpool workers to avoid blocking the event loop, maintaining performance for both patterns.",
+      "alternatives_considered": [
+        "Supporting only async generators",
+        "Requiring manual threadpool management for sync generators",
+        "Not supporting sync generators at all"
+      ],
+      "files_affected": [
+        "fastapi/routing.py"
+      ]
+    },
+    {
+      "dimension": "cancellation_support",
+      "recommendation": "Added cancellation support with `anyio.sleep(0)` calls in async generators",
+      "rationale": "Inserted small yields in async generator loops to allow cancellation signals to be processed. This prevents long-running streaming operations from becoming uncancellable and improves the responsiveness of streaming endpoints when clients disconnect.",
+      "alternatives_considered": [
+        "Not supporting cancellation for streaming",
+        "Requiring manual cancellation points",
+        "Using different async primitives for cancellation"
+      ],
+      "files_affected": [
+        "fastapi/routing.py"
+      ]
+    },
+    {
+      "dimension": "documentation",
+      "recommendation": "Created comprehensive documentation with practical examples for both streaming patterns",
+      "rationale": "Added two new documentation files with clear examples showing different streaming scenarios: JSON Lines for structured data and raw streaming for binary/text data. The examples demonstrate various patterns (async/sync, typed/untyped, bytes/strings) to cover common use cases.",
+      "alternatives_considered": [
+        "Minimal documentation with API reference only",
+        "Single combined streaming documentation",
+        "Examples only in code without markdown documentation"
+      ],
+      "files_affected": [
+        "docs/en/docs/advanced/stream-data.md",
+        "docs/en/docs/tutorial/stream-json-lines.md",
+        "docs_src/stream_data/tutorial001_py310.py",
+        "docs_src/stream_data/tutorial002_py310.py",
+        "docs_src/stream_json_lines/tutorial001_py310.py"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Core Streaming Implementation",
+      "description": "Implement the core logic for detecting and handling generator endpoints in FastAPI's routing system",
+      "files_to_modify": [
+        "fastapi/routing.py",
+        "fastapi/dependencies/utils.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "large"
+    },
+    {
+      "id": "T-002",
+      "title": "OpenAPI Documentation Support",
+      "description": "Update OpenAPI generation to properly document streaming endpoints with correct schemas and content types",
+      "files_to_modify": [
+        "fastapi/openapi/utils.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-003",
+      "title": "Documentation and Examples",
+      "description": "Create comprehensive documentation and example code demonstrating both JSON Lines and binary streaming patterns",
+      "files_to_modify": [
+        "docs/en/mkdocs.yml"
+      ],
+      "files_to_create": [
+        "docs/en/docs/advanced/stream-data.md",
+        "docs/en/docs/tutorial/stream-json-lines.md",
+        "docs_src/stream_data/tutorial001_py310.py",
+        "docs_src/stream_data/tutorial002_py310.py",
+        "docs_src/stream_json_lines/tutorial001_py310.py"
+      ],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-004",
+      "title": "Testing Infrastructure",
+      "description": "Add comprehensive tests for streaming functionality including edge cases and error scenarios",
+      "files_to_modify": [],
+      "files_to_create": [
+        "tests/test_stream_bare_type.py",
+        "tests/test_stream_cancellation.py",
+        "tests/test_stream_json_validation_error.py",
+        "tests/test_tutorial/test_stream_data/test_tutorial001.py",
+        "tests/test_tutorial/test_stream_data/test_tutorial002.py",
+        "tests/test_tutorial/test_stream_json_lines/test_tutorial001.py"
+      ],
+      "estimated_effort": "medium"
+    }
+  ],
+  "implementation_summary": "The implementation adds streaming support to FastAPI through a carefully designed extension of the existing routing system. The core innovation is the automatic detection of generator endpoints (functions using `yield`) and their classification into two streaming modes: JSON Lines for structured data and raw streaming for binary/text data. This classification happens based on whether the endpoint uses an explicit `response_class=StreamingResponse` (raw streaming) or relies on the default response class (JSON Lines streaming).\n\nFor JSON Lines streaming, the system automatically serializes each yielded item as a separate JSON object followed by a newline, with full Pydantic validation and serialization support when types are annotated. This maintains FastAPI's strong typing benefits while enabling incremental data delivery. For raw streaming, developers have complete control over the data format, allowing for binary data, custom encodings, or specialized streaming protocols.\n\nThe implementation integrates seamlessly with FastAPI's existing dependency injection system, ensuring that request context and dependencies remain available throughout the streaming process. Error handling is preserved with proper validation error propagation for JSON Lines endpoints. The OpenAPI documentation is automatically updated to reflect streaming endpoints with appropriate content types (application/jsonl for JSON Lines) and schemas.\n\nKey design patterns include the use of type introspection to detect generator return types, separation of concerns between JSON Lines and raw streaming logic, and careful handling of async/sync generator differences. The solution maintains full backward compatibility while adding powerful new capabilities for streaming large datasets, real-time data feeds, and binary content.",
+  "source_pr": "https://github.com/fastapi/fastapi/pull/15022",
+  "before_sha": "5a4d3aa26eb68c22294cbea4f2990ea60a1b0fed",
+  "after_sha": "749cefdeb1428ba5c3911b03c4a72993f7eb3747",
+  "diff_stats": {
+    "additions": 1168,
+    "deletions": 71,
+    "files_changed": 21
+  }
+}

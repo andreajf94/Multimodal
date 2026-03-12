@@ -1,0 +1,130 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "data_modeling",
+      "recommendation": "Changed MariaDB adapter to use binary protocol for regular queries to preserve decimal precision",
+      "rationale": "The MariaDB driver's default `query` method uses text protocol which can lose precision for large decimal values. The `execute` method uses binary protocol that preserves exact numeric precision. This is critical for financial applications where decimal precision matters.",
+      "alternatives_considered": [
+        "Keep using text protocol and accept precision loss",
+        "Implement custom decimal parsing logic",
+        "Use a different MySQL driver that always uses binary protocol"
+      ],
+      "files_affected": [
+        "packages/adapter-mariadb/src/mariadb.ts"
+      ]
+    },
+    {
+      "dimension": "api_design",
+      "recommendation": "Implemented phantom queries for transaction operations when using binary protocol",
+      "rationale": "The MariaDB binary protocol doesn't support transaction operations (BEGIN, COMMIT, ROLLBACK, SAVEPOINT). To maintain transaction compatibility while using binary protocol for queries, we use `query` method (text protocol) for transaction operations only. This hybrid approach gives us precision for data queries while maintaining transaction support.",
+      "alternatives_considered": [
+        "Disable transactions entirely when using binary protocol",
+        "Implement custom transaction emulation layer",
+        "Switch back to text protocol for all operations when transactions are needed"
+      ],
+      "files_affected": [
+        "packages/adapter-mariadb/src/mariadb.ts"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Added proper error handling for transaction operations with try-catch-finally blocks",
+      "rationale": "Transaction operations now use explicit error handling with `try-catch-finally` to ensure cleanup happens even if transaction commands fail. This prevents connection leaks and ensures proper resource management.",
+      "alternatives_considered": [
+        "Let errors bubble up without cleanup",
+        "Use global error handlers",
+        "Implement retry logic for failed transaction operations"
+      ],
+      "files_affected": [
+        "packages/adapter-mariadb/src/mariadb.ts"
+      ]
+    },
+    {
+      "dimension": "testing",
+      "recommendation": "Created comprehensive end-to-end test for decimal precision preservation",
+      "rationale": "Added a dedicated test suite that validates large decimal values maintain precision through create/update operations. The test uses Prisma.Decimal type with extremely large values (30-digit precision) to ensure the binary protocol fix works correctly.",
+      "alternatives_considered": [
+        "Rely on existing unit tests",
+        "Add integration tests to existing test files",
+        "Skip testing due to complexity of decimal precision testing"
+      ],
+      "files_affected": [
+        "packages/client/tests/functional/issues/29160-mysql-precision-loss/_matrix.ts",
+        "packages/client/tests/functional/issues/29160-mysql-precision-loss/prisma/_schema.ts",
+        "packages/client/tests/functional/issues/29160-mysql-precision-loss/tests.ts"
+      ]
+    },
+    {
+      "dimension": "testing",
+      "recommendation": "Updated existing tests to handle Float32 precision variance",
+      "rationale": "When using binary protocol, FLOAT values are transmitted as 32-bit IEEE 754 floats, which can have different precision than text representation. Updated test assertions to accept either the exact value or the Float32 representation to account for this variance.",
+      "alternatives_considered": [
+        "Force all FLOAT values to be transmitted as DECIMAL",
+        "Skip FLOAT tests when using binary protocol",
+        "Implement custom float comparison logic"
+      ],
+      "files_affected": [
+        "packages/client/tests/functional/typed-sql/mysql-scalars-nullable/test.ts",
+        "packages/client/tests/functional/typed-sql/mysql-scalars/test.ts"
+      ]
+    },
+    {
+      "dimension": "observability",
+      "recommendation": "Updated tracing tests to include MariaDB adapter in synthetic transaction queries",
+      "rationale": "Since MariaDB adapter now uses phantom queries for transactions (mixing binary protocol for data and text protocol for transactions), it needs to be included in the list of adapters that use synthetic transaction queries for proper tracing behavior.",
+      "alternatives_considered": [
+        "Exclude MariaDB from tracing tests",
+        "Create separate tracing logic for MariaDB",
+        "Ignore tracing discrepancies for MariaDB"
+      ],
+      "files_affected": [
+        "packages/client/tests/functional/tracing/tests.ts"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Implement MySQL binary protocol support in MariaDB adapter",
+      "description": "Modified MariaDB adapter to use binary protocol for regular queries to prevent precision loss with large decimal values, while maintaining transaction support through phantom queries",
+      "files_to_modify": [
+        "packages/adapter-mariadb/src/mariadb.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-002",
+      "title": "Add precision loss test suite for MySQL/MariaDB",
+      "description": "Created comprehensive end-to-end test to validate decimal precision preservation with large values, specifically targeting the MySQL precision loss issue",
+      "files_to_modify": [],
+      "files_to_create": [
+        "packages/client/tests/functional/issues/29160-mysql-precision-loss/_matrix.ts",
+        "packages/client/tests/functional/issues/29160-mysql-precision-loss/prisma/_schema.ts",
+        "packages/client/tests/functional/issues/29160-mysql-precision-loss/tests.ts"
+      ],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-003",
+      "title": "Update existing tests for binary protocol compatibility",
+      "description": "Modified existing test assertions to account for Float32 precision variance when using binary protocol, and updated tracing tests to include MariaDB adapter",
+      "files_to_modify": [
+        "packages/client/tests/functional/tracing/tests.ts",
+        "packages/client/tests/functional/typed-sql/mysql-scalars-nullable/test.ts",
+        "packages/client/tests/functional/typed-sql/mysql-scalars/test.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation addresses precision loss issues in MySQL/MariaDB by switching the MariaDB adapter to use the binary protocol for regular queries. This was achieved by changing `client.query()` to `client.execute()` in the `MariaDbQueryable` class, which ensures decimal values maintain exact precision during transmission.\n\nHowever, since the binary protocol doesn't support transaction operations, a hybrid approach was implemented. Transaction operations (BEGIN, COMMIT, ROLLBACK, SAVEPOINT) continue to use the text protocol via `client.query()`, while all data queries use the binary protocol. This required making the connection object accessible in the transaction class and updating all transaction methods to use direct query calls instead of going through the existing `executeRaw` method.\n\nThe solution includes comprehensive error handling with try-catch-finally blocks to ensure proper cleanup of connections even when transaction operations fail. The `usePhantomQuery` flag was set to `true` to indicate that transaction operations are handled separately from regular queries.\n\nTo validate the fix, a dedicated test suite was created that exercises large decimal values (up to 30 digits) through create and update operations. Existing tests were also updated to handle Float32 precision variance that occurs when using the binary protocol. The tracing tests were updated to include MariaDB in the list of adapters that use synthetic transaction queries, ensuring observability tools work correctly with this hybrid approach.",
+  "source_pr": "https://github.com/prisma/prisma/pull/29285",
+  "before_sha": "9fa295d70ff0497e0f0e4f06bdd5df76f6a9501a",
+  "after_sha": "bee450265aaa2e8bab7320fdbe4ce83d11289ac0",
+  "diff_stats": {
+    "additions": 118,
+    "deletions": 15,
+    "files_changed": 7
+  }
+}

@@ -1,0 +1,111 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "api_design",
+      "recommendation": "Export throttleRAF from the main excalidraw package entry point to make it available for external consumers",
+      "rationale": "The throttleRAF utility is a useful function for throttling callbacks using requestAnimationFrame, which is a common pattern in animation and UI libraries. By exporting it from the main package entry point, external consumers can import and use it without having to reach into internal modules. This follows the principle of exposing reusable utilities through public APIs.",
+      "alternatives_considered": [
+        "Keep throttleRAF as an internal-only utility",
+        "Create a separate utilities package",
+        "Export from a different entry point"
+      ],
+      "files_affected": [
+        "packages/excalidraw/index.tsx"
+      ]
+    },
+    {
+      "dimension": "testing",
+      "recommendation": "Create comprehensive unit tests for throttleRAF that mock requestAnimationFrame to test its throttling behavior",
+      "rationale": "Since throttleRAF depends on browser APIs (requestAnimationFrame), proper testing requires mocking these APIs to control timing and verify behavior. The tests simulate animation frames to ensure the function throttles calls correctly, flushes pending callbacks, and cancels scheduled executions. This approach allows testing the actual implementation logic rather than relying on time-based tests.",
+      "alternatives_considered": [
+        "Use real requestAnimationFrame with timeouts",
+        "Skip testing the throttling behavior",
+        "Test only through integration tests"
+      ],
+      "files_affected": [
+        "packages/common/src/utils.test.ts"
+      ]
+    },
+    {
+      "dimension": "testing",
+      "recommendation": "Update test mocks to handle the exported throttleRAF function consistently across test files",
+      "rationale": "When throttleRAF was internal-only, tests could mock it globally in setupTests.ts. Now that it's exported, tests need consistent mocking to avoid test pollution and ensure predictable behavior. The mock implementation in mocks.ts provides a synchronous version for tests while maintaining the same API surface.",
+      "alternatives_considered": [
+        "Keep the global mock without updating individual test files",
+        "Use the real throttleRAF implementation in tests",
+        "Create different mock implementations for different test files"
+      ],
+      "files_affected": [
+        "packages/excalidraw/tests/clipboard.test.tsx",
+        "packages/excalidraw/tests/helpers/mocks.ts",
+        "setupTests.ts"
+      ]
+    },
+    {
+      "dimension": "code_quality",
+      "recommendation": "Remove test environment bypass from throttleRAF implementation to ensure consistent behavior",
+      "rationale": "The original throttleRAF implementation had a special case for test environments that bypassed throttling entirely (calling fn immediately). This was removed to ensure the function behaves consistently across all environments. Tests now use proper mocks instead of relying on environment detection, which makes the implementation cleaner and more predictable.",
+      "alternatives_considered": [
+        "Keep the test environment bypass",
+        "Add a configuration option to disable throttling",
+        "Create a separate test-only version"
+      ],
+      "files_affected": [
+        "packages/common/src/utils.ts"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Export throttleRAF utility from excalidraw package",
+      "description": "Make the throttleRAF function available for external consumption by exporting it from the main package entry point",
+      "files_to_modify": [
+        "packages/excalidraw/index.tsx"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-002",
+      "title": "Add comprehensive unit tests for throttleRAF",
+      "description": "Create thorough unit tests that verify throttleRAF's throttling behavior using mocked requestAnimationFrame",
+      "files_to_modify": [
+        "packages/common/src/utils.test.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-003",
+      "title": "Update test mocks for exported throttleRAF",
+      "description": "Update test setup and mocks to handle the now-exported throttleRAF function consistently across all test files",
+      "files_to_modify": [
+        "packages/excalidraw/tests/clipboard.test.tsx",
+        "packages/excalidraw/tests/helpers/mocks.ts",
+        "setupTests.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-004",
+      "title": "Clean up throttleRAF implementation",
+      "description": "Remove test environment bypass from throttleRAF to ensure consistent behavior across all environments",
+      "files_to_modify": [
+        "packages/common/src/utils.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation focuses on exporting the throttleRAF utility function from the excalidraw package while maintaining backward compatibility and ensuring proper test coverage. The throttleRAF function, which throttles callbacks using requestAnimationFrame, was previously an internal utility. By exporting it from the main package entry point (packages/excalidraw/index.tsx), it becomes available to external consumers who can now import and use this useful animation utility.\n\nA key architectural decision was to remove the test environment bypass from the throttleRAF implementation. Originally, the function would immediately execute callbacks in test environments, bypassing the throttling logic. This was replaced with proper mocking in test files, making the implementation cleaner and more consistent across environments. The tests now use mocked requestAnimationFrame and cancelAnimationFrame to precisely control timing and verify the throttling behavior.\n\nThe testing strategy involves comprehensive unit tests that verify: 1) the function throttles calls within the same animation frame, 2) the flush() method immediately executes pending callbacks, and 3) the cancel() method properly cancels scheduled executions. Test mocks were updated across multiple files (setupTests.ts, mocks.ts, clipboard.test.tsx) to ensure consistent mocking of throttleRAF throughout the test suite. This approach maintains test reliability while allowing the utility to be exported for external use without breaking existing tests.",
+  "source_pr": "https://github.com/excalidraw/excalidraw/pull/10912",
+  "before_sha": "3d8c12fba475bad8ebee4c238466c59f08a5458c",
+  "after_sha": "fa1f7d9f2258375214b02a442b130185a5a1540c",
+  "diff_stats": {
+    "additions": 123,
+    "deletions": 5,
+    "files_changed": 6
+  }
+}

@@ -1,0 +1,1790 @@
+diff --git a/apps/oxfmt/conformance/run.ts b/apps/oxfmt/conformance/run.ts
+index 0dacf3545c3d2..e23190f2e6789 100644
+--- a/apps/oxfmt/conformance/run.ts
++++ b/apps/oxfmt/conformance/run.ts
+@@ -1,6 +1,7 @@
+ // oxlint-disable no-console, no-await-in-loop
+ 
+-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
++import { createTwoFilesPatch } from "diff";
++import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+ import { join, relative } from "node:path";
+ import prettier from "prettier";
+ import { format } from "../dist/index.js";
+@@ -73,7 +74,7 @@ const categories: Category[] = [
+     ],
+     optionSets: [{ printWidth: 80 }, { printWidth: 100 }],
+     notes: {
+-      "styled-components.js": "Multiple issues: `Button.extend` not recognized as tag",
++      "styled-components.js": "`Xxx.extend` not recognized as tag",
+     },
+   },
+ ];
+@@ -109,6 +110,8 @@ type Fixture = { name: string; fullPath: string };
+ type Failure = {
+   name: string;
+   note?: string;
++  oxfmt: string;
++  prettier: string;
+ };
+ 
+ type OptionSetResult = {
+@@ -162,7 +165,12 @@ async function runCategory(category: Category, fixtures: Fixture[]): Promise<Cat
+       if (oxfmtResult === prettierResult) {
+         passed++;
+       } else {
+-        failures.push({ name: fixture.name, note: category.notes?.[fixture.name] });
++        failures.push({
++          name: fixture.name,
++          note: category.notes?.[fixture.name],
++          oxfmt: oxfmtResult,
++          prettier: prettierResult,
++        });
+       }
+     }
+ 
+@@ -200,11 +208,36 @@ async function compareWithPrettier(
+ 
+ function writeReport(results: CategoryResult[]) {
+   const lines: string[] = [];
++  const diffsDir = join(SNAPSHOTS_DIR, "diffs");
++
++  // Clean up old diffs and recreate
++  rmSync(diffsDir, { recursive: true, force: true });
+ 
+   for (const result of results) {
+     lines.push(`## ${result.name}`);
+     lines.push("");
+ 
++    // Collect all failures per fixture across option sets
++    const failuresByFixture = new Map<
++      string,
++      { optionIndex: number; options: Record<string, unknown>; failure: Failure }[]
++    >();
++    for (let i = 0; i < result.optionSetResults.length; i++) {
++      for (const failure of result.optionSetResults[i].failures) {
++        let entries = failuresByFixture.get(failure.name);
++        if (!entries) {
++          entries = [];
++          failuresByFixture.set(failure.name, entries);
++        }
++        entries.push({ optionIndex: i + 1, options: result.optionSetResults[i].options, failure });
++      }
++    }
++
++    // Write one diff file per fixture
++    for (const [fixtureName, entries] of failuresByFixture) {
++      writeDiffFile(diffsDir, result.name, fixtureName, entries);
++    }
++
+     for (let i = 0; i < result.optionSetResults.length; i++) {
+       const r = result.optionSetResults[i];
+       const pct = ((r.passed / r.total) * 100).toFixed(2);
+@@ -219,7 +252,10 @@ function writeReport(results: CategoryResult[]) {
+         lines.push("| File | Note |");
+         lines.push("| :--- | :--- |");
+         for (const failure of r.failures) {
+-          lines.push(`| ${failure.name} | ${failure.note ?? ""} |`);
++          const safeName = failure.name.replaceAll("/", "__");
++          const diffRelPath = `diffs/${result.name}/${safeName}.md`;
++          const diffLink = `[${failure.name}](${diffRelPath})`;
++          lines.push(`| ${diffLink} | ${failure.note ?? ""} |`);
+         }
+         lines.push("");
+       }
+@@ -232,3 +268,63 @@ function writeReport(results: CategoryResult[]) {
+   console.log("=".repeat(60));
+   console.log(`Report written to ${relative(process.cwd(), outPath)}`);
+ }
++
++function writeDiffFile(
++  diffsDir: string,
++  categoryName: string,
++  fixtureName: string,
++  entries: { optionIndex: number; options: Record<string, unknown>; failure: Failure }[],
++) {
++  const safeName = fixtureName.replaceAll("/", "__");
++  const dir = join(diffsDir, categoryName);
++  mkdirSync(dir, { recursive: true });
++
++  const lines: string[] = [];
++  lines.push(`# ${fixtureName}`);
++  lines.push("");
++
++  const {
++    failure: { note },
++  } = entries[0];
++  if (note) {
++    lines.push(`> ${note}`);
++    lines.push("");
++  }
++
++  for (const entry of entries) {
++    lines.push(`## Option ${entry.optionIndex}`);
++    lines.push("");
++    lines.push("`````json");
++    lines.push(JSON.stringify(entry.options));
++    lines.push("`````");
++    lines.push("");
++    const lang = fixtureName.split(".").pop() ?? "";
++    const patch = createTwoFilesPatch(
++      "prettier",
++      "oxfmt",
++      entry.failure.prettier,
++      entry.failure.oxfmt,
++    );
++    lines.push("### Diff");
++    lines.push("");
++    lines.push("`````diff");
++    lines.push(patch);
++    lines.push("`````");
++    lines.push("");
++    lines.push("### Actual (oxfmt)");
++    lines.push("");
++    lines.push(`\`\`\`\`\`${lang}`);
++    lines.push(entry.failure.oxfmt);
++    lines.push("`````");
++    lines.push("");
++    lines.push("### Expected (prettier)");
++    lines.push("");
++    lines.push(`\`\`\`\`\`${lang}`);
++    lines.push(entry.failure.prettier);
++    lines.push("`````");
++    lines.push("");
++  }
++
++  const filePath = join(dir, `${safeName}.md`);
++  writeFileSync(filePath, lines.join("\n"));
++}
+diff --git a/apps/oxfmt/conformance/snapshots/conformance.snap.md b/apps/oxfmt/conformance/snapshots/conformance.snap.md
+index 17975c53fad2b..ebf05e57f39bb 100644
+--- a/apps/oxfmt/conformance/snapshots/conformance.snap.md
++++ b/apps/oxfmt/conformance/snapshots/conformance.snap.md
+@@ -8,7 +8,7 @@
+ 
+ | File | Note |
+ | :--- | :--- |
+-| vue/multiparser/lang-tsx.vue | `lang=tsx` is not supported |
++| [vue/multiparser/lang-tsx.vue](diffs/js-in-vue/vue__multiparser__lang-tsx.vue.md) | `lang=tsx` is not supported |
+ 
+ ### Option 2: 94/95 (98.95%)
+ 
+@@ -18,7 +18,7 @@
+ 
+ | File | Note |
+ | :--- | :--- |
+-| vue/multiparser/lang-tsx.vue | `lang=tsx` is not supported |
++| [vue/multiparser/lang-tsx.vue](diffs/js-in-vue/vue__multiparser__lang-tsx.vue.md) | `lang=tsx` is not supported |
+ 
+ ## gql-in-js
+ 
+@@ -30,7 +30,7 @@
+ 
+ | File | Note |
+ | :--- | :--- |
+-| comment-tag.js | `/* GraphQL */` comment tag not yet supported |
++| [comment-tag.js](diffs/gql-in-js/comment-tag.js.md) | `/* GraphQL */` comment tag not yet supported |
+ 
+ ### Option 2: 8/9 (88.89%)
+ 
+@@ -40,7 +40,7 @@
+ 
+ | File | Note |
+ | :--- | :--- |
+-| comment-tag.js | `/* GraphQL */` comment tag not yet supported |
++| [comment-tag.js](diffs/gql-in-js/comment-tag.js.md) | `/* GraphQL */` comment tag not yet supported |
+ 
+ ## css-in-js
+ 
+@@ -52,7 +52,7 @@
+ 
+ | File | Note |
+ | :--- | :--- |
+-| styled-components.js | Multiple issues: `Button.extend` not recognized as tag |
++| [styled-components.js](diffs/css-in-js/styled-components.js.md) | `Xxx.extend` not recognized as tag |
+ 
+ ### Option 2: 16/17 (94.12%)
+ 
+@@ -62,4 +62,4 @@
+ 
+ | File | Note |
+ | :--- | :--- |
+-| styled-components.js | Multiple issues: `Button.extend` not recognized as tag |
++| [styled-components.js](diffs/css-in-js/styled-components.js.md) | `Xxx.extend` not recognized as tag |
+diff --git a/apps/oxfmt/conformance/snapshots/diffs/css-in-js/styled-components.js.md b/apps/oxfmt/conformance/snapshots/diffs/css-in-js/styled-components.js.md
+new file mode 100644
+index 0000000000000..ea0726c919e84
+--- /dev/null
++++ b/apps/oxfmt/conformance/snapshots/diffs/css-in-js/styled-components.js.md
+@@ -0,0 +1,1159 @@
++# styled-components.js
++
++> `Xxx.extend` not recognized as tag
++
++## Option 1
++
++`````json
++{"printWidth":80}
++`````
++
++### Diff
++
++`````diff
++===================================================================
++--- prettier
+++++ oxfmt
++@@ -12,15 +12,17 @@
++   font-size: 1em;
++ `;
++ 
++ const TomatoButton = Button.extend`
++-  color: tomato;
+++	color  : tomato  ;
++ 
++-  border-color: tomato;
+++border-color : tomato
+++    ;
+++
++ `;
++ 
++ Button.extend.attr({})`
++-  border-color: black;
+++border-color : black;
++ `;
++ 
++ styled(ExistingComponent)`
++   color: papayawhip;
++
++`````
++
++### Actual (oxfmt)
++
++`````js
++const ListItem1 = styled.li``;
++
++const ListItem2 = styled.li``;
++
++const Dropdown = styled.div`
++  position: relative;
++`;
++
++const Button = styled.button`
++  color: palevioletred;
++
++  font-size: 1em;
++`;
++
++const TomatoButton = Button.extend`
++	color  : tomato  ;
++
++border-color : tomato
++    ;
++
++`;
++
++Button.extend.attr({})`
++border-color : black;
++`;
++
++styled(ExistingComponent)`
++  color: papayawhip;
++  background-color: firebrick;
++`;
++
++styled.button.attr({})`
++  border: rebeccapurple;
++`;
++
++styled(ExistingComponent).attr({})`
++  border: rebeccapurple;
++`;
++
++styled.div`
++  color: ${(props) => props.theme.colors.paragraph};
++  /* prettier-ignore */
++  ${(props) => (props.small ? "font-size: 0.8em;" : "")};
++`;
++
++styled.div`
++  color: ${(props) => props.theme.colors.paragraph};
++  /* prettier-ignore */
++  ${(props) => (props.small ? "font-size: 0.8em;" : "")}
++`;
++
++styled.div`
++  /* prettier-ignore */
++  color: ${(props) => props.theme.colors.paragraph};
++  ${(props) => (props.small ? "font-size: 0.8em;" : "")};
++`;
++
++styled.div`
++  color: ${(props) => props.theme.colors.paragraph};
++  /* prettier-ignore */
++  ${(props) => (props.small ? "font-size: 0.8em;" : "")};
++  /* prettier-ignore */
++  ${(props) => (props.red ? "color: red;" : "")};
++`;
++
++styled.div`
++  /* prettier-ignore */
++  color: ${(props) => props.theme.colors.paragraph};
++  /* prettier-ignore */
++  ${(props) => (props.small ? "font-size: 0.8em;" : "")};
++  /* prettier-ignore */
++  ${(props) => (props.red ? "color: red;" : "")};
++  /* prettier-ignore */
++`;
++
++styled.div`
++  ${sanitize} ${fonts}
++  html {
++    margin: 0;
++  }
++`;
++
++styled.div`
++  ${bar}
++  baz
++`;
++
++styled.span`
++  foo
++  ${bar}
++  baz
++`;
++
++styled.div`
++  foo
++  ${bar}
++  ${baz}
++`;
++
++styled.span`
++  ${foo}
++  ${bar}
++`;
++
++styled.div`
++  ${foo} bar
++`;
++
++styled.span`
++  ${foo} ${bar}
++  baz: ${foo}
++`;
++
++styled.span`
++  ${foo};
++  ${bar};
++`;
++
++styled.span`
++  ${foo}: ${bar};
++`;
++
++styled.span`
++  ${foo}: ${bar}
++`;
++
++styled.span`
++  ${foo}: ${bar}
++`;
++
++styled.span`
++  ${foo}: ${bar};
++`;
++
++styled.a`
++  ${feedbackCountBlockCss}
++  text-decoration: none;
++
++  ${FeedbackCount} {
++    margin: 0;
++  }
++`;
++
++const StyledComponent1 = styled.div`
++  ${anInterpolation}
++  /* a comment */
++
++  .aRule {
++    color: red;
++  }
++`;
++
++const StyledComponent2 = styled.div`
++  ${anInterpolation}
++
++  /* a comment */
++
++  .aRule {
++    color: red;
++  }
++`;
++
++const Direction = styled.span`
++  ${({ up }) => up && `color: ${color.positive};`}
++  ${({ down }) => down && `color: ${color.negative};`}
++`;
++
++const Direction2 = styled.span`
++  ${({ up }) => up && `color: ${color.positive}`};
++  ${({ down }) => down && `color: ${color.negative}`};
++`;
++
++const mixin = css`
++  color: ${(props) => props.color};
++  ${(props) => props.otherProperty}: ${(props) => props.otherValue};
++`;
++
++const foo = styled.div`
++  display: flex;
++  ${(props) => props.useMixin && mixin}
++`;
++
++const Single1 = styled.div`
++  color: red;
++`;
++
++const Single2 = styled.div`
++  color: red;
++`;
++
++const Dropdown2 = styled.div`
++  /* A comment to avoid the prettier issue: https://github.com/prettier/prettier/issues/2291 */
++  position: relative;
++`;
++
++const bar = styled.div`
++  border-radius: 50%;
++  border: 5px solid rgba(var(--green-rgb), 0);
++  display: inline-block;
++  height: 40px;
++  width: 40px;
++
++  ${(props) =>
++    (props.complete || props.inProgress) &&
++    css`
++      border-color: rgba(var(--green-rgb), 0.15);
++    `}
++
++  div {
++    background-color: var(--purpleTT);
++    border-radius: 50%;
++    border: 4px solid rgba(var(--purple-rgb), 0.2);
++    color: var(--purpleTT);
++    display: inline-flex;
++
++    ${(props) =>
++      props.complete &&
++      css`
++        background-color: var(--green);
++        border-width: 7px;
++      `}
++
++    ${(props) =>
++      (props.complete || props.inProgress) &&
++      css`
++        border-color: var(--green);
++      `}
++  }
++`;
++
++const A = styled.a`
++  display: inline-block;
++  color: #fff;
++  ${(props) =>
++    props.a &&
++    css`
++      display: none;
++    `}
++  height: 30px;
++`;
++
++const Foo = styled.p`
++  max-width: 980px;
++  ${mediaBreakpointOnlyXs`
++    && {
++      font-size: 0.8rem;
++    }
++  `}
++
++  &.bottom {
++    margin-top: 3rem;
++  }
++`;
++
++styled(A)`
++  // prettier-ignore
++  @media (aaaaaaaaaaaaa) {
++	z-index: ${(props) => (props.isComplete ? "1" : "0")};
++  }
++`;
++
++const StyledDiv = styled.div`
++  ${(props) => getSize(props.$size.xs)}
++  ${(props) => getSize(props.$size.sm, "sm")}
++  ${(props) => getSize(props.$size.md, "md")}
++`;
++
++`````
++
++### Expected (prettier)
++
++`````js
++const ListItem1 = styled.li``;
++
++const ListItem2 = styled.li``;
++
++const Dropdown = styled.div`
++  position: relative;
++`;
++
++const Button = styled.button`
++  color: palevioletred;
++
++  font-size: 1em;
++`;
++
++const TomatoButton = Button.extend`
++  color: tomato;
++
++  border-color: tomato;
++`;
++
++Button.extend.attr({})`
++  border-color: black;
++`;
++
++styled(ExistingComponent)`
++  color: papayawhip;
++  background-color: firebrick;
++`;
++
++styled.button.attr({})`
++  border: rebeccapurple;
++`;
++
++styled(ExistingComponent).attr({})`
++  border: rebeccapurple;
++`;
++
++styled.div`
++  color: ${(props) => props.theme.colors.paragraph};
++  /* prettier-ignore */
++  ${(props) => (props.small ? "font-size: 0.8em;" : "")};
++`;
++
++styled.div`
++  color: ${(props) => props.theme.colors.paragraph};
++  /* prettier-ignore */
++  ${(props) => (props.small ? "font-size: 0.8em;" : "")}
++`;
++
++styled.div`
++  /* prettier-ignore */
++  color: ${(props) => props.theme.colors.paragraph};
++  ${(props) => (props.small ? "font-size: 0.8em;" : "")};
++`;
++
++styled.div`
++  color: ${(props) => props.theme.colors.paragraph};
++  /* prettier-ignore */
++  ${(props) => (props.small ? "font-size: 0.8em;" : "")};
++  /* prettier-ignore */
++  ${(props) => (props.red ? "color: red;" : "")};
++`;
++
++styled.div`
++  /* prettier-ignore */
++  color: ${(props) => props.theme.colors.paragraph};
++  /* prettier-ignore */
++  ${(props) => (props.small ? "font-size: 0.8em;" : "")};
++  /* prettier-ignore */
++  ${(props) => (props.red ? "color: red;" : "")};
++  /* prettier-ignore */
++`;
++
++styled.div`
++  ${sanitize} ${fonts}
++  html {
++    margin: 0;
++  }
++`;
++
++styled.div`
++  ${bar}
++  baz
++`;
++
++styled.span`
++  foo
++  ${bar}
++  baz
++`;
++
++styled.div`
++  foo
++  ${bar}
++  ${baz}
++`;
++
++styled.span`
++  ${foo}
++  ${bar}
++`;
++
++styled.div`
++  ${foo} bar
++`;
++
++styled.span`
++  ${foo} ${bar}
++  baz: ${foo}
++`;
++
++styled.span`
++  ${foo};
++  ${bar};
++`;
++
++styled.span`
++  ${foo}: ${bar};
++`;
++
++styled.span`
++  ${foo}: ${bar}
++`;
++
++styled.span`
++  ${foo}: ${bar}
++`;
++
++styled.span`
++  ${foo}: ${bar};
++`;
++
++styled.a`
++  ${feedbackCountBlockCss}
++  text-decoration: none;
++
++  ${FeedbackCount} {
++    margin: 0;
++  }
++`;
++
++const StyledComponent1 = styled.div`
++  ${anInterpolation}
++  /* a comment */
++
++  .aRule {
++    color: red;
++  }
++`;
++
++const StyledComponent2 = styled.div`
++  ${anInterpolation}
++
++  /* a comment */
++
++  .aRule {
++    color: red;
++  }
++`;
++
++const Direction = styled.span`
++  ${({ up }) => up && `color: ${color.positive};`}
++  ${({ down }) => down && `color: ${color.negative};`}
++`;
++
++const Direction2 = styled.span`
++  ${({ up }) => up && `color: ${color.positive}`};
++  ${({ down }) => down && `color: ${color.negative}`};
++`;
++
++const mixin = css`
++  color: ${(props) => props.color};
++  ${(props) => props.otherProperty}: ${(props) => props.otherValue};
++`;
++
++const foo = styled.div`
++  display: flex;
++  ${(props) => props.useMixin && mixin}
++`;
++
++const Single1 = styled.div`
++  color: red;
++`;
++
++const Single2 = styled.div`
++  color: red;
++`;
++
++const Dropdown2 = styled.div`
++  /* A comment to avoid the prettier issue: https://github.com/prettier/prettier/issues/2291 */
++  position: relative;
++`;
++
++const bar = styled.div`
++  border-radius: 50%;
++  border: 5px solid rgba(var(--green-rgb), 0);
++  display: inline-block;
++  height: 40px;
++  width: 40px;
++
++  ${(props) =>
++    (props.complete || props.inProgress) &&
++    css`
++      border-color: rgba(var(--green-rgb), 0.15);
++    `}
++
++  div {
++    background-color: var(--purpleTT);
++    border-radius: 50%;
++    border: 4px solid rgba(var(--purple-rgb), 0.2);
++    color: var(--purpleTT);
++    display: inline-flex;
++
++    ${(props) =>
++      props.complete &&
++      css`
++        background-color: var(--green);
++        border-width: 7px;
++      `}
++
++    ${(props) =>
++      (props.complete || props.inProgress) &&
++      css`
++        border-color: var(--green);
++      `}
++  }
++`;
++
++const A = styled.a`
++  display: inline-block;
++  color: #fff;
++  ${(props) =>
++    props.a &&
++    css`
++      display: none;
++    `}
++  height: 30px;
++`;
++
++const Foo = styled.p`
++  max-width: 980px;
++  ${mediaBreakpointOnlyXs`
++    && {
++      font-size: 0.8rem;
++    }
++  `}
++
++  &.bottom {
++    margin-top: 3rem;
++  }
++`;
++
++styled(A)`
++  // prettier-ignore
++  @media (aaaaaaaaaaaaa) {
++	z-index: ${(props) => (props.isComplete ? "1" : "0")};
++  }
++`;
++
++const StyledDiv = styled.div`
++  ${(props) => getSize(props.$size.xs)}
++  ${(props) => getSize(props.$size.sm, "sm")}
++  ${(props) => getSize(props.$size.md, "md")}
++`;
++
++`````
++
++## Option 2
++
++`````json
++{"printWidth":100}
++`````
++
++### Diff
++
++`````diff
++===================================================================
++--- prettier
+++++ oxfmt
++@@ -12,15 +12,17 @@
++   font-size: 1em;
++ `;
++ 
++ const TomatoButton = Button.extend`
++-  color: tomato;
+++	color  : tomato  ;
++ 
++-  border-color: tomato;
+++border-color : tomato
+++    ;
+++
++ `;
++ 
++ Button.extend.attr({})`
++-  border-color: black;
+++border-color : black;
++ `;
++ 
++ styled(ExistingComponent)`
++   color: papayawhip;
++
++`````
++
++### Actual (oxfmt)
++
++`````js
++const ListItem1 = styled.li``;
++
++const ListItem2 = styled.li``;
++
++const Dropdown = styled.div`
++  position: relative;
++`;
++
++const Button = styled.button`
++  color: palevioletred;
++
++  font-size: 1em;
++`;
++
++const TomatoButton = Button.extend`
++	color  : tomato  ;
++
++border-color : tomato
++    ;
++
++`;
++
++Button.extend.attr({})`
++border-color : black;
++`;
++
++styled(ExistingComponent)`
++  color: papayawhip;
++  background-color: firebrick;
++`;
++
++styled.button.attr({})`
++  border: rebeccapurple;
++`;
++
++styled(ExistingComponent).attr({})`
++  border: rebeccapurple;
++`;
++
++styled.div`
++  color: ${(props) => props.theme.colors.paragraph};
++  /* prettier-ignore */
++  ${(props) => (props.small ? "font-size: 0.8em;" : "")};
++`;
++
++styled.div`
++  color: ${(props) => props.theme.colors.paragraph};
++  /* prettier-ignore */
++  ${(props) => (props.small ? "font-size: 0.8em;" : "")}
++`;
++
++styled.div`
++  /* prettier-ignore */
++  color: ${(props) => props.theme.colors.paragraph};
++  ${(props) => (props.small ? "font-size: 0.8em;" : "")};
++`;
++
++styled.div`
++  color: ${(props) => props.theme.colors.paragraph};
++  /* prettier-ignore */
++  ${(props) => (props.small ? "font-size: 0.8em;" : "")};
++  /* prettier-ignore */
++  ${(props) => (props.red ? "color: red;" : "")};
++`;
++
++styled.div`
++  /* prettier-ignore */
++  color: ${(props) => props.theme.colors.paragraph};
++  /* prettier-ignore */
++  ${(props) => (props.small ? "font-size: 0.8em;" : "")};
++  /* prettier-ignore */
++  ${(props) => (props.red ? "color: red;" : "")};
++  /* prettier-ignore */
++`;
++
++styled.div`
++  ${sanitize} ${fonts}
++  html {
++    margin: 0;
++  }
++`;
++
++styled.div`
++  ${bar}
++  baz
++`;
++
++styled.span`
++  foo
++  ${bar}
++  baz
++`;
++
++styled.div`
++  foo
++  ${bar}
++  ${baz}
++`;
++
++styled.span`
++  ${foo}
++  ${bar}
++`;
++
++styled.div`
++  ${foo} bar
++`;
++
++styled.span`
++  ${foo} ${bar}
++  baz: ${foo}
++`;
++
++styled.span`
++  ${foo};
++  ${bar};
++`;
++
++styled.span`
++  ${foo}: ${bar};
++`;
++
++styled.span`
++  ${foo}: ${bar}
++`;
++
++styled.span`
++  ${foo}: ${bar}
++`;
++
++styled.span`
++  ${foo}: ${bar};
++`;
++
++styled.a`
++  ${feedbackCountBlockCss}
++  text-decoration: none;
++
++  ${FeedbackCount} {
++    margin: 0;
++  }
++`;
++
++const StyledComponent1 = styled.div`
++  ${anInterpolation}
++  /* a comment */
++
++  .aRule {
++    color: red;
++  }
++`;
++
++const StyledComponent2 = styled.div`
++  ${anInterpolation}
++
++  /* a comment */
++
++  .aRule {
++    color: red;
++  }
++`;
++
++const Direction = styled.span`
++  ${({ up }) => up && `color: ${color.positive};`}
++  ${({ down }) => down && `color: ${color.negative};`}
++`;
++
++const Direction2 = styled.span`
++  ${({ up }) => up && `color: ${color.positive}`};
++  ${({ down }) => down && `color: ${color.negative}`};
++`;
++
++const mixin = css`
++  color: ${(props) => props.color};
++  ${(props) => props.otherProperty}: ${(props) => props.otherValue};
++`;
++
++const foo = styled.div`
++  display: flex;
++  ${(props) => props.useMixin && mixin}
++`;
++
++const Single1 = styled.div`
++  color: red;
++`;
++
++const Single2 = styled.div`
++  color: red;
++`;
++
++const Dropdown2 = styled.div`
++  /* A comment to avoid the prettier issue: https://github.com/prettier/prettier/issues/2291 */
++  position: relative;
++`;
++
++const bar = styled.div`
++  border-radius: 50%;
++  border: 5px solid rgba(var(--green-rgb), 0);
++  display: inline-block;
++  height: 40px;
++  width: 40px;
++
++  ${(props) =>
++    (props.complete || props.inProgress) &&
++    css`
++      border-color: rgba(var(--green-rgb), 0.15);
++    `}
++
++  div {
++    background-color: var(--purpleTT);
++    border-radius: 50%;
++    border: 4px solid rgba(var(--purple-rgb), 0.2);
++    color: var(--purpleTT);
++    display: inline-flex;
++
++    ${(props) =>
++      props.complete &&
++      css`
++        background-color: var(--green);
++        border-width: 7px;
++      `}
++
++    ${(props) =>
++      (props.complete || props.inProgress) &&
++      css`
++        border-color: var(--green);
++      `}
++  }
++`;
++
++const A = styled.a`
++  display: inline-block;
++  color: #fff;
++  ${(props) =>
++    props.a &&
++    css`
++      display: none;
++    `}
++  height: 30px;
++`;
++
++const Foo = styled.p`
++  max-width: 980px;
++  ${mediaBreakpointOnlyXs`
++    && {
++      font-size: 0.8rem;
++    }
++  `}
++
++  &.bottom {
++    margin-top: 3rem;
++  }
++`;
++
++styled(A)`
++  // prettier-ignore
++  @media (aaaaaaaaaaaaa) {
++	z-index: ${(props) => (props.isComplete ? "1" : "0")};
++  }
++`;
++
++const StyledDiv = styled.div`
++  ${(props) => getSize(props.$size.xs)}
++  ${(props) => getSize(props.$size.sm, "sm")}
++  ${(props) => getSize(props.$size.md, "md")}
++`;
++
++`````
++
++### Expected (prettier)
++
++`````js
++const ListItem1 = styled.li``;
++
++const ListItem2 = styled.li``;
++
++const Dropdown = styled.div`
++  position: relative;
++`;
++
++const Button = styled.button`
++  color: palevioletred;
++
++  font-size: 1em;
++`;
++
++const TomatoButton = Button.extend`
++  color: tomato;
++
++  border-color: tomato;
++`;
++
++Button.extend.attr({})`
++  border-color: black;
++`;
++
++styled(ExistingComponent)`
++  color: papayawhip;
++  background-color: firebrick;
++`;
++
++styled.button.attr({})`
++  border: rebeccapurple;
++`;
++
++styled(ExistingComponent).attr({})`
++  border: rebeccapurple;
++`;
++
++styled.div`
++  color: ${(props) => props.theme.colors.paragraph};
++  /* prettier-ignore */
++  ${(props) => (props.small ? "font-size: 0.8em;" : "")};
++`;
++
++styled.div`
++  color: ${(props) => props.theme.colors.paragraph};
++  /* prettier-ignore */
++  ${(props) => (props.small ? "font-size: 0.8em;" : "")}
++`;
++
++styled.div`
++  /* prettier-ignore */
++  color: ${(props) => props.theme.colors.paragraph};
++  ${(props) => (props.small ? "font-size: 0.8em;" : "")};
++`;
++
++styled.div`
++  color: ${(props) => props.theme.colors.paragraph};
++  /* prettier-ignore */
++  ${(props) => (props.small ? "font-size: 0.8em;" : "")};
++  /* prettier-ignore */
++  ${(props) => (props.red ? "color: red;" : "")};
++`;
++
++styled.div`
++  /* prettier-ignore */
++  color: ${(props) => props.theme.colors.paragraph};
++  /* prettier-ignore */
++  ${(props) => (props.small ? "font-size: 0.8em;" : "")};
++  /* prettier-ignore */
++  ${(props) => (props.red ? "color: red;" : "")};
++  /* prettier-ignore */
++`;
++
++styled.div`
++  ${sanitize} ${fonts}
++  html {
++    margin: 0;
++  }
++`;
++
++styled.div`
++  ${bar}
++  baz
++`;
++
++styled.span`
++  foo
++  ${bar}
++  baz
++`;
++
++styled.div`
++  foo
++  ${bar}
++  ${baz}
++`;
++
++styled.span`
++  ${foo}
++  ${bar}
++`;
++
++styled.div`
++  ${foo} bar
++`;
++
++styled.span`
++  ${foo} ${bar}
++  baz: ${foo}
++`;
++
++styled.span`
++  ${foo};
++  ${bar};
++`;
++
++styled.span`
++  ${foo}: ${bar};
++`;
++
++styled.span`
++  ${foo}: ${bar}
++`;
++
++styled.span`
++  ${foo}: ${bar}
++`;
++
++styled.span`
++  ${foo}: ${bar};
++`;
++
++styled.a`
++  ${feedbackCountBlockCss}
++  text-decoration: none;
++
++  ${FeedbackCount} {
++    margin: 0;
++  }
++`;
++
++const StyledComponent1 = styled.div`
++  ${anInterpolation}
++  /* a comment */
++
++  .aRule {
++    color: red;
++  }
++`;
++
++const StyledComponent2 = styled.div`
++  ${anInterpolation}
++
++  /* a comment */
++
++  .aRule {
++    color: red;
++  }
++`;
++
++const Direction = styled.span`
++  ${({ up }) => up && `color: ${color.positive};`}
++  ${({ down }) => down && `color: ${color.negative};`}
++`;
++
++const Direction2 = styled.span`
++  ${({ up }) => up && `color: ${color.positive}`};
++  ${({ down }) => down && `color: ${color.negative}`};
++`;
++
++const mixin = css`
++  color: ${(props) => props.color};
++  ${(props) => props.otherProperty}: ${(props) => props.otherValue};
++`;
++
++const foo = styled.div`
++  display: flex;
++  ${(props) => props.useMixin && mixin}
++`;
++
++const Single1 = styled.div`
++  color: red;
++`;
++
++const Single2 = styled.div`
++  color: red;
++`;
++
++const Dropdown2 = styled.div`
++  /* A comment to avoid the prettier issue: https://github.com/prettier/prettier/issues/2291 */
++  position: relative;
++`;
++
++const bar = styled.div`
++  border-radius: 50%;
++  border: 5px solid rgba(var(--green-rgb), 0);
++  display: inline-block;
++  height: 40px;
++  width: 40px;
++
++  ${(props) =>
++    (props.complete || props.inProgress) &&
++    css`
++      border-color: rgba(var(--green-rgb), 0.15);
++    `}
++
++  div {
++    background-color: var(--purpleTT);
++    border-radius: 50%;
++    border: 4px solid rgba(var(--purple-rgb), 0.2);
++    color: var(--purpleTT);
++    display: inline-flex;
++
++    ${(props) =>
++      props.complete &&
++      css`
++        background-color: var(--green);
++        border-width: 7px;
++      `}
++
++    ${(props) =>
++      (props.complete || props.inProgress) &&
++      css`
++        border-color: var(--green);
++      `}
++  }
++`;
++
++const A = styled.a`
++  display: inline-block;
++  color: #fff;
++  ${(props) =>
++    props.a &&
++    css`
++      display: none;
++    `}
++  height: 30px;
++`;
++
++const Foo = styled.p`
++  max-width: 980px;
++  ${mediaBreakpointOnlyXs`
++    && {
++      font-size: 0.8rem;
++    }
++  `}
++
++  &.bottom {
++    margin-top: 3rem;
++  }
++`;
++
++styled(A)`
++  // prettier-ignore
++  @media (aaaaaaaaaaaaa) {
++	z-index: ${(props) => (props.isComplete ? "1" : "0")};
++  }
++`;
++
++const StyledDiv = styled.div`
++  ${(props) => getSize(props.$size.xs)}
++  ${(props) => getSize(props.$size.sm, "sm")}
++  ${(props) => getSize(props.$size.md, "md")}
++`;
++
++`````
+diff --git a/apps/oxfmt/conformance/snapshots/diffs/gql-in-js/comment-tag.js.md b/apps/oxfmt/conformance/snapshots/diffs/gql-in-js/comment-tag.js.md
+new file mode 100644
+index 0000000000000..0c8f5b140ccd5
+--- /dev/null
++++ b/apps/oxfmt/conformance/snapshots/diffs/gql-in-js/comment-tag.js.md
+@@ -0,0 +1,181 @@
++# comment-tag.js
++
++> `/* GraphQL */` comment tag not yet supported
++
++## Option 1
++
++`````json
++{"printWidth":80}
++`````
++
++### Diff
++
++`````diff
++===================================================================
++--- prettier
+++++ oxfmt
++@@ -1,17 +1,18 @@
++ const query = /* GraphQL */ `
++-  {
++-    user(id: 5) {
+++      {
+++    user(   id :   5  )  {
++       firstName
++ 
++       lastName
++     }
++   }
++ `;
++ 
++ /* GraphQL */ `
++-  {
++-    user(id: 5, type: "without variable assignment") {
+++      {
+++    user(   id :   5 , type:
+++    "without variable assignment"  )  {
++       firstName
++ 
++       lastName
++     }
++
++`````
++
++### Actual (oxfmt)
++
++`````js
++const query = /* GraphQL */ `
++      {
++    user(   id :   5  )  {
++      firstName
++
++      lastName
++    }
++  }
++`;
++
++/* GraphQL */ `
++      {
++    user(   id :   5 , type:
++    "without variable assignment"  )  {
++      firstName
++
++      lastName
++    }
++  }
++`;
++
++`````
++
++### Expected (prettier)
++
++`````js
++const query = /* GraphQL */ `
++  {
++    user(id: 5) {
++      firstName
++
++      lastName
++    }
++  }
++`;
++
++/* GraphQL */ `
++  {
++    user(id: 5, type: "without variable assignment") {
++      firstName
++
++      lastName
++    }
++  }
++`;
++
++`````
++
++## Option 2
++
++`````json
++{"printWidth":100}
++`````
++
++### Diff
++
++`````diff
++===================================================================
++--- prettier
+++++ oxfmt
++@@ -1,17 +1,18 @@
++ const query = /* GraphQL */ `
++-  {
++-    user(id: 5) {
+++      {
+++    user(   id :   5  )  {
++       firstName
++ 
++       lastName
++     }
++   }
++ `;
++ 
++ /* GraphQL */ `
++-  {
++-    user(id: 5, type: "without variable assignment") {
+++      {
+++    user(   id :   5 , type:
+++    "without variable assignment"  )  {
++       firstName
++ 
++       lastName
++     }
++
++`````
++
++### Actual (oxfmt)
++
++`````js
++const query = /* GraphQL */ `
++      {
++    user(   id :   5  )  {
++      firstName
++
++      lastName
++    }
++  }
++`;
++
++/* GraphQL */ `
++      {
++    user(   id :   5 , type:
++    "without variable assignment"  )  {
++      firstName
++
++      lastName
++    }
++  }
++`;
++
++`````
++
++### Expected (prettier)
++
++`````js
++const query = /* GraphQL */ `
++  {
++    user(id: 5) {
++      firstName
++
++      lastName
++    }
++  }
++`;
++
++/* GraphQL */ `
++  {
++    user(id: 5, type: "without variable assignment") {
++      firstName
++
++      lastName
++    }
++  }
++`;
++
++`````
+diff --git a/apps/oxfmt/conformance/snapshots/diffs/js-in-vue/vue__multiparser__lang-tsx.vue.md b/apps/oxfmt/conformance/snapshots/diffs/js-in-vue/vue__multiparser__lang-tsx.vue.md
+new file mode 100644
+index 0000000000000..cb5d2dffc96b6
+--- /dev/null
++++ b/apps/oxfmt/conformance/snapshots/diffs/js-in-vue/vue__multiparser__lang-tsx.vue.md
+@@ -0,0 +1,133 @@
++# vue/multiparser/lang-tsx.vue
++
++> `lang=tsx` is not supported
++
++## Option 1
++
++`````json
++{"printWidth":80}
++`````
++
++### Diff
++
++`````diff
++===================================================================
++--- prettier
+++++ oxfmt
++@@ -1,13 +1,7 @@
++ <script lang="tsx">
++-import { VNode } from "vue";
+++import {VNode} from "vue"
++ export default {
++-  computed: {
++-    foo(): string {
++-      return "foo";
++-    },
++-  },
++-  render(h): VNode {
++-    return <div>{this.foo}</div>;
++-  },
++-};
+++  computed: {  foo( ):string { return "foo" }, },
+++  render(h):VNode {  return <div>{ this.foo }</div> },
+++}
++ </script>
++
++`````
++
++### Actual (oxfmt)
++
++`````vue
++<script lang="tsx">
++import {VNode} from "vue"
++export default {
++  computed: {  foo( ):string { return "foo" }, },
++  render(h):VNode {  return <div>{ this.foo }</div> },
++}
++</script>
++
++`````
++
++### Expected (prettier)
++
++`````vue
++<script lang="tsx">
++import { VNode } from "vue";
++export default {
++  computed: {
++    foo(): string {
++      return "foo";
++    },
++  },
++  render(h): VNode {
++    return <div>{this.foo}</div>;
++  },
++};
++</script>
++
++`````
++
++## Option 2
++
++`````json
++{"printWidth":100,"vueIndentScriptAndStyle":true,"singleQuote":true}
++`````
++
++### Diff
++
++`````diff
++===================================================================
++--- prettier
+++++ oxfmt
++@@ -1,13 +1,7 @@
++ <script lang="tsx">
++-  import { VNode } from 'vue';
+++  import {VNode} from "vue"
++   export default {
++-    computed: {
++-      foo(): string {
++-        return 'foo';
++-      },
++-    },
++-    render(h): VNode {
++-      return <div>{this.foo}</div>;
++-    },
++-  };
+++    computed: {  foo( ):string { return "foo" }, },
+++    render(h):VNode {  return <div>{ this.foo }</div> },
+++  }
++ </script>
++
++`````
++
++### Actual (oxfmt)
++
++`````vue
++<script lang="tsx">
++  import {VNode} from "vue"
++  export default {
++    computed: {  foo( ):string { return "foo" }, },
++    render(h):VNode {  return <div>{ this.foo }</div> },
++  }
++</script>
++
++`````
++
++### Expected (prettier)
++
++`````vue
++<script lang="tsx">
++  import { VNode } from 'vue';
++  export default {
++    computed: {
++      foo(): string {
++        return 'foo';
++      },
++    },
++    render(h): VNode {
++      return <div>{this.foo}</div>;
++    },
++  };
++</script>
++
++`````
+diff --git a/apps/oxfmt/package.json b/apps/oxfmt/package.json
+index f4521850d7885..4be829e0909c5 100644
+--- a/apps/oxfmt/package.json
++++ b/apps/oxfmt/package.json
+@@ -29,6 +29,7 @@
+     "@napi-rs/cli": "catalog:",
+     "@types/node": "catalog:",
+     "degit": "^2.8.4",
++    "diff": "^8.0.3",
+     "execa": "^9.6.0",
+     "json-schema-to-typescript": "catalog:",
+     "tsdown": "catalog:",
+diff --git a/oxfmtrc.jsonc b/oxfmtrc.jsonc
+index df032436d9a8e..81f9117548106 100644
+--- a/oxfmtrc.jsonc
++++ b/oxfmtrc.jsonc
+@@ -15,6 +15,7 @@
+     "**/generated/**",
+     "**/CHANGELOG.md",
+     "**/*.snap.md",
++    "apps/oxfmt/conformance/snapshots/**",
+     "apps/oxlint/conformance/snapshots/**",
+     "tasks/coverage/node-compat-table",
+     "tasks/coverage/misc",
+diff --git a/pnpm-lock.yaml b/pnpm-lock.yaml
+index 60fcc6109145f..8b24d6f6e24f0 100644
+--- a/pnpm-lock.yaml
++++ b/pnpm-lock.yaml
+@@ -12,27 +12,12 @@ catalogs:
+     '@napi-rs/cli':
+       specifier: 3.5.1
+       version: 3.5.1
+-    '@napi-rs/wasm-runtime':
+-      specifier: 1.1.1
+-      version: 1.1.1
+     '@types/node':
+       specifier: 24.1.0
+       version: 24.1.0
+-    cross-env:
+-      specifier: ^10.1.0
+-      version: 10.1.0
+-    eslint:
+-      specifier: 9.39.3
+-      version: 9.39.3
+     json-schema-to-typescript:
+       specifier: ^15.0.4
+       version: 15.0.4
+-    publint:
+-      specifier: 0.3.18
+-      version: 0.3.18
+-    rolldown:
+-      specifier: 1.0.0-rc.8
+-      version: 1.0.0-rc.8
+     tsdown:
+       specifier: 0.21.1
+       version: 0.21.1
+@@ -81,6 +66,9 @@ importers:
+       degit:
+         specifier: ^2.8.4
+         version: 2.8.4
++      diff:
++        specifier: ^8.0.3
++        version: 8.0.3
+       execa:
+         specifier: ^9.6.0
+         version: 9.6.1
+@@ -3216,6 +3204,10 @@ packages:
+   dezalgo@1.0.4:
+     resolution: {integrity: sha512-rXSP0bf+5n0Qonsb+SVVfNfIsimO4HEtmnIpPHY8Q1UCzKlQrDMfdobr8nJOOsRgWCyMRqeSBQzmWUMq7zvVig==}
+ 
++  diff@8.0.3:
++    resolution: {integrity: sha512-qejHi7bcSD4hQAZE0tNAawRK1ZtafHDmMTMkrrIGgSLl7hTnQHmKCeB45xAcbfTqK2zowkM3j3bHt/4b/ARbYQ==}
++    engines: {node: '>=0.3.1'}
++
+   dts-resolver@2.1.3:
+     resolution: {integrity: sha512-bihc7jPC90VrosXNzK0LTE2cuLP6jr0Ro8jk+kMugHReJVLIpHz/xadeq3MhuwyO4TD4OA3L1Q8pBBFRc08Tsw==}
+     engines: {node: '>=20.19.0'}
+@@ -7366,6 +7358,8 @@ snapshots:
+       asap: 2.0.6
+       wrappy: 1.0.2
+ 
++  diff@8.0.3: {}
++
+   dts-resolver@2.1.3: {}
+ 
+   dunder-proto@1.0.1:

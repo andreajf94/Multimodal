@@ -1,0 +1,89 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "api_design",
+      "recommendation": "Updated the issuer parameter type annotation from list[str] | None to str | Sequence[str] | None to match PyJWT's decode API specification",
+      "rationale": "PyJWT's decode method accepts issuer as str, Sequence[str], or None. The previous type annotation (list[str] | None) was incorrect and caused string issuers to be incorrectly converted to character lists, breaking validation. This change ensures proper type compatibility with the underlying library.",
+      "alternatives_considered": [
+        "Keeping the existing type annotation and adding internal conversion logic",
+        "Creating a custom wrapper function to handle type conversions",
+        "Maintaining the broken behavior for backward compatibility"
+      ],
+      "files_affected": [
+        "litestar/security/jwt/token.py",
+        "tests/unit/test_security/test_jwt/test_token.py"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Removed the list() conversion for issuer parameter in decode() method to prevent incorrect string-to-character-list transformation",
+      "rationale": "When issuer is a string, list(issuer) converts it to a list of characters (e.g., 'example' \u2192 ['e','x','a','m','p','l','e']), which breaks JWT validation. PyJWT expects either the original string or a sequence of strings. Removing this conversion fixes the validation logic while maintaining support for all valid issuer types.",
+      "alternatives_considered": [
+        "Adding conditional logic to only apply list() to non-string sequences",
+        "Creating a separate validation function for issuer parameter",
+        "Converting all issuer types to a standardized internal format"
+      ],
+      "files_affected": [
+        "litestar/security/jwt/token.py"
+      ]
+    },
+    {
+      "dimension": "testing",
+      "recommendation": "Added comprehensive test coverage for all issuer parameter types (None, string, list of strings) to ensure the fix works correctly",
+      "rationale": "The new test parametrizes issuer values to validate that the decode method correctly handles: 1) None (issuer validation disabled), 2) string issuer, 3) list of string issuers. This ensures the fix addresses the reported issue and prevents regression.",
+      "alternatives_considered": [
+        "Only testing the specific broken case (string issuer)",
+        "Adding separate test functions for each issuer type",
+        "Relying on existing integration tests without adding unit tests"
+      ],
+      "files_affected": [
+        "tests/unit/test_security/test_jwt/test_token.py"
+      ]
+    },
+    {
+      "dimension": "backward_compatibility",
+      "recommendation": "Maintained support for None issuer values and all existing issuer parameter formats while fixing the string handling issue",
+      "rationale": "The change preserves the existing API contract: None still disables issuer validation, and sequences of strings are still supported. Only the incorrect string-to-character-list conversion was removed, which was a bug rather than a feature.",
+      "alternatives_considered": [
+        "Breaking the API to enforce a single issuer type",
+        "Deprecating the old behavior with warnings",
+        "Adding a new parameter with correct behavior while keeping the old one"
+      ],
+      "files_affected": [
+        "litestar/security/jwt/token.py",
+        "tests/unit/test_security/test_jwt/test_token.py"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Fix JWT issuer validation type handling",
+      "description": "Correct the issuer parameter type annotation and remove incorrect string-to-list conversion to align with PyJWT's decode API specification",
+      "files_to_modify": [
+        "litestar/security/jwt/token.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-002",
+      "title": "Add comprehensive issuer validation tests",
+      "description": "Create parametrized tests to verify correct handling of all issuer parameter types (None, string, list of strings)",
+      "files_to_modify": [
+        "tests/unit/test_security/test_jwt/test_token.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation addresses a critical bug in JWT token validation where string issuer values were incorrectly converted to character lists, breaking issuer validation. The fix involves two key changes: First, updating the type annotation for the issuer parameter from `list[str] | None` to `str | Sequence[str] | None` in both the `decode_payload` function and its test mock to accurately reflect PyJWT's API contract. Second, removing the `list(issuer)` conversion in the `decode` method that was causing the incorrect string transformation.\n\nThe approach maintains backward compatibility by preserving support for None values (which disable issuer validation) and sequences of strings (for multiple allowed issuers). The fix aligns Litestar's JWT implementation with PyJWT's documented behavior, where issuer can be a string, a sequence of strings, or None. This ensures interoperability with standard JWT tokens and third-party authentication services.\n\nComprehensive test coverage was added to validate all issuer parameter types, using pytest's parametrize feature to test None, string, and list-of-strings cases. The test creates tokens with appropriate issuer claims, encodes them, then decodes with the corresponding issuer parameter, verifying that validation works correctly for each type. This minimal change set fixes the reported issue without introducing breaking changes or unnecessary complexity.",
+  "source_pr": "https://github.com/litestar-org/litestar/pull/4583",
+  "before_sha": "afe445b9cc27937e585efafd4704019aa34d94d7",
+  "after_sha": "095df98118485f5ba635c12c6c71372ed5191fa9",
+  "diff_stats": {
+    "additions": 23,
+    "deletions": 3,
+    "files_changed": 2
+  }
+}

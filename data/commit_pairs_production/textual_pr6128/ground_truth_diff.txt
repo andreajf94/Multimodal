@@ -1,0 +1,26 @@
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index 76f269007d..e02df616f8 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -23,6 +23,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
+ ### Fixed
+ 
+ - Fixed issue where Segments with a style of `None` aren't rendered https://github.com/Textualize/textual/pull/6109
++- Fixed visual glitches and crash when changing `DataTable.header_height` https://github.com/Textualize/textual/pull/6128
+ 
+ ## [6.1.0] - 2025-08-01
+ 
+diff --git a/src/textual/widgets/_data_table.py b/src/textual/widgets/_data_table.py
+index b78ce528a1..f7a8271874 100644
+--- a/src/textual/widgets/_data_table.py
++++ b/src/textual/widgets/_data_table.py
+@@ -1160,6 +1160,9 @@ def watch_fixed_columns(self) -> None:
+     def watch_zebra_stripes(self) -> None:
+         self._clear_caches()
+ 
++    def watch_header_height(self) -> None:
++        self._clear_caches()
++
+     def validate_cell_padding(self, cell_padding: int) -> int:
+         return max(cell_padding, 0)
+ 

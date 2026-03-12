@@ -1,0 +1,1398 @@
+diff --git a/packages/richtext-lexical/src/features/toolbars/fixed/client/Toolbar/index.tsx b/packages/richtext-lexical/src/features/toolbars/fixed/client/Toolbar/index.tsx
+index 435f235f740..bdb7b4b7ddf 100644
+--- a/packages/richtext-lexical/src/features/toolbars/fixed/client/Toolbar/index.tsx
++++ b/packages/richtext-lexical/src/features/toolbars/fixed/client/Toolbar/index.tsx
+@@ -10,21 +10,27 @@ import { useMemo } from 'react'
+ import type { EditorConfigContextType } from '../../../../../lexical/config/client/EditorConfigProvider.js'
+ import type { SanitizedClientEditorConfig } from '../../../../../lexical/config/types.js'
+ import type { PluginComponent } from '../../../../typesClient.js'
++import type { ToolbarStates } from '../../../shared/useToolbarStates.js'
+ import type { ToolbarGroup, ToolbarGroupItem } from '../../../types.js'
+ import type { FixedToolbarFeatureProps } from '../../server/index.js'
+ 
+ import { useEditorConfigContext } from '../../../../../lexical/config/client/EditorConfigProvider.js'
+ import { ToolbarButton } from '../../../shared/ToolbarButton/index.js'
+-import './index.scss'
+ import { ToolbarDropdown } from '../../../shared/ToolbarDropdown/index.js'
++import { useToolbarStates } from '../../../shared/useToolbarStates.js'
++import './index.scss'
+ 
+ function ButtonGroupItem({
++  active,
+   anchorElem,
+   editor,
++  enabled,
+   item,
+ }: {
++  active: boolean
+   anchorElem: HTMLElement
+   editor: LexicalEditor
++  enabled: boolean
+   item: ToolbarGroupItem
+ }): React.ReactNode {
+   if (item.Component) {
+@@ -40,7 +46,7 @@ function ButtonGroupItem({
+   }
+ 
+   return (
+-    <ToolbarButton editor={editor} item={item} key={item.key}>
++    <ToolbarButton active={active} editor={editor} enabled={enabled} item={item} key={item.key}>
+       <item.ChildComponent />
+     </ToolbarButton>
+   )
+@@ -52,70 +58,57 @@ function ToolbarGroupComponent({
+   editorConfig,
+   group,
+   index,
++  toolbarStates,
+ }: {
+   anchorElem: HTMLElement
+   editor: LexicalEditor
+   editorConfig: SanitizedClientEditorConfig
+   group: ToolbarGroup
+   index: number
++  toolbarStates: ToolbarStates
+ }): React.ReactNode {
+   const { i18n } = useTranslation<{}, string>()
+   const {
+     fieldProps: { featureClientSchemaMap, schemaPath },
+   } = useEditorConfigContext()
+ 
+-  const [dropdownLabel, setDropdownLabel] = React.useState<string | undefined>(undefined)
+-  const [DropdownIcon, setDropdownIcon] = React.useState<React.FC | undefined>(undefined)
++  const groupState = toolbarStates.groupStates.get(group.key)
+ 
+-  React.useEffect(() => {
+-    if (group?.type === 'dropdown' && group.items.length && group.ChildComponent) {
+-      setDropdownIcon(() => group.ChildComponent!)
+-    } else {
+-      setDropdownIcon(undefined)
++  const DropdownIcon = useMemo(() => {
++    if (group.type !== 'dropdown') {
++      return undefined
+     }
+-  }, [group])
+-
+-  const onActiveChange = React.useCallback(
+-    ({ activeItems }: { activeItems: ToolbarGroupItem[] }) => {
+-      if (!activeItems.length) {
+-        if (group?.type === 'dropdown' && group.items.length && group.ChildComponent) {
+-          setDropdownIcon(() => group.ChildComponent!)
+-          setDropdownLabel(undefined)
+-        } else {
+-          setDropdownIcon(undefined)
+-          setDropdownLabel(undefined)
+-        }
+-        return
+-      }
+-      const item = activeItems[0]!
++    const activeItem = groupState?.activeItems?.[0]
++    if (activeItem) {
++      return activeItem.ChildComponent
++    }
++    return group.ChildComponent
++  }, [group, groupState?.activeItems])
+ 
+-      let label = item.key
+-      if (item.label) {
+-        label =
+-          typeof item.label === 'function'
+-            ? item.label({ featureClientSchemaMap, i18n, schemaPath })
+-            : item.label
+-      }
+-      // Crop title to max. 25 characters
+-      if (label.length > 25) {
+-        label = label.substring(0, 25) + '...'
+-      }
+-      if (activeItems.length === 1) {
+-        setDropdownLabel(label)
+-        setDropdownIcon(() => item.ChildComponent)
+-      } else {
+-        setDropdownLabel(
+-          i18n.t('lexical:general:toolbarItemsActive', { count: activeItems.length }),
+-        )
+-        if (group?.type === 'dropdown' && group.items.length && group.ChildComponent) {
+-          setDropdownIcon(() => group.ChildComponent!)
+-        } else {
+-          setDropdownIcon(undefined)
+-        }
+-      }
+-    },
+-    [group, i18n, featureClientSchemaMap, schemaPath],
+-  )
++  const dropdownLabel = useMemo(() => {
++    if (group.type !== 'dropdown') {
++      return undefined
++    }
++    const activeItems = groupState?.activeItems
++    if (!activeItems?.length) {
++      return undefined
++    }
++    if (activeItems.length > 1) {
++      return i18n.t('lexical:general:toolbarItemsActive', { count: activeItems.length })
++    }
++    const item = activeItems[0]!
++    let label = item.key
++    if (item.label) {
++      label =
++        typeof item.label === 'function'
++          ? item.label({ featureClientSchemaMap, i18n, schemaPath })
++          : item.label
++    }
++    if (label.length > 25) {
++      label = label.substring(0, 25) + '...'
++    }
++    return label
++  }, [group, groupState?.activeItems, i18n, featureClientSchemaMap, schemaPath])
+ 
+   return (
+     <div
+@@ -123,34 +116,29 @@ function ToolbarGroupComponent({
+       data-toolbar-group-key={group.key}
+       key={group.key}
+     >
+-      {group.type === 'dropdown' && group.items.length ? (
+-        DropdownIcon ? (
+-          <ToolbarDropdown
+-            anchorElem={anchorElem}
+-            editor={editor}
+-            group={group}
+-            Icon={DropdownIcon}
+-            itemsContainerClassNames={['fixed-toolbar__dropdown-items']}
+-            label={dropdownLabel}
+-            maxActiveItems={group.maxActiveItems ?? 1}
+-            onActiveChange={onActiveChange}
+-          />
+-        ) : (
+-          <ToolbarDropdown
+-            anchorElem={anchorElem}
+-            editor={editor}
+-            group={group}
+-            itemsContainerClassNames={['fixed-toolbar__dropdown-items']}
+-            label={dropdownLabel}
+-            maxActiveItems={group.maxActiveItems ?? 1}
+-            onActiveChange={onActiveChange}
+-          />
+-        )
++      {group.type === 'dropdown' && group.items.length && groupState ? (
++        <ToolbarDropdown
++          anchorElem={anchorElem}
++          editor={editor}
++          group={group}
++          groupState={groupState}
++          Icon={DropdownIcon}
++          itemsContainerClassNames={['fixed-toolbar__dropdown-items']}
++          label={dropdownLabel}
++        />
+       ) : null}
+       {group.type === 'buttons' && group.items.length
+         ? group.items.map((item) => {
++            const itemState = toolbarStates.itemStates.get(item.key)
+             return (
+-              <ButtonGroupItem anchorElem={anchorElem} editor={editor} item={item} key={item.key} />
++              <ButtonGroupItem
++                active={itemState?.active ?? false}
++                anchorElem={anchorElem}
++                editor={editor}
++                enabled={itemState?.enabled ?? true}
++                item={item}
++                key={item.key}
++              />
+             )
+           })
+         : null}
+@@ -177,6 +165,8 @@ function FixedToolbar({
+ 
+   const { y } = useScrollInfo()
+ 
++  const toolbarStates = useToolbarStates(editor, editorConfig?.features?.toolbarFixed?.groups)
++
+   // Memoize the parent toolbar element
+   const parentToolbarElem = useMemo(() => {
+     if (!parentWithFixedToolbar || clientProps?.disableIfParentHasFixedToolbar) {
+@@ -254,6 +244,7 @@ function FixedToolbar({
+                   group={group}
+                   index={i}
+                   key={group.key}
++                  toolbarStates={toolbarStates}
+                 />
+               )
+             })}
+@@ -311,6 +302,7 @@ export const FixedToolbarPlugin: PluginComponent<FixedToolbarFeatureProps> = ({
+   return (
+     <FixedToolbar
+       anchorElem={document.body}
++      clientProps={clientProps}
+       editor={editor}
+       editorConfig={editorConfig}
+       parentWithFixedToolbar={parentWithFixedToolbar}
+diff --git a/packages/richtext-lexical/src/features/toolbars/inline/client/Toolbar/index.tsx b/packages/richtext-lexical/src/features/toolbars/inline/client/Toolbar/index.tsx
+index 836642b8767..f04b1be5301 100644
+--- a/packages/richtext-lexical/src/features/toolbars/inline/client/Toolbar/index.tsx
++++ b/packages/richtext-lexical/src/features/toolbars/inline/client/Toolbar/index.tsx
+@@ -12,27 +12,33 @@ import {
+   getDOMSelection,
+   SELECTION_CHANGE_COMMAND,
+ } from 'lexical'
+-import { useCallback, useEffect, useRef, useState } from 'react'
++import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+ import * as React from 'react'
+ import { createPortal } from 'react-dom'
+ 
+ import type { PluginComponentWithAnchor } from '../../../../typesClient.js'
++import type { ToolbarStates } from '../../../shared/useToolbarStates.js'
+ import type { ToolbarGroup, ToolbarGroupItem } from '../../../types.js'
+ 
+ import { useEditorConfigContext } from '../../../../../lexical/config/client/EditorConfigProvider.js'
+ import { getDOMRangeRect } from '../../../../../lexical/utils/getDOMRangeRect.js'
+ import { setFloatingElemPosition } from '../../../../../lexical/utils/setFloatingElemPosition.js'
+ import { ToolbarButton } from '../../../shared/ToolbarButton/index.js'
+-import './index.scss'
+ import { ToolbarDropdown } from '../../../shared/ToolbarDropdown/index.js'
++import { useToolbarStates } from '../../../shared/useToolbarStates.js'
++import './index.scss'
+ 
+ function ButtonGroupItem({
++  active,
+   anchorElem,
+   editor,
++  enabled,
+   item,
+ }: {
++  active: boolean
+   anchorElem: HTMLElement
+   editor: LexicalEditor
++  enabled: boolean
+   item: ToolbarGroupItem
+ }): React.ReactNode {
+   if (item.Component) {
+@@ -47,7 +53,7 @@ function ButtonGroupItem({
+   }
+ 
+   return (
+-    <ToolbarButton editor={editor} item={item} key={item.key}>
++    <ToolbarButton active={active} editor={editor} enabled={enabled} item={item} key={item.key}>
+       <item.ChildComponent />
+     </ToolbarButton>
+   )
+@@ -58,39 +64,25 @@ function ToolbarGroupComponent({
+   editor,
+   group,
+   index,
++  toolbarStates,
+ }: {
+   anchorElem: HTMLElement
+   editor: LexicalEditor
+   group: ToolbarGroup
+   index: number
++  toolbarStates: ToolbarStates
+ }): React.ReactNode {
+   const { editorConfig } = useEditorConfigContext()
+ 
+-  const [DropdownIcon, setDropdownIcon] = React.useState<React.FC | undefined>()
++  const groupState = toolbarStates.groupStates.get(group.key)
+ 
+-  React.useEffect(() => {
+-    if (group?.type === 'dropdown' && group.items.length && group.ChildComponent) {
+-      setDropdownIcon(() => group.ChildComponent)
+-    } else {
+-      setDropdownIcon(undefined)
++  const DropdownIcon = useMemo(() => {
++    if (group.type !== 'dropdown') {
++      return undefined
+     }
+-  }, [group])
+-
+-  const onActiveChange = useCallback(
+-    ({ activeItems }: { activeItems: ToolbarGroupItem[] }) => {
+-      if (!activeItems.length) {
+-        if (group?.type === 'dropdown' && group.items.length && group.ChildComponent) {
+-          setDropdownIcon(() => group.ChildComponent)
+-        } else {
+-          setDropdownIcon(undefined)
+-        }
+-        return
+-      }
+-      const item = activeItems[0]
+-      setDropdownIcon(() => item?.ChildComponent)
+-    },
+-    [group],
+-  )
++    const activeItem = groupState?.activeItems?.[0]
++    return activeItem?.ChildComponent ?? group.ChildComponent
++  }, [group, groupState?.activeItems])
+ 
+   return (
+     <div
+@@ -98,30 +90,27 @@ function ToolbarGroupComponent({
+       data-toolbar-group-key={group.key}
+       key={group.key}
+     >
+-      {group.type === 'dropdown' && group.items.length ? (
+-        DropdownIcon ? (
+-          <ToolbarDropdown
+-            anchorElem={anchorElem}
+-            editor={editor}
+-            group={group}
+-            Icon={DropdownIcon}
+-            maxActiveItems={group.maxActiveItems ?? 1}
+-            onActiveChange={onActiveChange}
+-          />
+-        ) : (
+-          <ToolbarDropdown
+-            anchorElem={anchorElem}
+-            editor={editor}
+-            group={group}
+-            maxActiveItems={group.maxActiveItems ?? 1}
+-            onActiveChange={onActiveChange}
+-          />
+-        )
++      {group.type === 'dropdown' && group.items.length && groupState ? (
++        <ToolbarDropdown
++          anchorElem={anchorElem}
++          editor={editor}
++          group={group}
++          groupState={groupState}
++          Icon={DropdownIcon}
++        />
+       ) : null}
+       {group.type === 'buttons' && group.items.length
+         ? group.items.map((item) => {
++            const itemState = toolbarStates.itemStates.get(item.key)
+             return (
+-              <ButtonGroupItem anchorElem={anchorElem} editor={editor} item={item} key={item.key} />
++              <ButtonGroupItem
++                active={itemState?.active ?? false}
++                anchorElem={anchorElem}
++                editor={editor}
++                enabled={itemState?.enabled ?? true}
++                item={item}
++                key={item.key}
++              />
+             )
+           })
+         : null}
+@@ -144,6 +133,8 @@ function InlineToolbar({
+ 
+   const { editorConfig } = useEditorConfigContext()
+ 
++  const toolbarStates = useToolbarStates(editor, editorConfig?.features?.toolbarInline?.groups)
++
+   const closeFloatingToolbar = useCallback(() => {
+     if (floatingToolbarRef?.current) {
+       const isOpacityZero = floatingToolbarRef.current.style.opacity === '0'
+@@ -307,6 +298,7 @@ function InlineToolbar({
+               group={group}
+               index={i}
+               key={group.key}
++              toolbarStates={toolbarStates}
+             />
+           )
+         })}
+diff --git a/packages/richtext-lexical/src/features/toolbars/shared/ToolbarButton/index.tsx b/packages/richtext-lexical/src/features/toolbars/shared/ToolbarButton/index.tsx
+index efd6beea2dc..f338e9d3416 100644
+--- a/packages/richtext-lexical/src/features/toolbars/shared/ToolbarButton/index.tsx
++++ b/packages/richtext-lexical/src/features/toolbars/shared/ToolbarButton/index.tsx
+@@ -1,84 +1,41 @@
+ 'use client'
+ import type { LexicalEditor } from 'lexical'
+ 
+-import { mergeRegister } from '@lexical/utils'
+-import { $addUpdateTag, $getSelection } from 'lexical'
+-import React, { useCallback, useDeferredValue, useEffect, useMemo, useState } from 'react'
++import { $addUpdateTag } from 'lexical'
++import React, { useCallback, useMemo } from 'react'
+ 
+ import type { ToolbarGroupItem } from '../../types.js'
+ 
+-import { useEditorConfigContext } from '../../../../lexical/config/client/EditorConfigProvider.js'
+ import './index.scss'
+-import { useRunDeprioritized } from '../../../../utilities/useRunDeprioritized.js'
+ 
+ const baseClass = 'toolbar-popup__button'
+ 
+ export const ToolbarButton = ({
++  active = false,
+   children,
+   editor,
++  enabled = true,
+   item,
+ }: {
++  active?: boolean
+   children: React.JSX.Element
+   editor: LexicalEditor
++  enabled?: boolean
+   item: ToolbarGroupItem
+ }) => {
+-  const [_state, setState] = useState({ active: false, enabled: true })
+-  const deferredState = useDeferredValue(_state)
+-
+-  const editorConfigContext = useEditorConfigContext()
+-
+   const className = useMemo(() => {
+     return [
+       baseClass,
+-      !deferredState.enabled ? 'disabled' : '',
+-      deferredState.active ? 'active' : '',
++      !enabled ? 'disabled' : '',
++      active ? 'active' : '',
+       item.key ? `${baseClass}-${item.key}` : '',
+     ]
+       .filter(Boolean)
+       .join(' ')
+-  }, [deferredState, item.key])
+-  const updateStates = useCallback(() => {
+-    editor.getEditorState().read(() => {
+-      const selection = $getSelection()
+-      if (!selection) {
+-        return
+-      }
+-      const newActive = item.isActive
+-        ? item.isActive({ editor, editorConfigContext, selection })
+-        : false
+-
+-      const newEnabled = item.isEnabled
+-        ? item.isEnabled({ editor, editorConfigContext, selection })
+-        : true
+-
+-      setState((prev) => {
+-        if (prev.active === newActive && prev.enabled === newEnabled) {
+-          return prev
+-        }
+-        return { active: newActive, enabled: newEnabled }
+-      })
+-    })
+-  }, [editor, editorConfigContext, item])
+-
+-  const runDeprioritized = useRunDeprioritized()
+-
+-  useEffect(() => {
+-    // Run on mount
+-    void runDeprioritized(updateStates)
+-
+-    const listener = () => runDeprioritized(updateStates)
+-
+-    const cleanup = mergeRegister(editor.registerUpdateListener(listener))
+-    document.addEventListener('mouseup', listener)
+-
+-    return () => {
+-      cleanup()
+-      document.removeEventListener('mouseup', listener)
+-    }
+-  }, [editor, runDeprioritized, updateStates])
++  }, [active, enabled, item.key])
+ 
+   const handleClick = useCallback(() => {
+-    if (!_state.enabled) {
++    if (!enabled) {
+       return
+     }
+ 
+@@ -89,10 +46,10 @@ export const ToolbarButton = ({
+       // We need to wrap the onSelect in the callback, so the editor is properly focused before the onSelect is called.
+       item.onSelect?.({
+         editor,
+-        isActive: _state.active,
++        isActive: active,
+       })
+     })
+-  }, [editor, item, _state])
++  }, [editor, item, active, enabled])
+ 
+   const handleMouseDown = useCallback((e: React.MouseEvent) => {
+     // This fixes a bug where you are unable to click the button if you are in a NESTED editor (editor in blocks field in editor).
+diff --git a/packages/richtext-lexical/src/features/toolbars/shared/ToolbarDropdown/index.tsx b/packages/richtext-lexical/src/features/toolbars/shared/ToolbarDropdown/index.tsx
+index 9df48e31e8e..aef236b3836 100644
+--- a/packages/richtext-lexical/src/features/toolbars/shared/ToolbarDropdown/index.tsx
++++ b/packages/richtext-lexical/src/features/toolbars/shared/ToolbarDropdown/index.tsx
+@@ -1,18 +1,16 @@
+ 'use client'
+-import React, { useCallback, useDeferredValue, useEffect, useMemo } from 'react'
++import React, { useMemo } from 'react'
+ 
+ const baseClass = 'toolbar-popup__dropdown'
+ 
+ import type { LexicalEditor } from 'lexical'
+ 
+-import { mergeRegister } from '@lexical/utils'
+ import { useTranslation } from '@payloadcms/ui'
+-import { $getSelection } from 'lexical'
+ 
+ import type { ToolbarDropdownGroup, ToolbarGroupItem } from '../../types.js'
++import type { ToolbarGroupState } from '../useToolbarStates.js'
+ 
+ import { useEditorConfigContext } from '../../../../lexical/config/client/EditorConfigProvider.js'
+-import { useRunDeprioritized } from '../../../../utilities/useRunDeprioritized.js'
+ import './index.scss'
+ import { DropDown, DropDownItem } from './DropDown.js'
+ 
+@@ -57,7 +55,6 @@ const ToolbarItem = ({
+         ? item.label({ featureClientSchemaMap, i18n, schemaPath })
+         : item.label
+   }
+-  // Crop title to max. 25 characters
+   if (title.length > 25) {
+     croppedTitle = title.substring(0, 25) + '...'
+   } else {
+@@ -87,110 +84,36 @@ export const ToolbarDropdown = ({
+   classNames,
+   editor,
+   group,
++  groupState,
+   Icon,
+   itemsContainerClassNames,
+   label,
+-  maxActiveItems,
+-  onActiveChange,
+ }: {
+   anchorElem: HTMLElement
+   classNames?: string[]
+   editor: LexicalEditor
+   group: ToolbarDropdownGroup
++  groupState: ToolbarGroupState
+   Icon?: React.FC
+   itemsContainerClassNames?: string[]
+   label?: string
+-  /**
+-   * Maximum number of active items allowed. This is a performance optimization to prevent
+-   * unnecessary item active checks when the maximum number of active items is reached.
+-   */
+-  maxActiveItems?: number
+-  onActiveChange?: ({ activeItems }: { activeItems: ToolbarGroupItem[] }) => void
+ }) => {
+-  const [toolbarState, setToolbarState] = React.useState<{
+-    activeItemKeys: string[]
+-    enabledGroup: boolean
+-    enabledItemKeys: string[]
+-  }>({
+-    activeItemKeys: [],
+-    enabledGroup: true,
+-    enabledItemKeys: [],
+-  })
+-  const deferredToolbarState = useDeferredValue(toolbarState)
+-
+-  const editorConfigContext = useEditorConfigContext()
+   const { items, key: groupKey } = group
+ 
+-  const runDeprioritized = useRunDeprioritized()
+-
+-  const updateStates = useCallback(() => {
+-    editor.getEditorState().read(() => {
+-      const selection = $getSelection()
+-      if (!selection) {
+-        return
+-      }
+-
+-      const _activeItemKeys: string[] = []
+-      const _activeItems: ToolbarGroupItem[] = []
+-      const _enabledItemKeys: string[] = []
+-
+-      for (const item of items) {
+-        if (item.isActive && (!maxActiveItems || _activeItemKeys.length < maxActiveItems)) {
+-          const isActive = item.isActive({ editor, editorConfigContext, selection })
+-          if (isActive) {
+-            _activeItemKeys.push(item.key)
+-            _activeItems.push(item)
+-          }
+-        }
+-        if (item.isEnabled) {
+-          const isEnabled = item.isEnabled({ editor, editorConfigContext, selection })
+-          if (isEnabled) {
+-            _enabledItemKeys.push(item.key)
+-          }
+-        } else {
+-          _enabledItemKeys.push(item.key)
+-        }
+-      }
+-
+-      setToolbarState({
+-        activeItemKeys: _activeItemKeys,
+-        enabledGroup: group.isEnabled
+-          ? group.isEnabled({ editor, editorConfigContext, selection })
+-          : true,
+-        enabledItemKeys: _enabledItemKeys,
+-      })
+-
+-      if (onActiveChange) {
+-        onActiveChange({ activeItems: _activeItems })
+-      }
+-    })
+-  }, [editor, editorConfigContext, group, items, maxActiveItems, onActiveChange])
+-
+-  useEffect(() => {
+-    // Run on mount in order to update states when dropdown is opened
+-    void runDeprioritized(updateStates)
+-
+-    return mergeRegister(
+-      editor.registerUpdateListener(async () => {
+-        await runDeprioritized(updateStates)
+-      }),
+-    )
+-  }, [editor, runDeprioritized, updateStates])
+-
+   const renderedItems = useMemo(() => {
+     return items?.length
+       ? items.map((item) => (
+           <MemoToolbarItem
+-            active={deferredToolbarState.activeItemKeys.includes(item.key)}
++            active={groupState.activeItemKeys.includes(item.key)}
+             anchorElem={anchorElem}
+             editor={editor}
+-            enabled={deferredToolbarState.enabledItemKeys.includes(item.key)}
++            enabled={groupState.enabledItemKeys.includes(item.key)}
+             item={item}
+             key={item.key}
+           />
+         ))
+       : null
+-  }, [items, deferredToolbarState, anchorElem, editor])
++  }, [items, groupState.activeItemKeys, groupState.enabledItemKeys, anchorElem, editor])
+ 
+   return (
+     <DropDown
+@@ -198,7 +121,7 @@ export const ToolbarDropdown = ({
+       buttonClassName={[baseClass, `${baseClass}-${groupKey}`, ...(classNames || [])]
+         .filter(Boolean)
+         .join(' ')}
+-      disabled={!deferredToolbarState.enabledGroup}
++      disabled={!groupState.enabledGroup}
+       dropdownKey={groupKey}
+       Icon={Icon}
+       itemsContainerClassNames={[`${baseClass}-items`, ...(itemsContainerClassNames || [])]}
+diff --git a/packages/richtext-lexical/src/features/toolbars/shared/useToolbarStates.ts b/packages/richtext-lexical/src/features/toolbars/shared/useToolbarStates.ts
+new file mode 100644
+index 00000000000..cc489a1151f
+--- /dev/null
++++ b/packages/richtext-lexical/src/features/toolbars/shared/useToolbarStates.ts
+@@ -0,0 +1,156 @@
++'use client'
++import type { LexicalEditor } from 'lexical'
++
++import { mergeRegister } from '@lexical/utils'
++import { $getSelection } from 'lexical'
++import { useCallback, useDeferredValue, useEffect, useRef, useState } from 'react'
++
++import type { ToolbarGroup, ToolbarGroupItem } from '../types.js'
++
++import { useEditorConfigContext } from '../../../lexical/config/client/EditorConfigProvider.js'
++import { useRunDeprioritized } from '../../../utilities/useRunDeprioritized.js'
++
++export interface ToolbarItemState {
++  active: boolean
++  enabled: boolean
++}
++
++export interface ToolbarGroupState {
++  activeItemKeys: string[]
++  activeItems: ToolbarGroupItem[]
++  enabledGroup: boolean
++  enabledItemKeys: string[]
++}
++
++export interface ToolbarStates {
++  groupStates: Map<string, ToolbarGroupState>
++  itemStates: Map<string, ToolbarItemState>
++}
++
++/**
++ * Build default states where every item is enabled and nothing is active.
++ * Used as the initial value so toolbar groups render immediately on mount
++ * instead of waiting for the first updateStates call.
++ */
++function buildDefaultStates(groups: ToolbarGroup[] | undefined): ToolbarStates {
++  const itemStates = new Map<string, ToolbarItemState>()
++  const groupStates = new Map<string, ToolbarGroupState>()
++
++  if (!groups?.length) {
++    return { groupStates, itemStates }
++  }
++
++  for (const group of groups) {
++    const enabledItemKeys: string[] = []
++    for (const item of group.items) {
++      itemStates.set(item.key, { active: false, enabled: true })
++      enabledItemKeys.push(item.key)
++    }
++    groupStates.set(group.key, {
++      activeItemKeys: [],
++      activeItems: [],
++      enabledGroup: true,
++      enabledItemKeys,
++    })
++  }
++
++  return { groupStates, itemStates }
++}
++
++/**
++ * Subscribes once to `editor.registerUpdateListener` and computes
++ * isActive / isEnabled for every toolbar item in a read.
++ */
++export function useToolbarStates(
++  editor: LexicalEditor,
++  groups: ToolbarGroup[] | undefined,
++): ToolbarStates {
++  const [states, setStates] = useState<ToolbarStates>(() => buildDefaultStates(groups))
++  const deferredStates = useDeferredValue(states)
++
++  const editorConfigContext = useEditorConfigContext()
++  const editorConfigContextRef = useRef(editorConfigContext)
++  editorConfigContextRef.current = editorConfigContext
++
++  const groupsRef = useRef(groups)
++  groupsRef.current = groups
++
++  const runDeprioritized = useRunDeprioritized()
++
++  const updateStates = useCallback(() => {
++    editor.getEditorState().read(() => {
++      const selection = $getSelection()
++      if (!selection) {
++        return
++      }
++
++      const currentGroups = groupsRef.current
++      if (!currentGroups?.length) {
++        return
++      }
++
++      const ctx = editorConfigContextRef.current
++      const newItemStates = new Map<string, ToolbarItemState>()
++      const newGroupStates = new Map<string, ToolbarGroupState>()
++
++      for (const group of currentGroups) {
++        const activeItemKeys: string[] = []
++        const activeItems: ToolbarGroupItem[] = []
++        const enabledItemKeys: string[] = []
++
++        const maxActive = group.type === 'dropdown' ? (group.maxActiveItems ?? 1) : undefined
++
++        for (const item of group.items) {
++          const isActive = item.isActive
++            ? (!maxActive || activeItemKeys.length < maxActive) &&
++              item.isActive({ editor, editorConfigContext: ctx, selection })
++            : false
++
++          const isEnabled = item.isEnabled
++            ? item.isEnabled({ editor, editorConfigContext: ctx, selection })
++            : true
++
++          if (isActive) {
++            activeItemKeys.push(item.key)
++            activeItems.push(item)
++          }
++          if (isEnabled) {
++            enabledItemKeys.push(item.key)
++          }
++
++          newItemStates.set(item.key, { active: isActive, enabled: isEnabled })
++        }
++
++        const enabledGroup =
++          group.type === 'dropdown' && group.isEnabled
++            ? group.isEnabled({ editor, editorConfigContext: ctx, selection })
++            : true
++
++        newGroupStates.set(group.key, {
++          activeItemKeys,
++          activeItems,
++          enabledGroup,
++          enabledItemKeys,
++        })
++      }
++
++      setStates({ groupStates: newGroupStates, itemStates: newItemStates })
++    })
++  }, [editor])
++
++  useEffect(() => {
++    void runDeprioritized(updateStates)
++
++    const listener = () => runDeprioritized(updateStates)
++
++    const cleanup = mergeRegister(editor.registerUpdateListener(listener))
++    document.addEventListener('mouseup', listener)
++
++    return () => {
++      cleanup()
++      document.removeEventListener('mouseup', listener)
++    }
++  }, [editor, runDeprioritized, updateStates])
++
++  return deferredStates
++}
+diff --git a/test/lexical/baseConfig.ts b/test/lexical/baseConfig.ts
+index 003d6b48324..17e1008027e 100644
+--- a/test/lexical/baseConfig.ts
++++ b/test/lexical/baseConfig.ts
+@@ -14,6 +14,7 @@ import {
+ } from './collections/Lexical/index.js'
+ import { LexicalAccessControl } from './collections/LexicalAccessControl/index.js'
+ import { LexicalAutosave } from './collections/LexicalAutosave/index.js'
++import { LexicalBenchmark } from './collections/LexicalBenchmark/index.js'
+ import { LexicalCustomCell } from './collections/LexicalCustomCell/index.js'
+ import { LexicalHeadingFeature } from './collections/LexicalHeadingFeature/index.js'
+ import { LexicalInBlock } from './collections/LexicalInBlock/index.js'
+@@ -44,6 +45,7 @@ export const baseConfig: Partial<Config> = {
+   // ...extend config here
+   blocks: [NestedBlock, BlockWithBlockRef],
+   collections: [
++    LexicalBenchmark,
+     LexicalFullyFeatured,
+     LexicalAutosave,
+     LexicalLinkFeature,
+diff --git a/test/lexical/benchmarks/perf.spec.ts b/test/lexical/benchmarks/perf.spec.ts
+new file mode 100644
+index 00000000000..c270400d96f
+--- /dev/null
++++ b/test/lexical/benchmarks/perf.spec.ts
+@@ -0,0 +1,265 @@
++import type { BrowserContext, Page } from '@playwright/test'
++
++import { test } from '@playwright/test'
++import path from 'path'
++import { fileURLToPath } from 'url'
++
++import type { PayloadTestSDK } from '../../__helpers/shared/sdk/index.js'
++import type { Config } from '../payload-types.js'
++
++import { ensureCompilationIsDone } from '../../__helpers/e2e/helpers.js'
++import { AdminUrlUtil } from '../../__helpers/shared/adminUrlUtil.js'
++import { initPayloadE2ENoConfig } from '../../__helpers/shared/initPayloadE2ENoConfig.js'
++import { TEST_TIMEOUT_LONG } from '../../playwright.config.js'
++import { LexicalHelpers } from '../collections/utils.js'
++import { lexicalBenchmarkSlug } from '../slugs.js'
++
++const filename = fileURLToPath(import.meta.url)
++const currentFolder = path.dirname(filename)
++const dirname = path.resolve(currentFolder, '../')
++
++const { beforeAll, beforeEach, describe } = test
++
++const ITERATIONS = 5
++
++let payload: PayloadTestSDK<Config>
++let serverURL: string
++let page: Page
++let context: BrowserContext
++
++interface PerfResults {
++  domMutationCount: number
++  inputLag: { charIndex: number; lagMs: number }[]
++  longTaskCount: number
++  longTaskTotalMs: number
++}
++
++interface IterationMetrics {
++  avgLag: number
++  domMutationsPerKey: number
++  longTaskCount: number
++  longTaskTotalMs: number
++  p95Lag: number
++}
++
++async function setupPerfInstrumentation(page: Page): Promise<void> {
++  await page.evaluate(() => {
++    const contentEditable = document.querySelector('[contenteditable="true"]')
++    if (!contentEditable) {
++      throw new Error('Could not find contentEditable element')
++    }
++
++    const perfData = {
++      inputLag: [] as { charIndex: number; lagMs: number }[],
++      domMutationCount: 0,
++      longTaskCount: 0,
++      longTaskTotalMs: 0,
++    }
++
++    ;(window as any).__lexicalPerf = perfData
++
++    let charIndex = 0
++
++    contentEditable.addEventListener('beforeinput', () => {
++      const startTime = performance.now()
++      const currentCharIndex = charIndex++
++
++      requestAnimationFrame(() => {
++        perfData.inputLag.push({
++          charIndex: currentCharIndex,
++          lagMs: Math.round((performance.now() - startTime) * 100) / 100,
++        })
++      })
++    })
++
++    const observer = new MutationObserver((mutations) => {
++      perfData.domMutationCount += mutations.length
++    })
++
++    observer.observe(contentEditable, {
++      childList: true,
++      subtree: true,
++      characterData: true,
++      attributes: true,
++    })
++
++    if ('PerformanceObserver' in window) {
++      try {
++        const longTaskObserver = new PerformanceObserver((list) => {
++          for (const entry of list.getEntries()) {
++            perfData.longTaskCount++
++            perfData.longTaskTotalMs += entry.duration
++          }
++        })
++        longTaskObserver.observe({ type: 'longtask', buffered: false })
++      } catch {
++        // longtask not supported in all browsers
++      }
++    }
++  })
++}
++
++async function collectPerfResults(page: Page): Promise<PerfResults> {
++  return page.evaluate(() => (window as any).__lexicalPerf as PerfResults)
++}
++
++function extractMetrics(results: PerfResults): IterationMetrics {
++  const lags = results.inputLag.map((e) => e.lagMs)
++  const sorted = [...lags].sort((a, b) => a - b)
++  const avgLag = lags.length > 0 ? lags.reduce((a, b) => a + b, 0) / lags.length : 0
++  const p95Lag = lags.length > 0 ? (sorted[Math.floor(lags.length * 0.95)] ?? Math.max(...lags)) : 0
++
++  return {
++    avgLag,
++    domMutationsPerKey: lags.length > 0 ? results.domMutationCount / lags.length : 0,
++    longTaskCount: results.longTaskCount,
++    longTaskTotalMs: results.longTaskTotalMs,
++    p95Lag,
++  }
++}
++
++function mean(values: number[]): number {
++  return values.length > 0 ? values.reduce((a, b) => a + b, 0) / values.length : 0
++}
++
++function stddev(values: number[]): number {
++  if (values.length < 2) {
++    return 0
++  }
++  const m = mean(values)
++  return Math.sqrt(values.reduce((sum, v) => sum + (v - m) ** 2, 0) / (values.length - 1))
++}
++
++function pad(str: string, width: number): string {
++  return str.padStart(width)
++}
++
++function printSummary(label: string, allMetrics: IterationMetrics[]): void {
++  const cols = [
++    { key: 'avgLag' as const, label: 'AvgLag', width: 8 },
++    { key: 'p95Lag' as const, label: 'P95Lag', width: 8 },
++    { key: 'domMutationsPerKey' as const, label: 'Mut/Key', width: 9 },
++    { key: 'longTaskCount' as const, label: 'LongTasks', width: 10 },
++    { key: 'longTaskTotalMs' as const, label: 'LongTaskMs', width: 11 },
++  ]
++
++  const header = pad('Iter', 6) + cols.map((c) => pad(c.label, c.width)).join('')
++  const separator = '─'.repeat(header.length)
++
++  const lines = [`\n=== ${label} (${allMetrics.length} iterations) ===`, `  ${header}`]
++
++  for (let i = 0; i < allMetrics.length; i++) {
++    const m = allMetrics[i]!
++    const row = pad(String(i + 1), 6) + cols.map((c) => pad(m[c.key].toFixed(2), c.width)).join('')
++    lines.push(`  ${row}`)
++  }
++
++  lines.push(`  ${separator}`)
++
++  const stats: Record<string, (vals: number[]) => number> = {
++    Mean: mean,
++    StdDev: stddev,
++    Min: (v) => Math.min(...v),
++    Max: (v) => Math.max(...v),
++  }
++
++  for (const [statLabel, fn] of Object.entries(stats)) {
++    const row =
++      pad(statLabel, 6) +
++      cols
++        .map((c) => {
++          const values = allMetrics.map((m) => m[c.key])
++          return pad(fn(values).toFixed(2), c.width)
++        })
++        .join('')
++    lines.push(`  ${row}`)
++  }
++
++  console.log(lines.join('\n'))
++}
++
++describe('Lexical Performance Benchmarks', () => {
++  let lexical: LexicalHelpers
++  let url: AdminUrlUtil
++
++  test.describe.configure({ timeout: 300_000 })
++
++  beforeAll(async ({ browser }, testInfo) => {
++    testInfo.setTimeout(TEST_TIMEOUT_LONG)
++    ;({ payload, serverURL } = await initPayloadE2ENoConfig<Config>({ dirname }))
++    url = new AdminUrlUtil(serverURL, lexicalBenchmarkSlug)
++    await ensureCompilationIsDone({ serverURL, browser })
++  })
++
++  beforeEach(async ({ browser }) => {
++    context = await browser.newContext()
++    page = await context.newPage()
++    lexical = new LexicalHelpers(page)
++  })
++
++  test('CPU throttled typing - empty editor (6x slowdown)', async () => {
++    const text = 'Typing under CPU throttling to simulate slower devices and real world conditions'
++    const allMetrics: IterationMetrics[] = []
++
++    for (let i = 0; i < ITERATIONS; i++) {
++      await page.goto(url.create)
++      await page.waitForSelector('[data-lexical-editor="true"]', { timeout: 30000 })
++      await lexical.editor.first().focus()
++      await page.waitForTimeout(500)
++
++      const cdpSession = await context.newCDPSession(page)
++      await cdpSession.send('Emulation.setCPUThrottlingRate', { rate: 6 })
++
++      await setupPerfInstrumentation(page)
++      await page.keyboard.type(text, { delay: 50 })
++      await page.waitForTimeout(2000)
++      allMetrics.push(extractMetrics(await collectPerfResults(page)))
++
++      await cdpSession.send('Emulation.setCPUThrottlingRate', { rate: 1 })
++      await cdpSession.detach()
++    }
++
++    printSummary('CPU Throttled (6x) — Empty Editor', allMetrics)
++  })
++
++  test('CPU throttled typing - with 30 blocks (6x slowdown)', async () => {
++    const text = 'Typing under CPU throttling with blocks in the editor to stress toolbar updates'
++    const allMetrics: IterationMetrics[] = []
++
++    const docs = await payload.find({
++      collection: lexicalBenchmarkSlug,
++      limit: 1,
++    })
++
++    const docId = docs.docs[0]?.id
++    if (!docId) {
++      throw new Error('No seeded benchmark document found. Run seed first.')
++    }
++
++    const editURL = url.edit(docId)
++
++    for (let i = 0; i < ITERATIONS; i++) {
++      await page.goto(editURL)
++      await page.waitForSelector('[data-lexical-editor="true"]', { timeout: 30000 })
++
++      // Wait for blocks to render, then click the trailing paragraph
++      await page.waitForTimeout(2000)
++      const lastParagraph = lexical.editor.first().locator('p').last()
++      await lastParagraph.click()
++      await page.waitForTimeout(500)
++
++      const cdpSession = await context.newCDPSession(page)
++      await cdpSession.send('Emulation.setCPUThrottlingRate', { rate: 6 })
++
++      await setupPerfInstrumentation(page)
++      await page.keyboard.type(text, { delay: 50 })
++      await page.waitForTimeout(2000)
++      allMetrics.push(extractMetrics(await collectPerfResults(page)))
++
++      await cdpSession.send('Emulation.setCPUThrottlingRate', { rate: 1 })
++      await cdpSession.detach()
++    }
++
++    printSummary('CPU Throttled (6x) — With 30 Blocks', allMetrics)
++  })
++})
+diff --git a/test/lexical/collections/Lexical/e2e/main/e2e.spec.ts b/test/lexical/collections/Lexical/e2e/main/e2e.spec.ts
+index f902ea3c760..8311f67ce0f 100644
+--- a/test/lexical/collections/Lexical/e2e/main/e2e.spec.ts
++++ b/test/lexical/collections/Lexical/e2e/main/e2e.spec.ts
+@@ -1132,9 +1132,12 @@ describe('lexicalMain', () => {
+     await internalLinkSelect.click()
+     await wait(200)
+ 
+-    await expect(linkDrawer.locator('.rs__option').nth(0)).toBeVisible()
+-    await expect(linkDrawer.locator('.rs__option').nth(0)).toContainText('Rich Text') // Link to itself - that way we can also test if depth 0 works
+-    await linkDrawer.locator('.rs__option').nth(0).click()
++    const richTextOption = linkDrawer
++      .locator('.rs__option')
++      .filter({ hasText: 'Rich Text' })
++      .first()
++    await expect(richTextOption).toBeVisible()
++    await richTextOption.click()
+ 
+     await expect(internalLinkSelect).toContainText('Rich Text')
+     await wait(1000)
+diff --git a/test/lexical/collections/LexicalBenchmark/index.ts b/test/lexical/collections/LexicalBenchmark/index.ts
+new file mode 100644
+index 00000000000..dee1e1c7438
+--- /dev/null
++++ b/test/lexical/collections/LexicalBenchmark/index.ts
+@@ -0,0 +1,36 @@
++import type { Block, CollectionConfig } from 'payload'
++
++import { BlocksFeature, FixedToolbarFeature, lexicalEditor } from '@payloadcms/richtext-lexical'
++
++import { lexicalBenchmarkSlug } from '../../slugs.js'
++
++const benchmarkBlocks: Block[] = Array.from({ length: 30 }, (_, i) => ({
++  slug: `benchBlock${i + 1}`,
++  fields: [
++    { name: 'title', type: 'text' as const },
++    { name: 'content', type: 'textarea' as const },
++  ],
++}))
++
++export const LexicalBenchmark: CollectionConfig = {
++  slug: lexicalBenchmarkSlug,
++  labels: {
++    singular: 'Lexical Benchmark',
++    plural: 'Lexical Benchmarks',
++  },
++  fields: [
++    {
++      name: 'richText',
++      type: 'richText',
++      editor: lexicalEditor({
++        features: ({ defaultFeatures }) => [
++          ...defaultFeatures,
++          FixedToolbarFeature(),
++          BlocksFeature({
++            blocks: benchmarkBlocks,
++          }),
++        ],
++      }),
++    },
++  ],
++}
+diff --git a/test/lexical/payload-types.ts b/test/lexical/payload-types.ts
+index 0a021dc62ce..d7f770f9f52 100644
+--- a/test/lexical/payload-types.ts
++++ b/test/lexical/payload-types.ts
+@@ -86,6 +86,7 @@ export interface Config {
+     blockWithBlockRef: BlockWithBlockRef;
+   };
+   collections: {
++    'lexical-benchmark': LexicalBenchmark;
+     'lexical-fully-featured': LexicalFullyFeatured;
+     'lexical-autosave': LexicalAutosave;
+     'lexical-link-feature': LexicalLinkFeature;
+@@ -116,6 +117,7 @@ export interface Config {
+   };
+   collectionsJoins: {};
+   collectionsSelect: {
++    'lexical-benchmark': LexicalBenchmarkSelect<false> | LexicalBenchmarkSelect<true>;
+     'lexical-fully-featured': LexicalFullyFeaturedSelect<false> | LexicalFullyFeaturedSelect<true>;
+     'lexical-autosave': LexicalAutosaveSelect<false> | LexicalAutosaveSelect<true>;
+     'lexical-link-feature': LexicalLinkFeatureSelect<false> | LexicalLinkFeatureSelect<true>;
+@@ -155,6 +157,9 @@ export interface Config {
+     tabsWithRichText: TabsWithRichTextSelect<false> | TabsWithRichTextSelect<true>;
+   };
+   locale: 'en' | 'es' | 'he';
++  widgets: {
++    collections: CollectionsWidget;
++  };
+   user: User;
+   jobs: {
+     tasks: unknown;
+@@ -206,6 +211,30 @@ export interface BlockWithBlockRef {
+   blockName?: string | null;
+   blockType: 'blockWithBlockRef';
+ }
++/**
++ * This interface was referenced by `Config`'s JSON-Schema
++ * via the `definition` "lexical-benchmark".
++ */
++export interface LexicalBenchmark {
++  id: string;
++  richText?: {
++    root: {
++      type: string;
++      children: {
++        type: any;
++        version: number;
++        [k: string]: unknown;
++      }[];
++      direction: ('ltr' | 'rtl') | null;
++      format: 'left' | 'start' | 'center' | 'right' | 'end' | 'justify' | '';
++      indent: number;
++      version: number;
++    };
++    [k: string]: unknown;
++  } | null;
++  updatedAt: string;
++  createdAt: string;
++}
+ /**
+  * This interface was referenced by `Config`'s JSON-Schema
+  * via the `definition` "lexical-fully-featured".
+@@ -1162,6 +1191,10 @@ export interface User {
+ export interface PayloadLockedDocument {
+   id: string;
+   document?:
++    | ({
++        relationTo: 'lexical-benchmark';
++        value: string | LexicalBenchmark;
++      } | null)
+     | ({
+         relationTo: 'lexical-fully-featured';
+         value: string | LexicalFullyFeatured;
+@@ -1296,6 +1329,15 @@ export interface PayloadMigration {
+   updatedAt: string;
+   createdAt: string;
+ }
++/**
++ * This interface was referenced by `Config`'s JSON-Schema
++ * via the `definition` "lexical-benchmark_select".
++ */
++export interface LexicalBenchmarkSelect<T extends boolean = true> {
++  richText?: T;
++  updatedAt?: T;
++  createdAt?: T;
++}
+ /**
+  * This interface was referenced by `Config`'s JSON-Schema
+  * via the `definition` "lexical-fully-featured_select".
+@@ -1841,6 +1883,16 @@ export interface TabsWithRichTextSelect<T extends boolean = true> {
+   createdAt?: T;
+   globalType?: T;
+ }
++/**
++ * This interface was referenced by `Config`'s JSON-Schema
++ * via the `definition` "collections_widget".
++ */
++export interface CollectionsWidget {
++  data?: {
++    [k: string]: unknown;
++  };
++  width: 'full';
++}
+ /**
+  * This interface was referenced by `Config`'s JSON-Schema
+  * via the `definition` "InlineBlockWithSelect".
+diff --git a/test/lexical/seed.ts b/test/lexical/seed.ts
+index 449e2243a6e..340a3016ffb 100644
+--- a/test/lexical/seed.ts
++++ b/test/lexical/seed.ts
+@@ -10,6 +10,7 @@ import { richTextBulletsDocData, richTextDocData } from './collections/RichText/
+ import {
+   arrayFieldsSlug,
+   collectionSlugs,
++  lexicalBenchmarkSlug,
+   lexicalFieldsSlug,
+   lexicalLocalizedFieldsSlug,
+   lexicalMigrateFieldsSlug,
+@@ -26,8 +27,8 @@ import {
+ import { buildEditorState, type DefaultNodeTypes } from '@payloadcms/richtext-lexical'
+ import { getFileByPath } from 'payload'
+ 
+-import { devUser } from '../credentials.js'
+ import { seedDB } from '../__helpers/shared/clearAndSeed/seed.js'
++import { devUser } from '../credentials.js'
+ import { arrayDoc } from './collections/Array/shared.js'
+ import { anotherTextDoc, textDoc } from './collections/Text/shared.js'
+ import { uploadsDoc } from './collections/Upload/shared.js'
+@@ -471,6 +472,49 @@ export const seed = async (_payload: Payload) => {
+     },
+     depth: 0,
+   })
++
++  const benchmarkBlockNodes = Array.from({ length: 30 }, (_, i) => ({
++    type: 'block',
++    version: 2,
++    format: '',
++    fields: {
++      id: `bench-block-${i + 1}`,
++      title: `Block ${i + 1}`,
++      content: `Content for block ${i + 1}`,
++      blockName: '',
++      blockType: `benchBlock${i + 1}`,
++    },
++  }))
++
++  await _payload.create({
++    collection: lexicalBenchmarkSlug,
++    data: {
++      richText: {
++        root: {
++          children: [
++            ...benchmarkBlockNodes,
++            {
++              children: [],
++              direction: null,
++              format: '',
++              indent: 0,
++              type: 'paragraph',
++              version: 1,
++              textFormat: 0,
++              textStyle: '',
++            },
++          ],
++          direction: null,
++          format: '',
++          indent: 0,
++          type: 'root',
++          version: 1,
++        },
++      },
++    },
++    depth: 0,
++    overrideAccess: true,
++  })
+ }
+ 
+ export async function clearAndSeedEverything(_payload: Payload) {
+diff --git a/test/lexical/slugs.ts b/test/lexical/slugs.ts
+index 4487c0f286c..0bfe5174752 100644
+--- a/test/lexical/slugs.ts
++++ b/test/lexical/slugs.ts
+@@ -23,6 +23,7 @@ export const arrayFieldsSlug = 'array-fields'
+ 
+ export const lexicalCustomCellSlug = 'lexical-custom-cell'
+ export const lexicalNestedBlocksSlug = 'lexical-nested-blocks'
++export const lexicalBenchmarkSlug = 'lexical-benchmark'
+ 
+ export const collectionSlugs = [
+   lexicalFieldsSlug,
+@@ -30,6 +31,7 @@ export const collectionSlugs = [
+   lexicalMigrateFieldsSlug,
+   lexicalRelationshipFieldsSlug,
+   lexicalAccessControlSlug,
++  lexicalBenchmarkSlug,
+   richTextFieldsSlug,
+   textFieldsSlug,
+   uploadsSlug,
+diff --git a/test/playwright.config.ts b/test/playwright.config.ts
+index 0ae7480dc23..98788b236bc 100644
+--- a/test/playwright.config.ts
++++ b/test/playwright.config.ts
+@@ -21,7 +21,7 @@ export const POLL_TOPASS_TIMEOUT = EXPECT_TIMEOUT * 4 // That way expect.poll()
+ export default defineConfig({
+   // Look for test files in the "test" directory, relative to this configuration file
+   testDir: '',
+-  testMatch: '*e2e.spec.ts',
++  testMatch: ['*e2e.spec.ts', '*perf.spec.ts'],
+   timeout: TEST_TIMEOUT, // 1 minute
+   use: {
+     screenshot: 'off',
+diff --git a/test/runE2E.ts b/test/runE2E.ts
+index 4dd3a7b3b01..9a737817118 100644
+--- a/test/runE2E.ts
++++ b/test/runE2E.ts
+@@ -150,7 +150,6 @@ async function executePlaywright(
+   const spawnDevArgs: string[] = [
+     'dev',
+     suiteConfigPath ? `${baseTestFolder}#${suiteConfigPath}` : baseTestFolder,
+-    '--start-memory-db',
+   ]
+   if (prod) {
+     spawnDevArgs.push('--prod')

@@ -1,0 +1,82 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "documentation_standards",
+      "recommendation": "Added comprehensive PR formatting guidelines to AGENT.md files to standardize contribution practices",
+      "rationale": "The agent documentation needed clear contribution guidelines to ensure consistent PR formatting across the team. This establishes a shared convention that improves review efficiency and maintains commit history quality. The guidelines were added to both root and docs/ versions of AGENT.md to ensure visibility regardless of where contributors look.",
+      "alternatives_considered": [
+        "Creating a separate CONTRIBUTING.md file",
+        "Adding guidelines to README.md",
+        "Using GitHub's repository settings for PR templates"
+      ],
+      "files_affected": [
+        "AGENT.md",
+        "docs/AGENT.md"
+      ]
+    },
+    {
+      "dimension": "api_design",
+      "recommendation": "Used Conventional Commits format for PR titles with project-specific adaptations",
+      "rationale": "Conventional Commits is a widely adopted standard that provides semantic meaning to commit messages. By adapting it for PR titles (treated as squash merge commits), we ensure consistent changelog generation and automated versioning. The project-specific scopes (providers, core, repo) make it immediately relevant to the instructor codebase.",
+      "alternatives_considered": [
+        "Using simple descriptive titles without structure",
+        "Creating a completely custom format",
+        "Using GitHub's default PR title conventions"
+      ],
+      "files_affected": [
+        "AGENT.md",
+        "docs/AGENT.md"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Included specific formatting rules and examples to prevent common mistakes",
+      "rationale": "By providing concrete rules (character limits, imperative mood, no periods) and good/bad examples, we reduce ambiguity and ensure contributors follow the standard correctly. The breaking change notation (!) is particularly important for semantic versioning.",
+      "alternatives_considered": [
+        "Leaving formatting to contributor discretion",
+        "Relying on automated linting without documentation",
+        "Providing only abstract guidelines without examples"
+      ],
+      "files_affected": [
+        "AGENT.md",
+        "docs/AGENT.md"
+      ]
+    },
+    {
+      "dimension": "testing",
+      "recommendation": "Added PR description checklist covering 'What', 'Why', 'Changes', and 'Testing' sections",
+      "rationale": "Structured PR descriptions improve review efficiency by ensuring all necessary context is provided upfront. The testing section is crucial for a library that integrates with multiple LLM providers, as it documents validation approaches. The docs-specific version includes 'Docs impact' for documentation changes.",
+      "alternatives_considered": [
+        "Using free-form PR descriptions",
+        "Creating separate issue templates",
+        "Relying on code review comments for context"
+      ],
+      "files_affected": [
+        "AGENT.md",
+        "docs/AGENT.md"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Add PR formatting guidelines to agent documentation",
+      "description": "Create comprehensive Pull Request formatting standards for the instructor codebase, including Conventional Commits format for titles and structured description templates",
+      "files_to_modify": [
+        "AGENT.md",
+        "docs/AGENT.md"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation adds standardized PR formatting guidelines to the instructor library's agent documentation. The approach leverages the existing AGENT.md files (both in root and docs/ directories) to ensure contributors encounter the guidelines regardless of their entry point. The solution adopts Conventional Commits format for PR titles, treating them as squash merge commit messages, which aligns with semantic versioning practices.\n\nKey patterns include: 1) Project-specific adaptation of a widely-used standard (Conventional Commits) with instructor-specific scopes like providers (openai, anthropic), core components, and repo areas; 2) Dual documentation strategy with slightly different content for general vs. documentation-specific contributions; 3) Practical guidance with concrete examples, character limits, and common mistake prevention.\n\nThe changes integrate seamlessly with the existing documentation structure by appending to the end of both AGENT.md files. The docs/AGENT.md version includes documentation-specific considerations like 'Docs impact' section and appropriate scopes (mkdocs, blog, examples), while the root AGENT.md includes broader development scopes. This differentiation recognizes that documentation contributions have different requirements than code changes, while maintaining overall consistency in formatting approach.",
+  "source_pr": "https://github.com/567-labs/instructor/pull/2015",
+  "before_sha": "96ca9fe8df548b348cae567a3f83e74e2da917a5",
+  "after_sha": "3fe0c7664bd19a7b6c3305ed1ebd5afb3cc0c1ed",
+  "diff_stats": {
+    "additions": 95,
+    "deletions": 0,
+    "files_changed": 2
+  }
+}

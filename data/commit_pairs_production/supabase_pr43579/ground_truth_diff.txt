@@ -1,0 +1,284 @@
+diff --git a/apps/studio/components/grid/components/header/filter/FilterPopoverNew.utils.test.ts b/apps/studio/components/grid/components/header/filter/FilterPopoverNew.utils.test.ts
+new file mode 100644
+index 0000000000000..72f2f96426137
+--- /dev/null
++++ b/apps/studio/components/grid/components/header/filter/FilterPopoverNew.utils.test.ts
+@@ -0,0 +1,150 @@
++import { describe, expect, test } from 'vitest'
++
++import { buildFilterFromCellValue, isComplexValue } from './FilterPopoverNew.utils'
++
++describe('isComplexValue', () => {
++  test('returns false for null', () => {
++    expect(isComplexValue(null)).toBe(false)
++  })
++
++  test('returns false for undefined', () => {
++    expect(isComplexValue(undefined)).toBe(false)
++  })
++
++  test('returns false for strings', () => {
++    expect(isComplexValue('hello')).toBe(false)
++    expect(isComplexValue('')).toBe(false)
++  })
++
++  test('returns false for numbers', () => {
++    expect(isComplexValue(42)).toBe(false)
++    expect(isComplexValue(0)).toBe(false)
++    expect(isComplexValue(-1)).toBe(false)
++    expect(isComplexValue(3.14)).toBe(false)
++  })
++
++  test('returns false for booleans', () => {
++    expect(isComplexValue(true)).toBe(false)
++    expect(isComplexValue(false)).toBe(false)
++  })
++
++  test('returns true for empty objects', () => {
++    expect(isComplexValue({})).toBe(true)
++  })
++
++  test('returns true for objects with properties', () => {
++    expect(isComplexValue({ key: 'value' })).toBe(true)
++    expect(isComplexValue({ nested: { key: 'value' } })).toBe(true)
++  })
++
++  test('returns true for empty arrays', () => {
++    expect(isComplexValue([])).toBe(true)
++  })
++
++  test('returns true for arrays with items', () => {
++    expect(isComplexValue([1, 2, 3])).toBe(true)
++    expect(isComplexValue(['a', 'b'])).toBe(true)
++    expect(isComplexValue([{ key: 'value' }])).toBe(true)
++  })
++})
++
++describe('buildFilterFromCellValue', () => {
++  test('creates filter with equals operator for string values', () => {
++    const filter = buildFilterFromCellValue('name', 'Alice')
++    expect(filter).toEqual({
++      column: 'name',
++      operator: '=',
++      value: 'Alice',
++    })
++  })
++
++  test('creates filter with equals operator for empty string', () => {
++    const filter = buildFilterFromCellValue('label', '')
++    expect(filter).toEqual({
++      column: 'label',
++      operator: '=',
++      value: '',
++    })
++  })
++
++  test('creates filter with equals operator for numbers', () => {
++    const filter = buildFilterFromCellValue('age', 42)
++    expect(filter).toEqual({
++      column: 'age',
++      operator: '=',
++      value: '42',
++    })
++  })
++
++  test('creates filter with equals operator for zero', () => {
++    const filter = buildFilterFromCellValue('count', 0)
++    expect(filter).toEqual({
++      column: 'count',
++      operator: '=',
++      value: '0',
++    })
++  })
++
++  test('creates filter with equals operator for negative numbers', () => {
++    const filter = buildFilterFromCellValue('balance', -100)
++    expect(filter).toEqual({
++      column: 'balance',
++      operator: '=',
++      value: '-100',
++    })
++  })
++
++  test('creates filter with equals operator for boolean true', () => {
++    const filter = buildFilterFromCellValue('active', true)
++    expect(filter).toEqual({
++      column: 'active',
++      operator: '=',
++      value: 'true',
++    })
++  })
++
++  test('creates filter with equals operator for boolean false', () => {
++    const filter = buildFilterFromCellValue('active', false)
++    expect(filter).toEqual({
++      column: 'active',
++      operator: '=',
++      value: 'false',
++    })
++  })
++
++  test('creates filter with is operator for null', () => {
++    const filter = buildFilterFromCellValue('name', null)
++    expect(filter).toEqual({
++      column: 'name',
++      operator: 'is',
++      value: 'null',
++    })
++  })
++
++  test('creates filter with is operator for undefined', () => {
++    const filter = buildFilterFromCellValue('name', undefined)
++    expect(filter).toEqual({
++      column: 'name',
++      operator: 'is',
++      value: 'null',
++    })
++  })
++
++  test('creates filter for date strings', () => {
++    const filter = buildFilterFromCellValue('created_at', '2024-01-01')
++    expect(filter).toEqual({
++      column: 'created_at',
++      operator: '=',
++      value: '2024-01-01',
++    })
++  })
++
++  test('creates filter for datetime strings', () => {
++    const filter = buildFilterFromCellValue('updated_at', '2024-01-01T12:00:00Z')
++    expect(filter).toEqual({
++      column: 'updated_at',
++      operator: '=',
++      value: '2024-01-01T12:00:00Z',
++    })
++  })
++})
+diff --git a/apps/studio/components/grid/components/header/filter/FilterPopoverNew.utils.ts b/apps/studio/components/grid/components/header/filter/FilterPopoverNew.utils.ts
+index 5cfefa6273b02..c45060004338c 100644
+--- a/apps/studio/components/grid/components/header/filter/FilterPopoverNew.utils.ts
++++ b/apps/studio/components/grid/components/header/filter/FilterPopoverNew.utils.ts
+@@ -1,4 +1,4 @@
+-import type { SupaColumn } from 'components/grid/types'
++import type { Filter, SupaColumn } from 'components/grid/types'
+ import {
+   isBoolColumn,
+   isDateColumn,
+@@ -59,6 +59,19 @@ const BOOLEAN_OPERATORS: OperatorDefinition[] = [
+   { value: 'is', label: 'Is', group: 'setNull' },
+ ]
+ 
++export function isComplexValue(value: unknown): boolean {
++  return value !== null && value !== undefined && typeof value === 'object'
++}
++
++export function buildFilterFromCellValue(columnKey: string, value: unknown): Filter {
++  const isNullish = value === null || value === undefined
++  return {
++    column: columnKey,
++    operator: isNullish ? 'is' : '=',
++    value: isNullish ? 'null' : String(value),
++  }
++}
++
+ export function columnToFilterProperty(column: SupaColumn): FilterProperty {
+   // For enum columns, use the enum values as options
+   if (isEnumColumn(column.dataType) && column.enum) {
+diff --git a/apps/studio/components/grid/components/menu/RowContextMenu.tsx b/apps/studio/components/grid/components/menu/RowContextMenu.tsx
+index 47dbc9969720b..e136f227410f9 100644
+--- a/apps/studio/components/grid/components/menu/RowContextMenu.tsx
++++ b/apps/studio/components/grid/components/menu/RowContextMenu.tsx
+@@ -2,17 +2,21 @@ import { useQueryClient } from '@tanstack/react-query'
+ import { ROW_CONTEXT_MENU_ID } from 'components/grid/constants'
+ import type { SupaRow } from 'components/grid/types'
+ import { queueRowDeletesWithOptimisticUpdate } from 'components/grid/utils/queueOperationUtils'
+-import { useIsQueueOperationsEnabled } from 'components/interfaces/App/FeaturePreview/FeaturePreviewContext'
++import {
++  useIsQueueOperationsEnabled,
++  useIsTableFilterBarEnabled,
++} from 'components/interfaces/App/FeaturePreview/FeaturePreviewContext'
+ import { useSelectedProjectQuery } from 'hooks/misc/useSelectedProject'
+-import { Copy, Edit, Trash } from 'lucide-react'
++import { Copy, Edit, ListFilter, Trash } from 'lucide-react'
+ import { useCallback } from 'react'
+ import { Item, ItemParams, Menu } from 'react-contexify'
+ import { toast } from 'sonner'
+ import { useTableEditorStateSnapshot } from 'state/table-editor'
+ import { useTableEditorTableStateSnapshot } from 'state/table-editor-table'
+-import { DialogSectionSeparator, copyToClipboard } from 'ui'
++import { copyToClipboard, DialogSectionSeparator } from 'ui'
+ 
+ import { formatClipboardValue } from '../../utils/common'
++import { buildFilterFromCellValue, isComplexValue } from '../header/filter/FilterPopoverNew.utils'
+ 
+ type RowContextMenuProps = {
+   rows: SupaRow[]
+@@ -26,6 +30,7 @@ export const RowContextMenu = ({ rows }: RowContextMenuProps) => {
+   const tableEditorSnap = useTableEditorStateSnapshot()
+   const snap = useTableEditorTableStateSnapshot()
+   const isQueueOperationsEnabled = useIsQueueOperationsEnabled()
++  const isTableFilterBarEnabled = useIsTableFilterBarEnabled()
+ 
+   function onDeleteRow(p: RowContextMenuItemProps) {
+     const rowIdx = p.props?.rowIdx
+@@ -88,6 +93,49 @@ export const RowContextMenu = ({ rows }: RowContextMenuProps) => {
+     [rows]
+   )
+ 
++  const getRowAndColumn = useCallback(
++    (rowIdx: number | undefined | null) => {
++      if (!snap.selectedCellPosition || rowIdx === undefined || rowIdx === null) {
++        return null
++      }
++
++      const row = rows[rowIdx]
++      const column = snap.gridColumns[snap.selectedCellPosition.idx as number]
++
++      if (!row || !column) return null
++
++      return { row, column }
++    },
++    [rows, snap.selectedCellPosition, snap.gridColumns]
++  )
++
++  const onFilterByValue = useCallback(
++    (p: RowContextMenuItemProps) => {
++      const result = getRowAndColumn(p.props?.rowIdx)
++      if (!result) return
++
++      const { row, column } = result
++      const newFilter = buildFilterFromCellValue(column.key, row[column.key])
++      snap.setFilters([...snap.filters, newFilter])
++
++      const displayValue = newFilter.value === 'null' ? 'NULL' : newFilter.value
++      toast.success(`Filtering ${column.name} by ${displayValue}`)
++    },
++    [getRowAndColumn, snap]
++  )
++
++  const isFilterByValueHidden = useCallback(
++    ({ props: itemProps }: { props?: { rowIdx: number } }) => {
++      if (!isTableFilterBarEnabled) return true
++
++      const result = getRowAndColumn(itemProps?.rowIdx)
++      if (!result) return true
++
++      return isComplexValue(result.row[result.column.key])
++    },
++    [isTableFilterBarEnabled, getRowAndColumn]
++  )
++
+   return (
+     <Menu id={ROW_CONTEXT_MENU_ID} animation={false} className="!min-w-36">
+       <Item onClick={onCopyCellContent}>
+@@ -98,6 +146,10 @@ export const RowContextMenu = ({ rows }: RowContextMenuProps) => {
+         <Copy size={12} />
+         <span className="ml-2 text-xs">Copy row</span>
+       </Item>
++      <Item onClick={onFilterByValue} hidden={isFilterByValueHidden}>
++        <ListFilter size={12} />
++        <span className="ml-2 text-xs">Filter by value</span>
++      </Item>
+ 
+       {/* We can't just wrap this entire section in a fragment conditional
+ 		  on snap.editable because of a bug in react-contexify. Only the

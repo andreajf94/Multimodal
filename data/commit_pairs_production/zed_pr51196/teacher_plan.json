@@ -1,0 +1,134 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "event_system_design",
+      "recommendation": "Modified BufferEvent::Edited to include an is_local boolean field to distinguish between local and remote edits",
+      "rationale": "The edit prediction system needs to differentiate between user-initiated edits and remote collaborator edits. By adding is_local to the Edited event, we can propagate this information through the entire event chain without changing the fundamental event subscription pattern. This maintains backward compatibility for components that only care about edits in general.",
+      "alternatives_considered": [
+        "Creating separate events for local vs remote edits (e.g., LocalEdited and RemoteEdited)",
+        "Adding a separate flag to the Buffer struct that components could check",
+        "Using a different event propagation mechanism specifically for edit predictions"
+      ],
+      "files_affected": [
+        "crates/language/src/buffer.rs",
+        "crates/language/src/buffer_tests.rs"
+      ]
+    },
+    {
+      "dimension": "data_flow_propagation",
+      "recommendation": "Propagated the is_local flag through the entire editing pipeline from Buffer to MultiBuffer to Editor",
+      "rationale": "Edit predictions need to be triggered at the Editor level, but the edit origin information originates at the Buffer level. By passing is_local through MultiBuffer::Event::Edited and up to Editor::on_multi_buffer_event, we maintain a clean data flow without introducing cross-component dependencies. This ensures the edit prediction system only sees the information it needs at the right abstraction level.",
+      "alternatives_considered": [
+        "Having the Editor check the Buffer directly for edit origin",
+        "Using a global collaboration state manager",
+        "Storing edit origin in a shared context accessible to all components"
+      ],
+      "files_affected": [
+        "crates/language/src/buffer.rs",
+        "crates/multi_buffer/src/multi_buffer.rs",
+        "crates/editor/src/editor.rs"
+      ]
+    },
+    {
+      "dimension": "api_compatibility",
+      "recommendation": "Updated all event handlers to use pattern matching with { .. } syntax to ignore the new is_local field",
+      "rationale": "Many components subscribe to BufferEvent::Edited but don't need the is_local information. Using { .. } in pattern matching allows these components to continue working without modification while ignoring the new field. This minimizes the blast radius of the change and maintains backward compatibility for unrelated features.",
+      "alternatives_considered": [
+        "Requiring all event handlers to explicitly handle the new field",
+        "Creating a new event type and migrating all components",
+        "Using feature flags to gradually migrate components"
+      ],
+      "files_affected": [
+        "crates/action_log/src/action_log.rs",
+        "crates/assistant_text_thread/src/text_thread.rs",
+        "crates/channel/src/channel_buffer.rs",
+        "crates/copilot/src/copilot.rs",
+        "crates/edit_prediction/src/edit_prediction.rs",
+        "crates/git_ui/src/file_diff_view.rs",
+        "crates/git_ui/src/text_diff_view.rs",
+        "crates/project/src/lsp_store.rs",
+        "crates/project/src/project.rs",
+        "crates/svg_preview/src/svg_preview_view.rs",
+        "crates/vim/src/state.rs"
+      ]
+    },
+    {
+      "dimension": "testing_strategy",
+      "recommendation": "Updated test assertions to include the new is_local field in BufferEvent::Edited patterns",
+      "rationale": "Tests needed to reflect the new event structure to continue passing. The changes show that local edits (from end_transaction_at, undo, redo) are marked as is_local: true, while remote edits (from apply_remote_ops) are marked as is_local: false. This ensures the collaboration behavior is properly tested.",
+      "alternatives_considered": [
+        "Ignoring the field in test assertions using { .. }",
+        "Creating separate test helpers for local vs remote edits",
+        "Updating only integration tests and leaving unit tests unchanged"
+      ],
+      "files_affected": [
+        "crates/language/src/buffer_tests.rs",
+        "crates/multi_buffer/src/multi_buffer_tests.rs",
+        "crates/project/tests/integration/project_tests.rs"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Add edit origin tracking to Buffer events",
+      "description": "Modified BufferEvent::Edited to include is_local flag and updated all edit methods to pass the correct origin",
+      "files_to_modify": [
+        "crates/language/src/buffer.rs",
+        "crates/language/src/buffer_tests.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-002",
+      "title": "Propagate edit origin through MultiBuffer layer",
+      "description": "Updated MultiBuffer::Event::Edited to include is_local flag and forward it from Buffer events",
+      "files_to_modify": [
+        "crates/multi_buffer/src/multi_buffer.rs",
+        "crates/multi_buffer/src/multi_buffer_tests.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-003",
+      "title": "Filter edit predictions based on edit origin",
+      "description": "Modified Editor to only trigger edit predictions for local edits by checking the is_local flag",
+      "files_to_modify": [
+        "crates/editor/src/editor.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-004",
+      "title": "Update event handlers for API compatibility",
+      "description": "Updated all BufferEvent::Edited handlers to use pattern matching that ignores the new is_local field",
+      "files_to_modify": [
+        "crates/action_log/src/action_log.rs",
+        "crates/assistant_text_thread/src/text_thread.rs",
+        "crates/channel/src/channel_buffer.rs",
+        "crates/copilot/src/copilot.rs",
+        "crates/edit_prediction/src/edit_prediction.rs",
+        "crates/git_ui/src/file_diff_view.rs",
+        "crates/git_ui/src/text_diff_view.rs",
+        "crates/project/src/lsp_store.rs",
+        "crates/project/src/project.rs",
+        "crates/svg_preview/src/svg_preview_view.rs",
+        "crates/vim/src/state.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    }
+  ],
+  "implementation_summary": "The implementation adds collaboration-aware edit filtering by modifying the event system to track edit origins. The core change is transforming BufferEvent::Edited from a simple variant to a struct variant with an is_local boolean field. This information originates in the Buffer's editing methods: local edits (from end_transaction_at, undo, redo) pass is_local: true, while remote edits (from apply_remote_ops) pass is_local: false.\n\nThe is_local flag propagates through the system via MultiBuffer::Event::Edited, which also gains the field, and finally to Editor::on_multi_buffer_event. The Editor uses this flag to conditionally trigger edit predictions only when is_local is true. This ensures edit predictions don't activate for remote collaborators' changes during collaboration sessions.\n\nA key design decision was maintaining backward compatibility by using { .. } pattern matching in event handlers that don't need the is_local information. This minimizes changes across the codebase while allowing the edit prediction system to access the necessary information. The approach follows Rust's enum evolution patterns and maintains the existing event subscription architecture without requiring widespread refactoring.",
+  "source_pr": "https://github.com/zed-industries/zed/pull/51196",
+  "before_sha": "eae21de630ca111ec7b73839b8d25a7916affc9f",
+  "after_sha": "b21f4a3debcc89343be0283af891fac9c3476e48",
+  "diff_stats": {
+    "additions": 72,
+    "deletions": 39,
+    "files_changed": 17
+  }
+}

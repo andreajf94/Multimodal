@@ -1,0 +1,65 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "dependency_management",
+      "recommendation": "Updated the minimum required version of langchain-core from 1.2.17 to 1.2.18 in the OpenAI partner library's pyproject.toml file",
+      "rationale": "This ensures the OpenAI integration library requires the latest core library version that includes necessary features, bug fixes, or security updates. By specifying a precise minimum version, we guarantee compatibility while allowing users to install newer patch versions within the same major version range (<2.0.0).",
+      "alternatives_considered": [
+        "Maintaining the existing version range without updates",
+        "Updating to a higher minor version (e.g., 1.3.x)",
+        "Removing the upper bound entirely to allow any 1.x version"
+      ],
+      "files_affected": [
+        "libs/partners/openai/pyproject.toml"
+      ]
+    },
+    {
+      "dimension": "lock_file_management",
+      "recommendation": "Regenerated the uv.lock file to reflect the updated langchain-core dependency version from 1.2.17 to 1.2.18",
+      "rationale": "The lock file must be synchronized with pyproject.toml to ensure reproducible builds. Since langchain-core is marked as editable from the local monorepo path ('../../core'), the lock file update ensures the dependency resolver recognizes the version constraint change and resolves to the correct local version.",
+      "alternatives_considered": [
+        "Not updating the lock file (would cause version mismatch)",
+        "Manually editing the lock file instead of regenerating it",
+        "Using a version range without a lock file"
+      ],
+      "files_affected": [
+        "libs/partners/openai/uv.lock"
+      ]
+    },
+    {
+      "dimension": "backward_compatibility",
+      "recommendation": "Maintained the same major version upper bound (<2.0.0) while only increasing the patch version minimum",
+      "rationale": "This change is backward compatible for all users with langchain-core >=1.2.18. The patch version increment (1.2.17 \u2192 1.2.18) suggests the update includes bug fixes or minor features rather than breaking changes. Keeping the upper bound at <2.0.0 protects users from unexpected breaking changes in future major releases.",
+      "alternatives_considered": [
+        "Increasing the minimum to a minor version (e.g., 1.3.0) which might include breaking changes",
+        "Removing the minimum version constraint entirely",
+        "Tightening the upper bound to a specific version"
+      ],
+      "files_affected": [
+        "libs/partners/openai/pyproject.toml"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Update OpenAI partner library core dependency version",
+      "description": "Update the minimum required version of langchain-core from 1.2.17 to 1.2.18 to ensure compatibility with recent core library updates while maintaining existing functionality.",
+      "files_to_modify": [
+        "libs/partners/openai/pyproject.toml",
+        "libs/partners/openai/uv.lock"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "This change updates the OpenAI partner library's dependency on the core LangChain library from version 1.2.17 to 1.2.18. The implementation follows a straightforward dependency management pattern common in Python monorepos with multiple packages.\n\nThe update was made in two files: first, the pyproject.toml file was modified to change the version constraint string from 'langchain-core>=1.2.17,<2.0.0' to 'langchain-core>=1.2.18,<2.0.0'. This ensures that any installation of the OpenAI library will require at least version 1.2.18 of the core library, while still protecting users from breaking changes by maintaining the upper bound of <2.0.0.\n\nSecond, the uv.lock file was regenerated to reflect this version change. Since langchain-core is referenced as an editable dependency pointing to the local '../../core' path, the lock file update ensures that the dependency resolver correctly recognizes the new minimum version constraint. This two-file update pattern is essential in the LangChain monorepo structure where partner packages have independent versioning but share the core library as a local dependency. The change is minimal and focused, affecting only dependency specifications without modifying any functional code, which aligns with the feature's goal of maintaining existing functionality while ensuring compatibility with core library updates.",
+  "source_pr": "https://github.com/langchain-ai/langchain/pull/35705",
+  "before_sha": "6b25caf1ae801906dbfc1575ad68223510da6d41",
+  "after_sha": "fcca6e2dc473e2cd8942a7dc7c3424b918f8405c",
+  "diff_stats": {
+    "additions": 2,
+    "deletions": 2,
+    "files_changed": 2
+  }
+}

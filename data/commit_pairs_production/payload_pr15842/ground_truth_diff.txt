@@ -1,0 +1,699 @@
+diff --git a/packages/payload/src/config/orderable/index.ts b/packages/payload/src/config/orderable/index.ts
+index 48f138eab7a..56eb00d9403 100644
+--- a/packages/payload/src/config/orderable/index.ts
++++ b/packages/payload/src/config/orderable/index.ts
+@@ -6,11 +6,15 @@ import type { Endpoint, PayloadHandler, SanitizedConfig } from '../types.js'
+ 
+ import { executeAccess } from '../../auth/executeAccess.js'
+ import { APIError } from '../../errors/index.js'
++import { combineWhereConstraints } from '../../utilities/combineWhereConstraints.js'
+ import { commitTransaction } from '../../utilities/commitTransaction.js'
+ import { initTransaction } from '../../utilities/initTransaction.js'
+ import { killTransaction } from '../../utilities/killTransaction.js'
+ import { traverseFields } from '../../utilities/traverseFields.js'
+ import { generateKeyBetween, generateNKeysBetween } from './fractional-indexing.js'
++import { getJoinScopeContext } from './utils/getJoinScopeContext.js'
++import { getJoinScopeWhereFromDocData } from './utils/getJoinScopeWhereFromDocData.js'
++import { resolvePendingTargetKey } from './utils/resolvePendingTargetKey.js'
+ 
+ /**
+  * This function creates:
+@@ -22,6 +26,7 @@ import { generateKeyBetween, generateNKeysBetween } from './fractional-indexing.
+  */
+ export const setupOrderable = (config: SanitizedConfig) => {
+   const fieldsToAdd = new Map<CollectionConfig, string[]>()
++  const joinFieldPathsByCollection = new Map<string, Map<string, string>>()
+ 
+   config.collections.forEach((collection) => {
+     if (collection.orderable) {
+@@ -58,10 +63,13 @@ export const setupOrderable = (config: SanitizedConfig) => {
+           const currentFields = fieldsToAdd.get(relationshipCollection) || []
+           // @ts-expect-error ref is untyped
+           const prefix = parentRef?.prefix ? `${parentRef.prefix}_` : ''
+-          fieldsToAdd.set(relationshipCollection, [
+-            ...currentFields,
+-            `_${field.collection}_${prefix}${field.name}_order`,
+-          ])
++          const joinOrderableFieldName = `_${field.collection}_${prefix}${field.name}_order`
++          fieldsToAdd.set(relationshipCollection, [...currentFields, joinOrderableFieldName])
++
++          const currentJoinFieldPaths =
++            joinFieldPathsByCollection.get(relationshipCollection.slug) || new Map<string, string>()
++          currentJoinFieldPaths.set(joinOrderableFieldName, field.on)
++          joinFieldPathsByCollection.set(relationshipCollection.slug, currentJoinFieldPaths)
+         }
+       },
+       fields: collection.fields,
+@@ -69,17 +77,18 @@ export const setupOrderable = (config: SanitizedConfig) => {
+   })
+ 
+   Array.from(fieldsToAdd.entries()).forEach(([collection, orderableFields]) => {
+-    addOrderableFieldsAndHook(collection, orderableFields)
++    addOrderableFieldsAndHook(collection, orderableFields, joinFieldPathsByCollection)
+   })
+ 
+   if (fieldsToAdd.size > 0) {
+-    addOrderableEndpoint(config)
++    addOrderableEndpoint(config, joinFieldPathsByCollection)
+   }
+ }
+ 
+ export const addOrderableFieldsAndHook = (
+   collection: CollectionConfig,
+   orderableFieldNames: string[],
++  joinFieldPathsByCollection?: Map<string, Map<string, string>>,
+ ) => {
+   // 1. Add field
+   orderableFieldNames.forEach((orderableFieldName) => {
+@@ -119,6 +128,14 @@ export const addOrderableFieldsAndHook = (
+   const orderBeforeChangeHook: BeforeChangeHook = async ({ data, originalDoc, req }) => {
+     for (const orderableFieldName of orderableFieldNames) {
+       if (!data[orderableFieldName] && !originalDoc?.[orderableFieldName]) {
++        const joinScopeWhere = getJoinScopeWhereFromDocData({
++          collectionSlug: collection.slug,
++          data,
++          joinFieldPathsByCollection,
++          orderableFieldName,
++          originalDoc,
++        })
++
+         const lastDoc = await req.payload.find({
+           collection: collection.slug,
+           depth: 0,
+@@ -127,11 +144,14 @@ export const addOrderableFieldsAndHook = (
+           req,
+           select: { [orderableFieldName]: true },
+           sort: `-${orderableFieldName}`,
+-          where: {
+-            [orderableFieldName]: {
+-              exists: true,
++          where: combineWhereConstraints([
++            {
++              [orderableFieldName]: {
++                exists: true,
++              },
+             },
+-          },
++            joinScopeWhere ?? undefined,
++          ]),
+         })
+ 
+         const lastOrderValue = lastDoc.docs[0]?.[orderableFieldName] || null
+@@ -160,7 +180,10 @@ export type OrderableEndpointBody = {
+   }
+ }
+ 
+-export const addOrderableEndpoint = (config: SanitizedConfig) => {
++export const addOrderableEndpoint = (
++  config: SanitizedConfig,
++  joinFieldPathsByCollection: Map<string, Map<string, string>>,
++) => {
+   // 3. Add endpoint
+   const reorderHandler: PayloadHandler = async (req) => {
+     const body = (await req.json?.()) as OrderableEndpointBody
+@@ -193,6 +216,14 @@ export const addOrderableEndpoint = (config: SanitizedConfig) => {
+       })
+     }
+ 
++    const { joinScopeWhere, targetDoc } = await getJoinScopeContext({
++      collectionSlug: collection.slug,
++      joinFieldPathsByCollection,
++      orderableFieldName,
++      req,
++      target,
++    })
++
+     // Prevent reordering if user doesn't have editing permissions
+     if (collection.access?.update) {
+       await executeAccess(
+@@ -222,11 +253,14 @@ export const addOrderableEndpoint = (config: SanitizedConfig) => {
+         limit: 0,
+         req,
+         select: { [orderableFieldName]: true },
+-        where: {
+-          [orderableFieldName]: {
+-            exists: false,
++        where: combineWhereConstraints([
++          {
++            [orderableFieldName]: {
++              exists: false,
++            },
+           },
+-        },
++          joinScopeWhere ?? undefined,
++        ]),
+       })
+       await initTransaction(req)
+       // We cannot update all documents in a single operation with `payload.update`,
+@@ -269,19 +303,14 @@ export const addOrderableEndpoint = (config: SanitizedConfig) => {
+     }
+ 
+     const targetId = target.id
+-    let targetKey = target.key
+-
+-    // If targetKey = pending, we need to find its current key.
+-    // This can only happen if the user reorders rows quickly with a slow connection.
+-    if (targetKey === 'pending') {
+-      const beforeDoc = await req.payload.findByID({
+-        id: targetId,
+-        collection: collection.slug,
+-        depth: 0,
+-        select: { [orderableFieldName]: true },
+-      })
+-      targetKey = beforeDoc?.[orderableFieldName] || null
+-    }
++    const targetKey = await resolvePendingTargetKey({
++      collectionSlug: collection.slug,
++      orderableFieldName,
++      req,
++      targetDoc,
++      targetID: targetId,
++      targetKey: target.key,
++    })
+ 
+     // The reason the endpoint does not receive this docId as an argument is that there
+     // are situations where the user may not see or know what the next or previous one is. For
+@@ -293,11 +322,14 @@ export const addOrderableEndpoint = (config: SanitizedConfig) => {
+       pagination: false,
+       select: { [orderableFieldName]: true },
+       sort: newKeyWillBe === 'greater' ? orderableFieldName : `-${orderableFieldName}`,
+-      where: {
+-        [orderableFieldName]: {
+-          [newKeyWillBe === 'greater' ? 'greater_than' : 'less_than']: targetKey,
++      where: combineWhereConstraints([
++        {
++          [orderableFieldName]: {
++            [newKeyWillBe === 'greater' ? 'greater_than' : 'less_than']: targetKey,
++          },
+         },
+-      },
++        joinScopeWhere ?? undefined,
++      ]),
+     })
+     const adjacentDocKey = adjacentDoc.docs?.[0]?.[orderableFieldName] || null
+ 
+diff --git a/packages/payload/src/config/orderable/utils/buildJoinScopeWhere.ts b/packages/payload/src/config/orderable/utils/buildJoinScopeWhere.ts
+new file mode 100644
+index 00000000000..d463f65ce0e
+--- /dev/null
++++ b/packages/payload/src/config/orderable/utils/buildJoinScopeWhere.ts
+@@ -0,0 +1,58 @@
++import type { Where } from '../../../types/index.js'
++
++/**
++ * Builds a `where` fragment that scopes order operations to docs sharing the
++ * same join `on` field value.
++ */
++export function buildJoinScopeWhere(args: {
++  joinOnFieldPath: string
++  scopeValue: unknown
++}): null | Where {
++  const { joinOnFieldPath, scopeValue } = args
++
++  if (typeof scopeValue === 'undefined') {
++    return null
++  }
++
++  if (Array.isArray(scopeValue)) {
++    return buildJoinScopeWhere({
++      joinOnFieldPath,
++      scopeValue: scopeValue[0],
++    })
++  }
++
++  if (
++    scopeValue &&
++    typeof scopeValue === 'object' &&
++    'relationTo' in scopeValue &&
++    'value' in scopeValue
++  ) {
++    const relation = (scopeValue as { relationTo?: unknown }).relationTo
++    const value = (scopeValue as { value?: unknown }).value
++
++    if (typeof relation === 'undefined' || typeof value === 'undefined') {
++      return null
++    }
++
++    return {
++      and: [
++        {
++          [`${joinOnFieldPath}.relationTo`]: {
++            equals: relation,
++          },
++        },
++        {
++          [`${joinOnFieldPath}.value`]: {
++            equals: value,
++          },
++        },
++      ],
++    }
++  }
++
++  return {
++    [joinOnFieldPath]: {
++      equals: scopeValue,
++    },
++  }
++}
+diff --git a/packages/payload/src/config/orderable/utils/getJoinScopeContext.ts b/packages/payload/src/config/orderable/utils/getJoinScopeContext.ts
+new file mode 100644
+index 00000000000..9522848ed02
+--- /dev/null
++++ b/packages/payload/src/config/orderable/utils/getJoinScopeContext.ts
+@@ -0,0 +1,62 @@
++import type { PayloadHandler } from '../../types.js'
++
++import { buildJoinScopeWhere } from './buildJoinScopeWhere.js'
++import { getValueAtPath } from './getValueAtPath.js'
++
++/**
++ * Resolves join scope and target document context for reorder operations.
++ */
++export async function getJoinScopeContext(args: {
++  collectionSlug: string
++  joinFieldPathsByCollection: Map<string, Map<string, string>>
++  orderableFieldName: string
++  req: Parameters<PayloadHandler>[0]
++  target: unknown
++}): Promise<{
++  joinScopeWhere: ReturnType<typeof buildJoinScopeWhere>
++  targetDoc: null | Record<string, unknown>
++}> {
++  const { collectionSlug, joinFieldPathsByCollection, orderableFieldName, req, target } = args
++
++  const joinOnFieldPath = joinFieldPathsByCollection.get(collectionSlug)?.get(orderableFieldName)
++  let targetDoc: null | Record<string, unknown> = null
++
++  if (
++    typeof target === 'object' &&
++    target &&
++    'id' in target &&
++    (joinOnFieldPath || ('key' in target && target.key === 'pending'))
++  ) {
++    const targetID = (target as { id?: unknown }).id
++
++    if (typeof targetID === 'number' || typeof targetID === 'string') {
++      targetDoc = await req.payload.findByID({
++        id: targetID,
++        collection: collectionSlug,
++        depth: 0,
++        req,
++        select: {
++          ...(joinOnFieldPath ? { [joinOnFieldPath]: true } : {}),
++          [orderableFieldName]: true,
++        },
++      })
++    }
++  }
++
++  if (!joinOnFieldPath) {
++    return {
++      joinScopeWhere: null,
++      targetDoc,
++    }
++  }
++
++  const joinScopeValue = getValueAtPath(targetDoc, joinOnFieldPath)
++
++  return {
++    joinScopeWhere: buildJoinScopeWhere({
++      joinOnFieldPath,
++      scopeValue: joinScopeValue,
++    }),
++    targetDoc,
++  }
++}
+diff --git a/packages/payload/src/config/orderable/utils/getJoinScopeWhereFromDocData.ts b/packages/payload/src/config/orderable/utils/getJoinScopeWhereFromDocData.ts
+new file mode 100644
+index 00000000000..d56a3d47972
+--- /dev/null
++++ b/packages/payload/src/config/orderable/utils/getJoinScopeWhereFromDocData.ts
+@@ -0,0 +1,29 @@
++import { buildJoinScopeWhere } from './buildJoinScopeWhere.js'
++import { getValueAtPath } from './getValueAtPath.js'
++
++/**
++ * Builds a join-scope filter for order key generation during beforeChange.
++ */
++export function getJoinScopeWhereFromDocData(args: {
++  collectionSlug: string
++  data: Record<string, unknown>
++  joinFieldPathsByCollection?: Map<string, Map<string, string>>
++  orderableFieldName: string
++  originalDoc?: Record<string, unknown>
++}): ReturnType<typeof buildJoinScopeWhere> {
++  const { collectionSlug, data, joinFieldPathsByCollection, orderableFieldName, originalDoc } = args
++
++  const joinOnFieldPath = joinFieldPathsByCollection?.get(collectionSlug)?.get(orderableFieldName)
++
++  if (!joinOnFieldPath) {
++    return null
++  }
++
++  const scopeValue =
++    getValueAtPath(data, joinOnFieldPath) ?? getValueAtPath(originalDoc, joinOnFieldPath)
++
++  return buildJoinScopeWhere({
++    joinOnFieldPath,
++    scopeValue,
++  })
++}
+diff --git a/packages/payload/src/config/orderable/utils/getValueAtPath.ts b/packages/payload/src/config/orderable/utils/getValueAtPath.ts
+new file mode 100644
+index 00000000000..70ecaa7833a
+--- /dev/null
++++ b/packages/payload/src/config/orderable/utils/getValueAtPath.ts
+@@ -0,0 +1,21 @@
++/**
++ * Reads a nested value from an object using dot-notation path syntax.
++ */
++export function getValueAtPath(data: unknown, path: string): unknown {
++  if (!data || typeof data !== 'object') {
++    return undefined
++  }
++
++  const segments = path.split('.')
++  let currentValue: unknown = data
++
++  for (const segment of segments) {
++    if (!currentValue || typeof currentValue !== 'object') {
++      return undefined
++    }
++
++    currentValue = (currentValue as Record<string, unknown>)[segment]
++  }
++
++  return currentValue
++}
+diff --git a/packages/payload/src/config/orderable/utils/resolvePendingTargetKey.ts b/packages/payload/src/config/orderable/utils/resolvePendingTargetKey.ts
+new file mode 100644
+index 00000000000..0ab6fb177cf
+--- /dev/null
++++ b/packages/payload/src/config/orderable/utils/resolvePendingTargetKey.ts
+@@ -0,0 +1,34 @@
++import type { PayloadHandler } from '../../types.js'
++
++/**
++ * Resolves the target key when the client sends the temporary `pending` marker.
++ */
++export async function resolvePendingTargetKey(args: {
++  collectionSlug: string
++  orderableFieldName: string
++  req: Parameters<PayloadHandler>[0]
++  targetDoc: null | Record<string, unknown>
++  targetID: string
++  targetKey: string
++}): Promise<null | string> {
++  const { collectionSlug, orderableFieldName, req, targetDoc, targetID, targetKey } = args
++
++  if (targetKey !== 'pending') {
++    return targetKey
++  }
++
++  const targetDocKey = targetDoc?.[orderableFieldName]
++  if (typeof targetDocKey === 'string') {
++    return targetDocKey
++  }
++
++  const beforeDoc = await req.payload.findByID({
++    id: targetID,
++    collection: collectionSlug,
++    depth: 0,
++    req,
++    select: { [orderableFieldName]: true },
++  })
++
++  return beforeDoc?.[orderableFieldName] || null
++}
+diff --git a/test/sort/collections/Orderable/index.ts b/test/sort/collections/Orderable/index.ts
+index ccf42c4205b..aa31ec50cc1 100644
+--- a/test/sort/collections/Orderable/index.ts
++++ b/test/sort/collections/Orderable/index.ts
+@@ -22,6 +22,7 @@ export const OrderableCollection: CollectionConfig = {
+       name: 'orderableField',
+       type: 'relationship',
+       relationTo: orderableJoinSlug,
++      localized: true,
+     },
+   ],
+ }
+diff --git a/test/sort/int.spec.ts b/test/sort/int.spec.ts
+index 1fde63bdfab..f247103371a 100644
+--- a/test/sort/int.spec.ts
++++ b/test/sort/int.spec.ts
+@@ -922,6 +922,254 @@ describe('Sort', () => {
+         expect(orders[0]).toBeLessThan(orders[1])
+         expect(orders[1]).toBeLessThan(orders[2])
+       })
++
++      it('should scope join reorder keys to the same parent relation', async () => {
++        const scopedParent = await payload.create({
++          collection: orderableJoinSlug,
++          data: {
++            title: 'scoped parent',
++          },
++        })
++        const otherParent = await payload.create({
++          collection: orderableJoinSlug,
++          data: {
++            title: 'other parent',
++          },
++        })
++
++        const scopedTarget = await payload.create({
++          collection: orderableSlug,
++          data: {
++            title: 'scoped target',
++            orderableField: scopedParent.id,
++            _orderable_orderableJoinField1_order: 'a0',
++          },
++        })
++
++        const scopedNeighbor = await payload.create({
++          collection: orderableSlug,
++          data: {
++            title: 'scoped neighbor',
++            orderableField: scopedParent.id,
++            _orderable_orderableJoinField1_order: 'a2',
++          },
++        })
++
++        const scopedMovedDoc = await payload.create({
++          collection: orderableSlug,
++          data: {
++            title: 'scoped moved',
++            orderableField: scopedParent.id,
++            _orderable_orderableJoinField1_order: 'a3',
++          },
++        })
++
++        await payload.create({
++          collection: orderableSlug,
++          data: {
++            title: 'other scope doc',
++            orderableField: otherParent.id,
++            _orderable_orderableJoinField1_order: 'a1',
++          },
++        })
++
++        const reorderResponse = await restClient.POST('/reorder', {
++          body: JSON.stringify({
++            collectionSlug: orderableSlug,
++            docsToMove: [scopedMovedDoc.id],
++            newKeyWillBe: 'greater',
++            orderableFieldName: '_orderable_orderableJoinField1_order',
++            target: {
++              id: scopedTarget.id,
++              key: scopedTarget._orderable_orderableJoinField1_order,
++            },
++          }),
++        })
++
++        expect(reorderResponse.status).toStrictEqual(200)
++
++        const reorderBody = await reorderResponse.json()
++
++        expect(reorderBody.orderValues?.[0]).toBe('a1')
++
++        const scopedMovedDocAfter = await payload.findByID({
++          collection: orderableSlug,
++          id: scopedMovedDoc.id,
++        })
++
++        expect(scopedMovedDocAfter._orderable_orderableJoinField1_order).toBe('a1')
++        expect(
++          scopedTarget._orderable_orderableJoinField1_order <
++            scopedMovedDocAfter._orderable_orderableJoinField1_order,
++        ).toBe(true)
++        expect(
++          scopedMovedDocAfter._orderable_orderableJoinField1_order <
++            scopedNeighbor._orderable_orderableJoinField1_order,
++        ).toBe(true)
++      })
++
++      it('should scope localized join reorder keys with request locale context', async () => {
++        const enParent = await payload.create({
++          collection: orderableJoinSlug,
++          data: {
++            title: 'localized parent en',
++          },
++        })
++
++        const nbParent = await payload.create({
++          collection: orderableJoinSlug,
++          data: {
++            title: 'localized parent nb',
++          },
++        })
++
++        const otherNbParent = await payload.create({
++          collection: orderableJoinSlug,
++          data: {
++            title: 'localized parent other nb',
++          },
++        })
++
++        const localizedTarget = await payload.create({
++          collection: orderableSlug,
++          locale: 'en',
++          data: {
++            title: 'localized scoped target',
++            orderableField: enParent.id,
++            _orderable_orderableJoinField1_order: 'a0',
++          },
++        })
++
++        await payload.update({
++          collection: orderableSlug,
++          id: localizedTarget.id,
++          locale: 'nb',
++          data: {
++            orderableField: nbParent.id,
++          },
++        })
++
++        const localizedNeighbor = await payload.create({
++          collection: orderableSlug,
++          locale: 'en',
++          data: {
++            title: 'localized scoped neighbor',
++            orderableField: enParent.id,
++            _orderable_orderableJoinField1_order: 'a2',
++          },
++        })
++
++        await payload.update({
++          collection: orderableSlug,
++          id: localizedNeighbor.id,
++          locale: 'nb',
++          data: {
++            orderableField: nbParent.id,
++          },
++        })
++
++        const localizedMovedDoc = await payload.create({
++          collection: orderableSlug,
++          locale: 'en',
++          data: {
++            title: 'localized scoped moved',
++            orderableField: enParent.id,
++            _orderable_orderableJoinField1_order: 'a3',
++          },
++        })
++
++        await payload.update({
++          collection: orderableSlug,
++          id: localizedMovedDoc.id,
++          locale: 'nb',
++          data: {
++            orderableField: nbParent.id,
++          },
++        })
++
++        // This doc only pollutes the EN scope with `a1`.
++        const localizedEnPollution = await payload.create({
++          collection: orderableSlug,
++          locale: 'en',
++          data: {
++            title: 'localized en pollution',
++            orderableField: enParent.id,
++            _orderable_orderableJoinField1_order: 'a1',
++          },
++        })
++
++        await payload.update({
++          collection: orderableSlug,
++          id: localizedEnPollution.id,
++          data: {
++            orderableField: otherNbParent.id,
++          },
++          locale: 'nb',
++        })
++
++        // Simulate "without req locale context": endpoint defaults to EN scope.
++        const reorderWithoutLocale = await restClient.POST('/reorder', {
++          body: JSON.stringify({
++            collectionSlug: orderableSlug,
++            docsToMove: [localizedMovedDoc.id],
++            newKeyWillBe: 'greater',
++            orderableFieldName: '_orderable_orderableJoinField1_order',
++            target: {
++              id: localizedTarget.id,
++              key: localizedTarget._orderable_orderableJoinField1_order,
++            },
++          }),
++        })
++
++        expect(reorderWithoutLocale.status).toStrictEqual(200)
++        const reorderWithoutLocaleBody = await reorderWithoutLocale.json()
++
++        // If scoped to EN (wrong for this scenario), we should NOT get the expected NB key.
++        expect(reorderWithoutLocaleBody.orderValues?.[0]).not.toBe('a1')
++
++        await payload.update({
++          collection: orderableSlug,
++          id: localizedMovedDoc.id,
++          data: {
++            _orderable_orderableJoinField1_order: 'a3',
++          },
++        })
++
++        await payload.update({
++          collection: orderableSlug,
++          id: localizedMovedDoc.id,
++          data: {
++            orderableField: nbParent.id,
++          },
++          locale: 'nb',
++        })
++
++        // With locale in request context, scope is NB and result should be deterministic.
++        const reorderWithLocale = await restClient.POST('/reorder?locale=nb', {
++          body: JSON.stringify({
++            collectionSlug: orderableSlug,
++            docsToMove: [localizedMovedDoc.id],
++            newKeyWillBe: 'greater',
++            orderableFieldName: '_orderable_orderableJoinField1_order',
++            target: {
++              id: localizedTarget.id,
++              key: localizedTarget._orderable_orderableJoinField1_order,
++            },
++          }),
++        })
++
++        expect(reorderWithLocale.status).toStrictEqual(200)
++        const reorderWithLocaleBody = await reorderWithLocale.json()
++
++        expect(reorderWithLocaleBody.orderValues?.[0]).toBe('a1')
++
++        const localizedMovedDocAfter = await payload.findByID({
++          collection: orderableSlug,
++          id: localizedMovedDoc.id,
++        })
++
++        expect(localizedMovedDocAfter._orderable_orderableJoinField1_order).toBe('a1')
++      })
+     })
+   })
+ 

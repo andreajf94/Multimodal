@@ -1,0 +1,1417 @@
+diff --git a/docs/en/docs/advanced/stream-data.md b/docs/en/docs/advanced/stream-data.md
+new file mode 100644
+index 0000000000000..4bec4edf998fb
+--- /dev/null
++++ b/docs/en/docs/advanced/stream-data.md
+@@ -0,0 +1,99 @@
++# Stream Data { #stream-data }
++
++If you want to stream data that can be structured as JSON, you should [Stream JSON Lines](../tutorial/stream-json-lines.md){.internal-link target=_blank}.
++
++But if you want to **stream pure binary data** or strings, here's how you can do it.
++
++## Use Cases { #use-cases }
++
++You could use this if you want to stream pure strings, for example directly from the output of an **AI LLM** service.
++
++You could also use it to stream **large binary files**, where you stream each chunk of data as you read it, without having to read it all in memory at once.
++
++You could also stream **video** or **audio** this way, it could even be generated as you process and send it.
++
++## A `StreamingResponse` with `yield` { #a-streamingresponse-with-yield }
++
++If you declare a `response_class=StreamingResponse` in your *path operation function*, you can use `yield` to send each chunk of data in turn.
++
++{* ../../docs_src/stream_data/tutorial001_py310.py ln[1:23] hl[20,23] *}
++
++FastAPI will give each chunk of data to the `StreamingResponse` as is, it won't try to convert it to JSON or anything similar.
++
++### Non-async *path operation functions* { #non-async-path-operation-functions }
++
++You can also use regular `def` functions (without `async`), and use `yield` the same way.
++
++{* ../../docs_src/stream_data/tutorial001_py310.py ln[26:29] hl[27] *}
++
++### No Annotation { #no-annotation }
++
++You don't really need to declare the return type annotation for streaming binary data.
++
++As FastAPI will not try to convert the data to JSON with Pydantic or serialize it in any way, in this case, the type annotation is only for your editor and tools to use, it won't be used by FastAPI.
++
++{* ../../docs_src/stream_data/tutorial001_py310.py ln[32:35] hl[33] *}
++
++This also means that with `StreamingResponse` you have the **freedom** and **responsibility** to produce and encode the data bytes exactly as you need them to be sent, independent of the type annotations. 🤓
++
++### Stream Bytes { #stream-bytes }
++
++One of the main use cases would be to stream `bytes` instead of strings, you can of course do it.
++
++{* ../../docs_src/stream_data/tutorial001_py310.py ln[44:47] hl[47] *}
++
++## A Custom `PNGStreamingResponse` { #a-custom-pngstreamingresponse }
++
++In the examples above, the data bytes were streamed, but the response didn't have a `Content-Type` header, so the client didn't know what type of data it was receiving.
++
++You can create a custom sub-class of `StreamingResponse` that sets the `Content-Type` header to the type of data you're streaming.
++
++For example, you can create a `PNGStreamingResponse` that sets the `Content-Type` header to `image/png` using the `media_type` attribute:
++
++{* ../../docs_src/stream_data/tutorial002_py310.py ln[6,19:20] hl[20] *}
++
++Then you can use this new class in `response_class=PNGStreamingResponse` in your *path operation function*:
++
++{* ../../docs_src/stream_data/tutorial002_py310.py ln[23:26] hl[23] *}
++
++### Simulate a File { #simulate-a-file }
++
++In this example, we are simulating a file with `io.BytesIO`, which is a file-like object that lives only in memory, but lets us use the same interface.
++
++For example, we can iterate over it to consume its contents, as we could with a file.
++
++{* ../../docs_src/stream_data/tutorial002_py310.py ln[1:26] hl[3,12:13,25] *}
++
++/// note | Technical Details
++
++The other two variables, `image_base64` and `binary_image`, are an image encoded in Base64, and then converted to bytes, to then pass it to `io.BytesIO`.
++
++Only so that it can live in the same file for this example and you can copy it and run it as is. 🥚
++
++///
++
++### Files and Async { #files-and-async }
++
++In most cases, file-like objects are not compatible with async and await by default.
++
++For example, they don't have an `await file.read()`, or `async for chunk in file`.
++
++And in many cases, reading them would be a blocking operation (that could block the event loop), because they are read from disk or from the network.
++
++/// info
++
++The example above is actually an exception, because the `io.BytesIO` object is already in memory, so reading it won't block anything.
++
++But in many cases reading a file or a file-like object would block.
++
++///
++
++To avoid blocking the event loop, you can simply declare the *path operation function* with regular `def` instead of `async def`, that way FastAPI will run it on a threadpool worker, to avoid blocking the main loop.
++
++{* ../../docs_src/stream_data/tutorial002_py310.py ln[29:32] hl[30] *}
++
++/// tip
++
++If you need to call blocking code from inside of an async function, or an async function from inside of a blocking function, you could use <a href="https://asyncer.tiangolo.com" class="external-link" target="_blank">Asyncer</a>, a sibling library to FastAPI.
++
++///
+diff --git a/docs/en/docs/tutorial/stream-json-lines.md b/docs/en/docs/tutorial/stream-json-lines.md
+new file mode 100644
+index 0000000000000..b65d0c0fabd28
+--- /dev/null
++++ b/docs/en/docs/tutorial/stream-json-lines.md
+@@ -0,0 +1,105 @@
++# Stream JSON Lines { #stream-json-lines }
++
++You could have a sequence of data that you would like to send in a "**stream**", you could do it with **JSON Lines**.
++
++## What is a Stream? { #what-is-a-stream }
++
++"**Streaming**" data means that your app will start sending data items to the client without waiting for the entire sequence of items to be ready.
++
++So, it will send the first item, the client will receive and start processing it, and you might still be producing the next item.
++
++```mermaid
++sequenceDiagram
++    participant App
++    participant Client
++
++    App->>App: Produce Item 1
++    App->>Client: Send Item 1
++    App->>App: Produce Item 2
++    Client->>Client: Process Item 1
++    App->>Client: Send Item 2
++    App->>App: Produce Item 3
++    Client->>Client: Process Item 2
++    App->>Client: Send Item 3
++    Client->>Client: Process Item 3
++    Note over App: Keeps producing...
++    Note over Client: Keeps consuming...
++```
++
++It could even be an infinite stream, where you keep sending data.
++
++## JSON Lines { #json-lines }
++
++In these cases, it's common to send "**JSON Lines**", which is a format where you send one JSON object per line.
++
++A response would have a content type of `application/jsonl` (instead of `application/json`) and the body would be something like:
++
++```json
++{"name": "Plumbus", "description": "A multi-purpose household device."}
++{"name": "Portal Gun", "description": "A portal opening device."}
++{"name": "Meeseeks Box", "description": "A box that summons a Meeseeks."}
++```
++
++It's very similar to a JSON array (equivalent of a Python list), but instead of being wrapped in `[]` and having `,` between the items, it has **one JSON object per line**, they are separated by a new line character.
++
++/// info
++
++The important point is that your app will be able to produce each line in turn, while the client consumes the previous lines.
++
++///
++
++/// note | Technical Details
++
++Because each JSON object will be separated by a new line, they can't contain literal new line characters in their content, but they can contain escaped new lines (`\n`), which is part of the JSON standard.
++
++But normally you won't have to worry about it, it's done automatically, continue reading. 🤓
++
++///
++
++## Use Cases { #use-cases }
++
++You could use this to stream data from an **AI LLM** service, from **logs** or **telemetry**, or from other types of data that can be structured in **JSON** items.
++
++/// tip
++
++If you want to stream binary data, for example video or audio, check the advanced guide: [Stream Data](../advanced/stream-data.md).
++
++///
++
++## Stream JSON Lines with FastAPI { #stream-json-lines-with-fastapi }
++
++To stream JSON Lines with FastAPI you can, instead of using `return` in your *path operation function*, use `yield` to produce each item in turn.
++
++{* ../../docs_src/stream_json_lines/tutorial001_py310.py ln[1:24] hl[24] *}
++
++If each JSON item you want to send back is of type `Item` (a Pydantic model) and it's an async function, you can declare the return type as `AsyncIterable[Item]`:
++
++{* ../../docs_src/stream_json_lines/tutorial001_py310.py ln[1:24] hl[9:11,22] *}
++
++If you declare the return type, FastAPI will use it to **validate** the data, **document** it in OpenAPI, **filter** it, and **serialize** it using Pydantic.
++
++/// tip
++
++As Pydantic will serialize it in the **Rust** side, you will get much higher **performance** than if you don't declare a return type.
++
++///
++
++### Non-async *path operation functions* { #non-async-path-operation-functions }
++
++You can also use regular `def` functions (without `async`), and use `yield` the same way.
++
++FastAPI will make sure it's run correctly so that it doesn't block the event loop.
++
++As in this case the function is not async, the right return type would be `Iterable[Item]`:
++
++{* ../../docs_src/stream_json_lines/tutorial001_py310.py ln[27:30] hl[28] *}
++
++### No Return Type { #no-return-type }
++
++You can also omit the return type. FastAPI will then use the [`jsonable_encoder`](./encoder.md){.internal-link target=_blank} to convert the data to something that can be serialized to JSON and then send it as JSON Lines.
++
++{* ../../docs_src/stream_json_lines/tutorial001_py310.py ln[33:36] hl[34] *}
++
++## Server Sent Events (SSE) { #server-sent-events-sse }
++
++A future version of FastAPI will also have first-class support for Server Sent Events (SSE), which are quite similar, but with a couple of extra details. 🤓
+diff --git a/docs/en/mkdocs.yml b/docs/en/mkdocs.yml
+index e86e7b9c4146b..4c017e1b5a34a 100644
+--- a/docs/en/mkdocs.yml
++++ b/docs/en/mkdocs.yml
+@@ -154,6 +154,7 @@ nav:
+     - tutorial/cors.md
+     - tutorial/sql-databases.md
+     - tutorial/bigger-applications.md
++    - tutorial/stream-json-lines.md
+     - tutorial/background-tasks.md
+     - tutorial/metadata.md
+     - tutorial/static-files.md
+@@ -161,6 +162,7 @@ nav:
+     - tutorial/debugging.md
+   - Advanced User Guide:
+     - advanced/index.md
++    - advanced/stream-data.md
+     - advanced/path-operation-advanced-configuration.md
+     - advanced/additional-status-codes.md
+     - advanced/response-directly.md
+diff --git a/docs_src/stream_data/__init__.py b/docs_src/stream_data/__init__.py
+new file mode 100644
+index 0000000000000..e69de29bb2d1d
+diff --git a/docs_src/stream_data/tutorial001_py310.py b/docs_src/stream_data/tutorial001_py310.py
+new file mode 100644
+index 0000000000000..2e91ec9ac9c09
+--- /dev/null
++++ b/docs_src/stream_data/tutorial001_py310.py
+@@ -0,0 +1,65 @@
++from collections.abc import AsyncIterable, Iterable
++
++from fastapi import FastAPI
++from fastapi.responses import StreamingResponse
++
++app = FastAPI()
++
++
++message = """
++Rick: (stumbles in drunkenly, and turns on the lights) Morty! You gotta come on. You got--... you gotta come with me.
++Morty: (rubs his eyes) What, Rick? What's going on?
++Rick: I got a surprise for you, Morty.
++Morty: It's the middle of the night. What are you talking about?
++Rick: (spills alcohol on Morty's bed) Come on, I got a surprise for you. (drags Morty by the ankle) Come on, hurry up. (pulls Morty out of his bed and into the hall)
++Morty: Ow! Ow! You're tugging me too hard!
++Rick: We gotta go, gotta get outta here, come on. Got a surprise for you Morty.
++"""
++
++
++@app.get("/story/stream", response_class=StreamingResponse)
++async def stream_story() -> AsyncIterable[str]:
++    for line in message.splitlines():
++        yield line
++
++
++@app.get("/story/stream-no-async", response_class=StreamingResponse)
++def stream_story_no_async() -> Iterable[str]:
++    for line in message.splitlines():
++        yield line
++
++
++@app.get("/story/stream-no-annotation", response_class=StreamingResponse)
++async def stream_story_no_annotation():
++    for line in message.splitlines():
++        yield line
++
++
++@app.get("/story/stream-no-async-no-annotation", response_class=StreamingResponse)
++def stream_story_no_async_no_annotation():
++    for line in message.splitlines():
++        yield line
++
++
++@app.get("/story/stream-bytes", response_class=StreamingResponse)
++async def stream_story_bytes() -> AsyncIterable[bytes]:
++    for line in message.splitlines():
++        yield line.encode("utf-8")
++
++
++@app.get("/story/stream-no-async-bytes", response_class=StreamingResponse)
++def stream_story_no_async_bytes() -> Iterable[bytes]:
++    for line in message.splitlines():
++        yield line.encode("utf-8")
++
++
++@app.get("/story/stream-no-annotation-bytes", response_class=StreamingResponse)
++async def stream_story_no_annotation_bytes():
++    for line in message.splitlines():
++        yield line.encode("utf-8")
++
++
++@app.get("/story/stream-no-async-no-annotation-bytes", response_class=StreamingResponse)
++def stream_story_no_async_no_annotation_bytes():
++    for line in message.splitlines():
++        yield line.encode("utf-8")
+diff --git a/docs_src/stream_data/tutorial002_py310.py b/docs_src/stream_data/tutorial002_py310.py
+new file mode 100644
+index 0000000000000..7fc884fa25abd
+--- /dev/null
++++ b/docs_src/stream_data/tutorial002_py310.py
+@@ -0,0 +1,44 @@
++import base64
++from collections.abc import AsyncIterable, Iterable
++from io import BytesIO
++
++from fastapi import FastAPI
++from fastapi.responses import StreamingResponse
++
++image_base64 = "iVBORw0KGgoAAAANSUhEUgAAAB0AAAAdCAYAAABWk2cPAAAAbnpUWHRSYXcgcHJvZmlsZSB0eXBlIGV4aWYAAHjadYzRDYAwCET/mcIRDoq0jGOiJm7g+NJK0vjhS4DjIEfHfZ20DKqSrrWZmyFQV5ctRMOLACxglNCcXk7zVqFzJzF8kV6R5vOJ97yVH78HjfYAtg0ged033ZgAAAoCaVRYdFhNTDpjb20uYWRvYmUueG1wAAAAAAA8P3hwYWNrZXQgYmVnaW49Iu+7vyIgaWQ9Ilc1TTBNcENlaGlIenJlU3pOVGN6a2M5ZCI/Pgo8eDp4bXBtZXRhIHhtbG5zOng9ImFkb2JlOm5zOm1ldGEvIiB4OnhtcHRrPSJYTVAgQ29yZSA0LjQuMC1FeGl2MiI+CiA8cmRmOlJERiB4bWxuczpyZGY9Imh0dHA6Ly93d3cudzMub3JnLzE5OTkvMDIvMjItcmRmLXN5bnRheC1ucyMiPgogIDxyZGY6RGVzY3JpcHRpb24gcmRmOmFib3V0PSIiCiAgICB4bWxuczpleGlmPSJodHRwOi8vbnMuYWRvYmUuY29tL2V4aWYvMS4wLyIKICAgIHhtbG5zOnRpZmY9Imh0dHA6Ly9ucy5hZG9iZS5jb20vdGlmZi8xLjAvIgogICBleGlmOlBpeGVsWERpbWVuc2lvbj0iMjkiCiAgIGV4aWY6UGl4ZWxZRGltZW5zaW9uPSIyOSIKICAgdGlmZjpJbWFnZVdpZHRoPSIyOSIKICAgdGlmZjpJbWFnZUxlbmd0aD0iMjkiCiAgIHRpZmY6T3JpZW50YXRpb249IjEiLz4KIDwvcmRmOlJERj4KPC94OnhtcG1ldGE+CiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAKICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIAogICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgCiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAKICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIAogICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgCiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAKICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIAogICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgCiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAKICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIAogICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgCiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAKICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIAogICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgCiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAKICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIAogICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgCiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAKICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIAogICAgICAgICAgICAgICAgICAgICAgICAgICAKPD94cGFja2V0IGVuZD0idyI/PnQkBZAAAAAEc0JJVAgICAh8CGSIAAABoklEQVRIx8VXwY7FIAjE5iXWU+P/f6RHPNW9LIaOoHYP+0yMShVkwNGG1lqjfy4HfaF0oyEEt+oSQqBaa//m9Wd6PlqhhbRMDiEQM3e59FNKw5qZHpnQfuPaW6lazsztvu/eElFj5j63lNLlMz2ttbZtVMu1MTGo5Sujn93gMzOllKiUQjHGB9QxxneZhJ5iwZ1rL2fwenoGeL0q3wVGhBPHMz0PeFccIfASEeWcO8xEROd50q6eAV6s1s5XXoncas1EKqVQznnwUBdJJmm1l3hmmdlOMrGO8Vl5gZ56Y0y8IZF0BuqkQWM4B6HXrRCKa1SEqyzEo7KK59RT/VHDjX3ZvSefeW3CO6O6vsiA1NrwVkxxAcYTCcHyTjZmJd00pugBQoTnzjvn+kzLBh9GtRDjhleZFwbx3kugP3GvFzdkqRlbDYw0u/HxKjuOw2QxZCGL5V5f4l7cd6qsffUa1DcLM9N1XcTMvep5ul1e4jNPtZfWGIkE6dI8MquXg/dS2CGVJQ2ushd5GmlxFdOw+1tRa32MY4zDQ9yaZ60J3/iX+QG4U3qGrFHmswAAAABJRU5ErkJggg=="
++binary_image = base64.b64decode(image_base64)
++
++
++def read_image() -> BytesIO:
++    return BytesIO(binary_image)
++
++
++app = FastAPI()
++
++
++class PNGStreamingResponse(StreamingResponse):
++    media_type = "image/png"
++
++
++@app.get("/image/stream", response_class=PNGStreamingResponse)
++async def stream_image() -> AsyncIterable[bytes]:
++    for chunk in read_image():
++        yield chunk
++
++
++@app.get("/image/stream-no-async", response_class=PNGStreamingResponse)
++def stream_image_no_async() -> Iterable[bytes]:
++    for chunk in read_image():
++        yield chunk
++
++
++@app.get("/image/stream-no-annotation", response_class=PNGStreamingResponse)
++async def stream_image_no_annotation():
++    for chunk in read_image():
++        yield chunk
++
++
++@app.get("/image/stream-no-async-no-annotation", response_class=PNGStreamingResponse)
++def stream_image_no_async_no_annotation():
++    for chunk in read_image():
++        yield chunk
+diff --git a/docs_src/stream_json_lines/__init__.py b/docs_src/stream_json_lines/__init__.py
+new file mode 100644
+index 0000000000000..e69de29bb2d1d
+diff --git a/docs_src/stream_json_lines/tutorial001_py310.py b/docs_src/stream_json_lines/tutorial001_py310.py
+new file mode 100644
+index 0000000000000..4fbe7c69cc650
+--- /dev/null
++++ b/docs_src/stream_json_lines/tutorial001_py310.py
+@@ -0,0 +1,42 @@
++from collections.abc import AsyncIterable, Iterable
++
++from fastapi import FastAPI
++from pydantic import BaseModel
++
++app = FastAPI()
++
++
++class Item(BaseModel):
++    name: str
++    description: str | None
++
++
++items = [
++    Item(name="Plumbus", description="A multi-purpose household device."),
++    Item(name="Portal Gun", description="A portal opening device."),
++    Item(name="Meeseeks Box", description="A box that summons a Meeseeks."),
++]
++
++
++@app.get("/items/stream")
++async def stream_items() -> AsyncIterable[Item]:
++    for item in items:
++        yield item
++
++
++@app.get("/items/stream-no-async")
++def stream_items_no_async() -> Iterable[Item]:
++    for item in items:
++        yield item
++
++
++@app.get("/items/stream-no-annotation")
++async def stream_items_no_annotation():
++    for item in items:
++        yield item
++
++
++@app.get("/items/stream-no-async-no-annotation")
++def stream_items_no_async_no_annotation():
++    for item in items:
++        yield item
+diff --git a/fastapi/dependencies/utils.py b/fastapi/dependencies/utils.py
+index ab18ec2db65e5..8fcf1a5b3c8ee 100644
+--- a/fastapi/dependencies/utils.py
++++ b/fastapi/dependencies/utils.py
+@@ -1,7 +1,17 @@
+ import dataclasses
+ import inspect
+ import sys
+-from collections.abc import Callable, Mapping, Sequence
++from collections.abc import (
++    AsyncGenerator,
++    AsyncIterable,
++    AsyncIterator,
++    Callable,
++    Generator,
++    Iterable,
++    Iterator,
++    Mapping,
++    Sequence,
++)
+ from contextlib import AsyncExitStack, contextmanager
+ from copy import copy, deepcopy
+ from dataclasses import dataclass
+@@ -251,6 +261,26 @@ def get_typed_return_annotation(call: Callable[..., Any]) -> Any:
+     return get_typed_annotation(annotation, globalns)
+ 
+ 
++_STREAM_ORIGINS = {
++    AsyncIterable,
++    AsyncIterator,
++    AsyncGenerator,
++    Iterable,
++    Iterator,
++    Generator,
++}
++
++
++def get_stream_item_type(annotation: Any) -> Any | None:
++    origin = get_origin(annotation)
++    if origin is not None and origin in _STREAM_ORIGINS:
++        type_args = get_args(annotation)
++        if type_args:
++            return type_args[0]
++        return Any
++    return None
++
++
+ def get_dependant(
+     *,
+     path: str,
+diff --git a/fastapi/openapi/utils.py b/fastapi/openapi/utils.py
+index 812003aee315a..3ddc0c14a9f9b 100644
+--- a/fastapi/openapi/utils.py
++++ b/fastapi/openapi/utils.py
+@@ -355,25 +355,40 @@ def get_openapi_path(
+             operation.setdefault("responses", {}).setdefault(status_code, {})[
+                 "description"
+             ] = route.response_description
+-            if route_response_media_type and is_body_allowed_for_status_code(
+-                route.status_code
+-            ):
+-                response_schema = {"type": "string"}
+-                if lenient_issubclass(current_response_class, JSONResponse):
+-                    if route.response_field:
+-                        response_schema = get_schema_from_model_field(
+-                            field=route.response_field,
++            if is_body_allowed_for_status_code(route.status_code):
++                # Check for JSONL streaming (generator endpoints)
++                if route.is_json_stream:
++                    jsonl_content: dict[str, Any] = {}
++                    if route.stream_item_field:
++                        item_schema = get_schema_from_model_field(
++                            field=route.stream_item_field,
+                             model_name_map=model_name_map,
+                             field_mapping=field_mapping,
+                             separate_input_output_schemas=separate_input_output_schemas,
+                         )
++                        jsonl_content["itemSchema"] = item_schema
+                     else:
+-                        response_schema = {}
+-                operation.setdefault("responses", {}).setdefault(
+-                    status_code, {}
+-                ).setdefault("content", {}).setdefault(route_response_media_type, {})[
+-                    "schema"
+-                ] = response_schema
++                        jsonl_content["itemSchema"] = {}
++                    operation.setdefault("responses", {}).setdefault(
++                        status_code, {}
++                    ).setdefault("content", {})["application/jsonl"] = jsonl_content
++                elif route_response_media_type:
++                    response_schema = {"type": "string"}
++                    if lenient_issubclass(current_response_class, JSONResponse):
++                        if route.response_field:
++                            response_schema = get_schema_from_model_field(
++                                field=route.response_field,
++                                model_name_map=model_name_map,
++                                field_mapping=field_mapping,
++                                separate_input_output_schemas=separate_input_output_schemas,
++                            )
++                        else:
++                            response_schema = {}
++                    operation.setdefault("responses", {}).setdefault(
++                        status_code, {}
++                    ).setdefault("content", {}).setdefault(
++                        route_response_media_type, {}
++                    )["schema"] = response_schema
+             if route.responses:
+                 operation_responses = operation.setdefault("responses", {})
+                 for (
+@@ -453,9 +468,9 @@ def get_fields_from_routes(
+     request_fields_from_routes: list[ModelField] = []
+     callback_flat_models: list[ModelField] = []
+     for route in routes:
+-        if getattr(route, "include_in_schema", None) and isinstance(
+-            route, routing.APIRoute
+-        ):
++        if not isinstance(route, routing.APIRoute):
++            continue
++        if route.include_in_schema:
+             if route.body_field:
+                 assert isinstance(route.body_field, ModelField), (
+                     "A request body must be a Pydantic Field"
+@@ -465,6 +480,8 @@ def get_fields_from_routes(
+                 responses_from_routes.append(route.response_field)
+             if route.response_fields:
+                 responses_from_routes.extend(route.response_fields.values())
++            if route.stream_item_field:
++                responses_from_routes.append(route.stream_item_field)
+             if route.callbacks:
+                 callback_flat_models.extend(get_fields_from_routes(route.callbacks))
+             params = get_flat_params(route.dependant)
+diff --git a/fastapi/routing.py b/fastapi/routing.py
+index d17650a6277c4..f00cd2ca75ad7 100644
+--- a/fastapi/routing.py
++++ b/fastapi/routing.py
+@@ -11,6 +11,7 @@
+     Collection,
+     Coroutine,
+     Generator,
++    Iterator,
+     Mapping,
+     Sequence,
+ )
+@@ -27,6 +28,7 @@
+     TypeVar,
+ )
+ 
++import anyio
+ from annotated_doc import Doc
+ from fastapi import params
+ from fastapi._compat import (
+@@ -42,6 +44,7 @@
+     get_dependant,
+     get_flat_dependant,
+     get_parameterless_sub_dependant,
++    get_stream_item_type,
+     get_typed_return_annotation,
+     solve_dependencies,
+ )
+@@ -66,7 +69,7 @@
+ from starlette.concurrency import run_in_threadpool
+ from starlette.exceptions import HTTPException
+ from starlette.requests import Request
+-from starlette.responses import JSONResponse, Response
++from starlette.responses import JSONResponse, Response, StreamingResponse
+ from starlette.routing import (
+     BaseRoute,
+     Match,
+@@ -315,6 +318,24 @@ async def run_endpoint_function(
+         return await run_in_threadpool(dependant.call, **values)
+ 
+ 
++def _build_response_args(
++    *, status_code: int | None, solved_result: Any
++) -> dict[str, Any]:
++    response_args: dict[str, Any] = {
++        "background": solved_result.background_tasks,
++    }
++    # If status_code was set, use it, otherwise use the default from the
++    # response class, in the case of redirect it's 307
++    current_status_code = (
++        status_code if status_code else solved_result.response.status_code
++    )
++    if current_status_code is not None:
++        response_args["status_code"] = current_status_code
++    if solved_result.response.status_code:
++        response_args["status_code"] = solved_result.response.status_code
++    return response_args
++
++
+ def get_request_handler(
+     dependant: Dependant,
+     body_field: ModelField | None = None,
+@@ -330,6 +351,8 @@ def get_request_handler(
+     dependency_overrides_provider: Any | None = None,
+     embed_body_fields: bool = False,
+     strict_content_type: bool | DefaultPlaceholder = Default(True),
++    stream_item_field: ModelField | None = None,
++    is_json_stream: bool = False,
+ ) -> Callable[[Request], Coroutine[Any, Any, Response]]:
+     assert dependant.call is not None, "dependant.call must be a function"
+     is_coroutine = dependant.is_coroutine_callable
+@@ -427,61 +450,130 @@ async def app(request: Request) -> Response:
+             embed_body_fields=embed_body_fields,
+         )
+         errors = solved_result.errors
++        assert dependant.call  # For types
+         if not errors:
+-            raw_response = await run_endpoint_function(
+-                dependant=dependant,
+-                values=solved_result.values,
+-                is_coroutine=is_coroutine,
+-            )
+-            if isinstance(raw_response, Response):
+-                if raw_response.background is None:
+-                    raw_response.background = solved_result.background_tasks
+-                response = raw_response
+-            else:
+-                response_args: dict[str, Any] = {
+-                    "background": solved_result.background_tasks
+-                }
+-                # If status_code was set, use it, otherwise use the default from the
+-                # response class, in the case of redirect it's 307
+-                current_status_code = (
+-                    status_code if status_code else solved_result.response.status_code
++            if is_json_stream:
++                # Generator endpoint: stream as JSONL
++                gen = dependant.call(**solved_result.values)
++
++                def _serialize_item(item: Any) -> bytes:
++                    if stream_item_field:
++                        value, errors = stream_item_field.validate(
++                            item, {}, loc=("response",)
++                        )
++                        if errors:
++                            ctx = endpoint_ctx or EndpointContext()
++                            raise ResponseValidationError(
++                                errors=errors,
++                                body=item,
++                                endpoint_ctx=ctx,
++                            )
++                        line = stream_item_field.serialize_json(
++                            value,
++                            include=response_model_include,
++                            exclude=response_model_exclude,
++                            by_alias=response_model_by_alias,
++                            exclude_unset=response_model_exclude_unset,
++                            exclude_defaults=response_model_exclude_defaults,
++                            exclude_none=response_model_exclude_none,
++                        )
++                        return line + b"\n"
++                    else:
++                        data = jsonable_encoder(item)
++                        return json.dumps(data).encode("utf-8") + b"\n"
++
++                if dependant.is_async_gen_callable:
++
++                    async def _async_stream_jsonl() -> AsyncIterator[bytes]:
++                        async for item in gen:
++                            yield _serialize_item(item)
++                            # To allow for cancellation to trigger
++                            # Ref: https://github.com/fastapi/fastapi/issues/14680
++                            await anyio.sleep(0)
++
++                    stream_content: AsyncIterator[bytes] | Iterator[bytes] = (
++                        _async_stream_jsonl()
++                    )
++                else:
++
++                    def _sync_stream_jsonl() -> Iterator[bytes]:
++                        for item in gen:
++                            yield _serialize_item(item)
++
++                    stream_content = _sync_stream_jsonl()
++
++                response = StreamingResponse(
++                    stream_content,
++                    media_type="application/jsonl",
++                    background=solved_result.background_tasks,
+                 )
+-                if current_status_code is not None:
+-                    response_args["status_code"] = current_status_code
+-                if solved_result.response.status_code:
+-                    response_args["status_code"] = solved_result.response.status_code
+-                # Use the fast path (dump_json) when no custom response
+-                # class was set and a response field with a TypeAdapter
+-                # exists. Serializes directly to JSON bytes via Pydantic's
+-                # Rust core, skipping the intermediate Python dict +
+-                # json.dumps() step.
+-                use_dump_json = response_field is not None and isinstance(
+-                    response_class, DefaultPlaceholder
++                response.headers.raw.extend(solved_result.response.headers.raw)
++            elif dependant.is_async_gen_callable or dependant.is_gen_callable:
++                # Raw streaming with explicit response_class (e.g. StreamingResponse)
++                gen = dependant.call(**solved_result.values)
++                if dependant.is_async_gen_callable:
++
++                    async def _async_stream_raw(
++                        async_gen: AsyncIterator[Any],
++                    ) -> AsyncIterator[Any]:
++                        async for chunk in async_gen:
++                            yield chunk
++                            # To allow for cancellation to trigger
++                            # Ref: https://github.com/fastapi/fastapi/issues/14680
++                            await anyio.sleep(0)
++
++                    gen = _async_stream_raw(gen)
++                response_args = _build_response_args(
++                    status_code=status_code, solved_result=solved_result
+                 )
+-                content = await serialize_response(
+-                    field=response_field,
+-                    response_content=raw_response,
+-                    include=response_model_include,
+-                    exclude=response_model_exclude,
+-                    by_alias=response_model_by_alias,
+-                    exclude_unset=response_model_exclude_unset,
+-                    exclude_defaults=response_model_exclude_defaults,
+-                    exclude_none=response_model_exclude_none,
++                response = actual_response_class(content=gen, **response_args)
++                response.headers.raw.extend(solved_result.response.headers.raw)
++            else:
++                raw_response = await run_endpoint_function(
++                    dependant=dependant,
++                    values=solved_result.values,
+                     is_coroutine=is_coroutine,
+-                    endpoint_ctx=endpoint_ctx,
+-                    dump_json=use_dump_json,
+                 )
+-                if use_dump_json:
+-                    response = Response(
+-                        content=content,
+-                        media_type="application/json",
+-                        **response_args,
+-                    )
++                if isinstance(raw_response, Response):
++                    if raw_response.background is None:
++                        raw_response.background = solved_result.background_tasks
++                    response = raw_response
+                 else:
+-                    response = actual_response_class(content, **response_args)
+-                if not is_body_allowed_for_status_code(response.status_code):
+-                    response.body = b""
+-                response.headers.raw.extend(solved_result.response.headers.raw)
++                    response_args = _build_response_args(
++                        status_code=status_code, solved_result=solved_result
++                    )
++                    # Use the fast path (dump_json) when no custom response
++                    # class was set and a response field with a TypeAdapter
++                    # exists. Serializes directly to JSON bytes via Pydantic's
++                    # Rust core, skipping the intermediate Python dict +
++                    # json.dumps() step.
++                    use_dump_json = response_field is not None and isinstance(
++                        response_class, DefaultPlaceholder
++                    )
++                    content = await serialize_response(
++                        field=response_field,
++                        response_content=raw_response,
++                        include=response_model_include,
++                        exclude=response_model_exclude,
++                        by_alias=response_model_by_alias,
++                        exclude_unset=response_model_exclude_unset,
++                        exclude_defaults=response_model_exclude_defaults,
++                        exclude_none=response_model_exclude_none,
++                        is_coroutine=is_coroutine,
++                        endpoint_ctx=endpoint_ctx,
++                        dump_json=use_dump_json,
++                    )
++                    if use_dump_json:
++                        response = Response(
++                            content=content,
++                            media_type="application/json",
++                            **response_args,
++                        )
++                    else:
++                        response = actual_response_class(content, **response_args)
++                    if not is_body_allowed_for_status_code(response.status_code):
++                        response.body = b""
++                    response.headers.raw.extend(solved_result.response.headers.raw)
+         if errors:
+             validation_error = RequestValidationError(
+                 errors, body=body, endpoint_ctx=endpoint_ctx
+@@ -609,12 +701,21 @@ def __init__(
+     ) -> None:
+         self.path = path
+         self.endpoint = endpoint
++        self.stream_item_type: Any | None = None
+         if isinstance(response_model, DefaultPlaceholder):
+             return_annotation = get_typed_return_annotation(endpoint)
+             if lenient_issubclass(return_annotation, Response):
+                 response_model = None
+             else:
+-                response_model = return_annotation
++                stream_item = get_stream_item_type(return_annotation)
++                if stream_item is not None:
++                    # Only extract item type for JSONL streaming when no
++                    # explicit response_class (e.g. StreamingResponse) was set
++                    if isinstance(response_class, DefaultPlaceholder):
++                        self.stream_item_type = stream_item
++                    response_model = None
++                else:
++                    response_model = return_annotation
+         self.response_model = response_model
+         self.summary = summary
+         self.response_description = response_description
+@@ -663,6 +764,15 @@ def __init__(
+             )
+         else:
+             self.response_field = None  # type: ignore
++        if self.stream_item_type:
++            stream_item_name = "StreamItem_" + self.unique_id
++            self.stream_item_field: ModelField | None = create_model_field(
++                name=stream_item_name,
++                type_=self.stream_item_type,
++                mode="serialization",
++            )
++        else:
++            self.stream_item_field = None
+         self.dependencies = list(dependencies or [])
+         self.description = description or inspect.cleandoc(self.endpoint.__doc__ or "")
+         # if a "form feed" character (page break) is found in the description text,
+@@ -704,6 +814,11 @@ def __init__(
+             name=self.unique_id,
+             embed_body_fields=self._embed_body_fields,
+         )
++        # Detect generator endpoints that should stream as JSONL
++        # (only when no explicit response_class like StreamingResponse is set)
++        self.is_json_stream = isinstance(response_class, DefaultPlaceholder) and (
++            self.dependant.is_async_gen_callable or self.dependant.is_gen_callable
++        )
+         self.app = request_response(self.get_route_handler())
+ 
+     def get_route_handler(self) -> Callable[[Request], Coroutine[Any, Any, Response]]:
+@@ -722,6 +837,8 @@ def get_route_handler(self) -> Callable[[Request], Coroutine[Any, Any, Response]
+             dependency_overrides_provider=self.dependency_overrides_provider,
+             embed_body_fields=self._embed_body_fields,
+             strict_content_type=self.strict_content_type,
++            stream_item_field=self.stream_item_field,
++            is_json_stream=self.is_json_stream,
+         )
+ 
+     def matches(self, scope: Scope) -> tuple[Match, Scope]:
+diff --git a/pyproject.toml b/pyproject.toml
+index 55a5870f0e17d..37caa322f690d 100644
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -42,7 +42,7 @@ classifiers = [
+     "Topic :: Internet :: WWW/HTTP",
+ ]
+ dependencies = [
+-    "starlette>=0.40.0",
++    "starlette>=0.46.0",
+     "pydantic>=2.7.0",
+     "typing-extensions>=4.8.0",
+     "typing-inspection>=0.4.2",
+@@ -321,6 +321,9 @@ ignore = [
+ "docs_src/security/tutorial005_py310.py" = ["B904"]
+ "docs_src/security/tutorial005_py39.py" = ["B904"]
+ "docs_src/json_base64_bytes/tutorial001_py310.py" = ["UP012"]
++"docs_src/stream_json_lines/tutorial001_py310.py" = ["UP028"]
++"docs_src/stream_data/tutorial001_py310.py" = ["UP028"]
++"docs_src/stream_data/tutorial002_py310.py" = ["UP028"]
+ 
+ [tool.ruff.lint.isort]
+ known-third-party = ["fastapi", "pydantic", "starlette"]
+diff --git a/tests/test_stream_bare_type.py b/tests/test_stream_bare_type.py
+new file mode 100644
+index 0000000000000..68bd31df6bd5f
+--- /dev/null
++++ b/tests/test_stream_bare_type.py
+@@ -0,0 +1,42 @@
++import json
++from typing import AsyncIterable, Iterable  # noqa: UP035 to test coverage
++
++from fastapi import FastAPI
++from fastapi.testclient import TestClient
++from pydantic import BaseModel
++
++
++class Item(BaseModel):
++    name: str
++
++
++app = FastAPI()
++
++
++@app.get("/items/stream-bare-async")
++async def stream_bare_async() -> AsyncIterable:
++    yield {"name": "foo"}
++
++
++@app.get("/items/stream-bare-sync")
++def stream_bare_sync() -> Iterable:
++    yield {"name": "bar"}
++
++
++client = TestClient(app)
++
++
++def test_stream_bare_async_iterable():
++    response = client.get("/items/stream-bare-async")
++    assert response.status_code == 200
++    assert response.headers["content-type"] == "application/jsonl"
++    lines = [json.loads(line) for line in response.text.strip().splitlines()]
++    assert lines == [{"name": "foo"}]
++
++
++def test_stream_bare_sync_iterable():
++    response = client.get("/items/stream-bare-sync")
++    assert response.status_code == 200
++    assert response.headers["content-type"] == "application/jsonl"
++    lines = [json.loads(line) for line in response.text.strip().splitlines()]
++    assert lines == [{"name": "bar"}]
+diff --git a/tests/test_stream_cancellation.py b/tests/test_stream_cancellation.py
+new file mode 100644
+index 0000000000000..20069c5f6b18f
+--- /dev/null
++++ b/tests/test_stream_cancellation.py
+@@ -0,0 +1,88 @@
++"""
++Test that async streaming endpoints can be cancelled without hanging.
++
++Ref: https://github.com/fastapi/fastapi/issues/14680
++"""
++
++from collections.abc import AsyncIterable
++
++import anyio
++import pytest
++from fastapi import FastAPI
++from fastapi.responses import StreamingResponse
++
++pytestmark = [
++    pytest.mark.anyio,
++    pytest.mark.filterwarnings("ignore::pytest.PytestUnraisableExceptionWarning"),
++]
++
++
++app = FastAPI()
++
++
++@app.get("/stream-raw", response_class=StreamingResponse)
++async def stream_raw() -> AsyncIterable[str]:
++    """Async generator with no internal await - would hang without checkpoint."""
++    i = 0
++    while True:
++        yield f"item {i}\n"
++        i += 1
++
++
++@app.get("/stream-jsonl")
++async def stream_jsonl() -> AsyncIterable[int]:
++    """JSONL async generator with no internal await."""
++    i = 0
++    while True:
++        yield i
++        i += 1
++
++
++async def _run_asgi_and_cancel(app: FastAPI, path: str, timeout: float) -> bool:
++    """Call the ASGI app for *path* and cancel after *timeout* seconds.
++
++    Returns `True` if the cancellation was delivered (i.e. it did not hang).
++    """
++    chunks: list[bytes] = []
++
++    async def receive():  # type: ignore[no-untyped-def]
++        # Simulate a client that never disconnects, rely on cancellation
++        await anyio.sleep(float("inf"))
++        return {"type": "http.disconnect"}  # pragma: no cover
++
++    async def send(message: dict) -> None:  # type: ignore[type-arg]
++        if message["type"] == "http.response.body":
++            chunks.append(message.get("body", b""))
++
++    scope = {
++        "type": "http",
++        "asgi": {"version": "3.0", "spec_version": "2.0"},
++        "http_version": "1.1",
++        "method": "GET",
++        "path": path,
++        "query_string": b"",
++        "root_path": "",
++        "headers": [],
++        "server": ("test", 80),
++    }
++
++    with anyio.move_on_after(timeout) as cancel_scope:
++        await app(scope, receive, send)  # type: ignore[arg-type]
++
++    # If we got here within the timeout the generator was cancellable.
++    # cancel_scope.cancelled_caught is True when move_on_after fired.
++    return cancel_scope.cancelled_caught or len(chunks) > 0
++
++
++async def test_raw_stream_cancellation() -> None:
++    """Raw streaming endpoint should be cancellable within a reasonable time."""
++    cancelled = await _run_asgi_and_cancel(app, "/stream-raw", timeout=3.0)
++    # The key assertion: we reached this line at all (didn't hang).
++    # cancelled will be True because the infinite generator was interrupted.
++    assert cancelled
++
++
++async def test_jsonl_stream_cancellation() -> None:
++    """JSONL streaming endpoint should be cancellable within a reasonable time."""
++    cancelled = await _run_asgi_and_cancel(app, "/stream-jsonl", timeout=3.0)
++    assert cancelled
+diff --git a/tests/test_stream_json_validation_error.py b/tests/test_stream_json_validation_error.py
+new file mode 100644
+index 0000000000000..f60b4a6abe601
+--- /dev/null
++++ b/tests/test_stream_json_validation_error.py
+@@ -0,0 +1,40 @@
++from collections.abc import AsyncIterable, Iterable
++
++import pytest
++from fastapi import FastAPI
++from fastapi.exceptions import ResponseValidationError
++from fastapi.testclient import TestClient
++from pydantic import BaseModel
++
++
++class Item(BaseModel):
++    name: str
++    price: float
++
++
++app = FastAPI()
++
++
++@app.get("/items/stream-invalid")
++async def stream_items_invalid() -> AsyncIterable[Item]:
++    yield {"name": "valid", "price": 1.0}
++    yield {"name": "invalid", "price": "not-a-number"}
++
++
++@app.get("/items/stream-invalid-sync")
++def stream_items_invalid_sync() -> Iterable[Item]:
++    yield {"name": "valid", "price": 1.0}
++    yield {"name": "invalid", "price": "not-a-number"}
++
++
++client = TestClient(app)
++
++
++def test_stream_json_validation_error_async():
++    with pytest.raises(ResponseValidationError):
++        client.get("/items/stream-invalid")
++
++
++def test_stream_json_validation_error_sync():
++    with pytest.raises(ResponseValidationError):
++        client.get("/items/stream-invalid-sync")
+diff --git a/tests/test_tutorial/test_stream_data/__init__.py b/tests/test_tutorial/test_stream_data/__init__.py
+new file mode 100644
+index 0000000000000..e69de29bb2d1d
+diff --git a/tests/test_tutorial/test_stream_data/test_tutorial001.py b/tests/test_tutorial/test_stream_data/test_tutorial001.py
+new file mode 100644
+index 0000000000000..9731b04f79626
+--- /dev/null
++++ b/tests/test_tutorial/test_stream_data/test_tutorial001.py
+@@ -0,0 +1,154 @@
++import importlib
++
++import pytest
++from fastapi.testclient import TestClient
++from inline_snapshot import snapshot
++
++
++@pytest.fixture(
++    name="client",
++    params=[
++        pytest.param("tutorial001_py310"),
++    ],
++)
++def get_client(request: pytest.FixtureRequest):
++    mod = importlib.import_module(f"docs_src.stream_data.{request.param}")
++
++    client = TestClient(mod.app)
++    return client
++
++
++expected_text = (
++    ""
++    "Rick: (stumbles in drunkenly, and turns on the lights)"
++    " Morty! You gotta come on. You got--... you gotta come with me."
++    "Morty: (rubs his eyes) What, Rick? What's going on?"
++    "Rick: I got a surprise for you, Morty."
++    "Morty: It's the middle of the night. What are you talking about?"
++    "Rick: (spills alcohol on Morty's bed) Come on, I got a surprise for you."
++    " (drags Morty by the ankle) Come on, hurry up."
++    " (pulls Morty out of his bed and into the hall)"
++    "Morty: Ow! Ow! You're tugging me too hard!"
++    "Rick: We gotta go, gotta get outta here, come on."
++    " Got a surprise for you Morty."
++)
++
++
++@pytest.mark.parametrize(
++    "path",
++    [
++        "/story/stream",
++        "/story/stream-no-async",
++        "/story/stream-no-annotation",
++        "/story/stream-no-async-no-annotation",
++        "/story/stream-bytes",
++        "/story/stream-no-async-bytes",
++        "/story/stream-no-annotation-bytes",
++        "/story/stream-no-async-no-annotation-bytes",
++    ],
++)
++def test_stream_story(client: TestClient, path: str):
++    response = client.get(path)
++    assert response.status_code == 200, response.text
++    assert response.text == expected_text
++
++
++def test_openapi_schema(client: TestClient):
++    response = client.get("/openapi.json")
++    assert response.status_code == 200, response.text
++    assert response.json() == snapshot(
++        {
++            "openapi": "3.1.0",
++            "info": {"title": "FastAPI", "version": "0.1.0"},
++            "paths": {
++                "/story/stream": {
++                    "get": {
++                        "summary": "Stream Story",
++                        "operationId": "stream_story_story_stream_get",
++                        "responses": {
++                            "200": {
++                                "description": "Successful Response",
++                            }
++                        },
++                    }
++                },
++                "/story/stream-no-async": {
++                    "get": {
++                        "summary": "Stream Story No Async",
++                        "operationId": "stream_story_no_async_story_stream_no_async_get",
++                        "responses": {
++                            "200": {
++                                "description": "Successful Response",
++                            }
++                        },
++                    }
++                },
++                "/story/stream-no-annotation": {
++                    "get": {
++                        "summary": "Stream Story No Annotation",
++                        "operationId": "stream_story_no_annotation_story_stream_no_annotation_get",
++                        "responses": {
++                            "200": {
++                                "description": "Successful Response",
++                            }
++                        },
++                    }
++                },
++                "/story/stream-no-async-no-annotation": {
++                    "get": {
++                        "summary": "Stream Story No Async No Annotation",
++                        "operationId": "stream_story_no_async_no_annotation_story_stream_no_async_no_annotation_get",
++                        "responses": {
++                            "200": {
++                                "description": "Successful Response",
++                            }
++                        },
++                    }
++                },
++                "/story/stream-bytes": {
++                    "get": {
++                        "summary": "Stream Story Bytes",
++                        "operationId": "stream_story_bytes_story_stream_bytes_get",
++                        "responses": {
++                            "200": {
++                                "description": "Successful Response",
++                            }
++                        },
++                    }
++                },
++                "/story/stream-no-async-bytes": {
++                    "get": {
++                        "summary": "Stream Story No Async Bytes",
++                        "operationId": "stream_story_no_async_bytes_story_stream_no_async_bytes_get",
++                        "responses": {
++                            "200": {
++                                "description": "Successful Response",
++                            }
++                        },
++                    }
++                },
++                "/story/stream-no-annotation-bytes": {
++                    "get": {
++                        "summary": "Stream Story No Annotation Bytes",
++                        "operationId": "stream_story_no_annotation_bytes_story_stream_no_annotation_bytes_get",
++                        "responses": {
++                            "200": {
++                                "description": "Successful Response",
++                            }
++                        },
++                    }
++                },
++                "/story/stream-no-async-no-annotation-bytes": {
++                    "get": {
++                        "summary": "Stream Story No Async No Annotation Bytes",
++                        "operationId": "stream_story_no_async_no_annotation_bytes_story_stream_no_async_no_annotation_bytes_get",
++                        "responses": {
++                            "200": {
++                                "description": "Successful Response",
++                            }
++                        },
++                    }
++                },
++            },
++        }
++    )
+diff --git a/tests/test_tutorial/test_stream_data/test_tutorial002.py b/tests/test_tutorial/test_stream_data/test_tutorial002.py
+new file mode 100644
+index 0000000000000..83201a7a22317
+--- /dev/null
++++ b/tests/test_tutorial/test_stream_data/test_tutorial002.py
+@@ -0,0 +1,106 @@
++import importlib
++
++import pytest
++from fastapi.testclient import TestClient
++from inline_snapshot import snapshot
++
++
++@pytest.fixture(
++    name="mod",
++    params=[
++        pytest.param("tutorial002_py310"),
++    ],
++)
++def get_mod(request: pytest.FixtureRequest):
++    return importlib.import_module(f"docs_src.stream_data.{request.param}")
++
++
++@pytest.fixture(name="client")
++def get_client(mod):
++    client = TestClient(mod.app)
++    return client
++
++
++@pytest.mark.parametrize(
++    "path",
++    [
++        "/image/stream",
++        "/image/stream-no-async",
++        "/image/stream-no-annotation",
++        "/image/stream-no-async-no-annotation",
++    ],
++)
++def test_stream_image(mod, client: TestClient, path: str):
++    response = client.get(path)
++    assert response.status_code == 200
++    assert response.headers["content-type"] == "image/png"
++    assert response.content == mod.binary_image
++
++
++def test_openapi_schema(client: TestClient):
++    response = client.get("/openapi.json")
++    assert response.status_code == 200, response.text
++    assert response.json() == snapshot(
++        {
++            "openapi": "3.1.0",
++            "info": {"title": "FastAPI", "version": "0.1.0"},
++            "paths": {
++                "/image/stream": {
++                    "get": {
++                        "summary": "Stream Image",
++                        "operationId": "stream_image_image_stream_get",
++                        "responses": {
++                            "200": {
++                                "description": "Successful Response",
++                                "content": {
++                                    "image/png": {"schema": {"type": "string"}}
++                                },
++                            }
++                        },
++                    }
++                },
++                "/image/stream-no-async": {
++                    "get": {
++                        "summary": "Stream Image No Async",
++                        "operationId": "stream_image_no_async_image_stream_no_async_get",
++                        "responses": {
++                            "200": {
++                                "description": "Successful Response",
++                                "content": {
++                                    "image/png": {"schema": {"type": "string"}}
++                                },
++                            }
++                        },
++                    }
++                },
++                "/image/stream-no-annotation": {
++                    "get": {
++                        "summary": "Stream Image No Annotation",
++                        "operationId": "stream_image_no_annotation_image_stream_no_annotation_get",
++                        "responses": {
++                            "200": {
++                                "description": "Successful Response",
++                                "content": {
++                                    "image/png": {"schema": {"type": "string"}}
++                                },
++                            }
++                        },
++                    }
++                },
++                "/image/stream-no-async-no-annotation": {
++                    "get": {
++                        "summary": "Stream Image No Async No Annotation",
++                        "operationId": "stream_image_no_async_no_annotation_image_stream_no_async_no_annotation_get",
++                        "responses": {
++                            "200": {
++                                "description": "Successful Response",
++                                "content": {
++                                    "image/png": {"schema": {"type": "string"}}
++                                },
++                            }
++                        },
++                    }
++                },
++            },
++        }
++    )
+diff --git a/tests/test_tutorial/test_stream_json_lines/__init__.py b/tests/test_tutorial/test_stream_json_lines/__init__.py
+new file mode 100644
+index 0000000000000..e69de29bb2d1d
+diff --git a/tests/test_tutorial/test_stream_json_lines/test_tutorial001.py b/tests/test_tutorial/test_stream_json_lines/test_tutorial001.py
+new file mode 100644
+index 0000000000000..0b5f9d95bbb15
+--- /dev/null
++++ b/tests/test_tutorial/test_stream_json_lines/test_tutorial001.py
+@@ -0,0 +1,143 @@
++import importlib
++import json
++
++import pytest
++from fastapi.testclient import TestClient
++from inline_snapshot import snapshot
++
++
++@pytest.fixture(
++    name="client",
++    params=[
++        pytest.param("tutorial001_py310"),
++    ],
++)
++def get_client(request: pytest.FixtureRequest):
++    mod = importlib.import_module(f"docs_src.stream_json_lines.{request.param}")
++
++    client = TestClient(mod.app)
++    return client
++
++
++expected_items = [
++    {"name": "Plumbus", "description": "A multi-purpose household device."},
++    {"name": "Portal Gun", "description": "A portal opening device."},
++    {"name": "Meeseeks Box", "description": "A box that summons a Meeseeks."},
++]
++
++
++@pytest.mark.parametrize(
++    "path",
++    [
++        "/items/stream",
++        "/items/stream-no-async",
++        "/items/stream-no-annotation",
++        "/items/stream-no-async-no-annotation",
++    ],
++)
++def test_stream_items(client: TestClient, path: str):
++    response = client.get(path)
++    assert response.status_code == 200, response.text
++    assert response.headers["content-type"] == "application/jsonl"
++    lines = [json.loads(line) for line in response.text.strip().splitlines()]
++    assert lines == expected_items
++
++
++def test_openapi_schema(client: TestClient):
++    response = client.get("/openapi.json")
++    assert response.status_code == 200, response.text
++    assert response.json() == snapshot(
++        {
++            "openapi": "3.1.0",
++            "info": {"title": "FastAPI", "version": "0.1.0"},
++            "paths": {
++                "/items/stream": {
++                    "get": {
++                        "responses": {
++                            "200": {
++                                "description": "Successful Response",
++                                "content": {
++                                    "application/jsonl": {
++                                        "itemSchema": {
++                                            "$ref": "#/components/schemas/Item"
++                                        },
++                                    }
++                                },
++                            }
++              
+
+... [truncated, 64082 chars total]

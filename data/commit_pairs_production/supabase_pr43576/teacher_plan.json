@@ -1,0 +1,124 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "api_design",
+      "recommendation": "Created a new batch signing endpoint `/platform/storage/{ref}/buckets/{id}/objects/sign-multi` that accepts multiple file paths and returns signed URLs in a single API call, replacing the previous approach of making individual API calls for each file.",
+      "rationale": "This reduces the number of management API calls from O(n) to O(1) when downloading multiple files, significantly improving performance for folder downloads and reducing API throttling risks. The batch endpoint follows RESTful conventions by extending the existing signing endpoint pattern with a `-multi` suffix.",
+      "alternatives_considered": [
+        "Extending the existing single-file signing endpoint with an optional array parameter",
+        "Creating a completely separate endpoint with different naming conventions",
+        "Using WebSocket or streaming responses for progressive URL generation"
+      ],
+      "files_affected": [
+        "apps/studio/pages/api/platform/storage/[ref]/buckets/[id]/objects/sign-multi.ts"
+      ]
+    },
+    {
+      "dimension": "security",
+      "recommendation": "Replaced temporary API key minting with signed URL generation for read-only users, maintaining the same security model while enabling broader access.",
+      "rationale": "Signed URLs provide time-limited, scope-limited access to specific objects without requiring elevated permissions. This is more secure than temporary API keys which grant broader access. The solution maintains backward compatibility by keeping temporary API keys for write operations while using signed URLs for downloads.",
+      "alternatives_considered": [
+        "Continuing to use temporary API keys with more restrictive scopes",
+        "Implementing a custom token-based authentication system",
+        "Using presigned URLs with different expiration policies per user role"
+      ],
+      "files_affected": [
+        "apps/studio/state/storage-explorer.tsx",
+        "apps/studio/data/storage/bucket-object-sign-mutation.ts"
+      ]
+    },
+    {
+      "dimension": "performance_optimization",
+      "recommendation": "Implemented batch URL pre-fetching before downloading files, collecting all file paths and making a single API call to get signed URLs for all files simultaneously.",
+      "rationale": "This eliminates the N+1 API call problem where each file download previously required its own management API call. For folder downloads with many files, this reduces network overhead and improves download initiation time. The URLs are cached in a Map for O(1) lookup during the actual download phase.",
+      "alternatives_considered": [
+        "Lazy loading URLs as each file download begins",
+        "Implementing a queue-based system with rate limiting",
+        "Using background prefetching with optimistic UI updates"
+      ],
+      "files_affected": [
+        "apps/studio/state/storage-explorer.tsx"
+      ]
+    },
+    {
+      "dimension": "ui_ux",
+      "recommendation": "Moved the 'Download' action outside the conditional write-permissions block in both context menus, making it available to read-only users while keeping write operations (rename, move, delete) protected.",
+      "rationale": "This provides a consistent user experience where download functionality is always available regardless of permissions, while maintaining security by restricting write operations. The visual hierarchy places download as a primary action, separate from destructive or modifying operations.",
+      "alternatives_considered": [
+        "Creating separate context menus for read-only vs write users",
+        "Using disabled states instead of conditional rendering",
+        "Adding permission badges or tooltips to indicate access levels"
+      ],
+      "files_affected": [
+        "apps/studio/components/interfaces/Storage/StorageExplorer/FileExplorerRow.tsx",
+        "apps/studio/components/interfaces/Storage/StorageExplorer/ItemContextMenu.tsx"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Maintained existing error handling patterns while adding specific error messages for batch operations and URL retrieval failures.",
+      "rationale": "Consistent error handling ensures users receive clear feedback when downloads fail. The implementation checks for missing URLs in the batch response and provides specific error messages for individual file failures while continuing with successful downloads.",
+      "alternatives_considered": [
+        "Implementing retry logic for failed URL generation",
+        "Creating a more sophisticated error aggregation system",
+        "Adding progressive fallback to individual signing if batch fails"
+      ],
+      "files_affected": [
+        "apps/studio/state/storage-explorer.tsx",
+        "apps/studio/pages/api/platform/storage/[ref]/buckets/[id]/objects/sign-multi.ts"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Batch Signed URL API Endpoint",
+      "description": "Create a new API endpoint that generates signed URLs for multiple storage objects in a single request, replacing the need for individual API calls per file.",
+      "files_to_modify": [],
+      "files_to_create": [
+        "apps/studio/pages/api/platform/storage/[ref]/buckets/[id]/objects/sign-multi.ts"
+      ],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-002",
+      "title": "Storage Client Batch Signing Integration",
+      "description": "Update the storage client utilities to support batch signed URL requests with proper TypeScript types and error handling.",
+      "files_to_modify": [
+        "apps/studio/data/storage/bucket-object-sign-mutation.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-003",
+      "title": "Storage Explorer Download Logic Refactor",
+      "description": "Refactor the storage explorer state management to use batch signed URLs for multi-file downloads and update single file downloads to use the new signed URL approach.",
+      "files_to_modify": [
+        "apps/studio/state/storage-explorer.tsx"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "large"
+    },
+    {
+      "id": "T-004",
+      "title": "UI Permission Updates for Download Actions",
+      "description": "Update context menus and row actions to make download functionality available to read-only users while keeping write operations protected.",
+      "files_to_modify": [
+        "apps/studio/components/interfaces/Storage/StorageExplorer/FileExplorerRow.tsx",
+        "apps/studio/components/interfaces/Storage/StorageExplorer/ItemContextMenu.tsx"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation introduces a batch signed URL generation system for Supabase Storage downloads, replacing the previous temporary API key approach. The core architectural change is the addition of a new API endpoint (`sign-multi`) that can generate signed URLs for multiple objects in a single request, dramatically reducing API calls for folder downloads from O(n) to O(1).\n\nThe solution maintains backward compatibility by distinguishing between public and private buckets - public buckets use direct URLs while private buckets use the new batch signing endpoint. The storage explorer state management was refactored to pre-fetch all URLs in a batch before initiating downloads, using a Map for efficient lookup. This batch approach significantly improves performance for multi-file operations while maintaining security through time-limited signed URLs.\n\nUI changes were made to make download functionality available to read-only users by moving the download action outside permission-gated blocks in context menus, while keeping write operations (rename, move, delete) protected. The implementation follows the existing patterns in the codebase for API wrappers, error handling, and state management, ensuring consistency with the overall architecture. The solution elegantly solves the original problem of enabling read-only users to download files without requiring elevated permissions or temporary API keys.",
+  "source_pr": "https://github.com/supabase/supabase/pull/43576",
+  "before_sha": "f7d3d2d3c3c4b2ccef8017665539f915a34006fb",
+  "after_sha": "8732fc3bd95ed9f99882dcb0ce70e7d4fcda3fe5",
+  "diff_stats": {
+    "additions": 137,
+    "deletions": 39,
+    "files_changed": 5
+  }
+}

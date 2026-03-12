@@ -1,0 +1,65 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "api_design",
+      "recommendation": "Added decodeURIComponent() to parse URL-encoded cookie values before passing to URLSearchParams",
+      "rationale": "Next.js's response.cookies.set() automatically URL-encodes cookie values containing special characters like '=' and '&'. The original implementation failed because URLSearchParams expects unencoded key-value pairs. By decoding first, we handle both encoded and unencoded formats transparently.",
+      "alternatives_considered": [
+        "Modifying Next.js cookie encoding behavior",
+        "Using a custom parser instead of URLSearchParams",
+        "Accepting only unencoded values and requiring callers to decode"
+      ],
+      "files_affected": [
+        "packages/common/first-referrer-cookie.ts"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Maintained backward compatibility by decoding all values, not just encoded ones",
+      "rationale": "decodeURIComponent() safely passes through already-unencoded strings (it returns them unchanged). This ensures existing cookies continue to work while adding support for Next.js's encoded format. No conditional logic needed.",
+      "alternatives_considered": [
+        "Detecting encoded vs unencoded and applying decodeURIComponent() conditionally",
+        "Creating two parsing paths for different cookie formats",
+        "Throwing errors for encoded cookies in old code"
+      ],
+      "files_affected": [
+        "packages/common/first-referrer-cookie.ts"
+      ]
+    },
+    {
+      "dimension": "testing",
+      "recommendation": "Added comprehensive test cases covering URL-encoded cookies in various scenarios",
+      "rationale": "Tests verify: 1) Basic URL-encoded parsing works, 2) Different boolean flag combinations, 3) Cookie parsing among multiple cookies in header. This ensures the fix handles real-world Next.js production scenarios and edge cases.",
+      "alternatives_considered": [
+        "Only testing the happy path",
+        "Testing at integration level instead of unit level",
+        "Relying on existing tests without adding new ones"
+      ],
+      "files_affected": [
+        "packages/common/first-referrer-cookie.test.ts"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Fix URL-encoded cookie parsing for Next.js compatibility",
+      "description": "Update mw_diag cookie parser to handle URL-encoded values produced by Next.js's response.cookies.set() method, which encodes special characters like '=' as %3D and '&' as %26",
+      "files_to_modify": [
+        "packages/common/first-referrer-cookie.ts",
+        "packages/common/first-referrer-cookie.test.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The change addresses a compatibility issue between the mw_diag cookie parser and Next.js's cookie handling. Next.js automatically URL-encodes cookie values when using response.cookies.set(), turning characters like '=' and '&' into %3D and %26 respectively. The original parser used URLSearchParams directly on the raw cookie value, which failed because URLSearchParams expects unencoded key-value pairs.\n\nThe fix is minimal and elegant: simply wrap the raw cookie value with decodeURIComponent() before passing it to URLSearchParams. This single-line change handles both encoded and unencoded formats transparently, since decodeURIComponent() returns unencoded strings unchanged. This maintains perfect backward compatibility while adding support for Next.js's production format.\n\nThe accompanying test additions are comprehensive, covering the exact encoded format Next.js produces, different boolean flag combinations, and the scenario where the mw_diag cookie appears among other cookies in the header. This ensures the parser works correctly in real-world deployment scenarios where cookies are set by Next.js middleware or API routes.",
+  "source_pr": "https://github.com/supabase/supabase/pull/43606",
+  "before_sha": "8fe62a57156f08e38c98d9b8bdaf2804d0736f60",
+  "after_sha": "dcbaaad64e552efbf777f8b5209b8bcdcd01deb4",
+  "diff_stats": {
+    "additions": 29,
+    "deletions": 2,
+    "files_changed": 2
+  }
+}

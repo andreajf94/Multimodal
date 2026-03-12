@@ -1,0 +1,67 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "dependency_management",
+      "recommendation": "Pinned Click to version 8.2.1 with an exact version specifier (==) instead of allowing newer versions",
+      "rationale": "MkDocs live reload functionality was breaking with newer versions of Click (specifically 8.3.1). By pinning to a known working version, we ensure consistent behavior across development environments and prevent regression when Click releases updates. The exact version specifier provides deterministic builds.",
+      "alternatives_considered": [
+        "Using a version range (e.g., >=8.2.1,<8.3.0) to allow patches within the 8.2.x series",
+        "Adding compatibility shims in the code to handle Click API changes",
+        "Updating MkDocs or related dependencies to work with newer Click versions"
+      ],
+      "files_affected": [
+        "pyproject.toml",
+        "uv.lock"
+      ]
+    },
+    {
+      "dimension": "documentation_workflow",
+      "recommendation": "Added Click as a dependency to both 'dev' and 'docs' dependency groups with clear inline comment explaining the purpose",
+      "rationale": "MkDocs live reload is used during documentation development and testing. Adding Click to both groups ensures developers working on documentation have the correct version whether they're running tests or building docs. The inline comment provides context for future maintainers about why this specific version is pinned.",
+      "alternatives_considered": [
+        "Adding Click only to the 'docs' group since it's primarily for documentation",
+        "Creating a separate dependency group specifically for documentation development tools",
+        "Relying on MkDocs to declare its own Click dependency version"
+      ],
+      "files_affected": [
+        "pyproject.toml",
+        "uv.lock"
+      ]
+    },
+    {
+      "dimension": "lock_file_management",
+      "recommendation": "Updated uv.lock file to reflect the pinned Click version and added Click to the dependency groups in the lock file",
+      "rationale": "uv.lock is the lock file for the project's dependencies. When changing dependency versions in pyproject.toml, the lock file must be updated to ensure reproducible builds. The lock file changes include the new version hash, download URLs, and adds Click to the appropriate dependency groups.",
+      "alternatives_considered": [
+        "Not updating the lock file and relying on developers to regenerate it",
+        "Using a different lock file format or dependency manager",
+        "Removing the lock file entirely and relying only on version constraints"
+      ],
+      "files_affected": [
+        "uv.lock"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Pin Click version for MkDocs compatibility",
+      "description": "Pin Click dependency to version 8.2.1 to fix MkDocs live reload functionality that was breaking with newer Click versions",
+      "files_to_modify": [
+        "pyproject.toml",
+        "uv.lock"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The change addresses a compatibility issue between Click and MkDocs live reload functionality by pinning the Click dependency to version 8.2.1. This was implemented by modifying two key files: pyproject.toml (the project's dependency configuration) and uv.lock (the dependency lock file for reproducible builds).\n\nIn pyproject.toml, Click was added to the 'docs' dependency group with an exact version specifier (==8.2.1) and an explanatory comment indicating it's for MkDocs live reload. The dependency was also added to the 'dev' group since documentation development workflows might use both groups. The approach uses an exact version pin rather than a range to ensure deterministic behavior and prevent future breaking changes in Click from affecting the documentation workflow.\n\nThe uv.lock file was updated to reflect the new Click version, including the specific package metadata (version 8.2.1 instead of 8.3.1), download URLs, and file hashes. Click was also added to the dependency groups in the lock file's metadata section to ensure it's properly included when those groups are installed. This comprehensive update ensures that all developers working on the FastAPI documentation will have a consistent environment with working live reload functionality.",
+  "source_pr": "https://github.com/fastapi/fastapi/pull/15057",
+  "before_sha": "365fad3c7bd023029123d8466fe9ec9988973f79",
+  "after_sha": "9d475aae74a40f477984c033a7e086bbaf1e59d0",
+  "diff_stats": {
+    "additions": 9,
+    "deletions": 3,
+    "files_changed": 2
+  }
+}

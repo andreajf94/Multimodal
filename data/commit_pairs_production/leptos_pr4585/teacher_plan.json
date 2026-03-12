@@ -1,0 +1,136 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "api_design",
+      "recommendation": "Created a new BitcodeSerdeEncoding struct that implements the existing Encodes and Decodes traits using bitcode's serde integration functions (bitcode::serialize and bitcode::deserialize). This follows the same pattern as existing codecs in the system.",
+      "rationale": "The framework already has a well-defined codec abstraction with Encodes/Decodes traits. By implementing these traits for BitcodeSerdeEncoding, the new codec integrates seamlessly with the existing server function system without requiring changes to the core architecture. This maintains consistency and reduces cognitive load for developers familiar with the framework.",
+      "alternatives_considered": [
+        "Modifying the existing Bitcode codec to handle serde types",
+        "Creating a completely new abstraction layer for serde-based serialization",
+        "Requiring types to implement both bitcode::Encode/Decode and serde::Serialize/Deserialize"
+      ],
+      "files_affected": [
+        "server_fn/src/codec/bitcode_serde.rs"
+      ]
+    },
+    {
+      "dimension": "feature_gating",
+      "recommendation": "Added a new 'bitcode-serde' feature flag that conditionally compiles the new codec, and added it to the denylist in the main crate to prevent accidental inclusion.",
+      "rationale": "The framework uses feature flags to allow users to opt into specific serialization formats. Adding a separate feature for bitcode-serde ensures users can choose between the native bitcode implementation and the serde-based one. The denylist addition prevents the feature from being enabled by default, maintaining the principle of minimal dependencies.",
+      "alternatives_considered": [
+        "Making bitcode-serde always available when bitcode is enabled",
+        "Creating a single 'bitcode' feature that includes both implementations",
+        "Not using feature flags at all"
+      ],
+      "files_affected": [
+        "leptos/Cargo.toml",
+        "server_fn/Cargo.toml",
+        "server_fn/src/codec/mod.rs"
+      ]
+    },
+    {
+      "dimension": "dependency_management",
+      "recommendation": "Updated server_fn/Cargo.toml to make the bitcode-serde feature depend on 'bitcode?/serde', enabling bitcode's serde integration only when the bitcode-serde feature is active.",
+      "rationale": "The bitcode crate likely has its own serde feature that needs to be enabled for serde integration. Using 'bitcode?/serde' ensures that when bitcode-serde is enabled, bitcode is compiled with serde support, but doesn't force serde support when only the regular bitcode feature is used. This minimizes compile times and binary size for users who don't need serde integration.",
+      "alternatives_considered": [
+        "Always enabling bitcode's serde feature",
+        "Creating a separate dependency on bitcode with serde enabled",
+        "Requiring users to manually enable bitcode's serde feature"
+      ],
+      "files_affected": [
+        "server_fn/Cargo.toml"
+      ]
+    },
+    {
+      "dimension": "testing_strategy",
+      "recommendation": "Updated the test configuration to include the new bitcode-serde feature in the test compilation conditions, ensuring the new codec is tested alongside other codecs.",
+      "rationale": "The existing test file uses conditional compilation to test all available codecs. Adding bitcode-serde to this condition ensures the new codec is automatically tested when its feature is enabled, maintaining test coverage parity with other codecs without requiring separate test files.",
+      "alternatives_considered": [
+        "Creating a separate test file for bitcode-serde",
+        "Not testing the new codec at all",
+        "Testing it only in integration tests"
+      ],
+      "files_affected": [
+        "server_fn/tests/server_macro.rs"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Used bitcode::Error as the error type for both encoding and decoding operations in the BitcodeSerdeEncoding implementation.",
+      "rationale": "The bitcode crate provides its own error type that encapsulates serialization/deserialization failures. Using this type directly allows errors to propagate naturally and provides detailed error information to callers. This matches the pattern used by other codecs in the system.",
+      "alternatives_considered": [
+        "Creating a custom error type for bitcode-serde",
+        "Converting bitcode errors to a generic serialization error type",
+        "Using Box<dyn Error> for flexibility"
+      ],
+      "files_affected": [
+        "server_fn/src/codec/bitcode_serde.rs"
+      ]
+    },
+    {
+      "dimension": "documentation",
+      "recommendation": "Added clear documentation comments explaining the purpose of the BitcodeSerde codec and notes about browser compatibility for PATCH and PUT request types.",
+      "rationale": "The documentation helps users understand when to use BitcodeSerde vs. the regular Bitcode codec. The browser compatibility warnings for PATCH and PUT methods are copied from existing codecs, ensuring consistent user experience and preventing confusion about which HTTP methods work without JavaScript.",
+      "alternatives_considered": [
+        "Minimal documentation assuming users will read the existing codec documentation",
+        "Separate documentation file",
+        "No browser compatibility warnings"
+      ],
+      "files_affected": [
+        "server_fn/src/codec/bitcode_serde.rs"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Implement BitcodeSerde codec core",
+      "description": "Create the main BitcodeSerdeEncoding struct that implements Encodes and Decodes traits using bitcode's serde integration functions",
+      "files_to_modify": [],
+      "files_to_create": [
+        "server_fn/src/codec/bitcode_serde.rs"
+      ],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-002",
+      "title": "Integrate BitcodeSerde into codec system",
+      "description": "Add the new codec module to the codec system with proper feature gating and export it alongside other codecs",
+      "files_to_modify": [
+        "server_fn/src/codec/mod.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-003",
+      "title": "Update dependency configuration",
+      "description": "Add feature flags and dependencies for bitcode-serde in both the main crate and server_fn crate",
+      "files_to_modify": [
+        "leptos/Cargo.toml",
+        "server_fn/Cargo.toml"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-004",
+      "title": "Update test configuration",
+      "description": "Ensure the new codec is included in existing tests when its feature is enabled",
+      "files_to_modify": [
+        "server_fn/tests/server_macro.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation adds a new BitcodeSerde codec to the Leptos server function system, providing an alternative serialization method for types that implement serde traits but not bitcode's native Encode/Decode traits. The approach follows the established patterns in the codebase by creating a new struct (BitcodeSerdeEncoding) that implements the existing Encodes and Decodes traits, using bitcode::serialize and bitcode::deserialize for the actual serialization work.\n\nThe codec is properly feature-gated with a 'bitcode-serde' feature flag that conditionally enables compilation. This feature depends on bitcode's serde integration ('bitcode?/serde'), ensuring the necessary functionality is available without forcing it on users who only need the regular bitcode codec. The implementation includes the standard HTTP method wrappers (Post, Patch, Put) that match other codecs in the system, complete with appropriate browser compatibility warnings.\n\nIntegration with the existing system is minimal and non-disruptive: the new module is added to the codec module exports with proper feature gating, dependencies are updated in Cargo.toml files, and tests are configured to include the new codec. This approach allows users to seamlessly switch between serialization methods based on their type implementations while maintaining the same API surface and error handling patterns as existing codecs.",
+  "source_pr": "https://github.com/leptos-rs/leptos/pull/4585",
+  "before_sha": "da62c0cb9a1d814cf480c2f1dae5f67f4ea4773f",
+  "after_sha": "fc8382e51ad3317ddb7405ffa1d98b66b1215020",
+  "diff_stats": {
+    "additions": 61,
+    "deletions": 0,
+    "files_changed": 5
+  }
+}

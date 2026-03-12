@@ -1,0 +1,38 @@
+diff --git a/packages/excalidraw/components/dropdownMenu/DropdownMenu.scss b/packages/excalidraw/components/dropdownMenu/DropdownMenu.scss
+index 939ef763ce4e..e207203d60f3 100644
+--- a/packages/excalidraw/components/dropdownMenu/DropdownMenu.scss
++++ b/packages/excalidraw/components/dropdownMenu/DropdownMenu.scss
+@@ -181,6 +181,21 @@
+         box-shadow: 0 0 0 1px var(--color-brand-active);
+       }
+ 
++      &[disabled] {
++        cursor: not-allowed;
++        opacity: 0.5;
++        pointer-events: none;
++
++        &:hover {
++          background-color: transparent;
++        }
++
++        &:active {
++          background-color: transparent;
++          box-shadow: none;
++        }
++      }
++
+       svg {
+         width: 1rem;
+         height: 1rem;
+diff --git a/packages/excalidraw/components/main-menu/DefaultItems.tsx b/packages/excalidraw/components/main-menu/DefaultItems.tsx
+index 8865dfa7aead..9793b62e282f 100644
+--- a/packages/excalidraw/components/main-menu/DefaultItems.tsx
++++ b/packages/excalidraw/components/main-menu/DefaultItems.tsx
+@@ -469,6 +469,7 @@ const PreferencesToggleMidpointSnappingItem = () => {
+   return (
+     <DropdownMenuItemCheckbox
+       checked={appState.isMidpointSnappingEnabled}
++      disabled={appState.bindingPreference === "disabled"}
+       onSelect={(event) => {
+         actionManager.executeAction(actionToggleMidpointSnapping);
+         event.preventDefault();

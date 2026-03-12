@@ -1,0 +1,105 @@
+diff --git a/tachys/src/html/directive.rs b/tachys/src/html/directive.rs
+index 5fab0b26fe..4433f5292e 100644
+--- a/tachys/src/html/directive.rs
++++ b/tachys/src/html/directive.rs
+@@ -121,19 +121,19 @@ where
+         self,
+         el: &crate::renderer::types::Element,
+     ) -> Self::State {
+-        let inner = self.0.expect("directive removed early").take();
++        let inner = self.0.expect(super::FEATURE_CONFLICT_DIAGNOSTIC).take();
+         inner.handler.run(el.clone(), inner.param);
+         el.clone()
+     }
+ 
+     fn build(self, el: &crate::renderer::types::Element) -> Self::State {
+-        let inner = self.0.expect("directive removed early").take();
++        let inner = self.0.expect(super::FEATURE_CONFLICT_DIAGNOSTIC).take();
+         inner.handler.run(el.clone(), inner.param);
+         el.clone()
+     }
+ 
+     fn rebuild(self, state: &mut Self::State) {
+-        let inner = self.0.expect("directive removed early").take();
++        let inner = self.0.expect(super::FEATURE_CONFLICT_DIAGNOSTIC).take();
+         inner.handler.run(state.clone(), inner.param);
+     }
+ 
+diff --git a/tachys/src/html/event.rs b/tachys/src/html/event.rs
+index 22b3df3122..a0dec30e63 100644
+--- a/tachys/src/html/event.rs
++++ b/tachys/src/html/event.rs
+@@ -187,7 +187,7 @@ where
+             }
+         }
+ 
+-        let mut cb = self.cb.expect("callback removed before attaching").take();
++        let mut cb = self.cb.expect(super::FEATURE_CONFLICT_DIAGNOSTIC).take();
+ 
+         #[cfg(feature = "tracing")]
+         let span = tracing::Span::current();
+@@ -230,7 +230,7 @@ where
+             Rndr::add_event_listener_use_capture(el, &name, cb)
+         }
+ 
+-        let mut cb = self.cb.expect("callback removed before attaching").take();
++        let mut cb = self.cb.expect(super::FEATURE_CONFLICT_DIAGNOSTIC).take();
+ 
+         #[cfg(feature = "tracing")]
+         let span = tracing::Span::current();
+diff --git a/tachys/src/html/mod.rs b/tachys/src/html/mod.rs
+index a58c4fc0ae..859a560692 100644
+--- a/tachys/src/html/mod.rs
++++ b/tachys/src/html/mod.rs
+@@ -12,6 +12,22 @@ use crate::{
+ use attribute::any_attribute::AnyAttribute;
+ use std::borrow::Cow;
+ 
++/// Diagnostic message shared by event, directive, and property `.expect()` calls.
++///
++/// When the `ssr` feature is active, tachys skips creating client-side values
++/// (event handlers, directives, properties) to avoid `SendWrapper` cross-thread
++/// panics on multithreaded servers. If these `.expect()` calls fire, it means
++/// the `ssr` feature was activated unintentionally via Cargo feature
++/// unification in a client-side (CSR or hydrate) build.
++pub(crate) const FEATURE_CONFLICT_DIAGNOSTIC: &str =
++    "Value is None because the `ssr` feature is active. When `ssr` is \
++     enabled, tachys skips creating client-side values (event handlers, \
++     directives, properties) to avoid cross-thread panics on multithreaded \
++     servers. If you are building a client-side (CSR or hydrate) target, this \
++     means the `ssr` feature is being activated unintentionally via Cargo \
++     feature unification; another dependency in your workspace is enabling \
++     it. Run `cargo tree -e features -i tachys` to identify the source.";
++
+ /// Types for HTML attributes.
+ pub mod attribute;
+ /// Types for manipulating the `class` attribute and `classList`.
+diff --git a/tachys/src/html/property.rs b/tachys/src/html/property.rs
+index 9c435b82c7..d4cf9584ab 100644
+--- a/tachys/src/html/property.rs
++++ b/tachys/src/html/property.rs
+@@ -78,21 +78,21 @@ where
+         el: &crate::renderer::types::Element,
+     ) -> Self::State {
+         self.value
+-            .expect("property removed early")
++            .expect(super::FEATURE_CONFLICT_DIAGNOSTIC)
+             .take()
+             .hydrate::<FROM_SERVER>(el, self.key.as_ref())
+     }
+ 
+     fn build(self, el: &crate::renderer::types::Element) -> Self::State {
+         self.value
+-            .expect("property removed early")
++            .expect(super::FEATURE_CONFLICT_DIAGNOSTIC)
+             .take()
+             .build(el, self.key.as_ref())
+     }
+ 
+     fn rebuild(self, state: &mut Self::State) {
+         self.value
+-            .expect("property removed early")
++            .expect(super::FEATURE_CONFLICT_DIAGNOSTIC)
+             .take()
+             .rebuild(state, self.key.as_ref())
+     }

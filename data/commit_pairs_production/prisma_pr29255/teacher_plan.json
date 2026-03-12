@@ -1,0 +1,140 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "dependency_management",
+      "recommendation": "Updated @prisma/studio-core dependency from 0.13.1 to 0.16.3 in the CLI package to leverage the latest Studio features and improvements",
+      "rationale": "The update brings bug fixes, performance improvements, and potentially new features from the Studio core team. The version bump from 0.13.1 to 0.16.3 indicates significant development has occurred, and staying current ensures compatibility and access to the latest improvements.",
+      "alternatives_considered": [
+        "Maintaining the older version",
+        "Updating to an intermediate version",
+        "Removing the dependency entirely"
+      ],
+      "files_affected": [
+        "packages/cli/package.json",
+        "pnpm-lock.yaml"
+      ]
+    },
+    {
+      "dimension": "api_design",
+      "recommendation": "Removed all Accelerate URL transformation logic and added early validation to reject Accelerate URLs with clear error messages",
+      "rationale": "Accelerate URLs (prisma:// and prisma+postgres://) are no longer supported in Studio. Instead of silently failing or attempting to transform them, we now provide immediate, clear feedback to users. This simplifies the codebase and prevents confusion when users try to use unsupported connection types.",
+      "alternatives_considered": [
+        "Keeping the transformation logic with deprecation warnings",
+        "Supporting Accelerate URLs with a different implementation",
+        "Silently converting to direct database connections"
+      ],
+      "files_affected": [
+        "packages/cli/src/Studio.ts"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Created a new UserFacingError class for clean error presentation without stack traces and updated error handling to use this class for all Studio validation errors",
+      "rationale": "CLI tools should present clean, user-friendly error messages without technical stack traces for validation errors. The UserFacingError class formats errors with consistent styling (red exclamation mark) and ensures they're displayed cleanly through the CLI's error handling pipeline.",
+      "alternatives_considered": [
+        "Using existing HelpError class",
+        "Adding formatting logic to each error message individually",
+        "Catching and reformatting errors at display time"
+      ],
+      "files_affected": [
+        "packages/cli/src/utils/errors.ts",
+        "packages/cli/src/bin.ts",
+        "packages/cli/src/Studio.ts"
+      ]
+    },
+    {
+      "dimension": "database_adapter_compatibility",
+      "recommendation": "Added MySQL connection string normalization to map Prisma-specific query parameters to mysql2 driver parameters",
+      "rationale": "Prisma uses some query parameters (like 'connection_limit', 'sslaccept') that aren't natively supported by the mysql2 driver. The normalization function converts these to the format mysql2 expects ('connectionLimit', 'ssl' with JSON object), ensuring compatibility while maintaining the Prisma connection string interface.",
+      "alternatives_considered": [
+        "Requiring users to use mysql2-native connection strings",
+        "Creating a separate mysql2 adapter",
+        "Documenting the parameter differences without automatic conversion"
+      ],
+      "files_affected": [
+        "packages/cli/src/Studio.ts"
+      ]
+    },
+    {
+      "dimension": "testing",
+      "recommendation": "Created comprehensive test suite for MySQL URL compatibility to ensure parameter conversion works correctly",
+      "rationale": "The MySQL parameter normalization is critical functionality that needs to be tested to prevent regressions. The tests verify that sslaccept values are correctly converted to mysql2 ssl JSON and that connection_limit is mapped to connectionLimit. Using vitest with mocked dependencies allows isolated testing of the URL transformation logic.",
+      "alternatives_considered": [
+        "Adding tests to existing test files",
+        "Using integration tests with real databases",
+        "Not testing the normalization logic"
+      ],
+      "files_affected": [
+        "packages/cli/src/__tests__/Studio.vitest.ts"
+      ]
+    },
+    {
+      "dimension": "code_organization",
+      "recommendation": "Removed Zod dependency and Accelerate-specific schemas from Studio.ts since Accelerate URL support was removed",
+      "rationale": "With Accelerate URL support removed, the Zod schema for parsing Accelerate API keys and the associated validation logic are no longer needed. Removing them reduces dependencies and simplifies the codebase. The zod import and AccelerateAPIKeyPayloadSchema were completely eliminated.",
+      "alternatives_considered": [
+        "Keeping the code commented out",
+        "Moving it to a separate legacy module",
+        "Adding feature flags to disable it"
+      ],
+      "files_affected": [
+        "packages/cli/src/Studio.ts"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Update Studio Core and Remove Accelerate Support",
+      "description": "Update @prisma/studio-core dependency to latest version and remove all Accelerate URL transformation logic from Studio command",
+      "files_to_modify": [
+        "packages/cli/package.json",
+        "packages/cli/src/Studio.ts",
+        "pnpm-lock.yaml"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-002",
+      "title": "Implement User-Friendly Error Handling",
+      "description": "Create UserFacingError class and update error handling to display clean error messages without stack traces for validation errors",
+      "files_to_modify": [
+        "packages/cli/src/utils/errors.ts",
+        "packages/cli/src/bin.ts",
+        "packages/cli/src/Studio.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-003",
+      "title": "Add MySQL Connection String Normalization",
+      "description": "Implement MySQL connection string parameter mapping from Prisma format to mysql2 driver format",
+      "files_to_modify": [
+        "packages/cli/src/Studio.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-004",
+      "title": "Create MySQL URL Compatibility Tests",
+      "description": "Add comprehensive test suite for MySQL connection string normalization functionality",
+      "files_to_modify": [],
+      "files_to_create": [
+        "packages/cli/src/__tests__/Studio.vitest.ts"
+      ],
+      "estimated_effort": "medium"
+    }
+  ],
+  "implementation_summary": "The changes implement a clean deprecation of Accelerate URL support in Prisma Studio while improving the user experience with better error messages and maintaining compatibility for MySQL connections. The core approach involves three key patterns: 1) Early validation with clear error messages using a new UserFacingError class, 2) Removal of legacy transformation logic to simplify the codebase, and 3) Parameter normalization for MySQL connections to ensure compatibility between Prisma's connection string format and the underlying mysql2 driver.\n\nThe implementation starts by updating the @prisma/studio-core dependency to version 0.16.3, bringing in the latest Studio improvements. All Accelerate URL transformation logic (previously handling prisma:// and prisma+postgres:// protocols) is removed, replaced by early validation that immediately rejects these URLs with a clear error message. This simplifies the codebase by eliminating complex URL parsing and API key validation logic.\n\nFor MySQL connections, a normalization function was added to map Prisma-specific query parameters (like 'connection_limit' and 'sslaccept') to the format expected by the mysql2 driver ('connectionLimit' and 'ssl' with JSON object). This ensures backward compatibility while using the standard mysql2 library. Comprehensive tests verify this parameter conversion works correctly for different sslaccept values and connection limits.\n\nThe changes integrate well with the existing codebase by following established patterns: using the CLI's error handling pipeline, maintaining the same Studio command interface, and adding tests in the existing test structure. The UserFacingError class ensures consistent error presentation across the CLI, and the early validation prevents users from encountering confusing errors deep in the execution stack.",
+  "source_pr": "https://github.com/prisma/prisma/pull/29255",
+  "before_sha": "11ec4fe847ba9ad9d4e41b462608ffa747c398df",
+  "after_sha": "9fa295d70ff0497e0f0e4f06bdd5df76f6a9501a",
+  "diff_stats": {
+    "additions": 204,
+    "deletions": 62,
+    "files_changed": 6
+  }
+}

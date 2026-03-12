@@ -1,0 +1,143 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "api_design",
+      "recommendation": "Added batchIndex property to procedure calls and middleware interfaces to expose call position within batched HTTP requests",
+      "rationale": "The batchIndex property allows developers to identify individual calls within batch operations, which is essential for debugging, logging, and implementing call-specific logic. By making it undefined for non-batched requests, we maintain backward compatibility while providing valuable context for batched operations.",
+      "alternatives_considered": [
+        "Creating a separate batch context object",
+        "Adding batch metadata to request headers only",
+        "Implementing a completely separate batch-aware API surface"
+      ],
+      "files_affected": [
+        "packages/server/src/unstable-core-do-not-import/http/types.ts",
+        "packages/server/src/unstable-core-do-not-import/middleware.ts",
+        "packages/server/src/unstable-core-do-not-import/procedureBuilder.ts"
+      ]
+    },
+    {
+      "dimension": "data_modeling",
+      "recommendation": "Extended TRPCRequestInfoProcedureCall interface to include batchIndex as a required property",
+      "rationale": "By adding batchIndex directly to the procedure call interface, we ensure it's available throughout the entire request processing chain. This approach provides consistent access to batch information whether the call is processed through HTTP adapters, WebSocket connections, or direct procedure calls.",
+      "alternatives_considered": [
+        "Storing batchIndex in a separate metadata object",
+        "Using a request-scoped context variable",
+        "Implementing batchIndex as an optional property with different semantics"
+      ],
+      "files_affected": [
+        "packages/server/src/unstable-core-do-not-import/http/types.ts"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Ensured batchIndex is always defined (even for non-batched requests) with value 0 for consistency",
+      "rationale": "Making batchIndex always defined (0 for single calls) simplifies type checking and reduces conditional logic. This approach ensures developers don't need to handle undefined cases differently, making the API more predictable and easier to use.",
+      "alternatives_considered": [
+        "Making batchIndex optional (number | undefined)",
+        "Using -1 as sentinel value for non-batched calls",
+        "Creating separate interfaces for batched vs non-batched calls"
+      ],
+      "files_affected": [
+        "packages/client/src/links/localLink.ts",
+        "packages/next/src/app-dir/links/nextCache.ts",
+        "packages/next/src/app-dir/server.ts",
+        "packages/react-query/src/server/ssgProxy.ts",
+        "packages/server/src/adapters/next-app-dir/nextAppDirCaller.ts",
+        "packages/server/src/unstable-core-do-not-import/router.ts",
+        "packages/tanstack-react-query/src/internals/createOptionsProxy.ts"
+      ]
+    },
+    {
+      "dimension": "testing",
+      "recommendation": "Added comprehensive test suite covering batched, streamed, non-batched, and single-call scenarios",
+      "rationale": "The test suite validates that batchIndex works correctly across all tRPC transport mechanisms and edge cases. Tests verify proper index assignment in batch operations, middleware access, and backward compatibility for single calls.",
+      "alternatives_considered": [
+        "Testing only the core functionality",
+        "Relying on existing adapter tests",
+        "Creating separate test files for batchIndex functionality"
+      ],
+      "files_affected": [
+        "packages/tests/server/batching.test.ts",
+        "packages/tests/server/callRouter.test.ts",
+        "packages/tests/server/caller.test.ts",
+        "packages/tests/server/getRawInput.test.ts"
+      ]
+    },
+    {
+      "dimension": "integration_patterns",
+      "recommendation": "Updated all adapters and link implementations to propagate batchIndex through the entire request chain",
+      "rationale": "Consistent propagation ensures batchIndex is available whether requests come through HTTP adapters, WebSocket connections, local links, or direct procedure calls. This required updating content type handlers, WebSocket message processing, and various client-side links.",
+      "alternatives_considered": [
+        "Implementing batchIndex only for HTTP adapters",
+        "Using middleware to inject batchIndex conditionally",
+        "Creating adapter-specific batchIndex implementations"
+      ],
+      "files_affected": [
+        "packages/server/src/adapters/ws.ts",
+        "packages/server/src/unstable-core-do-not-import/http/contentType.ts",
+        "packages/server/src/unstable-core-do-not-import/http/resolveResponse.ts",
+        "packages/tests/server/adapters/awsLambda.test.tsx",
+        "packages/tests/server/adapters/express.test.tsx",
+        "packages/tests/server/adapters/fastify.test.ts"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Core batchIndex type definitions and interfaces",
+      "description": "Add batchIndex property to core tRPC interfaces including ProcedureCallOptions, MiddlewareFunction, and TRPCRequestInfoProcedureCall",
+      "files_to_modify": [
+        "packages/server/src/unstable-core-do-not-import/http/types.ts",
+        "packages/server/src/unstable-core-do-not-import/middleware.ts",
+        "packages/server/src/unstable-core-do-not-import/procedureBuilder.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-002",
+      "title": "Adapter and link implementations",
+      "description": "Update all adapters, content handlers, and client links to pass batchIndex through the request chain",
+      "files_to_modify": [
+        "packages/client/src/links/localLink.ts",
+        "packages/next/src/app-dir/links/nextCache.ts",
+        "packages/next/src/app-dir/server.ts",
+        "packages/react-query/src/server/ssgProxy.ts",
+        "packages/server/src/adapters/next-app-dir/nextAppDirCaller.ts",
+        "packages/server/src/adapters/ws.ts",
+        "packages/server/src/unstable-core-do-not-import/http/contentType.ts",
+        "packages/server/src/unstable-core-do-not-import/http/resolveResponse.ts",
+        "packages/server/src/unstable-core-do-not-import/router.ts",
+        "packages/tanstack-react-query/src/internals/createOptionsProxy.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-003",
+      "title": "Comprehensive test suite",
+      "description": "Add tests covering all batchIndex scenarios including batched, streamed, non-batched, middleware access, and adapter-specific behavior",
+      "files_to_modify": [
+        "packages/tests/server/batching.test.ts",
+        "packages/tests/server/callRouter.test.ts",
+        "packages/tests/server/caller.test.ts",
+        "packages/tests/server/getRawInput.test.ts",
+        "packages/tests/server/adapters/awsLambda.test.tsx",
+        "packages/tests/server/adapters/express.test.tsx",
+        "packages/tests/server/adapters/fastify.test.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    }
+  ],
+  "implementation_summary": "The batchIndex feature was implemented by extending core tRPC interfaces to include a batchIndex property that indicates a call's position within batched HTTP requests. The implementation follows a consistent pattern across the entire tRPC ecosystem: batchIndex is added to ProcedureCallOptions, MiddlewareFunction parameters, and TRPCRequestInfoProcedureCall interfaces, ensuring it's available throughout the request processing chain.\n\nKey design decisions include making batchIndex always defined (with value 0 for single calls) rather than optional, which simplifies type safety and reduces conditional logic. This approach ensures backward compatibility while providing valuable context for batch operations. The implementation updates all adapters (HTTP, WebSocket, local links) to properly propagate batchIndex, with special attention to content type handlers that process batched JSON requests.\n\nThe comprehensive test suite validates the feature across all transport mechanisms, including batched HTTP requests, streamed responses, WebSocket connections, and direct procedure calls. Tests also verify that middleware can access batchIndex and that the property behaves correctly in edge cases like single-call batches. This systematic approach ensures the feature works consistently across tRPC's diverse deployment targets while maintaining the framework's type safety guarantees.",
+  "source_pr": "https://github.com/trpc/trpc/pull/7097",
+  "before_sha": "caee09deaab736ab449b3da1a30baf8abac67e4e",
+  "after_sha": "bc215fe627146c4006ef9ef13f3e5e1a28a88c6a",
+  "diff_stats": {
+    "additions": 181,
+    "deletions": 2,
+    "files_changed": 20
+  }
+}

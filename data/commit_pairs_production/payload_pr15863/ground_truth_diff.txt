@@ -1,0 +1,666 @@
+diff --git a/packages/ui/src/elements/ClipboardAction/mergeFormStateFromClipboard.spec.ts b/packages/ui/src/elements/ClipboardAction/mergeFormStateFromClipboard.spec.ts
+new file mode 100644
+index 00000000000..1e717d576ab
+--- /dev/null
++++ b/packages/ui/src/elements/ClipboardAction/mergeFormStateFromClipboard.spec.ts
+@@ -0,0 +1,444 @@
++import type { FormState } from 'payload'
++
++import ObjectIdImport from 'bson-objectid'
++import { describe, expect, it } from 'vitest'
++
++import { mergeFormStateFromClipboard } from './mergeFormStateFromClipboard.js'
++import type { ClipboardPasteData } from './types.js'
++
++const ObjectId = (
++  'default' in ObjectIdImport ? ObjectIdImport.default : ObjectIdImport
++) as typeof ObjectIdImport
++
++describe('mergeFormStateFromClipboard', () => {
++  describe('block ID regeneration', () => {
++    it('should generate new IDs when pasting blocks to prevent duplicates', () => {
++      const copiedBlockID = new ObjectId().toHexString()
++
++      const formState: FormState = {
++        layout: {
++          valid: true,
++          value: 0,
++          initialValue: 0,
++          rows: [],
++        },
++      }
++
++      const clipboardData: ClipboardPasteData = {
++        type: 'blocks',
++        path: 'layout',
++        blocks: [],
++        data: {
++          'layout.0.id': {
++            value: copiedBlockID,
++            valid: true,
++          },
++          'layout.0.blockType': {
++            value: 'content',
++            valid: true,
++          },
++          'layout.0.text': {
++            value: 'test content',
++            valid: true,
++          },
++        },
++        rowIndex: 0,
++      }
++
++      const result = mergeFormStateFromClipboard({
++        dataFromClipboard: clipboardData,
++        formState,
++        path: 'layout',
++      })
++
++      // Check that a new ID was generated
++      expect(result['layout.0.id']).toBeDefined()
++      expect(result['layout.0.id'].value).toBeDefined()
++      expect(result['layout.0.id'].value).not.toEqual(copiedBlockID)
++      expect(ObjectId.isValid(result['layout.0.id'].value as string)).toBe(true)
++
++      // Check that the row metadata also has the new ID
++      expect(result.layout.rows).toHaveLength(1)
++      expect(result.layout.rows?.[0]?.id).not.toEqual(copiedBlockID)
++      expect(result.layout.rows?.[0]?.id).toEqual(result['layout.0.id'].value)
++    })
++
++    it('should generate new IDs for nested blocks', () => {
++      const copiedBlockID = new ObjectId().toHexString()
++      const copiedNestedBlockID = new ObjectId().toHexString()
++
++      const formState: FormState = {
++        layout: {
++          valid: true,
++          value: 0,
++          initialValue: 0,
++          rows: [],
++        },
++      }
++
++      const clipboardData: ClipboardPasteData = {
++        type: 'blocks',
++        path: 'layout',
++        blocks: [],
++        data: {
++          'layout.0.id': {
++            value: copiedBlockID,
++            valid: true,
++          },
++          'layout.0.blockType': {
++            value: 'container',
++            valid: true,
++          },
++          'layout.0.subBlocks': {
++            value: 1,
++            valid: true,
++            rows: [{ id: copiedNestedBlockID }],
++          },
++          'layout.0.subBlocks.0.id': {
++            value: copiedNestedBlockID,
++            valid: true,
++          },
++          'layout.0.subBlocks.0.blockType': {
++            value: 'content',
++            valid: true,
++          },
++        },
++        rowIndex: 0,
++      }
++
++      const result = mergeFormStateFromClipboard({
++        dataFromClipboard: clipboardData,
++        formState,
++        path: 'layout',
++      })
++
++      // Check that parent block got new ID
++      expect(result['layout.0.id'].value).not.toEqual(copiedBlockID)
++      expect(ObjectId.isValid(result['layout.0.id'].value as string)).toBe(true)
++
++      // Check that nested block got new ID
++      expect(result['layout.0.subBlocks.0.id'].value).not.toEqual(copiedNestedBlockID)
++      expect(ObjectId.isValid(result['layout.0.subBlocks.0.id'].value as string)).toBe(true)
++
++      // Check that parent and nested IDs are different
++      expect(result['layout.0.id'].value).not.toEqual(result['layout.0.subBlocks.0.id'].value)
++
++      // Check that parent row metadata has new ID
++      expect(result.layout.rows?.[0]?.id).toEqual(result['layout.0.id'].value)
++
++      // Check that nested row metadata has new ID
++      expect(result['layout.0.subBlocks'].rows?.[0]?.id).toEqual(
++        result['layout.0.subBlocks.0.id'].value,
++      )
++    })
++
++    it('should preserve non-ID field values when pasting', () => {
++      const copiedBlockID = new ObjectId().toHexString()
++
++      const formState: FormState = {
++        layout: {
++          valid: true,
++          value: 0,
++          initialValue: 0,
++          rows: [],
++        },
++      }
++
++      const clipboardData: ClipboardPasteData = {
++        type: 'blocks',
++        path: 'layout',
++        blocks: [],
++        data: {
++          'layout.0.id': {
++            value: copiedBlockID,
++            valid: true,
++          },
++          'layout.0.blockType': {
++            value: 'content',
++            valid: true,
++          },
++          'layout.0.text': {
++            value: 'preserved text content',
++            valid: true,
++          },
++        },
++        rowIndex: 0,
++      }
++
++      const result = mergeFormStateFromClipboard({
++        dataFromClipboard: clipboardData,
++        formState,
++        path: 'layout',
++      })
++
++      // Non-ID fields should be preserved
++      expect(result['layout.0.blockType'].value).toEqual('content')
++      expect(result['layout.0.text'].value).toEqual('preserved text content')
++    })
++
++    it('should generate new ID when pasting from row to field', () => {
++      const copiedBlockID = new ObjectId().toHexString()
++
++      const formState: FormState = {
++        duplicate: {
++          valid: true,
++          value: 0,
++          initialValue: 0,
++          rows: [],
++        },
++      }
++
++      // Simulating copying from blocks.1 and pasting into duplicate field
++      const clipboardData = {
++        type: 'blocks' as const,
++        path: 'blocks',
++        blocks: [],
++        data: {
++          'blocks.1.id': {
++            value: copiedBlockID,
++            valid: true,
++          },
++          'blocks.1.blockType': {
++            value: 'number',
++            valid: true,
++          },
++          'blocks.1.number': {
++            value: 342,
++            valid: true,
++          },
++        },
++        rowIndex: 1,
++      }
++
++      const result = mergeFormStateFromClipboard({
++        dataFromClipboard: clipboardData,
++        formState,
++        path: 'duplicate',
++      })
++
++      // Check that a new ID was generated
++      expect(result['duplicate.0.id']).toBeDefined()
++      expect(result['duplicate.0.id'].value).toBeDefined()
++      expect(result['duplicate.0.id'].value).not.toEqual(copiedBlockID)
++      expect(ObjectId.isValid(result['duplicate.0.id'].value as string)).toBe(true)
++
++      // Check that the row metadata has the new ID (not the copied ID)
++      expect(result.duplicate.rows).toBeDefined()
++      expect(result.duplicate.rows).toHaveLength(1)
++      expect(result.duplicate.rows![0].id).not.toEqual(copiedBlockID)
++      expect(result.duplicate.rows![0].id).toEqual(result['duplicate.0.id'].value)
++
++      // Check that other fields were preserved
++      expect(result['duplicate.0.number'].value).toEqual(342)
++    })
++  })
++
++  describe('array ID regeneration', () => {
++    it('should generate new IDs when pasting arrays to prevent duplicates', () => {
++      const copiedArrayID = new ObjectId().toHexString()
++
++      const formState: FormState = {
++        items: {
++          valid: true,
++          value: 0,
++          initialValue: 0,
++          rows: [],
++        },
++      }
++
++      const clipboardData: ClipboardPasteData = {
++        type: 'array',
++        path: 'items',
++        fields: [],
++        data: {
++          'items.0.id': {
++            value: copiedArrayID,
++            valid: true,
++          },
++          'items.0.text': {
++            value: 'test content',
++            valid: true,
++          },
++        },
++        rowIndex: 0,
++      }
++
++      const result = mergeFormStateFromClipboard({
++        dataFromClipboard: clipboardData,
++        formState,
++        path: 'items',
++      })
++
++      // Check that a new ID was generated
++      expect(result['items.0.id']).toBeDefined()
++      expect(result['items.0.id'].value).toBeDefined()
++      expect(result['items.0.id'].value).not.toEqual(copiedArrayID)
++      expect(ObjectId.isValid(result['items.0.id'].value as string)).toBe(true)
++
++      // Check that the row metadata also has the new ID
++      expect(result.items.rows).toHaveLength(1)
++      expect(result.items.rows?.[0]?.id).not.toEqual(copiedArrayID)
++      expect(result.items.rows?.[0]?.id).toEqual(result['items.0.id'].value)
++    })
++
++    it('should generate new IDs for nested arrays', () => {
++      const copiedArrayID = new ObjectId().toHexString()
++      const copiedNestedArrayID = new ObjectId().toHexString()
++
++      const formState: FormState = {
++        items: {
++          valid: true,
++          value: 0,
++          initialValue: 0,
++          rows: [],
++        },
++      }
++
++      const clipboardData: ClipboardPasteData = {
++        type: 'array',
++        path: 'items',
++        fields: [],
++        data: {
++          'items.0.id': {
++            value: copiedArrayID,
++            valid: true,
++          },
++          'items.0.text': {
++            value: 'parent array',
++            valid: true,
++          },
++          'items.0.subArray': {
++            value: 1,
++            valid: true,
++            rows: [{ id: copiedNestedArrayID }],
++          },
++          'items.0.subArray.0.id': {
++            value: copiedNestedArrayID,
++            valid: true,
++          },
++          'items.0.subArray.0.text': {
++            value: 'nested array',
++            valid: true,
++          },
++        },
++        rowIndex: 0,
++      }
++
++      const result = mergeFormStateFromClipboard({
++        dataFromClipboard: clipboardData,
++        formState,
++        path: 'items',
++      })
++
++      // Check that parent array got new ID
++      expect(result['items.0.id'].value).not.toEqual(copiedArrayID)
++      expect(ObjectId.isValid(result['items.0.id'].value as string)).toBe(true)
++
++      // Check that nested array got new ID
++      expect(result['items.0.subArray.0.id'].value).not.toEqual(copiedNestedArrayID)
++      expect(ObjectId.isValid(result['items.0.subArray.0.id'].value as string)).toBe(true)
++
++      // Check that parent and nested IDs are different
++      expect(result['items.0.id'].value).not.toEqual(result['items.0.subArray.0.id'].value)
++
++      // Check that parent row metadata has new ID
++      expect(result.items.rows?.[0]?.id).toEqual(result['items.0.id'].value)
++
++      // Check that nested row metadata has new ID
++      expect(result['items.0.subArray'].rows?.[0]?.id).toEqual(
++        result['items.0.subArray.0.id'].value,
++      )
++    })
++
++    it('should preserve non-ID field values when pasting arrays', () => {
++      const copiedArrayID = new ObjectId().toHexString()
++
++      const formState: FormState = {
++        items: {
++          valid: true,
++          value: 0,
++          initialValue: 0,
++          rows: [],
++        },
++      }
++
++      const clipboardData: ClipboardPasteData = {
++        type: 'array',
++        path: 'items',
++        fields: [],
++        data: {
++          'items.0.id': {
++            value: copiedArrayID,
++            valid: true,
++          },
++          'items.0.text': {
++            value: 'preserved array text',
++            valid: true,
++          },
++        },
++        rowIndex: 0,
++      }
++
++      const result = mergeFormStateFromClipboard({
++        dataFromClipboard: clipboardData,
++        formState,
++        path: 'items',
++      })
++
++      // Non-ID fields should be preserved
++      expect(result['items.0.text'].value).toEqual('preserved array text')
++    })
++
++    it('should generate new ID when pasting from array row to field', () => {
++      const copiedArrayID = new ObjectId().toHexString()
++
++      const formState: FormState = {
++        disableSort: {
++          valid: true,
++          value: 0,
++          initialValue: 0,
++          rows: [],
++        },
++      }
++
++      // Simulating copying from items.0 and pasting into disableSort field
++      const clipboardData = {
++        type: 'array' as const,
++        path: 'items',
++        fields: [],
++        data: {
++          'items.0.id': {
++            value: copiedArrayID,
++            valid: true,
++          },
++          'items.0.text': {
++            value: 'row one',
++            valid: true,
++          },
++        },
++        rowIndex: 0,
++      }
++
++      const result = mergeFormStateFromClipboard({
++        dataFromClipboard: clipboardData,
++        formState,
++        path: 'disableSort',
++      })
++
++      // Check that a new ID was generated
++      expect(result['disableSort.0.id']).toBeDefined()
++      expect(result['disableSort.0.id'].value).toBeDefined()
++      expect(result['disableSort.0.id'].value).not.toEqual(copiedArrayID)
++      expect(ObjectId.isValid(result['disableSort.0.id'].value as string)).toBe(true)
++
++      // Check that the row metadata has the new ID (not the copied ID)
++      expect(result.disableSort.rows).toBeDefined()
++      expect(result.disableSort.rows).toHaveLength(1)
++      expect(result.disableSort.rows![0].id).not.toEqual(copiedArrayID)
++      expect(result.disableSort.rows![0].id).toEqual(result['disableSort.0.id'].value)
++
++      // Check that other fields were preserved
++      expect(result['disableSort.0.text'].value).toEqual('row one')
++    })
++  })
++})
+diff --git a/packages/ui/src/elements/ClipboardAction/mergeFormStateFromClipboard.ts b/packages/ui/src/elements/ClipboardAction/mergeFormStateFromClipboard.ts
+index 5a8d01c1f2c..7ebc9e7f9a8 100644
+--- a/packages/ui/src/elements/ClipboardAction/mergeFormStateFromClipboard.ts
++++ b/packages/ui/src/elements/ClipboardAction/mergeFormStateFromClipboard.ts
+@@ -1,7 +1,11 @@
+ import type { FieldState, FormState } from 'payload'
+ 
++import ObjectIdImport from 'bson-objectid'
++
+ import type { ClipboardPasteData } from './types.js'
+ 
++const ObjectId = 'default' in ObjectIdImport ? ObjectIdImport.default : ObjectIdImport
++
+ export function reduceFormStateByPath({
+   formState,
+   path,
+@@ -80,7 +84,7 @@ export function mergeFormStateFromClipboard({
+ 
+   if (fromRowToField) {
+     const lastRenderedPath = `${path}.0`
+-    const rowIDFromClipboard = dataFromClipboard[`${pathToReplace}.id`].value as string
++    const rowIDFromClipboard = dataFromClipboard[`${pathToReplace}.id`]?.value as string
+     const hasRows = formState[path].rows?.length
+ 
+     formState[path].rows = [
+@@ -106,6 +110,9 @@ export function mergeFormStateFromClipboard({
+     }
+   }
+ 
++  // Map to track old IDs to new IDs for regenerating nested IDs
++  const idReplacements: Map<string, string> = new Map()
++
+   for (const clipboardPath in dataFromClipboard) {
+     // Pasting a row id, skip overwriting
+     if (
+@@ -120,6 +127,24 @@ export function mergeFormStateFromClipboard({
+     const customComponents = isArray ? formState[newPath]?.customComponents : undefined
+     const validate = isArray ? formState[newPath]?.validate : undefined
+ 
++    // If this is an ID field, generate a new ID to prevent duplicates
++    if (clipboardPath.endsWith('.id') && dataFromClipboard[clipboardPath]?.value) {
++      const oldID = dataFromClipboard[clipboardPath].value as string
++      if (typeof oldID === 'string' && ObjectId.isValid(oldID)) {
++        const newID = new ObjectId().toHexString()
++        idReplacements.set(clipboardPath, newID)
++
++        formState[newPath] = {
++          customComponents,
++          validate,
++          ...dataFromClipboard[clipboardPath],
++          initialValue: newID,
++          value: newID,
++        }
++        continue
++      }
++    }
++
+     formState[newPath] = {
+       customComponents,
+       validate,
+@@ -127,5 +152,39 @@ export function mergeFormStateFromClipboard({
+     }
+   }
+ 
++  // Update parent field rows with new IDs
++  for (const [clipboardPath, newID] of idReplacements) {
++    const relativePath = clipboardPath.replace(`${pathToReplace}.`, '')
++    const segments = relativePath.split('.')
++
++    if (segments.length >= 2) {
++      const rowIndex = parseInt(segments[segments.length - 2], 10)
++      const parentFieldPath = segments.slice(0, segments.length - 2).join('.')
++      const fullParentPath = parentFieldPath ? `${targetSegment}.${parentFieldPath}` : targetSegment
++
++      if (formState[fullParentPath] && Array.isArray(formState[fullParentPath].rows)) {
++        const parentRows = formState[fullParentPath].rows
++        if (!isNaN(rowIndex) && parentRows[rowIndex]) {
++          parentRows[rowIndex].id = newID
++        }
++      }
++    } else if (segments.length === 1 && segments[0] === 'id') {
++      // Top-level block ID - extract field path and row index from targetSegment
++      const targetParts = targetSegment.split('.')
++      const lastPart = targetParts[targetParts.length - 1]
++      const rowIndexFromTarget = !isNaN(parseInt(lastPart, 10)) ? parseInt(lastPart, 10) : 0
++      const fieldPath = !isNaN(parseInt(lastPart, 10))
++        ? targetParts.slice(0, -1).join('.')
++        : targetSegment
++
++      if (formState[fieldPath] && Array.isArray(formState[fieldPath].rows)) {
++        const rows = formState[fieldPath].rows
++        if (rows[rowIndexFromTarget]) {
++          rows[rowIndexFromTarget].id = newID
++        }
++      }
++    }
++  }
++
+   return formState
+ }
+diff --git a/test/fields/collections/Array/e2e.spec.ts b/test/fields/collections/Array/e2e.spec.ts
+index cc15635f21b..3a5d9d6d6a9 100644
+--- a/test/fields/collections/Array/e2e.spec.ts
++++ b/test/fields/collections/Array/e2e.spec.ts
+@@ -2,7 +2,6 @@
+ import type { Page } from '@playwright/test'
+ 
+ import { expect, test } from '@playwright/test'
+-import { assertToastErrors } from '../../../__helpers/shared/assertToastErrors.js'
+ import { copyPasteField } from '__helpers/e2e/copyPasteField.js'
+ import { addArrayRow, duplicateArrayRow, removeArrayRow } from '__helpers/e2e/fields/array/index.js'
+ import { scrollEntirePage } from '__helpers/e2e/scrollEntirePage.js'
+@@ -20,8 +19,9 @@ import {
+   saveDocAndAssert,
+ } from '../../../__helpers/e2e/helpers.js'
+ import { AdminUrlUtil } from '../../../__helpers/shared/adminUrlUtil.js'
+-import { initPayloadE2ENoConfig } from '../../../__helpers/shared/initPayloadE2ENoConfig.js'
++import { assertToastErrors } from '../../../__helpers/shared/assertToastErrors.js'
+ import { reInitializeDB } from '../../../__helpers/shared/clearAndSeed/reInitializeDB.js'
++import { initPayloadE2ENoConfig } from '../../../__helpers/shared/initPayloadE2ENoConfig.js'
+ import { RESTClient } from '../../../__helpers/shared/rest.js'
+ import { TEST_TIMEOUT_LONG } from '../../../playwright.config.js'
+ 
+@@ -697,6 +697,43 @@ describe('Array', () => {
+       await expect(subArrayContainer).toHaveCount(1)
+       await expect(subArrayContainer2).toHaveCount(1)
+     })
++
++    test('should generate unique array IDs when pasting arrays across documents', async () => {
++      await page.goto(url.create)
++
++      const field = page.locator('#field-items')
++      const textInput = field.locator('#field-items__0__text')
++      await textInput.fill('Unique content for first document')
++
++      await saveDocAndAssert(page)
++      const firstDocURL = page.url()
++
++      await copyPasteField({
++        page,
++        fieldName: 'items',
++      })
++
++      // Create second document
++      await page.goto(url.create)
++
++      await copyPasteField({
++        page,
++        action: 'paste',
++        fieldName: 'items',
++      })
++
++      const pastedTextInput = page.locator('#field-items__0__text')
++      await expect(pastedTextInput).toHaveValue('Unique content for first document')
++
++      // This should not fail with duplicate ID error
++      await saveDocAndAssert(page)
++
++      await expect(page.locator('.field-type.id .render-field-error')).toBeHidden()
++
++      // Navigate back to first document to ensure it wasn't modified
++      await page.goto(firstDocURL)
++      await expect(textInput).toHaveValue('Unique content for first document')
++    })
+   })
+   test('should return empty array from getDataByPath for array fields without rows', async () => {
+     await page.goto(url.create)
+diff --git a/test/fields/collections/Blocks/e2e.spec.ts b/test/fields/collections/Blocks/e2e.spec.ts
+index 93bf2dffa1f..5644036a145 100644
+--- a/test/fields/collections/Blocks/e2e.spec.ts
++++ b/test/fields/collections/Blocks/e2e.spec.ts
+@@ -709,6 +709,44 @@ describe('Block fields', () => {
+       await expect(subArrayContainer).toHaveCount(0)
+       await expect(subArrayContainer2).toHaveCount(0)
+     })
++
++    test('should generate unique block IDs when pasting blocks across documents', async () => {
++      // Create first document with a block
++      await page.goto(url.create)
++
++      const field = page.locator('#field-blocks')
++      const textInput = field.locator('#field-blocks__0__text')
++      await textInput.fill('Unique content for first document')
++
++      await saveDocAndAssert(page)
++      const firstDocURL = page.url()
++
++      await copyPasteField({
++        page,
++        fieldName: 'blocks',
++      })
++
++      // Create second document
++      await page.goto(url.create)
++
++      await copyPasteField({
++        page,
++        action: 'paste',
++        fieldName: 'blocks',
++      })
++
++      const pastedTextInput = page.locator('#field-blocks__0__text')
++      await expect(pastedTextInput).toHaveValue('Unique content for first document')
++
++      // This should not fail with duplicate ID error
++      await saveDocAndAssert(page)
++
++      await expect(page.locator('.field-type.id .render-field-error')).toBeHidden()
++
++      // Navigate back to first document to ensure it wasn't modified
++      await page.goto(firstDocURL)
++      await expect(textInput).toHaveValue('Unique content for first document')
++    })
+   })
+ 
+   describe('block images', () => {

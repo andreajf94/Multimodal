@@ -1,0 +1,81 @@
+diff --git a/packages/ui/src/fields/Join/index.tsx b/packages/ui/src/fields/Join/index.tsx
+index 0756154cab3..70a9861e9e8 100644
+--- a/packages/ui/src/fields/Join/index.tsx
++++ b/packages/ui/src/fields/Join/index.tsx
+@@ -224,7 +224,7 @@ const JoinFieldComponent: JoinFieldClientComponent = (props) => {
+           </h4>
+         }
+         parent={
+-          Array.isArray(collection)
++          typeof docID !== 'undefined'
+             ? {
+                 id: docID,
+                 collectionSlug: docConfig.slug,
+diff --git a/packages/ui/src/utilities/buildTableState.ts b/packages/ui/src/utilities/buildTableState.ts
+index 26c3310c0c2..4425ef3f80e 100644
+--- a/packages/ui/src/utilities/buildTableState.ts
++++ b/packages/ui/src/utilities/buildTableState.ts
+@@ -116,10 +116,12 @@ const buildTableState: ServerFunction<
+     }
+   }
+ 
++  const preferencesKey = parent
++    ? `${parent.collectionSlug}-${parent.joinPath}`
++    : `collection-${collectionSlug}`
++
+   const collectionPreferences = await upsertPreferences<CollectionPreferences>({
+-    key: Array.isArray(collectionSlug)
+-      ? `${parent.collectionSlug}-${parent.joinPath}`
+-      : `collection-${collectionSlug}`,
++    key: preferencesKey,
+     req,
+     value: {
+       columns: columnsFromArgs,
+diff --git a/test/joins/e2e.spec.ts b/test/joins/e2e.spec.ts
+index 3f9588edef8..dbf90740bfe 100644
+--- a/test/joins/e2e.spec.ts
++++ b/test/joins/e2e.spec.ts
+@@ -8,6 +8,7 @@ import { fileURLToPath } from 'url'
+ import type { PayloadTestSDK } from '../__helpers/shared/sdk/index.js'
+ import type { Config } from './payload-types.js'
+ 
++import { reorderColumns } from '../__helpers/e2e/columns/index.js'
+ import {
+   changeLocale,
+   ensureCompilationIsDone,
+@@ -16,11 +17,10 @@ import {
+   saveDocAndAssert,
+   // throttleTest,
+ } from '../__helpers/e2e/helpers.js'
+-import { AdminUrlUtil } from '../__helpers/shared/adminUrlUtil.js'
+-import { reorderColumns } from '../__helpers/e2e/columns/index.js'
+ import { navigateToDoc } from '../__helpers/e2e/navigateToDoc.js'
+-import { initPayloadE2ENoConfig } from '../__helpers/shared/initPayloadE2ENoConfig.js'
++import { AdminUrlUtil } from '../__helpers/shared/adminUrlUtil.js'
+ import { reInitializeDB } from '../__helpers/shared/clearAndSeed/reInitializeDB.js'
++import { initPayloadE2ENoConfig } from '../__helpers/shared/initPayloadE2ENoConfig.js'
+ import { RESTClient } from '../__helpers/shared/rest.js'
+ import { EXPECT_TIMEOUT, TEST_TIMEOUT_LONG } from '../playwright.config.js'
+ import {
+@@ -358,6 +358,21 @@ describe('Join Field', () => {
+     expect(innerText.indexOf('Created At')).toBeLessThan(innerText.indexOf('Title'))
+   })
+ 
++  test('should not overwrite list view columns when rendering relationship table with default columns', async () => {
++    await page.goto(new AdminUrlUtil(serverURL, postsSlug).list)
++    await expect(page.locator('#heading-id')).toBeHidden()
++
++    await page.goto(categoriesURL.edit(categoryID))
++    const joinField = page.locator('#field-group__relatedPosts.field-type.join')
++    const joinThead = joinField.locator('.relationship-table thead')
++    await expect(joinThead).toContainText('ID')
++    await expect(joinThead).toContainText('Created At')
++    await expect(joinThead).toContainText('Title')
++
++    await page.goto(new AdminUrlUtil(serverURL, postsSlug).list)
++    await expect(page.locator('#heading-id')).toBeHidden()
++  })
++
+   test('should update relationship table when new document is created', async () => {
+     await page.goto(categoriesURL.edit(categoryID))
+     const joinField = page.locator('#field-relatedPosts.field-type.join')

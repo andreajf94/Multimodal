@@ -1,0 +1,94 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "documentation_and_examples",
+      "recommendation": "Fixed spelling of 'seperate' to 'separate' in all example files and test files where it appeared in documentation strings and comments",
+      "rationale": "Misspellings in documentation and examples can undermine the credibility of the library and cause confusion for users. Since these files are part of the public-facing documentation and examples, maintaining correct spelling is important for professional presentation and clear communication. The changes were made only to documentation strings and comments, not to functional code.",
+      "alternatives_considered": [
+        "Leaving the misspellings unchanged",
+        "Using automated spell-checking tools as part of CI/CD",
+        "Creating a comprehensive spelling correction across the entire codebase"
+      ],
+      "files_affected": [
+        "examples/citation_with_extraction/citation_fuzzy_match.py",
+        "examples/extract-table/run_vision.py",
+        "examples/extract-table/run_vision_langsmith.py",
+        "examples/extract-table/run_vision_org_table.py",
+        "examples/logfire/image.py",
+        "examples/resolving-complex-entities/run.py",
+        "examples/vision/run_table.py",
+        "tests/llm/test_writer/evals/test_entities.py"
+      ]
+    },
+    {
+      "dimension": "consistency_and_maintainability",
+      "recommendation": "Applied consistent spelling correction across multiple similar patterns in different files",
+      "rationale": "The same misspelling appeared in multiple places with similar patterns (e.g., 'each fact should be its separate object' and 'tables that should be separate'). By fixing all occurrences consistently, we maintain uniformity across the codebase. This approach ensures that users see consistent documentation regardless of which example they examine.",
+      "alternatives_considered": [
+        "Fixing only the most visible occurrences",
+        "Creating a script to automatically find and replace all occurrences",
+        "Adding the correct spelling to a project dictionary for future prevention"
+      ],
+      "files_affected": [
+        "examples/citation_with_extraction/citation_fuzzy_match.py",
+        "examples/extract-table/run_vision.py",
+        "examples/extract-table/run_vision_langsmith.py",
+        "examples/extract-table/run_vision_org_table.py",
+        "examples/logfire/image.py",
+        "examples/resolving-complex-entities/run.py",
+        "examples/vision/run_table.py",
+        "tests/llm/test_writer/evals/test_entities.py"
+      ]
+    },
+    {
+      "dimension": "testing_and_validation",
+      "recommendation": "Updated test files to ensure test assertions and documentation use correct spelling",
+      "rationale": "Test files serve as both validation tools and documentation for developers. Correct spelling in test files ensures that when developers examine test failures or read test code, they encounter professional, correctly spelled documentation. This maintains consistency between examples and tests.",
+      "alternatives_considered": [
+        "Only fixing example files and ignoring test files",
+        "Creating separate spelling tests",
+        "Adding spell-checking to the test suite"
+      ],
+      "files_affected": [
+        "tests/llm/test_writer/evals/test_entities.py"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Fix 'seperate' to 'separate' spelling in example files",
+      "description": "Correct the misspelling of 'separate' in documentation strings and comments across all example files to improve professionalism and clarity for users exploring the library's examples",
+      "files_to_modify": [
+        "examples/citation_with_extraction/citation_fuzzy_match.py",
+        "examples/extract-table/run_vision.py",
+        "examples/extract-table/run_vision_langsmith.py",
+        "examples/extract-table/run_vision_org_table.py",
+        "examples/logfire/image.py",
+        "examples/resolving-complex-entities/run.py",
+        "examples/vision/run_table.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-002",
+      "title": "Fix 'seperate' to 'separate' spelling in test files",
+      "description": "Correct the same misspelling in test files to maintain consistency between examples and tests, ensuring test documentation is also professionally presented",
+      "files_to_modify": [
+        "tests/llm/test_writer/evals/test_entities.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "This change addresses a simple but important spelling correction across the codebase, specifically fixing the misspelling of 'separate' (previously written as 'seperate') in documentation strings and comments. The implementation was straightforward but required careful attention to ensure all occurrences were found and corrected consistently.\n\nThe changes were made across two main categories of files: example files that demonstrate library usage, and test files that validate functionality. In the example files, the corrections appear in Pydantic Field descriptions that guide LLM responses, ensuring that when users copy these examples, they receive correctly spelled documentation. In test files, the correction maintains consistency and professionalism in test documentation.\n\nAn interesting pattern emerged where the same phrase appeared in multiple files: 'each fact should be its separate object with a body and a list of sources' and variations about tables that 'should be separate'. This suggests these examples may have been copied from a common template or evolved from similar use cases. The implementation carefully preserved the semantic meaning while correcting the spelling, ensuring no functional changes were introduced. The changes are minimal and focused, affecting only documentation strings and comments, not any functional code logic or API contracts.",
+  "source_pr": "https://github.com/567-labs/instructor/pull/2075",
+  "before_sha": "7bbf595475354c73eb71ed12bc709c963807162a",
+  "after_sha": "7206b98f38621ba06b5151da3fa1fbacd436adc3",
+  "diff_stats": {
+    "additions": 9,
+    "deletions": 9,
+    "files_changed": 8
+  }
+}

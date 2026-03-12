@@ -1,0 +1,118 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "api_design",
+      "recommendation": "Added a new endpoint demonstrating `yield from` syntax for streaming responses",
+      "rationale": "The `yield from` syntax provides a more concise way to delegate iteration in Python generators, which is particularly useful for streaming scenarios where you're passing through data from another iterable. This demonstrates a Pythonic pattern that developers should know about when working with streaming responses.",
+      "alternatives_considered": [
+        "Keeping only the explicit for-loop approach",
+        "Using async generators exclusively"
+      ],
+      "files_affected": [
+        "docs_src/stream_data/tutorial002_py310.py",
+        "tests/test_tutorial/test_stream_data/test_tutorial002.py"
+      ]
+    },
+    {
+      "dimension": "documentation",
+      "recommendation": "Updated streaming documentation to emphasize proper resource management with `with` blocks and clarify best practices",
+      "rationale": "Proper resource management is critical for streaming responses, especially with file-like objects. The documentation now explicitly shows how to use `with` blocks to ensure files are closed after streaming completes, preventing resource leaks. This aligns with Python best practices for context managers.",
+      "alternatives_considered": [
+        "Leaving resource management implicit",
+        "Documenting only async approaches"
+      ],
+      "files_affected": [
+        "docs/en/docs/advanced/stream-data.md",
+        "docs_src/stream_data/tutorial002_py310.py"
+      ]
+    },
+    {
+      "dimension": "documentation",
+      "recommendation": "Refined custom response documentation to clarify performance implications and redirect users to better patterns",
+      "rationale": "Direct use of `StreamingResponse` can be error-prone regarding cancellation handling. The documentation now guides users toward the more convenient patterns in the streaming documentation, which handle cancellation automatically. This promotes better practices while still documenting the low-level API.",
+      "alternatives_considered": [
+        "Keeping the low-level API as the primary recommendation",
+        "Removing the `StreamingResponse` documentation entirely"
+      ],
+      "files_affected": [
+        "docs/en/docs/advanced/custom-response.md"
+      ]
+    },
+    {
+      "dimension": "documentation",
+      "recommendation": "Enhanced response handling documentation to clarify the trade-offs between flexibility and responsibility",
+      "rationale": "When developers return responses directly, they bypass FastAPI's automatic validation and serialization. The documentation now explicitly states that this gives both flexibility AND responsibility, making developers aware they must handle serialization, formatting, and correctness themselves.",
+      "alternatives_considered": [
+        "Only documenting the flexibility aspect",
+        "Discouraging direct response returns entirely"
+      ],
+      "files_affected": [
+        "docs/en/docs/advanced/response-directly.md"
+      ]
+    },
+    {
+      "dimension": "testing",
+      "recommendation": "Updated test suite to include the new `yield from` endpoint and verify OpenAPI schema generation",
+      "rationale": "Tests must validate that new patterns work correctly and generate proper OpenAPI documentation. Adding the new endpoint to test parameterization ensures all streaming variants are tested consistently, maintaining test coverage as features evolve.",
+      "alternatives_considered": [
+        "Creating separate test files for new patterns",
+        "Only testing the core functionality without OpenAPI validation"
+      ],
+      "files_affected": [
+        "tests/test_tutorial/test_stream_data/test_tutorial002.py"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Enhance streaming documentation with best practices and new patterns",
+      "description": "Update streaming documentation to include proper resource management with `with` blocks, demonstrate `yield from` syntax, and clarify when to use async vs sync approaches for file operations",
+      "files_to_modify": [
+        "docs/en/docs/advanced/stream-data.md",
+        "docs_src/stream_data/tutorial002_py310.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-002",
+      "title": "Refine custom response documentation for clarity and performance",
+      "description": "Update custom response documentation to clarify performance implications of response models vs JSONResponse, redirect users to better streaming patterns, and remove redundant file-like object examples",
+      "files_to_modify": [
+        "docs/en/docs/advanced/custom-response.md"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-003",
+      "title": "Improve direct response handling documentation",
+      "description": "Enhance documentation about returning responses directly to clarify the trade-offs between flexibility and responsibility, and update references to response models",
+      "files_to_modify": [
+        "docs/en/docs/advanced/response-directly.md"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-004",
+      "title": "Update tests for new streaming patterns",
+      "description": "Extend test coverage to include the new `yield from` endpoint and verify OpenAPI schema generation for all streaming variants",
+      "files_to_modify": [
+        "tests/test_tutorial/test_stream_data/test_tutorial002.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "This change set enhances FastAPI's documentation around response handling and streaming capabilities with a focus on practical patterns and best practices. The implementation introduces a new `yield from` pattern in the streaming examples, demonstrating a more concise way to delegate iteration in Python generators when streaming data. This is particularly valuable for developers working with file-like objects or other iterables where direct passthrough is needed.\n\nKey architectural decisions include emphasizing proper resource management through `with` blocks in streaming scenarios, which ensures files are properly closed after streaming completes. The documentation now clearly distinguishes between the flexibility and responsibility trade-offs when returning responses directly versus using FastAPI's automatic serialization. Performance implications are clarified, noting that response models provide better performance by leveraging Rust-side serialization rather than Python's `jsonable_encoder`.\n\nThe changes integrate seamlessly with the existing documentation structure by updating example code, adding new endpoints to demonstrate patterns, and ensuring test coverage remains comprehensive. The approach maintains backward compatibility while guiding developers toward better practices, such as preferring the streaming patterns documented in `stream-data.md` over direct `StreamingResponse` usage for better cancellation handling. This creates a more cohesive learning path for developers exploring FastAPI's advanced response capabilities.",
+  "source_pr": "https://github.com/fastapi/fastapi/pull/15023",
+  "before_sha": "c0836dc1b7f4ba91e9563c8c4ccd0ebe655bc914",
+  "after_sha": "1377052c6cc5eff92a6bcbb54c0fcb66e14e06d7",
+  "diff_stats": {
+    "additions": 67,
+    "deletions": 36,
+    "files_changed": 5
+  }
+}

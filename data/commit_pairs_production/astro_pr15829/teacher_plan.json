@@ -1,0 +1,186 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "release_automation",
+      "recommendation": "Used Changesets to manage monorepo releases with automated version bumps and changelog updates",
+      "rationale": "Changesets is the industry standard for monorepo release management. It provides a structured way to collect changes, determine version bumps, update changelogs, and handle cross-package dependencies. The system automatically tracks changes in .changeset/ files and coordinates releases across multiple packages.",
+      "alternatives_considered": [
+        "Manual version management",
+        "Lerna",
+        "Nx release management",
+        "Custom release scripts"
+      ],
+      "files_affected": [
+        ".changeset/perky-dots-prove.md"
+      ]
+    },
+    {
+      "dimension": "dependency_management",
+      "recommendation": "Updated package.json versions across all examples and packages to maintain consistency after internal package updates",
+      "rationale": "When internal packages like @astrojs/internal-helpers are updated, all dependent packages and examples must be updated to reference the new versions. This ensures consistency across the monorepo and prevents version mismatches. The changeset system automatically propagates version updates through the dependency graph.",
+      "alternatives_considered": [
+        "Keeping examples pinned to older versions",
+        "Using wildcard versions",
+        "Manual dependency updates"
+      ],
+      "files_affected": [
+        "examples/basics/package.json",
+        "examples/blog/package.json",
+        "examples/component/package.json",
+        "examples/container-with-vitest/package.json",
+        "examples/framework-alpine/package.json",
+        "examples/framework-multiple/package.json",
+        "examples/framework-preact/package.json",
+        "examples/framework-react/package.json",
+        "examples/framework-solid/package.json",
+        "examples/framework-svelte/package.json",
+        "examples/framework-vue/package.json",
+        "examples/hackernews/package.json",
+        "examples/integration/package.json",
+        "examples/minimal/package.json",
+        "examples/portfolio/package.json",
+        "examples/ssr/package.json",
+        "examples/starlog/package.json",
+        "examples/toolbar-app/package.json",
+        "examples/with-markdoc/package.json",
+        "examples/with-mdx/package.json",
+        "examples/with-nanostores/package.json",
+        "examples/with-tailwindcss/package.json",
+        "examples/with-vitest/package.json",
+        "packages/astro/package.json",
+        "packages/integrations/cloudflare/package.json",
+        "packages/integrations/markdoc/package.json",
+        "packages/integrations/mdx/package.json",
+        "packages/integrations/netlify/package.json",
+        "packages/integrations/node/package.json",
+        "packages/integrations/vercel/package.json",
+        "packages/internal-helpers/package.json",
+        "packages/markdown/remark/package.json"
+      ]
+    },
+    {
+      "dimension": "changelog_management",
+      "recommendation": "Automatically generated CHANGELOG.md entries for all affected packages with proper dependency linking",
+      "rationale": "Changesets automatically generates changelog entries with consistent formatting, links to commits, and dependency updates. This maintains professional documentation and helps users understand what changed in each release. The system tracks which packages depend on others and includes those relationships in changelog entries.",
+      "alternatives_considered": [
+        "Manual changelog updates",
+        "GitHub releases only",
+        "Separate release notes"
+      ],
+      "files_affected": [
+        "packages/astro/CHANGELOG.md",
+        "packages/integrations/cloudflare/CHANGELOG.md",
+        "packages/integrations/markdoc/CHANGELOG.md",
+        "packages/integrations/mdx/CHANGELOG.md",
+        "packages/integrations/netlify/CHANGELOG.md",
+        "packages/integrations/node/CHANGELOG.md",
+        "packages/integrations/vercel/CHANGELOG.md",
+        "packages/internal-helpers/CHANGELOG.md",
+        "packages/markdown/remark/CHANGELOG.md"
+      ]
+    },
+    {
+      "dimension": "lockfile_management",
+      "recommendation": "Updated pnpm-lock.yaml to reflect new package versions across the entire monorepo",
+      "rationale": "When package versions change in a pnpm workspace, the lockfile must be updated to ensure consistent installations. The changeset release process automatically updates the lockfile to match the new versions, preventing installation inconsistencies and ensuring reproducible builds.",
+      "alternatives_considered": [
+        "Manual lockfile updates",
+        "Regenerating lockfile from scratch",
+        "Skipping lockfile updates"
+      ],
+      "files_affected": [
+        "pnpm-lock.yaml"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Implement Changeset-based Release Automation",
+      "description": "Set up Changesets to automate version bumps, changelog generation, and coordinated publishing across the monorepo. This includes configuring the system to track changes, determine appropriate version bumps (major/minor/patch), update all affected package.json files, generate changelog entries, and handle cross-package dependencies.",
+      "files_to_modify": [
+        ".changeset/perky-dots-prove.md"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-002",
+      "title": "Update Package Versions Across Monorepo",
+      "description": "Apply version updates to all packages and examples that depend on changed internal packages. This includes updating the main astro package from 5.18.0 to 5.18.1, updating integration packages that depend on internal-helpers, and updating all example projects to use the latest versions.",
+      "files_to_modify": [
+        "examples/basics/package.json",
+        "examples/blog/package.json",
+        "examples/component/package.json",
+        "examples/container-with-vitest/package.json",
+        "examples/framework-alpine/package.json",
+        "examples/framework-multiple/package.json",
+        "examples/framework-preact/package.json",
+        "examples/framework-react/package.json",
+        "examples/framework-solid/package.json",
+        "examples/framework-svelte/package.json",
+        "examples/framework-vue/package.json",
+        "examples/hackernews/package.json",
+        "examples/integration/package.json",
+        "examples/minimal/package.json",
+        "examples/portfolio/package.json",
+        "examples/ssr/package.json",
+        "examples/starlog/package.json",
+        "examples/toolbar-app/package.json",
+        "examples/with-markdoc/package.json",
+        "examples/with-mdx/package.json",
+        "examples/with-nanostores/package.json",
+        "examples/with-tailwindcss/package.json",
+        "examples/with-vitest/package.json",
+        "packages/astro/package.json",
+        "packages/integrations/cloudflare/package.json",
+        "packages/integrations/markdoc/package.json",
+        "packages/integrations/mdx/package.json",
+        "packages/integrations/netlify/package.json",
+        "packages/integrations/node/package.json",
+        "packages/integrations/vercel/package.json",
+        "packages/internal-helpers/package.json",
+        "packages/markdown/remark/package.json"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "large"
+    },
+    {
+      "id": "T-003",
+      "title": "Generate Changelog Entries for All Packages",
+      "description": "Create standardized changelog entries for each updated package, including links to the relevant commit and noting dependency updates. The changelogs should follow conventional formatting and clearly indicate what changed in each release.",
+      "files_to_modify": [
+        "packages/astro/CHANGELOG.md",
+        "packages/integrations/cloudflare/CHANGELOG.md",
+        "packages/integrations/markdoc/CHANGELOG.md",
+        "packages/integrations/mdx/CHANGELOG.md",
+        "packages/integrations/netlify/CHANGELOG.md",
+        "packages/integrations/node/CHANGELOG.md",
+        "packages/integrations/vercel/CHANGELOG.md",
+        "packages/internal-helpers/CHANGELOG.md",
+        "packages/markdown/remark/CHANGELOG.md"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-004",
+      "title": "Update Lockfile for Consistent Dependencies",
+      "description": "Update pnpm-lock.yaml to reflect all version changes across the monorepo, ensuring consistent installations and reproducible builds. The lockfile must be updated to match the new package versions specified in all package.json files.",
+      "files_to_modify": [
+        "pnpm-lock.yaml"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "This change implements a comprehensive release automation system using Changesets for the Astro monorepo. The system was triggered by a patch fix to @astrojs/internal-helpers (commit c2cd371) that addressed glob matching issues in remote patterns. When this change was merged, the Changesets system automatically: 1) Determined that this was a patch-level change, 2) Updated the internal-helpers package from 0.7.5 to 0.7.6, 3) Identified all packages that depend on internal-helpers and updated their versions accordingly, 4) Updated the main astro package from 5.18.0 to 5.18.1 since it depends on internal-helpers, 5) Updated all example projects to use the latest astro and integration package versions, 6) Generated changelog entries for all affected packages with proper formatting and commit links, and 7) Updated the pnpm lockfile to reflect all version changes.\n\nThe key pattern here is dependency propagation: when an internal package changes, the system automatically updates all dependent packages and examples. This ensures consistency across the entire monorepo. The changeset file (.changeset/perky-dots-prove.md) was consumed and deleted as part of the release process, demonstrating the automated workflow. The system handles cross-package dependencies intelligently - for example, when internal-helpers was updated, packages like @astrojs/cloudflare, @astrojs/markdoc, and @astrojs/markdown-remark that depend on it were also updated.\n\nThis approach integrates seamlessly with the existing monorepo structure and CI/CD pipeline. The changeset-based release automation provides a structured, predictable release process that reduces manual effort while maintaining high-quality documentation through automated changelog generation. The system scales well with the monorepo's complexity, handling the coordination of multiple packages and their interdependencies automatically.",
+  "source_pr": "https://github.com/withastro/astro/pull/15829",
+  "before_sha": "c2cd371f9f2003ab8c9ce70a24fc0af40c5de531",
+  "after_sha": "434d9cc7eed62e6324bd922865f5c29136f3474c",
+  "diff_stats": {
+    "additions": 133,
+    "deletions": 72,
+    "files_changed": 43
+  }
+}

@@ -1,0 +1,159 @@
+diff --git a/ratatui-core/src/text/line.rs b/ratatui-core/src/text/line.rs
+index 9840c27eef..425be819c6 100644
+--- a/ratatui-core/src/text/line.rs
++++ b/ratatui-core/src/text/line.rs
+@@ -35,6 +35,7 @@ use crate::widgets::Widget;
+ /// - [`Line::from`] creates a `Line` from a [`String`].
+ /// - [`Line::from`] creates a `Line` from a [`&str`].
+ /// - [`Line::from`] creates a `Line` from a [`Vec`] of [`Span`]s.
++/// - [`Line::from`] creates a `Line` from a `&[Into<Span>]`.
+ /// - [`Line::from`] creates a `Line` from single [`Span`].
+ /// - [`String::from`] converts a line into a [`String`].
+ /// - [`Line::from_iter`] creates a line from an iterator of items that are convertible to [`Span`].
+@@ -628,6 +629,18 @@ impl<'a> From<Vec<Span<'a>>> for Line<'a> {
+     }
+ }
+ 
++impl<'a, 'b, T> From<&'b [T]> for Line<'a>
++where
++    T: Into<Span<'a>> + Clone,
++{
++    fn from(value: &'b [T]) -> Self {
++        Self {
++            spans: value.iter().cloned().map(Into::into).collect(),
++            ..Default::default()
++        }
++    }
++}
++
+ impl<'a> From<Span<'a>> for Line<'a> {
+     fn from(span: Span<'a>) -> Self {
+         Self::from(vec![span])
+@@ -1020,6 +1033,41 @@ mod tests {
+         assert_eq!(line.spans, spans);
+     }
+ 
++    #[test]
++    fn from_slice_of_spans() {
++        let slice = [
++            Span::from("Hello"),
++            Span::from("world!"),
++            Span::from("Extra"),
++        ];
++        let line = Line::from(&slice[0..2]);
++        let line2 = Line::from(&slice[1..]);
++        assert_eq!(line.spans, vec![Span::from("Hello"), Span::from("world!")]);
++        assert_eq!(line2.spans, vec![Span::from("world!"), Span::from("Extra")]);
++    }
++
++    #[test]
++    fn from_slice_of_strs() {
++        let slice = ["Hello", "world!", "Extra"];
++        let line = Line::from(&slice[0..2]);
++        let line2 = Line::from(&slice[1..]);
++        assert_eq!(line.spans, vec![Span::from("Hello"), Span::from("world!")]);
++        assert_eq!(line2.spans, vec![Span::from("world!"), Span::from("Extra")]);
++    }
++
++    #[test]
++    fn from_slice_of_strings() {
++        let slice = [
++            "Hello".to_string(),
++            "world!".to_string(),
++            "Extra".to_string(),
++        ];
++        let line = Line::from(&slice[0..2]);
++        let line2 = Line::from(&slice[1..]);
++        assert_eq!(line.spans, vec![Span::from("Hello"), Span::from("world!")]);
++        assert_eq!(line2.spans, vec![Span::from("world!"), Span::from("Extra")]);
++    }
++
+     #[test]
+     fn from_iter() {
+         let line = Line::from_iter(vec!["Hello".blue(), " world!".green()]);
+diff --git a/ratatui-core/src/text/text.rs b/ratatui-core/src/text/text.rs
+index 456762a5a8..544aa1f362 100644
+--- a/ratatui-core/src/text/text.rs
++++ b/ratatui-core/src/text/text.rs
+@@ -33,6 +33,7 @@ use crate::widgets::Widget;
+ /// - [`Text::from`] creates a `Text` from a [`Span`].
+ /// - [`Text::from`] creates a `Text` from a [`Line`].
+ /// - [`Text::from`] creates a `Text` from a `Vec<Line>`.
++/// - [`Text::from`] creates a `Text` from a `&[Into<Line>]`.
+ /// - [`Text::from_iter`] creates a `Text` from an iterator of items that can be converted into
+ ///   `Line`.
+ ///
+@@ -652,6 +653,18 @@ impl<'a> From<Vec<Line<'a>>> for Text<'a> {
+     }
+ }
+ 
++impl<'a, 'b, T> From<&'b [T]> for Text<'a>
++where
++    T: Into<Line<'a>> + Clone,
++{
++    fn from(value: &'b [T]) -> Self {
++        Self {
++            lines: value.iter().cloned().map(Into::into).collect(),
++            ..Default::default()
++        }
++    }
++}
++
+ impl<'a, T> FromIterator<T> for Text<'a>
+ where
+     T: Into<Line<'a>>,
+@@ -887,6 +900,54 @@ mod tests {
+         assert_eq!(text.lines, [Line::from("The first line")]);
+     }
+ 
++    #[test]
++    fn from_slice_of_spans() {
++        let slice = [
++            Span::from("Hello"),
++            Span::from("world!"),
++            Span::from("Extra"),
++        ];
++        let text = Text::from(&slice[0..1]);
++        let text2 = Text::from(&slice[1..]);
++        assert_eq!(text.lines, [Line::from("Hello")]);
++        assert_eq!(text2.lines, [Line::from("world!"), Line::from("Extra")]);
++    }
++
++    #[test]
++    fn from_slice_of_lines() {
++        let slice = [
++            Line::from("Hello"),
++            Line::from("world!"),
++            Line::from("Extra"),
++        ];
++        let text = Text::from(&slice[0..1]);
++        let text2 = Text::from(&slice[1..]);
++        assert_eq!(text.lines, [Line::from("Hello")]);
++        assert_eq!(text2.lines, [Line::from("world!"), Line::from("Extra")]);
++    }
++
++    #[test]
++    fn from_slice_of_strs() {
++        let slice = ["Hello", "world!", "Extra"];
++        let text = Text::from(&slice[0..1]);
++        let text2 = Text::from(&slice[1..]);
++        assert_eq!(text.lines, [Line::from("Hello")]);
++        assert_eq!(text2.lines, [Line::from("world!"), Line::from("Extra")]);
++    }
++
++    #[test]
++    fn from_slice_of_strings() {
++        let slice = [
++            "Hello".to_string(),
++            "world!".to_string(),
++            "Extra".to_string(),
++        ];
++        let text = Text::from(&slice[0..1]);
++        let text2 = Text::from(&slice[1..]);
++        assert_eq!(text.lines, [Line::from("Hello")]);
++        assert_eq!(text2.lines, [Line::from("world!"), Line::from("Extra")]);
++    }
++
+     #[rstest]
+     #[case(42, Text::from("42"))]
+     #[case("just\ntesting", Text::from("just\ntesting"))]

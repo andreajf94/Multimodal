@@ -1,0 +1,12 @@
+{
+  "feature_name": "Centralized Toolbar State Management",
+  "description": "Create a centralized state management system for the lexical editor toolbar to dramatically reduce main thread blocking during user interactions. Replace the current per-component update listener subscriptions with a single hook that computes all toolbar states in one pass, then convert toolbar components to stateless presentational components that receive their state as props.",
+  "functional_requirements": [
+    "Implement a centralized `useToolbarStates` hook that computes all active/enabled states for toolbar items in a single pass when the editor updates",
+    "Refactor `ToolbarButton` and `ToolbarDropdown` components to be stateless and receive their active/enabled states as props from the centralized hook",
+    "Replace the dropdown icon/label derivation logic that currently uses useState/useEffect with a direct useMemo calculation from the centralized group state",
+    "Add a dedicated benchmark suite with CPU-throttled typing tests to measure and track performance improvements"
+  ],
+  "project_name": "payload",
+  "source_pr": "https://github.com/payloadcms/payload/pull/15832"
+}

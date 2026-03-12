@@ -1,0 +1,78 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "data_modeling",
+      "recommendation": "Added virtual field support in join query sanitization by applying the existing `sanitizeWhereQuery` function to access control results in join queries",
+      "rationale": "When join queries execute access control on the target collection, any virtual fields in the access control conditions need to be properly transformed to their underlying database field paths. The existing `sanitizeWhereQuery` function already handles this transformation for regular queries, so reusing it ensures consistency and fixes the bug where virtual fields in join access controls would fail.",
+      "alternatives_considered": [
+        "Creating a separate sanitization function for join queries",
+        "Modifying the access control execution to handle virtual fields internally",
+        "Requiring developers to manually transform virtual fields in join access controls"
+      ],
+      "files_affected": [
+        "packages/payload/src/database/sanitizeJoinQuery.ts"
+      ]
+    },
+    {
+      "dimension": "testing",
+      "recommendation": "Added comprehensive test coverage for virtual fields in join query access controls with a realistic three-collection relationship scenario",
+      "rationale": "The test creates a scenario with tenants, roles, and projects collections where roles have a virtual field `tenantSlug` that references `tenant.slug`. The access control on roles uses this virtual field, and projects join to roles. This tests the exact bug scenario where join queries would fail when accessing collections with virtual fields in their access controls.",
+      "alternatives_considered": [
+        "Adding a simpler unit test without the full relationship complexity",
+        "Modifying existing tests instead of adding new ones",
+        "Relying on integration tests from other parts of the codebase"
+      ],
+      "files_affected": [
+        "test/database/getConfig.ts",
+        "test/database/int.spec.ts",
+        "test/database/payload-types.ts"
+      ]
+    },
+    {
+      "dimension": "api_design",
+      "recommendation": "Maintained backward compatibility by only adding sanitization without changing the existing API or query structure",
+      "rationale": "The fix only adds the missing sanitization step without modifying how developers write queries or access controls. Virtual fields in access controls continue to work as expected, and the join query API remains unchanged. This ensures existing code continues to work while fixing the specific bug.",
+      "alternatives_considered": [
+        "Changing the join query API to require explicit virtual field handling",
+        "Deprecating virtual fields in access controls for join queries",
+        "Adding a new configuration option for join query sanitization"
+      ],
+      "files_affected": [
+        "packages/payload/src/database/sanitizeJoinQuery.ts"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Fix join query sanitization for virtual fields in access controls",
+      "description": "Apply sanitizeWhereQuery to access control results in join queries to properly transform virtual field paths, enabling virtual fields to work correctly in access controls of joined collections",
+      "files_to_modify": [
+        "packages/payload/src/database/sanitizeJoinQuery.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-002",
+      "title": "Add test coverage for virtual fields in join query access controls",
+      "description": "Create test collections and integration test to verify that virtual fields work correctly in access controls when accessed through join queries",
+      "files_to_modify": [
+        "test/database/getConfig.ts",
+        "test/database/int.spec.ts",
+        "test/database/payload-types.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    }
+  ],
+  "implementation_summary": "The implementation addresses a bug where join queries would fail when the target collection's access control used virtual fields. The core fix is in `sanitizeJoinQuery.ts` where we now apply the existing `sanitizeWhereQuery` function to access control results before combining them with the join query. This ensures that virtual field paths like `tenantSlug` (which maps to `tenant.slug`) are properly transformed to their underlying database field paths.\n\nThe fix follows the existing pattern in Payload's query system where field path transformation is handled consistently. By reusing `sanitizeWhereQuery`, we ensure that join queries benefit from the same field transformation logic that regular queries already use. This maintains consistency across the codebase and leverages existing, tested functionality.\n\nTo validate the fix, comprehensive test coverage was added with three new collections: `virtual-linked-tenants`, `virtual-linked-roles`, and `virtual-linked-projects`. The test creates a realistic scenario where roles have a virtual field referencing tenant.slug, and this virtual field is used in the roles collection's read access control. The test then verifies that join queries from projects to roles work correctly despite the virtual field in the access control. The TypeScript types were also updated to reflect these new collections, ensuring type safety throughout the system.",
+  "source_pr": "https://github.com/payloadcms/payload/pull/15891",
+  "before_sha": "fff60c8cad4f8df7d9fb5ab8e589590d8b6bb6aa",
+  "after_sha": "dc049fe00fb5bd9adc116e9d70dbf5b23e55f381",
+  "diff_stats": {
+    "additions": 172,
+    "deletions": 1,
+    "files_changed": 4
+  }
+}

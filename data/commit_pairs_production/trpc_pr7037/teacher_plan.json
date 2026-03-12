@@ -1,0 +1,112 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "error_handling",
+      "recommendation": "Created a combined abort signal that merges client disconnect signals with maxDurationMs timeout signals, ensuring subscription handlers receive a unified cancellation signal",
+      "rationale": "Previously, subscription handlers only received client disconnect signals via opts.req.signal, but maxDurationMs timeouts were handled at the stream level using withMaxDuration(). This caused subscriptions waiting for abort signals to hang indefinitely when maxDurationMs expired. By creating a combined signal, handlers can properly detect both types of cancellation through a single interface (opts.signal.aborted or 'abort' events).",
+      "alternatives_considered": [
+        "Keeping separate timeout handling at stream level",
+        "Using AbortSignal.timeout() directly",
+        "Passing multiple signals to subscription handlers"
+      ],
+      "files_affected": [
+        "packages/server/src/unstable-core-do-not-import/http/resolveResponse.ts"
+      ]
+    },
+    {
+      "dimension": "resource_management",
+      "recommendation": "Implemented proper cleanup of timeout timers when the combined abort signal fires, preventing memory leaks",
+      "rationale": "When maxDurationMs timeout fires, we need to clear the setTimeout timer and abort the combined controller. The cleanup function removes the event listener and aborts the controller, ensuring no dangling timers or event listeners remain. This is critical for long-running servers handling many subscriptions.",
+      "alternatives_considered": [
+        "Letting timers expire naturally",
+        "Using weak references",
+        "Manual cleanup in subscription handlers"
+      ],
+      "files_affected": [
+        "packages/server/src/unstable-core-do-not-import/http/resolveResponse.ts"
+      ]
+    },
+    {
+      "dimension": "api_design",
+      "recommendation": "Removed stream-level timeout wrapping (withMaxDuration) in favor of request-level signal propagation",
+      "rationale": "The withMaxDuration() function was creating a separate timeout mechanism at the stream level that didn't communicate with subscription handlers. By removing it and handling timeouts at the request level via the combined abort signal, we ensure consistent behavior: subscription handlers receive the timeout signal and can clean up resources properly. This also simplifies the codebase by removing redundant timeout mechanisms.",
+      "alternatives_considered": [
+        "Keeping both timeout mechanisms",
+        "Adding timeout signaling to withMaxDuration",
+        "Creating a new stream wrapper that passes signals"
+      ],
+      "files_affected": [
+        "packages/server/src/unstable-core-do-not-import/stream/sse.ts",
+        "packages/server/src/unstable-core-do-not-import/stream/utils/asyncIterable.ts"
+      ]
+    },
+    {
+      "dimension": "testing",
+      "recommendation": "Added comprehensive tests for maxDurationMs timeout behavior, including edge cases for non-yielding subscriptions and timer cleanup",
+      "rationale": "The tests verify that: 1) subscriptions abort when maxDurationMs is reached even without yielding values, 2) the abort signal is properly received by handlers, 3) timeout timers are cleaned up when subscriptions end (preventing memory leaks), and 4) the implementation handles the regression case from issue #6991. Using fake timers and spies ensures reliable testing of timeout behavior.",
+      "alternatives_considered": [
+        "Only testing happy paths",
+        "Mocking the entire abort system",
+        "Relying on existing subscription tests"
+      ],
+      "files_affected": [
+        "packages/tests/server/httpSubscriptionLink.test.ts"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Used AbortController.abort() with AbortError instead of AbortSignal.timeout() to maintain consistent error types",
+      "rationale": "AbortSignal.timeout() creates a DOMException with name 'TimeoutError', while the existing abort handling uses AbortError. Using abortSignalsAnyPonyfill with a manually created AbortController ensures consistent error types across the codebase and avoids browser compatibility issues with AbortSignal.timeout().",
+      "alternatives_considered": [
+        "Using AbortSignal.timeout() directly",
+        "Creating custom error types",
+        "Wrapping timeout errors"
+      ],
+      "files_affected": [
+        "packages/server/src/unstable-core-do-not-import/http/resolveResponse.ts"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Implement combined abort signal for subscription timeouts",
+      "description": "Create a unified abort signal that combines client disconnect signals with maxDurationMs timeout signals, ensuring subscription handlers receive proper timeout notifications",
+      "files_to_modify": [
+        "packages/server/src/unstable-core-do-not-import/http/resolveResponse.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-002",
+      "title": "Remove redundant stream-level timeout handling",
+      "description": "Clean up the withMaxDuration stream wrapper and related code since timeout handling is now managed at the request level through abort signals",
+      "files_to_modify": [
+        "packages/server/src/unstable-core-do-not-import/stream/sse.ts",
+        "packages/server/src/unstable-core-do-not-import/stream/utils/asyncIterable.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-003",
+      "title": "Add comprehensive timeout behavior tests",
+      "description": "Implement test cases for maxDurationMs timeout propagation, including non-yielding subscriptions and timer cleanup verification",
+      "files_to_modify": [
+        "packages/tests/server/httpSubscriptionLink.test.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    }
+  ],
+  "implementation_summary": "The implementation addresses a critical issue where GraphQL subscription handlers weren't receiving timeout signals from maxDurationMs configuration, causing subscriptions to hang indefinitely when waiting for abort signals. The core approach creates a combined abort signal at the request level that merges the original client disconnect signal with a timeout signal based on maxDurationMs.\n\nKey patterns used include: 1) Signal composition using abortSignalsAnyPonyfill to create a unified cancellation interface, 2) Proper resource cleanup with event listener removal and timer clearing to prevent memory leaks, and 3) Moving timeout handling from the stream layer to the request layer for consistency. The combinedAbortController function encapsulates the signal merging logic, creating a timer that aborts the controller when maxDurationMs expires, with cleanup functions to remove event listeners and clear timers.\n\nThe changes integrate seamlessly with the existing codebase by leveraging the existing opts.signal parameter that subscription handlers already receive. By removing the withMaxDuration stream wrapper and handling timeouts at the request resolution level, we ensure subscription handlers can properly detect both client disconnects and timeouts through the same abort signal interface. The added tests verify the fix for the reported regression and ensure timer cleanup prevents resource leaks in long-running servers.",
+  "source_pr": "https://github.com/trpc/trpc/pull/7037",
+  "before_sha": "783bf8f6582d80fdb42d35a1a6e1d42bf5515d15",
+  "after_sha": "172b6aa1ac2cfd5429ebd5284fcc308bce159702",
+  "diff_stats": {
+    "additions": 185,
+    "deletions": 43,
+    "files_changed": 4
+  }
+}

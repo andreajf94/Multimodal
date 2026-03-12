@@ -1,0 +1,13 @@
+{
+  "feature_name": "Linked Shared State API",
+  "description": "Implement a mechanism for linking SharedState instances between different user sessions, allowing state synchronization across clients. When a state is linked to another user's token, subsequent state loads should automatically patch in the linked shared states, and modifications to linked states should propagate to all connected clients.",
+  "functional_requirements": [
+    "Add a `_link_to(target_token)` method to SharedState that establishes a link to another user's state token, causing future state loads to include the linked state",
+    "Implement a `_unlink()` method that removes the link association and reverts the substate to load as private state from the client's own token tree",
+    "Ensure state modifications to linked states trigger loading of all other linked tokens and send delta updates to those connected clients",
+    "Make the linking mechanism work transparently with computed variables, background events, and frontend rendering without requiring special handling",
+    "Maintain `_linked_to` and `_linked_from` properties to track link relationships for debugging and state inspection"
+  ],
+  "project_name": "reflex",
+  "source_pr": "https://github.com/reflex-dev/reflex/pull/6024"
+}

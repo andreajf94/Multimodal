@@ -1,0 +1,108 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "data_validation",
+      "recommendation": "Added type guard function isFixedPoint() to validate fixed point coordinates before processing",
+      "rationale": "Prevents data corruption by ensuring fixed point arrays contain only finite numbers before normalization. This guards against malformed data from corrupted saves or external sources.",
+      "alternatives_considered": [
+        "Using try-catch blocks around parsing logic",
+        "Adding validation at the serialization layer instead of restoration"
+      ],
+      "files_affected": [
+        "packages/element/src/binding.ts"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Modified normalizeFixedPoint() to handle invalid inputs gracefully with default values",
+      "rationale": "Ensures restoration doesn't fail when encountering corrupted fixed point data. Returns a safe default [0.5001, 0.5001] instead of propagating invalid data or throwing errors.",
+      "alternatives_considered": [
+        "Throwing specific errors for invalid data",
+        "Skipping restoration of affected elements entirely"
+      ],
+      "files_affected": [
+        "packages/element/src/binding.ts"
+      ]
+    },
+    {
+      "dimension": "api_design",
+      "recommendation": "Simplified normalizeFixedPoint() type signature from conditional return type to simple FixedPoint return",
+      "rationale": "The function now always returns a valid FixedPoint, eliminating complex conditional types. This makes the API more predictable and reduces TypeScript complexity.",
+      "alternatives_considered": [
+        "Keeping the original conditional type signature",
+        "Creating separate functions for nullable and non-nullable cases"
+      ],
+      "files_affected": [
+        "packages/element/src/binding.ts"
+      ]
+    },
+    {
+      "dimension": "data_consistency",
+      "recommendation": "Removed default fallback values in repairBinding() calls and centralized validation in normalizeFixedPoint()",
+      "rationale": "Previously, different call sites provided different defaults ([0,0] vs [0.5,0.5]). Now all validation and defaulting happens in normalizeFixedPoint(), ensuring consistent behavior across the codebase.",
+      "alternatives_considered": [
+        "Keeping call-site defaults with additional validation",
+        "Creating a separate validation layer"
+      ],
+      "files_affected": [
+        "packages/excalidraw/data/restore.ts"
+      ]
+    },
+    {
+      "dimension": "defensive_programming",
+      "recommendation": "Added safeElement wrapper in repairBinding() to ensure consistent element state during fixed point calculation",
+      "rationale": "When calculating fixed points for legacy bindings, ensures the element's binding properties are normalized before use. This prevents cascading errors from unnormalized data during the migration process.",
+      "alternatives_considered": [
+        "Normalizing bindings in-place before calculation",
+        "Creating a deep clone of the element with normalized bindings"
+      ],
+      "files_affected": [
+        "packages/excalidraw/data/restore.ts"
+      ]
+    },
+    {
+      "dimension": "code_maintainability",
+      "recommendation": "Extracted EPSILON constant and improved type assertions for better readability",
+      "rationale": "Magic numbers (0.0001) were replaced with named constants, and complex type assertions were simplified. This improves code clarity and makes future maintenance easier.",
+      "alternatives_considered": [
+        "Keeping inline magic numbers",
+        "Using a configuration file for constants"
+      ],
+      "files_affected": [
+        "packages/element/src/binding.ts",
+        "packages/excalidraw/data/restore.ts"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Fixed Point Validation and Normalization",
+      "description": "Implement robust validation for fixed point coordinates and ensure graceful handling of invalid data during restoration",
+      "files_to_modify": [
+        "packages/element/src/binding.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-002",
+      "title": "Restoration Process Hardening",
+      "description": "Update element restoration logic to use validated fixed points and handle edge cases in binding migration",
+      "files_to_modify": [
+        "packages/excalidraw/data/restore.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    }
+  ],
+  "implementation_summary": "The changes implement a hardened parsing system for fixed points and bound elements during editor restoration. The core approach centers on defensive validation and graceful degradation when encountering malformed data.\n\nIn binding.ts, a new isFixedPoint() type guard validates that fixed point arrays contain exactly two finite numbers before processing. The normalizeFixedPoint() function was refactored to always return a valid FixedPoint, handling invalid inputs by returning a safe default [0.5001, 0.5001]. This eliminates the previous conditional return type, simplifying the API while maintaining the critical behavior of avoiding exact 0.5 values due to floating-point precision issues.\n\nIn restore.ts, the repairBinding() function was updated to remove inconsistent default values ([0,0] vs [0.5,0.5]) that were previously passed to normalizeFixedPoint(). Now all validation and defaulting is centralized in normalizeFixedPoint(). Additionally, when migrating legacy binding schemas, a safeElement wrapper ensures that binding properties are normalized before being used in fixed point calculations, preventing cascading errors from unnormalized intermediate states.\n\nThe changes integrate seamlessly with the existing restoration pipeline, adding validation layers without breaking existing functionality. The use of finite number checks (Number.isFinite) rather than simple truthiness tests provides robust protection against NaN and Infinity values that could crash calculations. This approach balances data integrity with backward compatibility, ensuring that even corrupted saves can be restored to a functional state.",
+  "source_pr": "https://github.com/excalidraw/excalidraw/pull/10816",
+  "before_sha": "b0404b10b6d775d4a0bc48072947f95e5753e117",
+  "after_sha": "7ea3229e17696d2d64f9d0c4a0596b15d8cc81b9",
+  "diff_stats": {
+    "additions": 51,
+    "deletions": 19,
+    "files_changed": 2
+  }
+}

@@ -1,0 +1,74 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "testing",
+      "recommendation": "Disabled flow heartbeats in test environment by setting PREFECT_FLOWS_HEARTBEAT_FREQUENCY to None in the test session profile configuration",
+      "rationale": "Heartbeats spawn background threads/tasks that increase test execution time and can cause CI timeouts. Disabling them in tests improves performance while maintaining test isolation. The change uses the existing test configuration infrastructure (pytest_sessionstart) to apply this setting globally for all tests.",
+      "alternatives_considered": [
+        "Mocking heartbeat behavior in individual tests",
+        "Adding a test-specific environment variable",
+        "Creating a separate test settings profile"
+      ],
+      "files_affected": [
+        "tests/conftest.py"
+      ]
+    },
+    {
+      "dimension": "api_design",
+      "recommendation": "Updated test cases to use get_current_settings() instead of Settings() to respect test environment configuration",
+      "rationale": "Settings() creates a fresh settings instance that doesn't inherit test environment overrides, while get_current_settings() returns the current context-aware settings. This ensures tests properly reflect the test configuration (including disabled heartbeats) and prevents test pollution from default settings.",
+      "alternatives_considered": [
+        "Manually applying test settings to Settings() instances",
+        "Using fixtures to inject settings into tests",
+        "Leaving tests as-is (would break test isolation)"
+      ],
+      "files_affected": [
+        "tests/test_settings.py"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Maintained backward compatibility for heartbeat-specific tests by preserving existing mocking approaches",
+      "rationale": "Tests that specifically test heartbeat functionality should continue to work by using their existing mocking patterns. The global test configuration disables heartbeats for performance, but heartbeat-specific tests can still test the feature by explicitly enabling/mocking it. This preserves test coverage while optimizing test suite performance.",
+      "alternatives_considered": [
+        "Removing all heartbeat tests",
+        "Creating a separate test suite for heartbeat functionality",
+        "Conditionally enabling heartbeats only in specific tests"
+      ],
+      "files_affected": [
+        "tests/conftest.py"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Disable heartbeats in test environment configuration",
+      "description": "Update the test session profile to disable flow heartbeats by default, improving test performance and preventing CI timeouts",
+      "files_to_modify": [
+        "tests/conftest.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-002",
+      "title": "Fix test settings usage patterns",
+      "description": "Update test cases to use get_current_settings() instead of Settings() to properly respect test environment configuration",
+      "files_to_modify": [
+        "tests/test_settings.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation addresses the need to disable flow heartbeats in test environments to improve test performance and prevent CI timeouts. The approach modifies the test configuration at the session level by setting PREFECT_FLOWS_HEARTBEAT_FREQUENCY to None in the pytest_sessionstart hook. This ensures all tests run without spawning background heartbeat threads, reducing execution time and resource consumption.\n\nKey patterns used include leveraging Prefect's existing settings infrastructure and the test session profile mechanism. The change integrates with the existing test suite by modifying the global test configuration while maintaining backward compatibility for heartbeat-specific tests. Tests that need to test heartbeat functionality can still do so by explicitly enabling or mocking heartbeats, as the global configuration doesn't prevent explicit overrides.\n\nAdditionally, the implementation fixes a subtle but important issue in test patterns: replacing Settings() instantiation with get_current_settings() calls. This ensures tests properly respect the test environment configuration rather than creating fresh settings instances that would ignore test-specific overrides. This pattern change improves test isolation and reliability while maintaining the same test behavior for non-test-specific settings.",
+  "source_pr": "https://github.com/PrefectHQ/prefect/pull/21062",
+  "before_sha": "eb81ee5d1c0adc63115006f55e8f10c1fdd325a8",
+  "after_sha": "70c731b3ce4051bdc7efa71b6a25fe244bb06156",
+  "diff_stats": {
+    "additions": 6,
+    "deletions": 2,
+    "files_changed": 2
+  }
+}

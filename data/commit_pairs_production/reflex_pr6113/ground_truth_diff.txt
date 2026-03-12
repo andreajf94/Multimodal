@@ -1,0 +1,30 @@
+diff --git a/pyi_hashes.json b/pyi_hashes.json
+index d179d76dc59..681a2d1e3d9 100644
+--- a/pyi_hashes.json
++++ b/pyi_hashes.json
+@@ -23,7 +23,7 @@
+   "reflex/components/core/window_events.pyi": "af33ccec866b9540ee7fbec6dbfbd151",
+   "reflex/components/datadisplay/__init__.pyi": "52755871369acbfd3a96b46b9a11d32e",
+   "reflex/components/datadisplay/code.pyi": "b86769987ef4d1cbdddb461be88539fd",
+-  "reflex/components/datadisplay/dataeditor.pyi": "dc4327bd23addced344d9850a959aa21",
++  "reflex/components/datadisplay/dataeditor.pyi": "f8c1e816c9f22f4a7429f812214407f2",
+   "reflex/components/datadisplay/shiki_code_block.pyi": "1d53e75b6be0d3385a342e7b3011babd",
+   "reflex/components/el/__init__.pyi": "0adfd001a926a2a40aee94f6fa725ecc",
+   "reflex/components/el/element.pyi": "c5974a92fbc310e42d0f6cfdd13472f4",
+diff --git a/reflex/components/datadisplay/dataeditor.py b/reflex/components/datadisplay/dataeditor.py
+index 6107c98467a..e5fa555bdab 100644
+--- a/reflex/components/datadisplay/dataeditor.py
++++ b/reflex/components/datadisplay/dataeditor.py
+@@ -360,6 +360,12 @@ class DataEditor(NoSSRComponent):
+     # Fired when a column is resized.
+     on_column_resize: EventHandler[passthrough_event_spec(GridColumn, int)]
+ 
++    # Shows search bar.
++    show_search: Var[bool]
++
++    # Fired when the search close button is clicked.
++    on_search_close: EventHandler[no_args_event_spec]
++
+     def add_imports(self) -> ImportDict:
+         """Add imports for the component.
+ 

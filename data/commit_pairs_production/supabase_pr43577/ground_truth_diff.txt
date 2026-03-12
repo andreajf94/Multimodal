@@ -1,0 +1,332 @@
+diff --git a/apps/studio/components/interfaces/Auth/EmailTemplates/TemplateEditor.tsx b/apps/studio/components/interfaces/Auth/EmailTemplates/TemplateEditor.tsx
+index 8997336afd964..9e3e61eab1f5b 100644
+--- a/apps/studio/components/interfaces/Auth/EmailTemplates/TemplateEditor.tsx
++++ b/apps/studio/components/interfaces/Auth/EmailTemplates/TemplateEditor.tsx
+@@ -29,6 +29,7 @@ import {
+ import { Admonition } from 'ui-patterns'
+ import { FormItemLayout } from 'ui-patterns/form/FormItemLayout/FormItemLayout'
+ import { SpamValidation } from './SpamValidation'
++import { PreventNavigationOnUnsavedChanges } from '@/components/ui-patterns/Dialogs/PreventNavigationOnUnsavedChanges'
+ 
+ interface TemplateEditorProps {
+   template: FormSchema
+@@ -202,21 +203,6 @@ export const TemplateEditor = ({ template }: TemplateEditorProps) => {
+     }
+   }, [authConfig, properties, messageSlug, form])
+ 
+-  useEffect(() => {
+-    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+-      if (hasUnsavedChanges) {
+-        e.preventDefault()
+-        e.returnValue = '' // deprecated, but older browsers still require this
+-      }
+-    }
+-
+-    window.addEventListener('beforeunload', handleBeforeUnload)
+-
+-    return () => {
+-      window.removeEventListener('beforeunload', handleBeforeUnload)
+-    }
+-  }, [hasUnsavedChanges])
+-
+   useEffect(() => {
+     if (projectRef && id && !!authConfig) {
+       const [subjectKey] = Object.keys(properties)
+@@ -376,6 +362,7 @@ export const TemplateEditor = ({ template }: TemplateEditorProps) => {
+           </>
+         )}
+       </form>
++      <PreventNavigationOnUnsavedChanges hasChanges={hasChanges} />
+     </Form_Shadcn_>
+   )
+ }
+diff --git a/apps/studio/components/interfaces/Reports/Reports.tsx b/apps/studio/components/interfaces/Reports/Reports.tsx
+index ca74c461aefcd..98f4b82639db9 100644
+--- a/apps/studio/components/interfaces/Reports/Reports.tsx
++++ b/apps/studio/components/interfaces/Reports/Reports.tsx
+@@ -37,6 +37,7 @@ import { ChartConfig } from '../SQLEditor/UtilityPanel/ChartConfig'
+ import { GridResize } from './GridResize'
+ import { MetricOptions } from './MetricOptions'
+ import { LAYOUT_COLUMN_COUNT } from './Reports.constants'
++import { PreventNavigationOnUnsavedChanges } from '@/components/ui-patterns/Dialogs/PreventNavigationOnUnsavedChanges'
+ 
+ const DEFAULT_CHART_COLUMN_COUNT = 1
+ const DEFAULT_CHART_ROW_COUNT = 1
+@@ -57,9 +58,6 @@ const Reports = () => {
+   const [hasEdits, setHasEdits] = useState<boolean>(false)
+   const [isRefreshing, setIsRefreshing] = useState<boolean>(false)
+ 
+-  const [navigateUrl, setNavigateUrl] = useState<string>()
+-  const [confirmNavigate, setConfirmNavigate] = useState(false)
+-
+   const {
+     data: userContents,
+     isPending: isLoading,
+@@ -364,31 +362,6 @@ const Reports = () => {
+     checkEditState()
+   }, [config])
+ 
+-  useEffect(() => {
+-    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+-      if (hasEdits) {
+-        e.preventDefault()
+-        e.returnValue = '' // deprecated, but older browsers still require this
+-      }
+-    }
+-
+-    const handleBrowseAway = (url: string) => {
+-      if (hasEdits && !confirmNavigate) {
+-        setNavigateUrl(url)
+-        throw 'Route change declined' // Just to prevent the route change
+-      } else {
+-        setNavigateUrl(undefined)
+-      }
+-    }
+-
+-    window.addEventListener('beforeunload', handleBeforeUnload)
+-    router.events.on('routeChangeStart', handleBrowseAway)
+-    return () => {
+-      window.removeEventListener('beforeunload', handleBeforeUnload)
+-      router.events.off('routeChangeStart', handleBrowseAway)
+-    }
+-  }, [hasEdits, confirmNavigate, router])
+-
+   if (isLoading || isLoadingPermissions) {
+     return <LogoLoader />
+   }
+@@ -528,27 +501,7 @@ const Reports = () => {
+           </div>
+         )}
+       </div>
+-      <ConfirmationModal
+-        visible={!!navigateUrl}
+-        variant="warning"
+-        title="You have unsaved changes in your report"
+-        confirmLabel="Confirm"
+-        onConfirm={() => {
+-          setConfirmNavigate(true)
+-          let urlToNavigate = navigateUrl ?? '/'
+-          if (BASE_PATH && urlToNavigate.startsWith(BASE_PATH)) {
+-            urlToNavigate = urlToNavigate.slice(BASE_PATH.length) || '/'
+-          }
+-          if (!urlToNavigate.startsWith('/')) urlToNavigate = `/${urlToNavigate}`
+-          setNavigateUrl(undefined)
+-          router.push(urlToNavigate)
+-        }}
+-        onCancel={() => setNavigateUrl(undefined)}
+-      >
+-        <p className="text-sm">
+-          Unsaved changes will be lost, are you sure you want to navigate away?
+-        </p>
+-      </ConfirmationModal>
++      <PreventNavigationOnUnsavedChanges hasChanges={hasEdits} />
+     </>
+   )
+ }
+diff --git a/apps/studio/components/ui-patterns/Dialogs/DiscardChangesConfirmationDialog.tsx b/apps/studio/components/ui-patterns/Dialogs/DiscardChangesConfirmationDialog.tsx
+index b7d920062ed75..d1cb633596a8c 100644
+--- a/apps/studio/components/ui-patterns/Dialogs/DiscardChangesConfirmationDialog.tsx
++++ b/apps/studio/components/ui-patterns/Dialogs/DiscardChangesConfirmationDialog.tsx
+@@ -14,7 +14,7 @@ import {
+   AlertDialogTitle,
+ } from 'ui'
+ 
+-interface DiscardChangesConfirmationDialogProps extends ConfirmOnCloseModalProps {
++export interface DiscardChangesConfirmationDialogProps extends ConfirmOnCloseModalProps {
+   title?: ReactNode
+   description?: ReactNode
+   confirmLabel?: ReactNode
+diff --git a/apps/studio/components/ui-patterns/Dialogs/PreventNavigationOnUnsavedChanges.tsx b/apps/studio/components/ui-patterns/Dialogs/PreventNavigationOnUnsavedChanges.tsx
+new file mode 100644
+index 0000000000000..a7e0a8f3dcc40
+--- /dev/null
++++ b/apps/studio/components/ui-patterns/Dialogs/PreventNavigationOnUnsavedChanges.tsx
+@@ -0,0 +1,70 @@
++import { useRouter } from 'next/router'
++import { useEffect, useState } from 'react'
++import { BASE_PATH } from 'lib/constants'
++
++import {
++  DiscardChangesConfirmationDialog,
++  type DiscardChangesConfirmationDialogProps,
++} from './DiscardChangesConfirmationDialog'
++
++export const PreventNavigationOnUnsavedChanges = ({
++  hasChanges,
++  ...props
++}: { hasChanges: boolean } & Omit<
++  DiscardChangesConfirmationDialogProps,
++  'visible' | 'onClose' | 'onCancel'
++>) => {
++  const router = useRouter()
++  const [navigateUrl, setNavigateUrl] = useState<string>()
++  const [confirmNavigate, setConfirmNavigate] = useState(false)
++
++  useEffect(() => {
++    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
++      if (hasChanges) {
++        e.preventDefault()
++        e.returnValue = '' // deprecated, but older browsers still require this
++      }
++    }
++
++    const handleBrowseAway = (url: string) => {
++      if (hasChanges && !confirmNavigate) {
++        setNavigateUrl(url)
++        throw 'Route change declined' // Just to prevent the route change
++        return
++      }
++      setNavigateUrl(undefined)
++    }
++    window.addEventListener('beforeunload', handleBeforeUnload)
++    router.events.on('routeChangeStart', handleBrowseAway)
++
++    return () => {
++      window.removeEventListener('beforeunload', handleBeforeUnload)
++      router.events.off('routeChangeStart', handleBrowseAway)
++    }
++    // eslint-disable-next-line react-hooks/exhaustive-deps
++  }, [confirmNavigate, hasChanges])
++
++  const handleCancel = () => {
++    setNavigateUrl(undefined)
++  }
++
++  const handleClose = () => {
++    setConfirmNavigate(true)
++    let urlToNavigate = navigateUrl ?? '/'
++    if (BASE_PATH && urlToNavigate.startsWith(BASE_PATH)) {
++      urlToNavigate = urlToNavigate.slice(BASE_PATH.length) || '/'
++    }
++    if (!urlToNavigate.startsWith('/')) urlToNavigate = `/${urlToNavigate}`
++    setNavigateUrl(undefined)
++    router.push(urlToNavigate)
++  }
++
++  return (
++    <DiscardChangesConfirmationDialog
++      visible={!!navigateUrl}
++      onCancel={handleCancel}
++      onClose={handleClose}
++      {...props}
++    />
++  )
++}
+diff --git a/apps/studio/pages/project/[ref]/functions/[functionSlug]/code.tsx b/apps/studio/pages/project/[ref]/functions/[functionSlug]/code.tsx
+index 76cc03bb879de..a8de7c3f472ff 100644
+--- a/apps/studio/pages/project/[ref]/functions/[functionSlug]/code.tsx
++++ b/apps/studio/pages/project/[ref]/functions/[functionSlug]/code.tsx
+@@ -1,12 +1,4 @@
+ import { PermissionAction } from '@supabase/shared-types/out/constants'
+-import { isEqual } from 'lodash'
+-import { AlertCircle, CornerDownLeft, Loader2 } from 'lucide-react'
+-import { useEffect, useMemo, useState } from 'react'
+-import { toast } from 'sonner'
+-
+-import { formatFunctionBodyToFiles } from '@/components/interfaces/EdgeFunctions/EdgeFunctions.utils'
+-import { FileData } from '@/components/ui/FileExplorerAndEditor/FileExplorerAndEditor.types'
+-import { useLatest } from '@/hooks/misc/useLatest'
+ import { IS_PLATFORM, useParams } from 'common'
+ import { DeployEdgeFunctionWarningModal } from 'components/interfaces/EdgeFunctions/DeployEdgeFunctionWarningModal'
+ import { DefaultLayout } from 'components/layouts/DefaultLayout'
+@@ -21,8 +13,16 @@ import { useAsyncCheckPermissions } from 'hooks/misc/useCheckPermissions'
+ import { useSelectedOrganizationQuery } from 'hooks/misc/useSelectedOrganization'
+ import { useSelectedProjectQuery } from 'hooks/misc/useSelectedProject'
+ import { BASE_PATH } from 'lib/constants'
++import { isEqual } from 'lodash'
++import { AlertCircle, CornerDownLeft, Loader2 } from 'lucide-react'
++import { useEffect, useMemo, useState } from 'react'
++import { toast } from 'sonner'
+ import { LogoLoader } from 'ui'
+ 
++import { formatFunctionBodyToFiles } from '@/components/interfaces/EdgeFunctions/EdgeFunctions.utils'
++import { PreventNavigationOnUnsavedChanges } from '@/components/ui-patterns/Dialogs/PreventNavigationOnUnsavedChanges'
++import { FileData } from '@/components/ui/FileExplorerAndEditor/FileExplorerAndEditor.types'
++
+ const CodePage = () => {
+   const { ref, functionSlug } = useParams()
+   const { data: project } = useSelectedProjectQuery()
+@@ -146,27 +146,11 @@ const CodePage = () => {
+     setFiles(initialFiles)
+   }, [initialFiles])
+ 
+-  // [Joshen] Probably a candidate for useStaticEffectEvent
+-  const filesRef = useLatest(files)
+-  const initialFilesRef = useLatest(initialFiles)
+-  useEffect(() => {
+-    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+-      const normalizeFiles = (list: FileData[]) =>
+-        list.map(({ id, name, content }) => ({ id, name, content }))
+-      const hasUnsavedChanges = !isEqual(
+-        normalizeFiles(initialFilesRef.current),
+-        normalizeFiles(filesRef.current)
+-      )
+-
+-      if (hasUnsavedChanges) {
+-        e.preventDefault()
+-        e.returnValue = '' // deprecated, but older browsers still require this
+-      }
+-    }
+-    window.addEventListener('beforeunload', handleBeforeUnload)
+-    return () => window.removeEventListener('beforeunload', handleBeforeUnload)
+-    // eslint-disable-next-line react-hooks/exhaustive-deps
+-  }, [])
++  const hasUnsavedChanges = useMemo(() => {
++    const normalizeFiles = (list: FileData[]) =>
++      list.map(({ id, name, content }) => ({ id, name, content }))
++    return !isEqual(normalizeFiles(initialFiles), normalizeFiles(files))
++  }, [initialFiles, files])
+ 
+   return (
+     <div className="flex flex-col h-full">
+@@ -252,6 +236,7 @@ const CodePage = () => {
+         onConfirm={handleDeployConfirm}
+         isDeploying={isDeploying}
+       />
++      <PreventNavigationOnUnsavedChanges hasChanges={hasUnsavedChanges} />
+     </div>
+   )
+ }
+diff --git a/apps/studio/pages/project/[ref]/functions/new.tsx b/apps/studio/pages/project/[ref]/functions/new.tsx
+index b8bb08b732175..a6291c202db0a 100644
+--- a/apps/studio/pages/project/[ref]/functions/new.tsx
++++ b/apps/studio/pages/project/[ref]/functions/new.tsx
+@@ -45,6 +45,7 @@ import {
+ } from 'ui'
+ import * as z from 'zod'
+ 
++import { PreventNavigationOnUnsavedChanges } from '@/components/ui-patterns/Dialogs/PreventNavigationOnUnsavedChanges'
+ import { FileData } from '@/components/ui/FileExplorerAndEditor/FileExplorerAndEditor.types'
+ import { useLatest } from '@/hooks/misc/useLatest'
+ 
+@@ -276,21 +277,7 @@ const NewFunctionPage = () => {
+     // eslint-disable-next-line react-hooks/exhaustive-deps
+   }, [template])
+ 
+-  // [Joshen] Probably a candidate for useStaticEffectEvent
+-  const filesRef = useLatest(files)
+-  useEffect(() => {
+-    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+-      const hasUnsavedChanges = !isEqual(INITIAL_FILES, filesRef.current)
+-
+-      if (hasUnsavedChanges) {
+-        e.preventDefault()
+-        e.returnValue = '' // deprecated, but older browsers still require this
+-      }
+-    }
+-    window.addEventListener('beforeunload', handleBeforeUnload)
+-    return () => window.removeEventListener('beforeunload', handleBeforeUnload)
+-    // eslint-disable-next-line react-hooks/exhaustive-deps
+-  }, [])
++  const hasUnsavedChanges = useMemo(() => !isEqual(INITIAL_FILES, files), [files])
+ 
+   return (
+     <PageLayout
+@@ -428,6 +415,7 @@ const NewFunctionPage = () => {
+           </Button>
+         </form>
+       </Form_Shadcn_>
++      <PreventNavigationOnUnsavedChanges hasChanges={hasUnsavedChanges} />
+     </PageLayout>
+   )
+ }

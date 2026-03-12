@@ -1,0 +1,12 @@
+{
+  "feature_name": "Preserve sync stream output logs in API",
+  "description": "Fix the sync stream reader threads in the prefect-shell integration to preserve flow-run logging context so that stdout/stderr records from shell operations are properly sent to the API. Currently, these logs are either buffered until process exit or lost entirely when streaming synchronously. The solution should ensure streamed logs maintain flow/task metadata and appear incrementally in the API.",
+  "functional_requirements": [
+    "Propagate the active logging context into sync stdout/stderr reader threads using appropriate context-copying mechanisms",
+    "Capture the run-aware logger before spawning reader threads to preserve flow/task metadata in streamed records",
+    "Ensure sync ShellOperation.run() sends streamed stdout/stderr records to flow-run logs in the API incrementally (not just buffered at exit)",
+    "Add regression tests that verify sync streaming logs reach the API with proper metadata"
+  ],
+  "project_name": "prefect",
+  "source_pr": "https://github.com/PrefectHQ/prefect/pull/21056"
+}

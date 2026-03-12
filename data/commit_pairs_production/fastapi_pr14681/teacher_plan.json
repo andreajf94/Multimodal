@@ -1,0 +1,78 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "documentation_accuracy",
+      "recommendation": "Updated the documentation to include a technical note explaining why async generators need await statements for proper cancellation when used with StreamingResponse",
+      "rationale": "Async generators without await points cannot be properly cancelled, which could lead to resource leaks or hanging connections. The documentation needed to explain this subtle but important detail to users implementing streaming responses.",
+      "alternatives_considered": [
+        "Leaving the documentation as-is and relying on users to discover this behavior through trial and error",
+        "Only updating the code example without explaining the reasoning",
+        "Creating a separate troubleshooting section instead of an inline note"
+      ],
+      "files_affected": [
+        "docs/en/docs/advanced/custom-response.md"
+      ]
+    },
+    {
+      "dimension": "code_example_best_practices",
+      "recommendation": "Modified the tutorial code example to demonstrate correct async generator implementation with await anyio.sleep(0) to allow proper cancellation",
+      "rationale": "The example needed to show the correct pattern for async generators used with StreamingResponse. Adding await anyio.sleep(0) provides a cancellation point without affecting the streaming behavior. This follows the principle that examples should demonstrate best practices, not just minimal working code.",
+      "alternatives_considered": [
+        "Using asyncio.sleep instead of anyio.sleep (but anyio is already a dependency and provides better compatibility)",
+        "Adding a more realistic await like fetching data from a database (but that would complicate the example)",
+        "Creating a separate example file for the corrected version"
+      ],
+      "files_affected": [
+        "docs_src/custom_response/tutorial007_py310.py"
+      ]
+    },
+    {
+      "dimension": "dependency_management",
+      "recommendation": "Added import anyio to the tutorial file to support the await statement",
+      "rationale": "anyio is already a transitive dependency of FastAPI (through starlette), so adding it doesn't introduce new dependencies. It provides async primitives that work across different async backends (asyncio, trio).",
+      "alternatives_considered": [
+        "Using asyncio.sleep directly (but this would tie the example to asyncio specifically)",
+        "Creating a mock awaitable function (but this would be less clear and educational)",
+        "Not importing anything and using a different approach (but then the example wouldn't demonstrate the actual solution)"
+      ],
+      "files_affected": [
+        "docs_src/custom_response/tutorial007_py310.py"
+      ]
+    },
+    {
+      "dimension": "documentation_highlighting",
+      "recommendation": "Updated the code highlighting range in the documentation from hl[2,14] to hl[3,16] to include the new import and await statement",
+      "rationale": "The documentation uses syntax highlighting to draw attention to specific lines. When the code example changed, the highlighting needed to be updated to include the new important lines (the anyio import and the await statement).",
+      "alternatives_considered": [
+        "Keeping the old highlighting range (but then the important new code wouldn't be highlighted)",
+        "Creating a completely new highlighting range (but the existing range was close enough to just adjust)",
+        "Removing highlighting altogether (but highlighting is valuable for educational purposes)"
+      ],
+      "files_affected": [
+        "docs/en/docs/advanced/custom-response.md"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Fix StreamingResponse async generator documentation",
+      "description": "Update documentation and code example to demonstrate proper async generator usage with await statements for cancellation support",
+      "files_to_modify": [
+        "docs/en/docs/advanced/custom-response.md",
+        "docs_src/custom_response/tutorial007_py310.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "This change addresses a subtle but important issue with async generators in FastAPI's StreamingResponse. The original documentation and example showed an async generator without any await statements, which meant the generator couldn't be properly cancelled when a client disconnects. This could lead to resource leaks or hanging processes, especially with long-running or infinite streams.\n\nThe fix involved two coordinated changes: First, the code example was updated to add `await anyio.sleep(0)` after each yield, providing a cancellation point without affecting the streaming behavior. This required importing anyio, which is already a transitive dependency. Second, the documentation was enhanced with a technical note explaining why await statements are necessary for proper cancellation, making the educational value explicit.\n\nThe approach maintains backward compatibility while improving the example to demonstrate best practices. By using anyio.sleep(0) instead of a more complex await, the example remains simple and focused on the core concept. The documentation note provides context that helps users understand not just what to do, but why it's important, which is crucial for educational documentation like FastAPI's.",
+  "source_pr": "https://github.com/fastapi/fastapi/pull/14681",
+  "before_sha": "ea80e466dbdc3bfd9f0baebacf5ec46bc3f71963",
+  "after_sha": "c3f54a0794d8acadb0059c55edbb314678253921",
+  "diff_stats": {
+    "additions": 13,
+    "deletions": 1,
+    "files_changed": 2
+  }
+}

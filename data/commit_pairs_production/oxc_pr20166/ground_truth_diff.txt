@@ -1,0 +1,152 @@
+diff --git a/apps/oxlint/src-js/plugins/lint.ts b/apps/oxlint/src-js/plugins/lint.ts
+index add6efa09194f..002826cdfd630 100644
+--- a/apps/oxlint/src-js/plugins/lint.ts
++++ b/apps/oxlint/src-js/plugins/lint.ts
+@@ -274,6 +274,13 @@ export function resetFile() {
+  * in the correct initial state for linting the next file.
+  */
+ export function resetStateAfterError() {
++  // In case error occurred during visitor compilation, clear internal state of visitor compilation,
++  // so no leftovers bleed into next file.
++  // We could have a separate function to reset state which could be simpler and faster, but `resetStateAfterError`
++  // should never be called - only happens when rules return an invalid visitor or malfunction.
++  // So better to use the existing function, rather than bloat the package with more code which should never run.
++  finalizeCompiledVisitor();
++
+   diagnostics.length = 0;
+   ancestors.length = 0;
+   resetFile();
+diff --git a/apps/oxlint/test/fixtures/lint_invalid_visitor/.oxlintrc.json b/apps/oxlint/test/fixtures/lint_invalid_visitor/.oxlintrc.json
+new file mode 100644
+index 0000000000000..76b546efca906
+--- /dev/null
++++ b/apps/oxlint/test/fixtures/lint_invalid_visitor/.oxlintrc.json
+@@ -0,0 +1,7 @@
++{
++  "jsPlugins": ["./plugin.ts"],
++  "categories": { "correctness": "off" },
++  "rules": {
++    "error-plugin/error": "error"
++  }
++}
+diff --git a/apps/oxlint/test/fixtures/lint_invalid_visitor/files/1.js b/apps/oxlint/test/fixtures/lint_invalid_visitor/files/1.js
+new file mode 100644
+index 0000000000000..2756c24c45775
+--- /dev/null
++++ b/apps/oxlint/test/fixtures/lint_invalid_visitor/files/1.js
+@@ -0,0 +1 @@
++let x;
+diff --git a/apps/oxlint/test/fixtures/lint_invalid_visitor/files/2.js b/apps/oxlint/test/fixtures/lint_invalid_visitor/files/2.js
+new file mode 100644
+index 0000000000000..a5c1e6463879f
+--- /dev/null
++++ b/apps/oxlint/test/fixtures/lint_invalid_visitor/files/2.js
+@@ -0,0 +1 @@
++let y;
+diff --git a/apps/oxlint/test/fixtures/lint_invalid_visitor/options.json b/apps/oxlint/test/fixtures/lint_invalid_visitor/options.json
+new file mode 100644
+index 0000000000000..c6d966f1b525b
+--- /dev/null
++++ b/apps/oxlint/test/fixtures/lint_invalid_visitor/options.json
+@@ -0,0 +1,3 @@
++{
++  "singleThread": true
++}
+diff --git a/apps/oxlint/test/fixtures/lint_invalid_visitor/output.snap.md b/apps/oxlint/test/fixtures/lint_invalid_visitor/output.snap.md
+new file mode 100644
+index 0000000000000..ecd37de934726
+--- /dev/null
++++ b/apps/oxlint/test/fixtures/lint_invalid_visitor/output.snap.md
+@@ -0,0 +1,22 @@
++# Exit code
++1
++
++# stdout
++```
++  x Error running JS plugin.
++  | File path: <fixture>/files/1.js
++  | TypeError: 'Program' property of visitor object is not a function
++
++  x error-plugin(error): Identifier in 2nd file: y
++   ,-[files/2.js:1:5]
++ 1 | let y;
++   :     ^
++   `----
++
++Found 0 warnings and 2 errors.
++Finished in Xms on 2 files with 1 rules using X threads.
++```
++
++# stderr
++```
++```
+diff --git a/apps/oxlint/test/fixtures/lint_invalid_visitor/plugin.ts b/apps/oxlint/test/fixtures/lint_invalid_visitor/plugin.ts
+new file mode 100644
+index 0000000000000..a4f3a11baeb09
+--- /dev/null
++++ b/apps/oxlint/test/fixtures/lint_invalid_visitor/plugin.ts
+@@ -0,0 +1,64 @@
++import assert from "node:assert";
++
++import type { Plugin, Rule } from "#oxlint/plugins";
++
++// Aim of this test is:
++//
++// 1. Check that errors thrown during visitor compilation are handled correctly and shown to user as diagnostics.
++// 2. Check that global state is reset after an error during visiting a file, so it's in correct initial state
++//    when Oxlint starts linting the next file.
++//
++// The 2nd is tricky to test because usually the order Oxlint lints files in is non-deterministic.
++// To make this test deterministic, we run it with `oxlint --threads 1`
++// (`options.json` file for this fixture contains `"singleThread": true`).
++// This guarantees that `1.js` is linted before `2.js`.
++//
++// This rule throws an error during visitor compilation when linting 1st file. If global state is not reset properly
++// before linting 2nd file, `Identifier` visitor for 1st file will not be cleaned up and will fire on 2nd file.
++
++let fileIndex = 0;
++
++const rule: Rule = {
++  create(context) {
++    const isFirstFileLinted = fileIndex === 0;
++    fileIndex++;
++
++    // Check the order files get linted in is what we expect
++    const isFirstFile = context.filename.endsWith("1.js");
++    assert(isFirstFile === isFirstFileLinted);
++
++    if (isFirstFile) {
++      return {
++        Identifier(node) {
++          context.report({
++            message: `Identifier in 1st file: ${node.name}`,
++            node,
++          });
++        },
++
++        // Illegal value, causes error during visitor compilation
++        Program: 123 as any,
++      };
++    }
++
++    return {
++      Identifier(node) {
++        context.report({
++          message: `Identifier in 2nd file: ${node.name}`,
++          node,
++        });
++      },
++    };
++  },
++};
++
++const plugin: Plugin = {
++  meta: {
++    name: "error-plugin",
++  },
++  rules: {
++    error: rule,
++  },
++};
++
++export default plugin;

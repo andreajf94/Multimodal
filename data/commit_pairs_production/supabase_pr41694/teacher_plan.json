@@ -1,0 +1,88 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "ui_ux_consistency",
+      "recommendation": "Fixed password toggle button labels to accurately reflect the action they will perform. Changed from showing the opposite state to showing the action that will occur when clicked.",
+      "rationale": "The original implementation had inverted logic where the button label described the current state rather than the action. When password was hidden, it said 'Hide password' (which would be incorrect since clicking would show it). This violates UX principles where button labels should describe the action, not the state.",
+      "alternatives_considered": [
+        "Keep current state description but change logic to match",
+        "Use icons only without text labels",
+        "Implement a toggle component with built-in state management"
+      ],
+      "files_affected": [
+        "apps/studio/components/interfaces/SignIn/SignUpForm.tsx"
+      ]
+    },
+    {
+      "dimension": "security_implementation",
+      "recommendation": "Implemented security-first approach for edge functions secrets by ensuring all secret values are hidden by default with bullet point masking. Added independent visibility toggle functionality for each secret.",
+      "rationale": "Sensitive data like API keys and secrets should never be visible by default. The bullet point masking prevents accidental exposure while the per-secret toggle allows developers to view specific secrets when needed. This follows the principle of least privilege and reduces the risk of shoulder surfing.",
+      "alternatives_considered": [
+        "Show secrets in plain text with a global hide button",
+        "Require additional authentication before revealing secrets",
+        "Implement a timeout for secret visibility"
+      ],
+      "files_affected": [
+        "apps/studio/components/interfaces/Functions/EdgeFunctionSecrets/EdgeFunctionSecret.tsx"
+      ]
+    },
+    {
+      "dimension": "code_organization",
+      "recommendation": "Reorganized import statements to follow consistent ordering patterns and moved security-related imports to appropriate positions.",
+      "rationale": "The import reorganization groups related imports together (external libraries, internal hooks, UI components) which improves code readability and maintainability. Moving security-related imports to logical positions makes the security intent clearer when reviewing the code.",
+      "alternatives_considered": [
+        "Keep original import order",
+        "Use automated import sorting tools",
+        "Create separate import groups with comments"
+      ],
+      "files_affected": [
+        "apps/studio/components/interfaces/Functions/EdgeFunctionSecrets/EdgeFunctionSecret.tsx",
+        "apps/studio/components/interfaces/SignIn/SignUpForm.tsx"
+      ]
+    },
+    {
+      "dimension": "accessibility",
+      "recommendation": "Updated aria-label attributes to match the corrected button labels, ensuring screen readers accurately describe the toggle action.",
+      "rationale": "Accessibility is critical for inclusive design. The aria-label must match the visual label to prevent confusion for users relying on assistive technologies. This maintains WCAG compliance and provides consistent experience across all user interfaces.",
+      "alternatives_considered": [
+        "Remove aria-label and rely on title attribute only",
+        "Use more descriptive aria-live announcements",
+        "Implement keyboard navigation enhancements"
+      ],
+      "files_affected": [
+        "apps/studio/components/interfaces/SignIn/SignUpForm.tsx"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Fix Password Visibility Toggle Logic in Sign-Up Form",
+      "description": "Correct the password toggle button labels and aria attributes to accurately describe the action that will occur when clicked. When password is hidden, button should say 'Show password' since clicking will reveal it.",
+      "files_to_modify": [
+        "apps/studio/components/interfaces/SignIn/SignUpForm.tsx"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-002",
+      "title": "Enhance Edge Functions Secrets Security",
+      "description": "Implement security-first defaults for edge functions secrets management with bullet point masking and independent visibility toggles for each secret value.",
+      "files_to_modify": [
+        "apps/studio/components/interfaces/Functions/EdgeFunctionSecrets/EdgeFunctionSecret.tsx"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The changes implement critical security and UX improvements across two authentication-related components in the Supabase Studio application. The primary focus was on fixing inverted logic in password visibility toggles and enhancing security defaults for sensitive data display.\n\nIn the SignUpForm component, the password toggle button logic was corrected to show action-oriented labels ('Show password' when hidden, 'Hide password' when visible) rather than state descriptions. This required updating both the title and aria-label attributes to maintain accessibility compliance. The change ensures users understand what will happen when they click the button, following established UX patterns for password fields.\n\nFor the EdgeFunctionSecret component, the implementation reinforces security best practices by ensuring secret values are always masked by default. The independent toggle functionality allows developers to selectively reveal specific secrets when needed, reducing the risk of accidental exposure. The import reorganization in both files improves code maintainability by grouping related dependencies together, with security-related imports positioned for clarity.\n\nThese changes integrate seamlessly with the existing codebase by maintaining the same component APIs and state management patterns. The security enhancements align with Supabase's commitment to secure defaults while the UX improvements provide more intuitive interfaces for developers managing authentication and secrets. The minimal nature of the changes demonstrates careful consideration of backward compatibility and user experience consistency.",
+  "source_pr": "https://github.com/supabase/supabase/pull/41694",
+  "before_sha": "64e800c0c1ce39b9019c3215c04ef519cbd0cba8",
+  "after_sha": "68e6edd5e6d41b93815e3526f6823e00fbfeb8e3",
+  "diff_stats": {
+    "additions": 11,
+    "deletions": 12,
+    "files_changed": 2
+  }
+}

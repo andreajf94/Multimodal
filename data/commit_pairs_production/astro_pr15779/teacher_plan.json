@@ -1,0 +1,80 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "api_design",
+      "recommendation": "Fixed the glob pattern matching logic for remote patterns to ensure '/*' only matches immediate children paths, not deeper nested paths",
+      "rationale": "The original implementation had a bug where '/*' patterns could incorrectly match paths where the pattern appeared in the middle of a longer path (e.g., '/en/*' matching '/evil/en/getting-started'). This was a security and validation issue because remote patterns are used to control which external URLs can be loaded in Astro applications. The fix ensures consistent behavior between '/*' and '/**' patterns.",
+      "alternatives_considered": [
+        "Using a more complex regex-based solution",
+        "Changing the API to require different pattern syntax",
+        "Adding a configuration flag to control matching behavior"
+      ],
+      "files_affected": [
+        "packages/internal-helpers/src/remote.ts"
+      ]
+    },
+    {
+      "dimension": "testing",
+      "recommendation": "Added a specific test case to verify the edge case where a pattern prefix appears mid-path",
+      "rationale": "The test ensures that the fix works correctly for the specific bug scenario and prevents regression. By adding a test with a descriptive name ('does not match pathname when prefix appears mid-path'), future developers understand the intended behavior and can verify their changes don't break this important security boundary.",
+      "alternatives_considered": [
+        "Adding multiple test cases for various edge scenarios",
+        "Creating integration tests instead of unit tests",
+        "Not adding tests and relying on existing test coverage"
+      ],
+      "files_affected": [
+        "packages/astro/test/units/remote-pattern.test.js"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Added early return when pathname doesn't start with the expected prefix before processing additional path chunks",
+      "rationale": "The original code would process the path replacement even when the URL pathname didn't start with the pattern prefix, leading to incorrect matches. By adding an early return check (`if (!url.pathname.startsWith(slicedPathname))`), we prevent false positives and improve performance by avoiding unnecessary string operations.",
+      "alternatives_considered": [
+        "Catching exceptions from the string operations",
+        "Adding more complex validation logic",
+        "Returning specific error types for different failure modes"
+      ],
+      "files_affected": [
+        "packages/internal-helpers/src/remote.ts"
+      ]
+    },
+    {
+      "dimension": "data_modeling",
+      "recommendation": "Changed string replacement approach to string slicing when calculating additional path chunks",
+      "rationale": "The original code used `url.pathname.replace(slicedPathname, '')` which could incorrectly match patterns appearing anywhere in the path (not just at the beginning). By changing to `url.pathname.slice(slicedPathname.length)`, we ensure we only remove the prefix from the beginning of the pathname, maintaining the positional integrity of the pattern matching.",
+      "alternatives_considered": [
+        "Using regex with start-of-string anchors",
+        "Splitting the path and comparing segment by segment",
+        "Using URL parsing utilities for path manipulation"
+      ],
+      "files_affected": [
+        "packages/internal-helpers/src/remote.ts"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Fix remote pattern glob matching bug",
+      "description": "Fix the bug where '/*' glob patterns could incorrectly match paths where the pattern appears in the middle of a longer path, which was a security and validation issue for remote pattern configurations",
+      "files_to_modify": [
+        "packages/internal-helpers/src/remote.ts",
+        "packages/astro/test/units/remote-pattern.test.js"
+      ],
+      "files_to_create": [
+        ".changeset/perky-dots-prove.md"
+      ],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation fixes a critical bug in Astro's remote pattern matching logic where '/*' glob patterns could incorrectly match unintended paths. The core issue was in the `matchPathname` function in `remote.ts`, which used `url.pathname.replace(slicedPathname, '')` to process paths. This approach had a flaw: when checking if '/en/*' matches '/evil/en/getting-started', it would replace 'en' anywhere in the string, not just at the beginning, leading to incorrect matches.\n\nThe fix involved two key changes: First, adding an early check to ensure the URL pathname actually starts with the pattern prefix before processing. Second, changing from string replacement to string slicing (`url.pathname.slice(slicedPathname.length)`) to only remove the prefix from the beginning of the path. This ensures positional integrity - patterns must match from the start of the path, not anywhere within it.\n\nA comprehensive test was added to verify the specific edge case where a pattern prefix appears mid-path, ensuring the fix works correctly and preventing regression. The changes maintain backward compatibility for all valid remote pattern configurations while fixing the security gap where certain URL paths could be incorrectly allowed or blocked. The implementation follows Astro's existing patterns and integrates seamlessly with the remote pattern validation system used throughout the framework.",
+  "source_pr": "https://github.com/withastro/astro/pull/15779",
+  "before_sha": "074901fe6b599e9ffc740feb1c06d4590e9da43a",
+  "after_sha": "cf6ea6b36b67c7712395ed3f9ca19cb14ba1a013",
+  "diff_stats": {
+    "additions": 15,
+    "deletions": 1,
+    "files_changed": 3
+  }
+}

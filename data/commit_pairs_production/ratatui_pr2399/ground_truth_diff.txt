@@ -1,0 +1,278 @@
+diff --git a/Cargo.lock b/Cargo.lock
+index 291ff1cd52..4d7ca789a8 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -659,6 +659,12 @@ dependencies = [
+  "itertools 0.13.0",
+ ]
+ 
++[[package]]
++name = "critical-section"
++version = "1.2.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "790eea4361631c5e7d22598ecd5723ff611904e3344ce8720784c93e3d83d40b"
++
+ [[package]]
+ name = "crossbeam-channel"
+ version = "0.5.15"
+@@ -2843,6 +2849,7 @@ dependencies = [
+  "anstyle",
+  "bitflags 2.11.0",
+  "compact_str",
++ "critical-section",
+  "document-features",
+  "hashbrown 0.16.1",
+  "indoc",
+diff --git a/Cargo.toml b/Cargo.toml
+index f5c2216a3c..7b9b405dd4 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -34,6 +34,7 @@ clap = { version = "4.5", features = ["derive"] }
+ color-eyre = "0.6"
+ compact_str = { version = "0.9", default-features = false }
+ criterion = { version = "0.8", features = ["html_reports"] }
++critical-section = "1.2"
+ crossterm = "0.29"
+ document-features = "0.2"
+ fakeit = "1"
+diff --git a/ratatui-core/Cargo.toml b/ratatui-core/Cargo.toml
+index 09c257386c..918a22e8b5 100644
+--- a/ratatui-core/Cargo.toml
++++ b/ratatui-core/Cargo.toml
+@@ -34,8 +34,9 @@ std = [
+   "strum/std",
+ ]
+ 
+-## enables layout cache
+-layout-cache = ["std"]
++## enables layout cache; uses thread_local when std is available,
++## critical-section::Mutex otherwise (for no_std/embedded targets).
++layout-cache = ["dep:critical-section"]
+ 
+ ## enables conversions to / from colors, modifiers, and styles in the ['anstyle'] crate
+ anstyle = ["dep:anstyle"]
+@@ -62,6 +63,7 @@ serde = ["std", "dep:serde", "bitflags/serde", "compact_str/serde"]
+ anstyle = { workspace = true, optional = true }
+ bitflags.workspace = true
+ compact_str.workspace = true
++critical-section = { workspace = true, optional = true }
+ document-features = { workspace = true, optional = true }
+ hashbrown.workspace = true
+ indoc.workspace = true
+@@ -77,6 +79,7 @@ unicode-truncate = { workspace = true, default-features = false }
+ unicode-width.workspace = true
+ 
+ [dev-dependencies]
++critical-section = { workspace = true, features = ["std"] }
+ pretty_assertions.workspace = true
+ rstest.workspace = true
+ serde_json.workspace = true
+diff --git a/ratatui-core/src/buffer/buffer.rs b/ratatui-core/src/buffer/buffer.rs
+index eb2970e581..73ad805d37 100644
+--- a/ratatui-core/src/buffer/buffer.rs
++++ b/ratatui-core/src/buffer/buffer.rs
+@@ -692,6 +692,9 @@ impl fmt::Debug for Buffer {
+ 
+ #[cfg(test)]
+ mod tests {
++    #[cfg(not(feature = "std"))]
++    extern crate std;
++
+     use alloc::format;
+     use alloc::string::{String, ToString};
+     use core::iter;
+diff --git a/ratatui-core/src/layout/layout.rs b/ratatui-core/src/layout/layout.rs
+index d7f1332571..1546e7173b 100644
+--- a/ratatui-core/src/layout/layout.rs
++++ b/ratatui-core/src/layout/layout.rs
+@@ -32,21 +32,30 @@ type Spacers = Rects;
+ // └   ┘└──────────────────┘└   ┘└──────────────────┘└   ┘└──────────────────┘└   ┘
+ //
+ // Number of spacers will always be one more than number of segments.
+-#[cfg(feature = "layout-cache")]
++// With std: cache can store Rc directly (no Send needed thanks to thread_local)
++#[cfg(all(feature = "layout-cache", feature = "std"))]
+ type Cache = LruCache<(Rect, Layout), (Segments, Spacers)>;
+ 
++// Without std: cache stores Vec instead (Send-safe for critical_section::Mutex)
++#[cfg(all(feature = "layout-cache", not(feature = "std")))]
++type Cache = LruCache<(Rect, Layout), (Vec<Rect>, Vec<Rect>)>;
++
+ // Multiplier that decides floating point precision when rounding.
+ // The number of zeros in this number is the precision for the rounding of f64 to u16 in layout
+ // calculations.
+ const FLOAT_PRECISION_MULTIPLIER: f64 = 100.0;
+ 
+-#[cfg(feature = "layout-cache")]
++#[cfg(all(feature = "layout-cache", feature = "std"))]
+ std::thread_local! {
+     static LAYOUT_CACHE: core::cell::RefCell<Cache> = core::cell::RefCell::new(Cache::new(
+         NonZeroUsize::new(Layout::DEFAULT_CACHE_SIZE).unwrap(),
+     ));
+ }
+ 
++#[cfg(all(feature = "layout-cache", not(feature = "std")))]
++static LAYOUT_CACHE: critical_section::Mutex<core::cell::RefCell<Option<Cache>>> =
++    critical_section::Mutex::new(core::cell::RefCell::new(None));
++
+ /// Represents the spacing between segments in a layout.
+ ///
+ /// The `Spacing` enum is used to define the spacing between segments in a layout. It can represent
+@@ -300,9 +309,25 @@ impl Layout {
+     /// By default, the cache size is [`Self::DEFAULT_CACHE_SIZE`].
+     #[cfg(feature = "layout-cache")]
+     pub fn init_cache(cache_size: NonZeroUsize) {
++        Self::resize_cache(cache_size);
++    }
++
++    #[cfg(all(feature = "layout-cache", feature = "std"))]
++    fn resize_cache(cache_size: NonZeroUsize) {
+         LAYOUT_CACHE.with_borrow_mut(|cache| cache.resize(cache_size));
+     }
+ 
++    #[cfg(all(feature = "layout-cache", not(feature = "std")))]
++    fn resize_cache(cache_size: NonZeroUsize) {
++        critical_section::with(|cs| {
++            let mut cache = LAYOUT_CACHE.borrow(cs).borrow_mut();
++            match cache.as_mut() {
++                Some(c) => c.resize(cache_size),
++                None => *cache = Some(Cache::new(cache_size)),
++            }
++        });
++    }
++
+     /// Set the direction of the layout.
+     ///
+     /// # Examples
+@@ -711,18 +736,62 @@ impl Layout {
+     /// );
+     /// ```
+     pub fn split_with_spacers(&self, area: Rect) -> (Segments, Spacers) {
+-        let split = || self.try_split(area).expect("failed to split");
+-
+         #[cfg(feature = "layout-cache")]
+         {
+-            LAYOUT_CACHE.with_borrow_mut(|cache| {
+-                let key = (area, self.clone());
+-                cache.get_or_insert(key, split).clone()
+-            })
++            self.cached_split(area)
+         }
+ 
+         #[cfg(not(feature = "layout-cache"))]
+-        split()
++        {
++            self.split_layout(area)
++        }
++    }
++
++    // std builds: use a thread-local cache with cheap Rc cloning and no locking.
++    #[cfg(all(feature = "layout-cache", feature = "std"))]
++    fn cached_split(&self, area: Rect) -> (Segments, Spacers) {
++        LAYOUT_CACHE.with_borrow_mut(|cache| {
++            let key = (area, self.clone());
++            cache.get_or_insert(key, || self.split_layout(area)).clone()
++        })
++    }
++
++    // no_std builds: use a critical-section cache and compute layouts outside locks.
++    #[cfg(all(feature = "layout-cache", not(feature = "std")))]
++    fn cached_split(&self, area: Rect) -> (Segments, Spacers) {
++        // Check cache inside critical section, but compute outside to avoid
++        // blocking interrupts during the (expensive) constraint solver.
++        let cached = critical_section::with(|cs| {
++            let mut cache = LAYOUT_CACHE.borrow(cs).borrow_mut();
++            let cache = cache.get_or_insert_with(|| {
++                Cache::new(NonZeroUsize::new(Self::DEFAULT_CACHE_SIZE).unwrap())
++            });
++            let key = (area, self.clone());
++            cache
++                .get(&key)
++                .map(|(s, sp)| (Rc::from(s.as_slice()), Rc::from(sp.as_slice())))
++        });
++
++        match cached {
++            Some(result) => result,
++            None => {
++                let result = self.split_layout(area);
++
++                critical_section::with(|cs| {
++                    let mut cache = LAYOUT_CACHE.borrow(cs).borrow_mut();
++                    if let Some(cache) = cache.as_mut() {
++                        let key = (area, self.clone());
++                        cache.put(key, (result.0.to_vec(), result.1.to_vec()));
++                    }
++                });
++
++                result
++            }
++        }
++    }
++
++    fn split_layout(&self, area: Rect) -> (Segments, Spacers) {
++        self.try_split(area).expect("failed to split")
+     }
+ 
+     fn try_split(&self, area: Rect) -> Result<(Segments, Spacers), AddConstraintError> {
+@@ -1329,7 +1398,7 @@ mod tests {
+     }
+ 
+     #[test]
+-    #[cfg(feature = "layout-cache")]
++    #[cfg(all(feature = "layout-cache", feature = "std"))]
+     fn cache_size() {
+         LAYOUT_CACHE.with_borrow(|cache| {
+             assert_eq!(cache.cap().get(), Layout::DEFAULT_CACHE_SIZE);
+@@ -1341,6 +1410,25 @@ mod tests {
+         });
+     }
+ 
++    #[test]
++    #[cfg(all(feature = "layout-cache", not(feature = "std")))]
++    fn cache_size() {
++        Layout::init_cache(NonZeroUsize::new(Layout::DEFAULT_CACHE_SIZE).unwrap());
++        critical_section::with(|cs| {
++            let cache = LAYOUT_CACHE.borrow(cs).borrow();
++            assert_eq!(
++                cache.as_ref().unwrap().cap().get(),
++                Layout::DEFAULT_CACHE_SIZE
++            );
++        });
++
++        Layout::init_cache(NonZeroUsize::new(10).unwrap());
++        critical_section::with(|cs| {
++            let cache = LAYOUT_CACHE.borrow(cs).borrow();
++            assert_eq!(cache.as_ref().unwrap().cap().get(), 10);
++        });
++    }
++
+     #[test]
+     fn default() {
+         assert_eq!(
+diff --git a/ratatui-core/src/text/line.rs b/ratatui-core/src/text/line.rs
+index e0b36c4cea..9840c27eef 100644
+--- a/ratatui-core/src/text/line.rs
++++ b/ratatui-core/src/text/line.rs
+@@ -846,6 +846,9 @@ impl Styled for Line<'_> {
+ 
+ #[cfg(test)]
+ mod tests {
++    #[cfg(not(feature = "std"))]
++    extern crate std;
++
+     use alloc::format;
+     use core::iter;
+     use std::dbg;
+diff --git a/ratatui/Cargo.toml b/ratatui/Cargo.toml
+index 4f22b31ca6..d3ad66d49d 100644
+--- a/ratatui/Cargo.toml
++++ b/ratatui/Cargo.toml
+@@ -58,7 +58,7 @@ serde = [
+ ]
+ 
+ ## enables layout cache
+-layout-cache = ["std", "ratatui-core/layout-cache"]
++layout-cache = ["ratatui-core/layout-cache"]
+ 
+ ## enables conversions from colors in the [`palette`] crate to [`Color`](crate::style::Color).
+ palette = ["std", "ratatui-core/palette", "dep:palette"]

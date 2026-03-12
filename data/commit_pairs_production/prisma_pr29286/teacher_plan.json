@@ -1,0 +1,117 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "cross_bundle_compatibility",
+      "recommendation": "Replaced instanceof ObjectEnumValue checks with a duck-typing function using global Symbol.for()",
+      "rationale": "instanceof checks fail when browser and server bundles load separate copies of the runtime utilities (common in Next.js apps with separate bundling). Using Symbol.for('prisma.objectEnumValue') creates a globally shared symbol that works across bundle boundaries, ensuring null type detection works consistently.",
+      "alternatives_considered": [
+        "WeakMap registry",
+        "custom property on window/global",
+        "string-based type checking"
+      ],
+      "files_affected": [
+        "packages/client-runtime-utils/src/nullTypes.ts"
+      ]
+    },
+    {
+      "dimension": "api_design",
+      "recommendation": "Added isObjectEnumValue() function and exported it from both browser and server runtime entry points",
+      "rationale": "Following the existing isDecimalJsLike pattern establishes consistency in the codebase. Exporting from both entry points ensures the function is available regardless of bundling configuration, maintaining backward compatibility while fixing the cross-bundle issue.",
+      "alternatives_considered": [
+        "Single export location",
+        "runtime detection of bundling environment",
+        "conditional exports"
+      ],
+      "files_affected": [
+        "packages/client-runtime-utils/src/nullTypes.ts",
+        "packages/client/src/runtime/index-browser.ts",
+        "packages/client/src/runtime/index.ts"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Updated null type validation to check by name string rather than singleton identity",
+      "rationale": "Since cross-bundle instances won't be the same singleton objects, we need to validate by the name string returned by _getName() method. This allows custom instances (created for cross-bundle compatibility) to pass validation while still ensuring only valid null types are accepted.",
+      "alternatives_considered": [
+        "Maintaining singleton checks with registry",
+        "type-only validation",
+        "runtime type checking"
+      ],
+      "files_affected": [
+        "packages/client/src/runtime/core/jsonProtocol/serializeJsonQuery.ts",
+        "packages/client/tests/functional/json-null-types/tests.ts"
+      ]
+    },
+    {
+      "dimension": "testing",
+      "recommendation": "Added comprehensive tests for cross-bundle null type serialization and cloning",
+      "rationale": "The tests verify that duck-typed null values (created with Symbol.for('prisma.objectEnumValue')) serialize correctly to the JSON protocol format and survive deep cloning operations. This ensures the fix works end-to-end in real bundling scenarios.",
+      "alternatives_considered": [
+        "No new tests",
+        "minimal smoke tests",
+        "integration tests only"
+      ],
+      "files_affected": [
+        "packages/client/src/runtime/core/jsonProtocol/serializeJsonQuery.test.ts",
+        "packages/client/src/runtime/utils/deepCloneArgs.test.ts"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Implement cross-bundle null type detection",
+      "description": "Create isObjectEnumValue() function using global Symbol.for() to detect Prisma null types across bundle boundaries, replacing all instanceof ObjectEnumValue checks",
+      "files_to_modify": [
+        "packages/client-runtime-utils/src/nullTypes.ts",
+        "packages/client/src/runtime/core/errorRendering/ArgumentsRenderingTree.ts",
+        "packages/client/src/runtime/core/jsonProtocol/serializeJsonQuery.ts",
+        "packages/client/src/runtime/utils/deepCloneArgs.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-002",
+      "title": "Export detection function from runtime entry points",
+      "description": "Export isObjectEnumValue from both browser and server runtime entry points to ensure availability in all bundling scenarios",
+      "files_to_modify": [
+        "packages/client/src/runtime/index-browser.ts",
+        "packages/client/src/runtime/index.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-003",
+      "title": "Update null type validation logic",
+      "description": "Change validation from singleton identity checks to name string checks to support cross-bundle instances",
+      "files_to_modify": [
+        "packages/client/src/runtime/core/jsonProtocol/serializeJsonQuery.ts",
+        "packages/client/tests/functional/json-null-types/tests.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-004",
+      "title": "Add cross-bundle compatibility tests",
+      "description": "Create tests that verify serialization and cloning work with duck-typed null values simulating cross-bundle scenarios",
+      "files_to_modify": [
+        "packages/client/src/runtime/core/jsonProtocol/serializeJsonQuery.test.ts",
+        "packages/client/src/runtime/utils/deepCloneArgs.test.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    }
+  ],
+  "implementation_summary": "The implementation addresses a critical cross-bundle compatibility issue where Prisma's null types (DbNull, JsonNull, AnyNull) failed to be recognized when browser and server code were bundled separately, as in Next.js applications. The core solution replaces instanceof ObjectEnumValue checks with a duck-typing approach using a global Symbol.for('prisma.objectEnumValue'), which works across bundle boundaries because Symbol.for() returns the same symbol globally.\n\nThe changes follow established patterns in the codebase, similar to the isDecimalJsLike approach. A new isObjectEnumValue() function was added to the nullTypes module and exported from both runtime entry points (browser and server). All serialization, error rendering, and deep cloning code was updated to use this function instead of instanceof checks. Validation logic was also updated to check null types by their name strings rather than singleton identity, allowing custom instances created for cross-bundle compatibility to work correctly.\n\nComprehensive tests were added to verify that duck-typed null values serialize to the correct JSON protocol format and survive deep cloning operations. The solution maintains backward compatibility while fixing the bundling issue, ensuring that existing code continues to work and new code benefits from cross-bundle compatibility.",
+  "source_pr": "https://github.com/prisma/prisma/pull/29286",
+  "before_sha": "7a1f497e9afa699732919d3c559db900455faa8d",
+  "after_sha": "4b65b6038303a681d03f1def0e0a1cdda69fa0af",
+  "diff_stats": {
+    "additions": 159,
+    "deletions": 19,
+    "files_changed": 9
+  }
+}

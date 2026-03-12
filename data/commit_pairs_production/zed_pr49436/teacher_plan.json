@@ -1,0 +1,107 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "data_modeling",
+      "recommendation": "Extended the DiskState::Present variant to include a size field alongside the existing mtime field",
+      "rationale": "The existing file change detection relied solely on modification time (mtime), which is insufficient for detecting certain file write patterns. Some external tools write files by creating a 0-byte temporary file and then writing content, causing race conditions where Zed would see the file as unchanged (same mtime) but with different content. Adding file size as a second comparison metric provides more robust change detection.",
+      "alternatives_considered": [
+        "Using file hash/checksum instead of size (more accurate but computationally expensive)",
+        "Keeping only mtime but with more sophisticated timestamp handling",
+        "Adding a separate 'version' field that increments on each write"
+      ],
+      "files_affected": [
+        "crates/language/src/buffer.rs"
+      ]
+    },
+    {
+      "dimension": "api_design",
+      "recommendation": "Added a size() method to DiskState enum to expose file size alongside existing mtime() method",
+      "rationale": "Maintains API consistency by providing symmetrical accessors for both metadata fields. The size() method follows the same pattern as mtime(), returning Option<u64> since only Present variant has a meaningful size. This keeps the API intuitive for consumers who need to access file metadata.",
+      "alternatives_considered": [
+        "Making size field public directly",
+        "Creating a single metadata() method returning a struct",
+        "Not exposing size accessor at all"
+      ],
+      "files_affected": [
+        "crates/language/src/buffer.rs"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Updated file_updated() logic to use pattern matching that ignores size field when checking mtime",
+      "rationale": "The file_updated() method only needs to compare mtime values to determine if a file has been modified externally. By using 'DiskState::Present { mtime, .. }' pattern matching, we ignore the size field while maintaining the same comparison logic. This ensures backward compatibility while the actual change detection logic (which would use both mtime and size) can be implemented elsewhere.",
+      "alternatives_considered": [
+        "Modifying file_updated() to also check size",
+        "Creating a new method that checks both mtime and size",
+        "Leaving the pattern matching as-is which would fail to compile"
+      ],
+      "files_affected": [
+        "crates/language/src/buffer.rs"
+      ]
+    },
+    {
+      "dimension": "data_flow",
+      "recommendation": "Updated all DiskState::Present creation sites to include size parameter from file metadata",
+      "rationale": "Ensures consistency across the codebase - every place that creates a DiskState::Present must now provide both mtime and size. This includes file system operations (worktree.rs), buffer/image store updates (buffer_store.rs, image_store.rs), and test mocks (copilot.rs). The size is sourced from metadata.len (file length) which is readily available from std::fs::Metadata.",
+      "alternatives_considered": [
+        "Making size optional with a default value",
+        "Using a builder pattern for DiskState creation",
+        "Only updating some creation sites and using default elsewhere"
+      ],
+      "files_affected": [
+        "crates/copilot/src/copilot.rs",
+        "crates/project/src/buffer_store.rs",
+        "crates/project/src/image_store.rs",
+        "crates/worktree/src/worktree.rs"
+      ]
+    },
+    {
+      "dimension": "serialization",
+      "recommendation": "Added default size value (0) in proto deserialization path",
+      "rationale": "When deserializing from protobuf format, the existing serialized data doesn't include size information. Using a default value of 0 ensures backward compatibility - existing serialized buffers can still be loaded. The size will be updated to correct value on next file system sync.",
+      "alternatives_considered": [
+        "Making size field optional in DiskState",
+        "Failing deserialization for old data",
+        "Estimating size from other fields"
+      ],
+      "files_affected": [
+        "crates/worktree/src/worktree.rs"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Extend DiskState data model with file size",
+      "description": "Add size field to DiskState::Present variant and update all creation sites to include file size from metadata",
+      "files_to_modify": [
+        "crates/language/src/buffer.rs",
+        "crates/worktree/src/worktree.rs",
+        "crates/project/src/buffer_store.rs",
+        "crates/project/src/image_store.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-002",
+      "title": "Update test mocks and serialization",
+      "description": "Fix test compilation by updating mock DiskState creation and handle backward compatibility in protobuf deserialization",
+      "files_to_modify": [
+        "crates/copilot/src/copilot.rs",
+        "crates/worktree/src/worktree.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation enhances Zed's file change detection system by adding file size tracking alongside existing modification time tracking. The core change is extending the DiskState::Present enum variant in the buffer module to include both mtime and size fields. This addresses race conditions where external tools might write files in ways that don't change mtime but do change content (e.g., creating 0-byte temporary files).\n\nAll creation sites for DiskState::Present were updated to extract size from file metadata (metadata.len), ensuring the size field is populated whenever a file is read from disk. The implementation maintains backward compatibility in several ways: the file_updated() method continues to use only mtime comparison (though it now ignores the size field via pattern matching), and protobuf deserialization uses a default size of 0 for existing serialized data.\n\nThis change follows Rust's strong type system - the compiler ensures all DiskState::Present creation sites are updated, preventing runtime errors. The addition of a size() accessor method maintains API symmetry with the existing mtime() method. While this change adds the data field infrastructure, the actual logic to compare both mtime AND size for change detection would be implemented in a separate change, making this a foundational enhancement that enables more robust file synchronization.",
+  "source_pr": "https://github.com/zed-industries/zed/pull/49436",
+  "before_sha": "074ca4cadf7390b77eb3ca6979632a6582d25e2b",
+  "after_sha": "e9e71431bb26ce554d4ed2024569745df6dd9047",
+  "diff_stats": {
+    "additions": 30,
+    "deletions": 7,
+    "files_changed": 5
+  }
+}

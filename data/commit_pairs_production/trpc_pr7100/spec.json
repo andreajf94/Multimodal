@@ -1,0 +1,14 @@
+{
+  "feature_name": "Experimental WebSocket Encoder Support",
+  "description": "Add support for custom encoders in WebSocket connections to allow tRPC messages to be transmitted in formats beyond JSON (such as CBOR, protobufs, or msgpack). The encoder sits between the transformer and the WebSocket transport, converting serialized data to a wire format on the client and decoding it back on the server. This should be implemented as an experimental option to maintain backward compatibility with existing JSON-based WebSocket connections.",
+  "functional_requirements": [
+    "Add an `experimental_encoder` configuration option to the WebSocket client that accepts an encoder object with `encode` and `decode` methods.",
+    "Ensure the encoder processes messages after the transformer's serialization on the client and before the transformer's deserialization on the server.",
+    "Maintain `jsonEncoder` as the default encoder when `experimental_encoder` is not specified to preserve existing behavior.",
+    "Update the WebSocket server adapter to decode incoming messages using the configured encoder before passing them to the transformer.",
+    "Provide a clear example demonstrating how to implement and use a custom encoder, such as with msgpack, in a Next.js WebSocket setup.",
+    "Ensure the implementation handles edge cases like `null` to `undefined` conversion for binary encoders without abstracting away encoder authors' control."
+  ],
+  "project_name": "trpc",
+  "source_pr": "https://github.com/trpc/trpc/pull/7100"
+}

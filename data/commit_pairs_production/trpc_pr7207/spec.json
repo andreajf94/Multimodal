@@ -1,0 +1,13 @@
+{
+  "feature_name": "SSE Subscription Auto-Reconnect",
+  "description": "Implement automatic reconnection for SSE subscriptions when they reach their maximum duration timeout. Currently, subscriptions hang indefinitely after timeout instead of properly ending the connection, preventing clients from reconnecting. The fix should ensure that when maxDurationMs elapses, the HTTP response ends cleanly so EventSource clients can automatically reconnect with proper last-event-id resumption.",
+  "functional_requirements": [
+    "When maxDurationMs timeout fires, the SSE HTTP response must end cleanly instead of hanging indefinitely",
+    "The client's EventSource should automatically reconnect after the connection ends due to timeout",
+    "Reconnections must properly resume using the last-event-id mechanism via the tracked() function",
+    "The abort mechanism for maxDurationMs should properly cancel the ReadableStream to unblock the response pipe",
+    "The fix should not interfere with normal client disconnect behavior or other abort signals"
+  ],
+  "project_name": "trpc",
+  "source_pr": "https://github.com/trpc/trpc/pull/7207"
+}

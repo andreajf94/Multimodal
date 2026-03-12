@@ -1,0 +1,605 @@
+diff --git a/apps/oxlint/src-js/plugins/lint.ts b/apps/oxlint/src-js/plugins/lint.ts
+index 002826cdfd630..5283991da49f6 100644
+--- a/apps/oxlint/src-js/plugins/lint.ts
++++ b/apps/oxlint/src-js/plugins/lint.ts
+@@ -247,16 +247,52 @@ export function lintFileImpl(
+     debugAssert(ancestors.length === 0, "`ancestors` should be empty after walking AST");
+   }
+ 
+-  // Run `after` hooks
++  // Run any `after` hooks
++  runAfterHooks(true);
++}
++
++/**
++ * Run any `after` hooks.
++ *
++ * Rules using `before` and `after` hooks likely maintain some internal state in their `createOnce` method.
++ * To keep that state in sync, it's critical that `after` hooks always run, even if an error is thrown during any of:
++ *
++ * 1. A later rule's `before` hook.
++ * 2. AST walk.
++ * 3. An earlier rule's `after` hook.
++ *
++ * So if any `after` hook throws an error, this function continues running remaining hooks, and re-throws the error
++ * only at the very end. This ensures an error in one rule does not affect any other rules.
++ *
++ * This function is called by `resetStateAfterError` to ensure `after` hooks are run no matter where an error occurs.
++ *
++ * @param shouldThrowIfError - `true` if any errors thrown in after hooks should be re-thrown
++ */
++function runAfterHooks(shouldThrowIfError: boolean) {
+   const afterHooksLen = afterHooks.length;
+-  if (afterHooksLen !== 0) {
+-    for (let i = 0; i < afterHooksLen; i++) {
++  if (afterHooksLen === 0) return;
++
++  // Run `after` hooks
++  let error: unknown;
++  let didError = false;
++
++  for (let i = 0; i < afterHooksLen; i++) {
++    try {
+       // Don't call hook with `afterHooks` array as `this`, or user could mess with it
+       (0, afterHooks[i])();
++    } catch (err) {
++      if (didError === false) {
++        error = err;
++        didError = true;
++      }
+     }
+-    // Reset array, ready for next file
+-    afterHooks.length = 0;
+   }
++
++  // Reset array, ready for next file
++  afterHooks.length = 0;
++
++  // If error was thrown in any `after` hooks, re-throw it
++  if (didError && shouldThrowIfError) throw error;
+ }
+ 
+ /**
+@@ -274,6 +310,9 @@ export function resetFile() {
+  * in the correct initial state for linting the next file.
+  */
+ export function resetStateAfterError() {
++  // This function must never throw, so call `runAfterHooks` with `false` to swallow any errors
++  runAfterHooks(false);
++
+   // In case error occurred during visitor compilation, clear internal state of visitor compilation,
+   // so no leftovers bleed into next file.
+   // We could have a separate function to reset state which could be simpler and faster, but `resetStateAfterError`
+diff --git a/apps/oxlint/test/fixtures/createOnce_hook_errors/.oxlintrc.json b/apps/oxlint/test/fixtures/createOnce_hook_errors/.oxlintrc.json
+new file mode 100644
+index 0000000000000..c2f47dd17276d
+--- /dev/null
++++ b/apps/oxlint/test/fixtures/createOnce_hook_errors/.oxlintrc.json
+@@ -0,0 +1,51 @@
++{
++  "jsPlugins": ["./plugin.ts"],
++  "categories": { "correctness": "off" },
++  "overrides": [
++    // Check that `after` hooks run even after an error in another rule's `before` hook
++    {
++      "files": ["files/throwInBefore/1.js"],
++      "rules": {
++        "create-once-errors-plugin/before-and-after": "error",
++        "create-once-errors-plugin/throw-in-before": "error",
++        "create-once-errors-plugin/before-and-after-late": "error"
++      }
++    },
++    {
++      "files": ["files/throwInBefore/2.js"],
++      "rules": {
++        "create-once-errors-plugin/before-and-after-late": "error"
++      }
++    },
++    // Check that `after` hooks run even after an error during visiting AST
++    {
++      "files": ["files/throwInVisit/1.js"],
++      "rules": {
++        "create-once-errors-plugin/before-and-after": "error",
++        "create-once-errors-plugin/throw-in-visit": "error",
++        "create-once-errors-plugin/before-and-after-late": "error"
++      }
++    },
++    {
++      "files": ["files/throwInVisit/2.js"],
++      "rules": {
++        "create-once-errors-plugin/before-and-after-late": "error"
++      }
++    },
++    // Check that `after` hooks run even after an error in another rule's `after` hook
++    {
++      "files": ["files/throwInAfter/1.js"],
++      "rules": {
++        "create-once-errors-plugin/before-and-after": "error",
++        "create-once-errors-plugin/throw-in-after": "error",
++        "create-once-errors-plugin/before-and-after-late": "error"
++      }
++    },
++    {
++      "files": ["files/throwInAfter/2.js"],
++      "rules": {
++        "create-once-errors-plugin/before-and-after-late": "error"
++      }
++    }
++  ]
++}
+diff --git a/apps/oxlint/test/fixtures/lint_after_hook_error/files/index.js b/apps/oxlint/test/fixtures/createOnce_hook_errors/files/throwInAfter/1.js
+similarity index 100%
+rename from apps/oxlint/test/fixtures/lint_after_hook_error/files/index.js
+rename to apps/oxlint/test/fixtures/createOnce_hook_errors/files/throwInAfter/1.js
+diff --git a/apps/oxlint/test/fixtures/createOnce_hook_errors/files/throwInAfter/2.js b/apps/oxlint/test/fixtures/createOnce_hook_errors/files/throwInAfter/2.js
+new file mode 100644
+index 0000000000000..a5c1e6463879f
+--- /dev/null
++++ b/apps/oxlint/test/fixtures/createOnce_hook_errors/files/throwInAfter/2.js
+@@ -0,0 +1 @@
++let y;
+diff --git a/apps/oxlint/test/fixtures/lint_before_hook_error/files/index.js b/apps/oxlint/test/fixtures/createOnce_hook_errors/files/throwInBefore/1.js
+similarity index 100%
+rename from apps/oxlint/test/fixtures/lint_before_hook_error/files/index.js
+rename to apps/oxlint/test/fixtures/createOnce_hook_errors/files/throwInBefore/1.js
+diff --git a/apps/oxlint/test/fixtures/createOnce_hook_errors/files/throwInBefore/2.js b/apps/oxlint/test/fixtures/createOnce_hook_errors/files/throwInBefore/2.js
+new file mode 100644
+index 0000000000000..a5c1e6463879f
+--- /dev/null
++++ b/apps/oxlint/test/fixtures/createOnce_hook_errors/files/throwInBefore/2.js
+@@ -0,0 +1 @@
++let y;
+diff --git a/apps/oxlint/test/fixtures/createOnce_hook_errors/files/throwInVisit/1.js b/apps/oxlint/test/fixtures/createOnce_hook_errors/files/throwInVisit/1.js
+new file mode 100644
+index 0000000000000..2756c24c45775
+--- /dev/null
++++ b/apps/oxlint/test/fixtures/createOnce_hook_errors/files/throwInVisit/1.js
+@@ -0,0 +1 @@
++let x;
+diff --git a/apps/oxlint/test/fixtures/createOnce_hook_errors/files/throwInVisit/2.js b/apps/oxlint/test/fixtures/createOnce_hook_errors/files/throwInVisit/2.js
+new file mode 100644
+index 0000000000000..a5c1e6463879f
+--- /dev/null
++++ b/apps/oxlint/test/fixtures/createOnce_hook_errors/files/throwInVisit/2.js
+@@ -0,0 +1 @@
++let y;
+diff --git a/apps/oxlint/test/fixtures/createOnce_hook_errors/options.json b/apps/oxlint/test/fixtures/createOnce_hook_errors/options.json
+new file mode 100644
+index 0000000000000..c6d966f1b525b
+--- /dev/null
++++ b/apps/oxlint/test/fixtures/createOnce_hook_errors/options.json
+@@ -0,0 +1,3 @@
++{
++  "singleThread": true
++}
+diff --git a/apps/oxlint/test/fixtures/createOnce_hook_errors/output.snap.md b/apps/oxlint/test/fixtures/createOnce_hook_errors/output.snap.md
+new file mode 100644
+index 0000000000000..4981cdff57971
+--- /dev/null
++++ b/apps/oxlint/test/fixtures/createOnce_hook_errors/output.snap.md
+@@ -0,0 +1,98 @@
++# Exit code
++1
++
++# stdout
++```
++  x Error running JS plugin.
++  | File path: <fixture>/files/throwInAfter/1.js
++  | Error: `after` hook threw
++  |     at after (<fixture>/plugin.ts:108:15)
++
++  x Error running JS plugin.
++  | File path: <fixture>/files/throwInBefore/1.js
++  | Error: `before` hook threw
++  |     at before (<fixture>/plugin.ts:82:15)
++
++  x Error running JS plugin.
++  | File path: <fixture>/files/throwInVisit/1.js
++  | Error: `Identifier` visit function threw
++  |     at Identifier (<fixture>/plugin.ts:124:15)
++
++  x create-once-errors-plugin(before-and-after-late): after hook:
++  | id: create-once-errors-plugin/before-and-after-late
++  | filename: <fixture>/files/throwInAfter/2.js
++  | events: {
++  |   "1.js": [
++  |     "before: before-and-after",
++  |     "before: throw-in-after",
++  |     "before: before-and-after-late",
++  |     "visit: before-and-after",
++  |     "visit: throw-in-after",
++  |     "visit: before-and-after-late",
++  |     "after: before-and-after",
++  |     "after: throw-in-after",
++  |     "after: before-and-after-late"
++  |   ],
++  |   "2.js": [
++  |     "before: before-and-after-late",
++  |     "visit: before-and-after-late",
++  |     "after: before-and-after-late"
++  |   ]
++  | }
++   ,-[files/throwInAfter/2.js:1:1]
++ 1 | let y;
++   : ^
++   `----
++
++  x create-once-errors-plugin(before-and-after-late): after hook:
++  | id: create-once-errors-plugin/before-and-after-late
++  | filename: <fixture>/files/throwInBefore/2.js
++  | events: {
++  |   "1.js": [
++  |     "before: before-and-after",
++  |     "before: throw-in-before",
++  |     "after: before-and-after"
++  |   ],
++  |   "2.js": [
++  |     "before: before-and-after-late",
++  |     "visit: before-and-after-late",
++  |     "after: before-and-after-late"
++  |   ]
++  | }
++   ,-[files/throwInBefore/2.js:1:1]
++ 1 | let y;
++   : ^
++   `----
++
++  x create-once-errors-plugin(before-and-after-late): after hook:
++  | id: create-once-errors-plugin/before-and-after-late
++  | filename: <fixture>/files/throwInVisit/2.js
++  | events: {
++  |   "1.js": [
++  |     "before: before-and-after",
++  |     "before: throw-in-visit",
++  |     "before: before-and-after-late",
++  |     "visit: before-and-after",
++  |     "visit: throw-in-visit",
++  |     "after: before-and-after",
++  |     "after: throw-in-visit",
++  |     "after: before-and-after-late"
++  |   ],
++  |   "2.js": [
++  |     "before: before-and-after-late",
++  |     "visit: before-and-after-late",
++  |     "after: before-and-after-late"
++  |   ]
++  | }
++   ,-[files/throwInVisit/2.js:1:1]
++ 1 | let y;
++   : ^
++   `----
++
++Found 0 warnings and 6 errors.
++Finished in Xms on 6 files with 0 rules using X threads.
++```
++
++# stderr
++```
++```
+diff --git a/apps/oxlint/test/fixtures/createOnce_hook_errors/plugin.ts b/apps/oxlint/test/fixtures/createOnce_hook_errors/plugin.ts
+new file mode 100644
+index 0000000000000..f1d2906c5291d
+--- /dev/null
++++ b/apps/oxlint/test/fixtures/createOnce_hook_errors/plugin.ts
+@@ -0,0 +1,195 @@
++import { sep as pathSep } from "node:path";
++
++import type { Node, Plugin, Rule, Context } from "#oxlint/plugins";
++
++// Aim of this test is to check:
++//
++// 1. Errors thrown during `before` and `after` hooks are handled correctly and shown to user as diagnostics.
++//
++// 2. All rules whose `before` hooks runs have their `after` hook run even if an error is thrown
++//    during other rules' hooks, or during AST visitation.
++//
++// 3. Global state is reset after an error in hooks, so it's in correct initial state when Oxlint starts linting
++//    the next file.
++//
++// The last two are tricky to test because usually the order Oxlint lints files in is non-deterministic.
++// To make this test deterministic, we run it with `oxlint --threads 1`
++// (`options.json` file for this fixture contains `"singleThread": true`).
++// This guarantees that files are linted in alphabetical order.
++//
++// In tests, rules are run in the order they're defined in the plugin, so we can control at what point
++// errors are thrown.
++
++const SPAN: Node = {
++  start: 0,
++  end: 0,
++  range: [0, 0],
++  loc: {
++    start: { line: 0, column: 0 },
++    end: { line: 0, column: 0 },
++  },
++};
++
++// Record of events per file.
++// Key of outer `Map` is directory name.
++// Key of inner object is file name.
++// Value of inner object is array of events.
++const events = new Map<string, Record<string, string[]>>();
++
++/**
++ * Record an event.
++ * @param context - Context object
++ * @param event - Event name
++ */
++function addEvent(context: Context, event: string) {
++  const pathParts = context.filename.split(pathSep);
++  const dirname = pathParts.at(-2)!;
++  const filename = pathParts.at(-1)!;
++
++  let dir = events.get(dirname);
++  if (!dir) {
++    dir = {};
++    events.set(dirname, dir);
++  }
++
++  let fileEvents = dir[filename];
++  if (!fileEvents) {
++    fileEvents = [];
++    dir[filename] = fileEvents;
++  }
++
++  const ruleName = context.id.split("/")[1];
++  fileEvents.push(`${event}: ${ruleName}`);
++}
++
++/**
++ * Get recorded events for a directory, serialized as pretty-printed JSON.
++ * @param path - File path
++ * @returns Events for directory as JSON string
++ */
++function getEvents(path: string): string {
++  const dirname = path.split(pathSep).at(-2)!;
++  return JSON.stringify(events.get(dirname)!, null, 2);
++}
++
++// Rule which throws in `before` hook
++const throwInBeforeRule: Rule = {
++  createOnce(context) {
++    return {
++      before() {
++        addEvent(context, "before");
++
++        throw new Error("`before` hook threw");
++      },
++      Identifier(_node) {
++        addEvent(context, "visit");
++      },
++      after() {
++        // Should not be called because `before` hook threw
++        addEvent(context, "after");
++      },
++    };
++  },
++};
++
++// Rule which throws in `after` hook
++const throwInAfterRule: Rule = {
++  createOnce(context) {
++    return {
++      before() {
++        addEvent(context, "before");
++      },
++      Identifier(_node) {
++        addEvent(context, "visit");
++      },
++      after() {
++        addEvent(context, "after");
++
++        throw new Error("`after` hook threw");
++      },
++    };
++  },
++};
++
++// Rule which throws during AST visitation
++const throwInVisitRule: Rule = {
++  createOnce(context) {
++    return {
++      before() {
++        addEvent(context, "before");
++      },
++      Identifier(_node) {
++        addEvent(context, "visit");
++
++        throw new Error("`Identifier` visit function threw");
++      },
++      after() {
++        // Should be called because `before` hook succeeded
++        addEvent(context, "after");
++      },
++    };
++  },
++};
++
++// Rule which records events in `before` and `after` hooks, and during AST visitation.
++// This rule is run before the rules which throw.
++const beforeAndAfterRule: Rule = {
++  createOnce(context) {
++    return {
++      before() {
++        addEvent(context, "before");
++      },
++      Identifier(_node) {
++        addEvent(context, "visit");
++      },
++      after() {
++        addEvent(context, "after");
++      },
++    };
++  },
++};
++
++// Rule which records events in `before` and `after` hooks, and during AST visitation (like `beforeAndAfterRule`).
++// `after` hook creates a diagnostic containing all events for the directory.
++// This rule is run after the rules which throw.
++const beforeAndAfterLateRule: Rule = {
++  createOnce(context) {
++    return {
++      before() {
++        addEvent(context, "before");
++      },
++      Identifier(_node) {
++        addEvent(context, "visit");
++      },
++      after() {
++        // Should be called unless `before` hook of another rule (`throwInBeforeRule`) threw in its `before` hook
++        // so this rule's `before` hook was not run either
++        addEvent(context, "after");
++
++        context.report({
++          message:
++            "after hook:\n" +
++            `id: ${context.id}\n` +
++            `filename: ${context.filename}\n` +
++            `events: ${getEvents(context.filename)}`,
++          node: SPAN,
++        });
++      },
++    };
++  },
++};
++
++const plugin: Plugin = {
++  meta: {
++    name: "create-once-errors-plugin",
++  },
++  rules: {
++    "before-and-after": beforeAndAfterRule,
++    "throw-in-before": throwInBeforeRule,
++    "throw-in-after": throwInAfterRule,
++    "throw-in-visit": throwInVisitRule,
++    "before-and-after-late": beforeAndAfterLateRule,
++  },
++};
++
++export default plugin;
+diff --git a/apps/oxlint/test/fixtures/lint_after_hook_error/.oxlintrc.json b/apps/oxlint/test/fixtures/lint_after_hook_error/.oxlintrc.json
+deleted file mode 100644
+index 76b546efca906..0000000000000
+--- a/apps/oxlint/test/fixtures/lint_after_hook_error/.oxlintrc.json
++++ /dev/null
+@@ -1,7 +0,0 @@
+-{
+-  "jsPlugins": ["./plugin.ts"],
+-  "categories": { "correctness": "off" },
+-  "rules": {
+-    "error-plugin/error": "error"
+-  }
+-}
+diff --git a/apps/oxlint/test/fixtures/lint_after_hook_error/output.snap.md b/apps/oxlint/test/fixtures/lint_after_hook_error/output.snap.md
+deleted file mode 100644
+index b0120050d97b0..0000000000000
+--- a/apps/oxlint/test/fixtures/lint_after_hook_error/output.snap.md
++++ /dev/null
+@@ -1,17 +0,0 @@
+-# Exit code
+-1
+-
+-# stdout
+-```
+-  x Error running JS plugin.
+-  | File path: <fixture>/files/index.js
+-  | Error: Whoops!
+-  |     at after (<fixture>/plugin.ts:13:19)
+-
+-Found 0 warnings and 1 error.
+-Finished in Xms on 1 file with 1 rules using X threads.
+-```
+-
+-# stderr
+-```
+-```
+diff --git a/apps/oxlint/test/fixtures/lint_after_hook_error/plugin.ts b/apps/oxlint/test/fixtures/lint_after_hook_error/plugin.ts
+deleted file mode 100644
+index 942b9eb85dddb..0000000000000
+--- a/apps/oxlint/test/fixtures/lint_after_hook_error/plugin.ts
++++ /dev/null
+@@ -1,21 +0,0 @@
+-import type { Plugin } from "#oxlint/plugins";
+-
+-const plugin: Plugin = {
+-  meta: {
+-    name: "error-plugin",
+-  },
+-  rules: {
+-    error: {
+-      createOnce(_context) {
+-        return {
+-          Program(_program) {},
+-          after() {
+-            throw new Error("Whoops!");
+-          },
+-        };
+-      },
+-    },
+-  },
+-};
+-
+-export default plugin;
+diff --git a/apps/oxlint/test/fixtures/lint_before_hook_error/.oxlintrc.json b/apps/oxlint/test/fixtures/lint_before_hook_error/.oxlintrc.json
+deleted file mode 100644
+index 76b546efca906..0000000000000
+--- a/apps/oxlint/test/fixtures/lint_before_hook_error/.oxlintrc.json
++++ /dev/null
+@@ -1,7 +0,0 @@
+-{
+-  "jsPlugins": ["./plugin.ts"],
+-  "categories": { "correctness": "off" },
+-  "rules": {
+-    "error-plugin/error": "error"
+-  }
+-}
+diff --git a/apps/oxlint/test/fixtures/lint_before_hook_error/output.snap.md b/apps/oxlint/test/fixtures/lint_before_hook_error/output.snap.md
+deleted file mode 100644
+index 7ab83081fb319..0000000000000
+--- a/apps/oxlint/test/fixtures/lint_before_hook_error/output.snap.md
++++ /dev/null
+@@ -1,17 +0,0 @@
+-# Exit code
+-1
+-
+-# stdout
+-```
+-  x Error running JS plugin.
+-  | File path: <fixture>/files/index.js
+-  | Error: Whoops!
+-  |     at before (<fixture>/plugin.ts:12:19)
+-
+-Found 0 warnings and 1 error.
+-Finished in Xms on 1 file with 1 rules using X threads.
+-```
+-
+-# stderr
+-```
+-```
+diff --git a/apps/oxlint/test/fixtures/lint_before_hook_error/plugin.ts b/apps/oxlint/test/fixtures/lint_before_hook_error/plugin.ts
+deleted file mode 100644
+index 083409782a81d..0000000000000
+--- a/apps/oxlint/test/fixtures/lint_before_hook_error/plugin.ts
++++ /dev/null
+@@ -1,21 +0,0 @@
+-import type { Plugin } from "#oxlint/plugins";
+-
+-const plugin: Plugin = {
+-  meta: {
+-    name: "error-plugin",
+-  },
+-  rules: {
+-    error: {
+-      createOnce(_context) {
+-        return {
+-          before() {
+-            throw new Error("Whoops!");
+-          },
+-          Program(_program) {},
+-        };
+-      },
+-    },
+-  },
+-};
+-
+-export default plugin;

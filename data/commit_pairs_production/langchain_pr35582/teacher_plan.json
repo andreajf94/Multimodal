@@ -1,0 +1,143 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "api_design",
+      "recommendation": "Added support for OpenAI's tool_search feature as a first-class citizen in the LangChain OpenAI integration, treating it as a built-in tool type alongside existing types like function, code_interpreter, and mcp.",
+      "rationale": "OpenAI's tool_search is a new API feature that allows models to search for appropriate tools during conversations. By adding it to the KNOWN_TOOL_TYPES tuple and handling it throughout the codebase, we ensure it's treated consistently with other tool types. This maintains the existing abstraction patterns where tool types are explicitly enumerated and handled.",
+      "alternatives_considered": [
+        "Creating a separate plugin system for new tool types",
+        "Using dynamic registration instead of static enumeration"
+      ],
+      "files_affected": [
+        "libs/core/langchain_core/utils/function_calling.py",
+        "libs/partners/openai/langchain_openai/chat_models/base.py"
+      ]
+    },
+    {
+      "dimension": "data_modeling",
+      "recommendation": "Extended the message block translation system to handle tool_search_call and tool_search_output blocks, preserving their metadata through extras dictionaries.",
+      "rationale": "The existing block translation system in openai.py already handles various block types (tool_calls, mcp_calls, etc.). Adding tool_search blocks follows the same pattern: extracting known fields (id, arguments, status) and preserving unknown fields in extras. This ensures backward compatibility while supporting new OpenAI API features.",
+      "alternatives_considered": [
+        "Creating a separate translation layer for tool_search",
+        "Modifying the base message classes instead of just translators"
+      ],
+      "files_affected": [
+        "libs/core/langchain_core/messages/block_translators/openai.py",
+        "libs/partners/openai/langchain_openai/chat_models/_compat.py"
+      ]
+    },
+    {
+      "dimension": "api_versioning",
+      "recommendation": "Implemented dual support for both OpenAI's v1 API format and the newer responses/v1 API format, with proper type conversions between them.",
+      "rationale": "LangChain needs to support multiple OpenAI API versions simultaneously. The implementation handles conversion between v1 format (server_tool_call/server_tool_result) and responses format (tool_search_call/tool_search_output). This allows users to choose their preferred API version while maintaining consistent behavior.",
+      "alternatives_considered": [
+        "Supporting only the newer API version",
+        "Creating separate model classes for each API version"
+      ],
+      "files_affected": [
+        "libs/partners/openai/langchain_openai/chat_models/_compat.py",
+        "libs/partners/openai/tests/integration_tests/chat_models/test_responses_api.py"
+      ]
+    },
+    {
+      "dimension": "tool_management",
+      "recommendation": "Added support for defer_loading flag propagation from BaseTool extras to OpenAI tool definitions, enabling client-side tool search execution.",
+      "rationale": "OpenAI's tool_search can work in two modes: server-executed (OpenAI searches tools) and client-executed (client provides tool search logic). The defer_loading flag indicates tools should be loaded on-demand. By propagating this from LangChain tools to OpenAI API calls, we enable the client-executed pattern where middleware can intercept tool_search calls and provide custom tool loading logic.",
+      "alternatives_considered": [
+        "Creating a separate tool search configuration system",
+        "Using different tool classes for defer-loaded tools"
+      ],
+      "files_affected": [
+        "libs/partners/openai/langchain_openai/chat_models/base.py",
+        "libs/partners/openai/tests/unit_tests/chat_models/test_base.py"
+      ]
+    },
+    {
+      "dimension": "testing",
+      "recommendation": "Enhanced VCR configuration to use JSON body matching for request recording, added comprehensive integration tests for tool_search in both regular and streaming modes, and created unit tests for edge cases.",
+      "rationale": "Tool search involves complex JSON payloads with potentially reordered keys. Using json_body matcher ensures tests are robust against JSON serialization differences. The tests cover both API versions (v1 and responses/v1), both execution modes (server and client), and both regular and streaming responses. This ensures the feature works in all expected usage scenarios.",
+      "alternatives_considered": [
+        "Using exact string matching for request bodies",
+        "Testing only the happy path"
+      ],
+      "files_affected": [
+        "libs/partners/openai/tests/conftest.py",
+        "libs/partners/openai/tests/integration_tests/chat_models/test_responses_api.py",
+        "libs/partners/openai/tests/unit_tests/chat_models/test_base.py"
+      ]
+    },
+    {
+      "dimension": "middleware_integration",
+      "recommendation": "Demonstrated client-side tool search execution through agent middleware hooks, allowing custom tool search logic to be injected into the agent loop.",
+      "rationale": "For advanced use cases, users may want to implement custom tool search logic (e.g., searching a tool registry, filtering based on permissions). The middleware approach allows intercepting tool_search_call blocks, executing custom search logic, and returning tool_search_output blocks. This maintains the existing agent loop architecture while adding new capabilities.",
+      "alternatives_considered": [
+        "Requiring all tool search to be server-side",
+        "Creating a separate tool search service"
+      ],
+      "files_affected": [
+        "libs/partners/openai/tests/integration_tests/chat_models/test_responses_api.py"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Core tool_search type support and block translation",
+      "description": "Add tool_search to the list of known tool types and implement block translation between LangChain and OpenAI formats for tool_search_call and tool_search_output blocks.",
+      "files_to_modify": [
+        "libs/core/langchain_core/messages/block_translators/openai.py",
+        "libs/core/langchain_core/utils/function_calling.py",
+        "libs/partners/openai/langchain_openai/chat_models/_compat.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-002",
+      "title": "OpenAI integration updates for tool_search",
+      "description": "Update the OpenAI chat model implementation to handle tool_search tool type, support defer_loading propagation, and ensure proper payload construction for both v1 and responses API versions.",
+      "files_to_modify": [
+        "libs/partners/openai/langchain_openai/chat_models/base.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-003",
+      "title": "Testing infrastructure and comprehensive test coverage",
+      "description": "Update VCR configuration for JSON body matching, add integration tests for tool_search in regular and streaming modes with both API versions, and add unit tests for edge cases like defer_loading and namespace tools.",
+      "files_to_modify": [
+        "libs/partners/openai/tests/conftest.py",
+        "libs/partners/openai/tests/integration_tests/chat_models/test_responses_api.py",
+        "libs/partners/openai/tests/unit_tests/chat_models/test_base.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "large"
+    },
+    {
+      "id": "T-004",
+      "title": "Dependency update and test cassette generation",
+      "description": "Update OpenAI SDK dependency to version 2.26.0 (which includes tool_search support) and generate new VCR cassettes for the integration tests.",
+      "files_to_modify": [
+        "libs/partners/openai/uv.lock"
+      ],
+      "files_to_create": [
+        "libs/partners/openai/tests/cassettes/test_agent_loop.yaml.gz",
+        "libs/partners/openai/tests/cassettes/test_agent_loop_streaming.yaml.gz",
+        "libs/partners/openai/tests/cassettes/test_client_executed_tool_search.yaml.gz",
+        "libs/partners/openai/tests/cassettes/test_tool_search.yaml.gz",
+        "libs/partners/openai/tests/cassettes/test_tool_search_streaming.yaml.gz"
+      ],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation adds comprehensive support for OpenAI's tool_search feature to LangChain's OpenAI integration. The approach follows LangChain's existing architectural patterns: extending enumerated tool types, enhancing the block translation system, and maintaining dual support for both v1 and responses API versions.\n\nKey technical decisions include: 1) Adding 'tool_search' and 'namespace' to the KNOWN_TOOL_TYPES tuple to ensure they're treated as first-class tool types; 2) Extending the block translation system in openai.py to handle tool_search_call and tool_search_output blocks with proper metadata preservation through extras dictionaries; 3) Implementing bidirectional conversion between v1 format (server_tool_call/server_tool_result) and responses format (tool_search_call/tool_search_output); 4) Propagating the defer_loading flag from BaseTool extras to OpenAI tool definitions to enable client-side tool search execution; 5) Adding comprehensive testing with JSON body matching to handle serialization variations.\n\nThe changes integrate seamlessly with the existing codebase by following established patterns for new tool types. The implementation supports both server-executed tool search (where OpenAI searches available tools) and client-executed tool search (where custom middleware provides tool search logic), demonstrated through agent middleware hooks. This maintains backward compatibility while adding powerful new capabilities for dynamic tool discovery and loading.",
+  "source_pr": "https://github.com/langchain-ai/langchain/pull/35582",
+  "before_sha": "532b014f5c362b031cfba4ed58ac583860a0d58f",
+  "after_sha": "fbfe4b812de119ec8e233627d88422727c823c35",
+  "diff_stats": {
+    "additions": 514,
+    "deletions": 13,
+    "files_changed": 13
+  }
+}

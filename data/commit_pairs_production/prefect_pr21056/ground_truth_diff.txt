@@ -1,0 +1,144 @@
+diff --git a/src/integrations/prefect-shell/prefect_shell/commands.py b/src/integrations/prefect-shell/prefect_shell/commands.py
+index 036e5bf135c2..082516b84cec 100644
+--- a/src/integrations/prefect-shell/prefect_shell/commands.py
++++ b/src/integrations/prefect-shell/prefect_shell/commands.py
+@@ -10,6 +10,7 @@
+ import tempfile
+ import threading
+ from contextlib import AsyncExitStack, ExitStack, contextmanager
++from contextvars import copy_context
+ from typing import IO, Any, Generator, Optional, Union
+ 
+ import anyio
+@@ -169,7 +170,10 @@ async def _capture_output(self, source: Any):
+             self._output.extend(text.split(os.linesep))
+ 
+     def _capture_output_sync(
+-        self, source: IO[bytes], output_label: str, include_in_output: bool
++        self,
++        source: IO[bytes],
++        output_label: str,
++        include_in_output: bool,
+     ) -> None:
+         """
+         Capture output from source (sync version for subprocess pipes).
+@@ -224,20 +228,34 @@ def wait_for_completion(self) -> None:
+ 
+         output_threads: list[threading.Thread] = []
+ 
++        # Each thread needs its own copied Context. Reusing the same Context for
++        # both `Context.run(...)` calls raises `RuntimeError` once one thread enters it.
+         if self._process.stdout is not None:
++            stdout_context = copy_context()
+             output_threads.append(
+                 threading.Thread(
+-                    target=self._capture_output_sync,
+-                    args=(self._process.stdout, "stream output", True),
++                    target=stdout_context.run,
++                    args=(
++                        self._capture_output_sync,
++                        self._process.stdout,
++                        "stream output",
++                        True,
++                    ),
+                     daemon=True,
+                 )
+             )
+ 
+         if self._process.stderr is not None:
++            stderr_context = copy_context()
+             output_threads.append(
+                 threading.Thread(
+-                    target=self._capture_output_sync,
+-                    args=(self._process.stderr, "stderr", False),
++                    target=stderr_context.run,
++                    args=(
++                        self._capture_output_sync,
++                        self._process.stderr,
++                        "stderr",
++                        False,
++                    ),
+                     daemon=True,
+                 )
+             )
+diff --git a/src/integrations/prefect-shell/tests/test_commands.py b/src/integrations/prefect-shell/tests/test_commands.py
+index 25ace71a433f..9726b6f643ae 100644
+--- a/src/integrations/prefect-shell/tests/test_commands.py
++++ b/src/integrations/prefect-shell/tests/test_commands.py
+@@ -1,19 +1,43 @@
++import asyncio
+ import logging
+ import os
+ import sys
+ from pathlib import Path
+ from typing import Union
+ from unittest.mock import AsyncMock
++from uuid import UUID
+ 
+ import pytest
+ from prefect_shell.commands import ShellOperation, shell_run_command
+ 
+ from prefect import flow
++from prefect.client.orchestration import get_client
++from prefect.client.schemas.filters import LogFilter, LogFilterFlowRunId
++from prefect.context import get_run_context
++from prefect.logging.handlers import APILogHandler
++from prefect.settings import PREFECT_LOGGING_TO_API_ENABLED, temporary_settings
+ 
+ if sys.platform == "win32":
+     pytest.skip(reason="see test_commands_windows.py", allow_module_level=True)
+ 
+ 
++async def wait_for_flow_run_logs(
++    flow_run_id: UUID, expected_count: int
++) -> list[object]:
++    for _ in range(30):
++        async with get_client() as client:
++            logs = await client.read_logs(
++                log_filter=LogFilter(
++                    flow_run_id=LogFilterFlowRunId(any_=[flow_run_id]),
++                )
++            )
++        if len(logs) >= expected_count:
++            return logs
++        await asyncio.sleep(0.1)
++
++    return logs
++
++
+ @pytest.mark.usefixtures("prefect_task_runs_caplog")
+ async def test_shell_run_command_error():
+     @flow
+@@ -335,3 +359,32 @@ def test_sync_streaming_stderr_output(
+         assert any("out2" in r.message for r in stream_records)
+         assert any("err1" in r.message for r in stderr_records)
+         assert any("err2" in r.message for r in stderr_records)
++
++    async def test_sync_streaming_output_is_sent_to_api(self):
++        with temporary_settings(updates={PREFECT_LOGGING_TO_API_ENABLED: True}):
++
++            @flow
++            def test_flow() -> UUID:
++                ShellOperation(
++                    commands=[
++                        "echo out1",
++                        "echo err1 >&2",
++                        "echo out2",
++                        "echo err2 >&2",
++                    ]
++                ).run()
++                return get_run_context().flow_run.id
++
++            flow_run_id = test_flow()
++            await APILogHandler.aflush()
++            logs = await wait_for_flow_run_logs(flow_run_id, expected_count=6)
++
++        messages = {log.message for log in logs}
++        assert any(
++            "PID" in message and "stream output:" in message for message in messages
++        )
++        assert any("out1" in message for message in messages)
++        assert any("out2" in message for message in messages)
++        assert any("PID" in message and "stderr:" in message for message in messages)
++        assert any("err1" in message for message in messages)
++        assert any("err2" in message for message in messages)

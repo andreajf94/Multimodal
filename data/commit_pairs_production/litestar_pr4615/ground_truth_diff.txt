@@ -1,0 +1,1492 @@
+diff --git a/Makefile b/Makefile
+index b1e5b6db1b..cf7b58b25f 100644
+--- a/Makefile
++++ b/Makefile
+@@ -121,12 +121,11 @@ check-all: lint test-all coverage                   ## Run all linting, tests, a
+ # =============================================================================
+ # Docs
+ # =============================================================================
+-# XXX: docs commands are pinned to Python 3.12 due to picologging not being compatible with 3.13
+ 
+ .PHONY: docs-install
+ docs-install: 										## Install docs dependencies
+ 	@echo "=> Installing documentation dependencies"
+-	@uv sync --python 3.12 --group docs
++	@uv sync --group docs
+ 	@echo "=> Installed documentation dependencies"
+ 
+ docs-clean: 										## Dump the existing built docs
+@@ -136,16 +135,16 @@ docs-clean: 										## Dump the existing built docs
+ 
+ docs-serve:  								## Serve the docs locally
+ 	@echo "=> Serving documentation"
+-	uv run --isolated --python 3.12 sphinx-autobuild docs docs/_build/ -j auto --watch litestar --watch docs --watch tests --watch CONTRIBUTING.rst --open-browser --port=0
++	uv run --isolated sphinx-autobuild docs docs/_build/ -j auto --watch litestar --watch docs --watch tests --watch CONTRIBUTING.rst --open-browser --port=0
+ 
+ docs: docs-clean 									## Dump the existing built docs and rebuild them
+ 	@echo "=> Building documentation"
+-	@uv run --isolated --python 3.12 sphinx-build -M html docs docs/_build/ -E -a -j auto -W --keep-going
++	@uv run --isolated sphinx-build -M html docs docs/_build/ -E -a -j auto -W --keep-going
+ 
+ .PHONY: docs-linkcheck
+ docs-linkcheck: 									## Run the link check on the docs
+-	@uv run --isolated --python 3.12 sphinx-build -b linkcheck ./docs ./docs/_build -D linkcheck_ignore='http://.*','https://.*'
++	@uv run --isolated sphinx-build -b linkcheck ./docs ./docs/_build -D linkcheck_ignore='http://.*','https://.*'
+ 
+ .PHONY: docs-linkcheck-full
+ docs-linkcheck-full: 									## Run the full link check on the docs
+-	@uv run --isolated --python 3.12 sphinx-build -b linkcheck ./docs ./docs/_build -D linkcheck_anchors=0
++	@uv run --isolated sphinx-build -b linkcheck ./docs ./docs/_build -D linkcheck_anchors=0
+diff --git a/docs/conf.py b/docs/conf.py
+index fb75993876..0b0bedba91 100644
+--- a/docs/conf.py
++++ b/docs/conf.py
+@@ -62,7 +62,6 @@
+     "alembic": ("https://alembic.sqlalchemy.org/en/latest/", None),
+     "click": ("https://click.palletsprojects.com/en/latest/", None),
+     "redis": ("https://redis.readthedocs.io/en/stable/", None),
+-    "picologging": ("https://microsoft.github.io/picologging/", None),
+     "structlog": ("https://www.structlog.org/en/stable/", None),
+     "tortoise": ("https://tortoise.github.io/", None),
+     "piccolo": ("https://piccolo-orm.readthedocs.io/en/latest/", None),
+@@ -261,6 +260,12 @@
+     re.compile(r"litestar\.channels\.backends\.asyncpg.*"): {"asyncpg.connection.Connection", "asyncpg.Connection"},
+     re.compile(r"litestar\.handlers\.websocket_handlers\.stream.*"): {"WebSocketMode"},
+     re.compile(r"litestar\.file_system.*"): {"AnyFileSystem", "SymlinkResolver"},
++    # these exist in struclog, but Sphinx thinks they're classes which they are not; they are type aliases
++    re.compile(r"litestar\.logging\.structlog\.StructLoggingConfig"): {
++        "structlog.typing.Processor",
++        "structlog.typing.Context",
++        "structlog.typing.WrappedLogger",
++    },
+ }
+ 
+ # Do not warn about broken links to the following:
+diff --git a/docs/examples/middleware/logging_middleware.py b/docs/examples/middleware/logging_middleware.py
+index d0b234d94f..233b75b6fc 100644
+--- a/docs/examples/middleware/logging_middleware.py
++++ b/docs/examples/middleware/logging_middleware.py
+@@ -1,17 +1,20 @@
+-from litestar import Litestar, get
+-from litestar.logging.config import LoggingConfig
+-from litestar.middleware.logging import LoggingMiddlewareConfig
++import logging
+ 
+-logging_middleware_config = LoggingMiddlewareConfig()
++from litestar import Litestar, get
++from litestar.middleware.logging import LoggingMiddleware
+ 
+ 
+-@get("/", sync_to_thread=False)
+-def my_handler() -> dict[str, str]:
++@get("/")
++async def my_handler() -> dict[str, str]:
+     return {"hello": "world"}
+ 
+ 
+ app = Litestar(
+     route_handlers=[my_handler],
+-    logging_config=LoggingConfig(),
+-    middleware=[logging_middleware_config.middleware],
++    middleware=[
++        LoggingMiddleware(
++            logging.getLogger("my.app"),
++            request_log_fields=("query", "body"),  # only log query and body fields
++        )
++    ],
+ )
+diff --git a/docs/examples/middleware/logging_middleware_structlog.py b/docs/examples/middleware/logging_middleware_structlog.py
+new file mode 100644
+index 0000000000..e5f8e5545f
+--- /dev/null
++++ b/docs/examples/middleware/logging_middleware_structlog.py
+@@ -0,0 +1,20 @@
++import structlog
++
++from litestar import Litestar, get
++from litestar.middleware.logging import LoggingMiddleware
++
++
++@get("/")
++async def my_handler() -> dict[str, str]:
++    return {"hello": "world"}
++
++
++app = Litestar(
++    route_handlers=[my_handler],
++    middleware=[
++        LoggingMiddleware(
++            structlog.get_logger("my.app"),
++            request_log_fields=("query", "body"),  # only log query and body fields
++        )
++    ],
++)
+diff --git a/docs/getting-started.rst b/docs/getting-started.rst
+index 0adc64cff5..e3fb9572e5 100644
+--- a/docs/getting-started.rst
++++ b/docs/getting-started.rst
+@@ -35,12 +35,6 @@ Installation
+     :doc:`RedisStore </usage/stores>`
+         :code:`pip install 'litestar[redis]'`
+ 
+-    :ref:`Picologging <usage/logging:using picologging>`
+-        :code:`pip install 'litestar[picologging]'`
+-
+-    :ref:`StructLog <usage/logging:using structlog>`
+-        :code:`pip install 'litestar[structlog]'`
+-
+     :doc:`Prometheus Instrumentation </usage/metrics/prometheus>`
+         :code:`pip install 'litestar[prometheus]'`
+ 
+diff --git a/docs/reference/index.rst b/docs/reference/index.rst
+index db4a7eae63..bd7def2234 100644
+--- a/docs/reference/index.rst
++++ b/docs/reference/index.rst
+@@ -24,7 +24,6 @@ API reference
+     exceptions
+     file_system
+     handlers
+-    logging/index
+     middleware/index
+     openapi/index
+     pagination
+diff --git a/docs/reference/logging/config.rst b/docs/reference/logging/config.rst
+deleted file mode 100644
+index ad7945c9b8..0000000000
+--- a/docs/reference/logging/config.rst
++++ /dev/null
+@@ -1,5 +0,0 @@
+-config
+-======
+-
+-.. automodule:: litestar.logging.config
+-    :members:
+diff --git a/docs/reference/logging/index.rst b/docs/reference/logging/index.rst
+deleted file mode 100644
+index ff364b258d..0000000000
+--- a/docs/reference/logging/index.rst
++++ /dev/null
+@@ -1,9 +0,0 @@
+-logging
+-=======
+-
+-.. toctree::
+-    :titlesonly:
+-
+-    config
+-    picologging
+-    standard
+diff --git a/docs/reference/logging/picologging.rst b/docs/reference/logging/picologging.rst
+deleted file mode 100644
+index fc8cf5d671..0000000000
+--- a/docs/reference/logging/picologging.rst
++++ /dev/null
+@@ -1,5 +0,0 @@
+-picologging
+-============
+-
+-.. automodule:: litestar.logging.picologging
+-    :members:
+diff --git a/docs/reference/logging/standard.rst b/docs/reference/logging/standard.rst
+deleted file mode 100644
+index adf6ca3520..0000000000
+--- a/docs/reference/logging/standard.rst
++++ /dev/null
+@@ -1,5 +0,0 @@
+-standard
+-========
+-
+-.. automodule:: litestar.logging.standard
+-    :members:
+diff --git a/docs/reference/plugins/index.rst b/docs/reference/plugins/index.rst
+index cd075431f6..eaa05e2ca4 100644
+--- a/docs/reference/plugins/index.rst
++++ b/docs/reference/plugins/index.rst
+@@ -15,4 +15,3 @@ plugins
+     problem_details
+     prometheus
+     pydantic
+-    structlog
+diff --git a/docs/reference/plugins/structlog.rst b/docs/reference/plugins/structlog.rst
+deleted file mode 100644
+index 85516bf4a8..0000000000
+--- a/docs/reference/plugins/structlog.rst
++++ /dev/null
+@@ -1,6 +0,0 @@
+-=========
+-structlog
+-=========
+-
+-.. automodule:: litestar.plugins.structlog
+-    :members:
+diff --git a/docs/release-notes/2.x-changelog.rst b/docs/release-notes/2.x-changelog.rst
+index 151d281f70..ad0aaee5ca 100644
+--- a/docs/release-notes/2.x-changelog.rst
++++ b/docs/release-notes/2.x-changelog.rst
+@@ -409,8 +409,8 @@
+         :type: feature
+         :pr: 2969
+ 
+-        The option :attr:`~litestar.logging.config.LoggingConfig.configure_root_logger` was
+-        added to :class:`~litestar.logging.config.LoggingConfig` attribute. It is enabled by
++        The option ``litestar.logging.config.LoggingConfig.configure_root_logger`` was
++        added to ``litestar.logging.config.LoggingConfig`` attribute. It is enabled by
+         default to not implement a breaking change.
+ 
+         When set to ``False`` the ``root`` logger will not be modified for ``logging``
+@@ -844,7 +844,7 @@
+         :pr: 2919
+ 
+         Using a method on
+-        :attr:`Request.logger <litestar.connection.ASGIConnection.logger>` when not
++        ``Request.logger`` when not
+         setting a ``logging_config`` on the application would result in a non-descriptive
+         :exc:`TypeError`. An :exc:`ImproperlyConfiguredException` with an explanation is
+         now raised instead.
+diff --git a/docs/release-notes/changelog.rst b/docs/release-notes/changelog.rst
+index 68fec394f1..06434d3f3b 100644
+--- a/docs/release-notes/changelog.rst
++++ b/docs/release-notes/changelog.rst
+@@ -4,7 +4,39 @@
+ =============
+ 
+ .. changelog:: 3.0.0
+-    :date: 2024-08-30
++    :date: 2364-01-27
++
++    .. change:: Remove logging config and related constructs
++        :type: feature
++        :breaking:
++        :pr: 4615
++        :issue: 2858, 3913, 3455
++
++        Remove Litestar's logging configuration, and related modules. In particular,
++        the following have been removed:
++
++        - ``Litestar.logging_config`` parameter
++        - ``Litestar.logger`` attribute
++        - ``Litestar.get_logger`` method
++        - ``AppConfig.logging_config`` attribute
++        - ``ASGIConnection.logger`` property
++        - ``litestar.logging`` module
++        - ``litestar.plugins.structlog`` module
++        - ``litestar.middleware.lgging.LoggingMiddlewareConfig`` class
++
++        Aside from debugging, there is only one place where Litestar logs, which is
++        :class:`~litestar.middleware.logging.LoggingMiddleware`, which has been changed
++        to accept a logger directly.
++        ``litestar.middleware.lgging.LoggingMiddlewareConfig`` has also been removed,
++        with ``LoggingMiddleware`` now accepting all configuration arguments directly.
++
++        Users that have previously relied on Litestar to configure logging, can simply
++        use the standard logging configuration provided by their logging library of
++        choice.
++
++        .. seealso::
++            :doc:`/usage/logging`
++
+ 
+     .. change:: Remove default exception handler for all unhandled exceptions
+         :type: feature
+@@ -114,7 +146,7 @@
+         :breaking:
+         :pr: 4300
+ 
+-        The ``traceback_line_limit`` parameter of :class:`~litestar.logging.config.LoggingConfig` has been removed. This
++        The ``traceback_line_limit`` parameter of ``litestar.logging.config.LoggingConfig`` has been removed. This
+         parameter had no effect since version ``2.9.0``, so it can be removed safely from applications without any
+         change in behaviour.
+ 
+diff --git a/docs/release-notes/whats-new-2.rst b/docs/release-notes/whats-new-2.rst
+index 3ebc11f816..2a16c28622 100644
+--- a/docs/release-notes/whats-new-2.rst
++++ b/docs/release-notes/whats-new-2.rst
+@@ -97,11 +97,11 @@ Imports
+ +----------------------------------------------------+------------------------------------------------------------------------+
+ | ``starlite.TemplateConfig``                        | :class:`.template.TemplateConfig`                                      |
+ +----------------------------------------------------+------------------------------------------------------------------------+
+-| ``starlite.BaseLoggingConfig``                     | :class:`.logging.config.BaseLoggingConfig`                             |
++| ``starlite.BaseLoggingConfig``                     | ``litestar.logging.config.BaseLoggingConfig``                          |
+ +----------------------------------------------------+------------------------------------------------------------------------+
+-| ``starlite.LoggingConfig``                         | :class:`.logging.config.LoggingConfig`                                 |
++| ``starlite.LoggingConfig``                         | ``litestar.logging.config.LoggingConfig``                              |
+ +----------------------------------------------------+------------------------------------------------------------------------+
+-| ``starlite.StructLoggingConfig``                   | :class:`.logging.config.StructLoggingConfig`                           |
++| ``starlite.StructLoggingConfig``                   | ``litestar.logging.config.StructLoggingConfig``                        |
+ +----------------------------------------------------+------------------------------------------------------------------------+
+ | **Provide**                                                                                                                 |
+ +----------------------------------------------------+------------------------------------------------------------------------+
+diff --git a/docs/usage/logging.rst b/docs/usage/logging.rst
+index 322deca8ff..eabe9c4ca1 100644
+--- a/docs/usage/logging.rst
++++ b/docs/usage/logging.rst
+@@ -1,172 +1,78 @@
+ .. _logging-usage:
+ 
+-Logging
+-=======
++Request logging
++================
+ 
+-Application and request level loggers can be configured using the :class:`~litestar.logging.config.LoggingConfig`:
++Litestar can be configured to log information about requests / responses, via
++:class:`~litestar.middleware.logging.LoggingMiddleware`. In that, it is agnostic about
++the logging set up, or which logging library is used. You can pass in any object that
++conforms to the :class:`logging.Logger` interface, or a callable that returns such a
++logger.
+ 
+-.. code-block:: python
+-
+-   import logging
+-
+-   from litestar import Litestar, Request, get
+-   from litestar.logging import LoggingConfig
+-
+-
+-   @get("/")
+-   def my_router_handler(request: Request) -> None:
+-       request.logger.info("inside a request")
+-       return None
++.. literalinclude:: /examples/middleware/logging_middleware.py
++    :language: python
+ 
+ 
+-   logging_config = LoggingConfig(
+-       root={"level": "INFO", "handlers": ["queue_listener"]},
+-       formatters={
+-           "standard": {"format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s"}
+-       },
+-       log_exceptions="always",
+-   )
+-
+-   app = Litestar(route_handlers=[my_router_handler], logging_config=logging_config)
++Default request log properties
++++++++++++++++++++++++++++++++
+ 
+-.. attention::
++-  ``path``
++-  :attr:`~litestar.connection.Request.method`
++-  :attr:`~litestar.connection.Request.content_type`
++-  :attr:`~litestar.connection.ASGIConnection.query_params`
++-  :attr:`~litestar.connection.ASGIConnection.path_params`
+ 
+-    Litestar configures a non-blocking ``QueueListenerHandler`` which
+-    is keyed as ``queue_listener`` in the logging configuration. The above example is using this handler,
+-    which is optimal for async applications. Make sure to use it in your own loggers as in the above example.
++Default response log properties
+++++++++++++++++++++++++++++++++
+ 
+-.. attention::
++- ``status_code``
+ 
+-    Exceptions won't be logged by default, except in debug mode. Make sure to use ``log_exceptions="always"`` as in the
+-    example above to log exceptions if you need it.
+ 
+-Controlling Exception Logging
+-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
++Obfuscating Logging Output
+++++++++++++++++++++++++++++
+ 
+-While ``log_exceptions`` controls when exceptions are logged, sometimes you may want to suppress stack traces for specific
+-exception types or HTTP status codes. The ``disable_stack_trace`` parameter allows you to specify a set of exception types
+-or status codes that should not generate stack traces in logs:
++Sometimes certain data, e.g. request or response headers, needs to be obfuscated:
+ 
+ .. code-block:: python
+ 
+-   from litestar import Litestar
+-   from litestar.logging import LoggingConfig
++   from litestar.middleware.logging import LoggingMiddleware
+ 
+-   # Don't log stack traces for 404 errors and ValueError exceptions
+-   logging_config = LoggingConfig(
+-       debug=True,
+-       disable_stack_trace={404, ValueError},
++   logging_middleware_config = LoggingMiddleware(
++       request_cookies_to_obfuscate={"my-custom-session-key"},
++       response_cookies_to_obfuscate={"my-custom-session-key"},
++       request_headers_to_obfuscate={"my-custom-header"},
++       response_headers_to_obfuscate={"my-custom-header"},
+    )
+ 
+-   app = Litestar(logging_config=logging_config)
+-
+-This is particularly useful for common exceptions that you expect in normal operation and don't need detailed stack traces for.
+-
+-Using Python standard library
+-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+-
+-`logging <https://docs.python.org/3/howto/logging.html>`_ is Python's builtin standard logging library and can be
+-configured through ``LoggingConfig``.
+-
+-The ``LoggingConfig.configure()`` method returns a reference to ``logging.getLogger`` which can be used to access a
+-logger instance. Thus, the root logger can retrieved with ``logging_config.configure()()`` as shown in the example
+-below:
+-
+-.. code-block:: python
+-
+-    import logging
+-
+-    from litestar import Litestar, Request, get
+-    from litestar.logging import LoggingConfig
+-
+-    logging_config = LoggingConfig(
+-        root={"level": "INFO", "handlers": ["queue_listener"]},
+-        formatters={
+-            "standard": {"format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s"}
+-        },
+-        log_exceptions="always",
+-    )
+-
+-    logger = logging_config.configure()()
+-
+-
+-    @get("/")
+-    def my_router_handler(request: Request) -> None:
+-        request.logger.info("inside a request")
+-        logger.info("here too")
+-
++.. note::
++    The middleware will obfuscate the headers ``Authorization`` and ``X-API-KEY`` , and
++    the cookie ``session`` by default.
+ 
+-    app = Litestar(
+-        route_handlers=[my_router_handler],
+-        logging_config=logging_config,
+-    )
+ 
+-The above example is the same as using logging without the litestar ``LoggingConfig``.
+-
+-.. code-block:: python
+-
+-    import logging
+-
+-    from litestar import Litestar, Request, get
+-    from litestar.logging.config import LoggingConfig
+-
+-
+-    def get_logger(mod_name: str) -> logging.Logger:
+-        """Return logger object."""
+-        format = "%(asctime)s: %(name)s: %(levelname)s: %(message)s"
+-        logger = logging.getLogger(mod_name)
+-        # Writes to stdout
+-        ch = logging.StreamHandler()
+-        ch.setLevel(logging.INFO)
+-        ch.setFormatter(logging.Formatter(format))
+-        logger.addHandler(ch)
+-        return logger
+-
+-
+-    logger = get_logger(__name__)
+-
+-
+-    @get("/")
+-    def my_router_handler(request: Request) -> None:
+-        logger.info("logger inside a request")
+-
+-
+-    app = Litestar(
+-        route_handlers=[my_router_handler],
+-    )
+-
+-
+-Using Picologging
+-^^^^^^^^^^^^^^^^^
+-
+-`Picologging <https://github.com/microsoft/picologging>`_ is a high performance logging library that is developed by
+-Microsoft. Litestar will default to using this library automatically if its installed - requiring zero configuration on
+-the part of the user. That is, if ``picologging`` is present the previous example will work with it automatically.
+-
+-Using StructLog
+-^^^^^^^^^^^^^^^
+-
+-`StructLog <https://www.structlog.org/en/stable/>`_ is a powerful structured-logging library. Litestar ships with a
+-dedicated logging plugin and config for using it:
+-
+-.. code-block:: python
++Compression and Logging of Response Body
++++++++++++++++++++++++++++++++++++++++++
+ 
+-   from litestar import Litestar, Request, get
+-   from litestar.plugins.structlog import StructlogPlugin
++If both :class:`~litestar.config.compression.CompressionConfig` and
++:class:`~litestar.middleware.logging.LoggingMiddleware` have been defined for the application, the response
++body will be omitted from response logging if it has been compressed, even if ``"body"`` has been included in
++:paramref:`~litestar.middleware.logging.LoggingMiddleware.response_log_fields`. To force the body of
++compressed responses to be logged, set
++:paramref:`~litestar.middleware.logging.LoggingMiddleware.include_compressed_body` to ``True`` , in
++addition to including ``"body"`` in ``response_log_fields``.
+ 
+ 
+-   @get("/")
+-   def my_router_handler(request: Request) -> None:
+-       request.logger.info("inside a request")
+-       return None
++Structured logging
+++++++++++++++++++++
+ 
++The middleware can be configured to log information in a structured way, by setting
++``log_structured=True``. In this mode, Litestar will expect a logger that accept
++arbitrary data as keyword arguments.
+ 
+-   structlog_plugin = StructlogPlugin()
+ 
+-   app = Litestar(route_handlers=[my_router_handler], plugins=[StructlogPlugin()])
++Integration with third party logging libraries
++++++++++++++++++++++++++++++++++++++++++++++++
+ 
+-Subclass Logging Configs
+-^^^^^^^^^^^^^^^^^^^^^^^^
++To integrate with a third party logging library, simply pass in the logger directly:
+ 
+-You can easily create you own ``LoggingConfig`` class by subclassing
+-:class:`BaseLoggingConfig <.logging.config.BaseLoggingConfig>` and implementing the ``configure`` method.
++.. literalinclude:: /examples/middleware/logging_middleware_structlog.py
++    :language: python
+diff --git a/docs/usage/middleware/builtin-middleware.rst b/docs/usage/middleware/builtin-middleware.rst
+index 692d8684c5..384543c675 100644
+--- a/docs/usage/middleware/builtin-middleware.rst
++++ b/docs/usage/middleware/builtin-middleware.rst
+@@ -286,50 +286,11 @@ updates the client's address in a secure way, such as uvicorn's
+ `ProxyHeaderMiddleware <https://github.com/encode/uvicorn/blob/master/uvicorn/middleware/proxy_headers.py>`_
+ or hypercon's `ProxyFixMiddleware <https://hypercorn.readthedocs.io/en/latest/how_to_guides/proxy_fix.html>`_ .
+ 
+-
+ Logging Middleware
+ ------------------
+ 
+-Litestar ships with a robust logging middleware that allows logging HTTP request and responses while building on
+-the Litestar's :ref:`logging configuration <logging-usage>`:
+-
+-.. literalinclude:: /examples/middleware/logging_middleware.py
+-    :language: python
+-
+-
+-The logging middleware uses the logger configuration defined on the application level, which allows for using any supported logging tool, depending on the configuration used
+-(see :ref:`logging configuration <logging-usage>` for more details).
+-
+-Obfuscating Logging Output
+-^^^^^^^^^^^^^^^^^^^^^^^^^^
+-
+-Sometimes certain data, e.g. request or response headers, needs to be obfuscated. This is supported by the middleware
+-configuration:
+-
+-.. code-block:: python
+-
+-   from litestar.middleware.logging import LoggingMiddlewareConfig
+-
+-   logging_middleware_config = LoggingMiddlewareConfig(
+-       request_cookies_to_obfuscate={"my-custom-session-key"},
+-       response_cookies_to_obfuscate={"my-custom-session-key"},
+-       request_headers_to_obfuscate={"my-custom-header"},
+-       response_headers_to_obfuscate={"my-custom-header"},
+-   )
+-
+-The middleware will obfuscate the headers ``Authorization`` and ``X-API-KEY`` , and the cookie ``session`` by default.
+-
+-
+-Compression and Logging of Response Body
+-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
++This content has moved to :doc:`/usage/logging`
+ 
+-If both :class:`~litestar.config.compression.CompressionConfig` and
+-:class:`~litestar.middleware.logging.LoggingMiddleware` have been defined for the application, the response
+-body will be omitted from response logging if it has been compressed, even if ``"body"`` has been included in
+-:class:`~litestar.middleware.logging.LoggingMiddlewareConfig.response_log_fields`. To force the body of
+-compressed responses to be logged, set
+-:attr:`~litestar.middleware.logging.LoggingMiddlewareConfig.include_compressed_body` to ``True`` , in
+-addition to including ``"body"`` in ``response_log_fields``.
+ 
+ Session Middleware
+ ------------------
+diff --git a/litestar/app.py b/litestar/app.py
+index 978eeeef77..7b916bc0bf 100644
+--- a/litestar/app.py
++++ b/litestar/app.py
+@@ -3,7 +3,6 @@
+ import collections
+ import inspect
+ import itertools
+-import logging
+ import pdb  # noqa: T100
+ import warnings
+ from collections import defaultdict
+@@ -38,7 +37,6 @@
+ )
+ from litestar.handlers import ASGIRouteHandler, BaseRouteHandler, HTTPRouteHandler, WebsocketRouteHandler
+ from litestar.handlers.http_handlers._options import create_options_handler
+-from litestar.logging.config import LoggingConfig, get_logger_placeholder
+ from litestar.middleware._internal.cors import CORSMiddleware
+ from litestar.openapi.config import OpenAPIConfig
+ from litestar.plugins import (
+@@ -69,7 +67,6 @@
+     from litestar.datastructures import CacheControlHeader, ETag
+     from litestar.dto import AbstractDTO
+     from litestar.events.listener import EventListener
+-    from litestar.logging.config import BaseLoggingConfig
+     from litestar.openapi.spec import SecurityRequirement
+     from litestar.openapi.spec.open_api import OpenAPI
+     from litestar.response import Response
+@@ -86,12 +83,10 @@
+         Dependencies,
+         EmptyType,
+         ExceptionHandlersMap,
+-        GetLogger,
+         Guard,
+         LifeSpanReceive,
+         LifeSpanScope,
+         LifeSpanSend,
+-        Logger,
+         Message,
+         Middleware,
+         OnAppInitHandler,
+@@ -141,7 +136,9 @@ class Litestar(Router):
+ 
+     __slots__ = (
+         "_debug",
++        "_is_using_litestar_test_client",
+         "_lifespan_managers",
++        "_logger_shutdown",
+         "_openapi_schema",
+         "_server_lifespan_managers",
+         "after_exception",
+@@ -155,9 +152,6 @@ class Litestar(Router):
+         "debugger_module",
+         "event_emitter",
+         "experimental_features",
+-        "get_logger",
+-        "logger",
+-        "logging_config",
+         "multipart_form_part_limit",
+         "on_shutdown",
+         "on_startup",
+@@ -196,7 +190,6 @@ def __init__(
+         guards: Sequence[Guard] | None = None,
+         include_in_schema: bool | EmptyType = Empty,
+         listeners: Sequence[EventListener] | None = None,
+-        logging_config: BaseLoggingConfig | EmptyType | None = Empty,
+         middleware: Sequence[Middleware] | None = None,
+         multipart_form_part_limit: int = 1000,
+         on_app_init: Sequence[OnAppInitHandler] | None = None,
+@@ -268,7 +261,6 @@ def __init__(
+             include_in_schema: A boolean flag dictating whether  the route handler should be documented in the OpenAPI schema.
+             lifespan: A list of callables returning async context managers, wrapping the lifespan of the ASGI application
+             listeners: A sequence of :class:`EventListener <.events.listener.EventListener>`.
+-            logging_config: A subclass of :class:`BaseLoggingConfig <.logging.config.BaseLoggingConfig>`.
+             middleware: A sequence of :class:`Middleware <.types.Middleware>`.
+             multipart_form_part_limit: The maximal number of allowed parts in a multipart/formdata request. This limit
+                 is intended to protect from DoS attacks.
+@@ -329,9 +321,6 @@ def __init__(
+             experimental_features: An iterable of experimental features to enable
+         """
+ 
+-        if logging_config is Empty:
+-            logging_config = LoggingConfig()
+-
+         if debug is None:
+             debug = envflag("LITESTAR_DEBUG")
+ 
+@@ -359,7 +348,6 @@ def __init__(
+             include_in_schema=include_in_schema,
+             lifespan=list(lifespan or []),
+             listeners=list(listeners or []),
+-            logging_config=logging_config,
+             middleware=list(middleware or []),
+             multipart_form_part_limit=multipart_form_part_limit,
+             on_shutdown=list(on_shutdown or []),
+@@ -423,9 +411,6 @@ def __init__(
+                 stacklevel=2,
+             )
+ 
+-        self.get_logger: GetLogger = get_logger_placeholder
+-        self.logger: Logger | None = None
+-
+         self.after_exception = [ensure_async_callable(h) for h in config.after_exception]
+         self.allowed_hosts = cast("AllowedHostsConfig | None", config.allowed_hosts)
+         self.before_send = [ensure_async_callable(h) for h in config.before_send]
+@@ -433,7 +418,6 @@ def __init__(
+         self.cors_config = config.cors_config
+         self.csrf_config = config.csrf_config
+         self.event_emitter = config.event_emitter_backend(listeners=config.listeners)
+-        self.logging_config = config.logging_config
+         self.multipart_form_part_limit = config.multipart_form_part_limit
+         self.on_shutdown = config.on_shutdown
+         self.on_startup = config.on_startup
+@@ -443,7 +427,7 @@ def __init__(
+         self.state = config.state
+         self.template_engine = config.template_config.engine_instance if config.template_config else None
+         self.websocket_class: type[WebSocket] = config.websocket_class or WebSocket
+-        self.debug = config.debug
++        self._debug = config.debug
+         self.pdb_on_exception: bool = config.pdb_on_exception
+         self.debugger_module: Debugger = config.debugger_module
+         self.include_in_schema = include_in_schema
+@@ -503,10 +487,6 @@ def __init__(
+ 
+         self.asgi_router.construct_routing_trie()
+ 
+-        if self.logging_config:
+-            self.get_logger = self.logging_config.configure()
+-            self.logger = self.get_logger("litestar")
+-
+         self.asgi_handler = self._create_asgi_handler()
+ 
+     @staticmethod
+@@ -570,20 +550,6 @@ def _get_default_plugins(plugins: list[PluginProtocol]) -> list[PluginProtocol]:
+     def debug(self) -> bool:
+         return self._debug
+ 
+-    @debug.setter
+-    def debug(self, value: bool) -> None:
+-        """Sets the debug logging level for the application.
+-
+-        When possible, it calls the `self.logging_config.set_level` method.  This allows for implementation specific code and APIs to be called.
+-        """
+-        if self.logger and self.logging_config:
+-            self.logging_config.set_level(self.logger, logging.DEBUG if value else logging.INFO)
+-        elif self.logger and hasattr(self.logger, "setLevel"):  # pragma: no cover
+-            self.logger.setLevel(logging.DEBUG if value else logging.INFO)  # pragma: no cover
+-        if isinstance(self.logging_config, LoggingConfig):
+-            self.logging_config.loggers["litestar"]["level"] = "DEBUG" if value else "INFO"
+-        self._debug = value
+-
+     async def __call__(
+         self,
+         scope: Scope | LifeSpanScope,
+diff --git a/litestar/config/app.py b/litestar/config/app.py
+index 902e3f6b75..4622ee0e00 100644
+--- a/litestar/config/app.py
++++ b/litestar/config/app.py
+@@ -24,7 +24,6 @@
+     from litestar.dto import AbstractDTO
+     from litestar.events.emitter import BaseEventEmitterBackend
+     from litestar.events.listener import EventListener
+-    from litestar.logging.config import BaseLoggingConfig
+     from litestar.openapi.config import OpenAPIConfig
+     from litestar.openapi.spec import SecurityRequirement
+     from litestar.plugins import PluginProtocol
+@@ -134,8 +133,6 @@ class AppConfig:
+     """A list of callables returning async context managers, wrapping the lifespan of the ASGI application"""
+     listeners: list[EventListener] = field(default_factory=list)
+     """A list of :class:`EventListener <.events.listener.EventListener>`."""
+-    logging_config: BaseLoggingConfig | None = field(default=None)
+-    """An instance of :class:`BaseLoggingConfig <.logging.config.BaseLoggingConfig>` subclass."""
+     middleware: list[Middleware] = field(default_factory=list)
+     """A list of :class:`Middleware <.types.Middleware>`."""
+     on_shutdown: list[LifespanHook] = field(default_factory=list)
+diff --git a/litestar/connection/__init__.py b/litestar/connection/__init__.py
+index 6922e7901d..b29d511755 100644
+--- a/litestar/connection/__init__.py
++++ b/litestar/connection/__init__.py
+@@ -1,34 +1,34 @@
+-"""Some code in this module was adapted from https://github.com/encode/starlette/blob/master/starlette/requests.py and
+-https://github.com/encode/starlette/blob/master/starlette/websockets.py.
++# Some code in this module was adapted from https://github.com/encode/starlette/blob/master/starlette/requests.py and
++# https://github.com/encode/starlette/blob/master/starlette/websockets.py.
++#
++# Copyright © 2018, [Encode OSS Ltd](https://www.encode.io/).
++# All rights reserved.
++#
++# Redistribution and use in source and binary forms, with or without
++# modification, are permitted provided that the following conditions are met:
++#
++# * Redistributions of source code must retain the above copyright notice, this
++#   list of conditions and the following disclaimer.
++#
++# * Redistributions in binary form must reproduce the above copyright notice,
++#   this list of conditions and the following disclaimer in the documentation
++#   and/or other materials provided with the distribution.
++#
++# * Neither the name of the copyright holder nor the names of its
++#   contributors may be used to endorse or promote products derived from
++#   this software without specific prior written permission.
++#
++# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
++# AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
++# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
++# DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
++# FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
++# DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
++# SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
++# CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
++# OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
++# OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ 
+-Copyright © 2018, [Encode OSS Ltd](https://www.encode.io/).
+-All rights reserved.
+-
+-Redistribution and use in source and binary forms, with or without
+-modification, are permitted provided that the following conditions are met:
+-
+-* Redistributions of source code must retain the above copyright notice, this
+-  list of conditions and the following disclaimer.
+-
+-* Redistributions in binary form must reproduce the above copyright notice,
+-  this list of conditions and the following disclaimer in the documentation
+-  and/or other materials provided with the distribution.
+-
+-* Neither the name of the copyright holder nor the names of its
+-  contributors may be used to endorse or promote products derived from
+-  this software without specific prior written permission.
+-
+-THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+-AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+-IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+-DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+-FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+-DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+-SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+-CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+-OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+-OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+-"""
+ 
+ from litestar.connection.base import ASGIConnection
+ from litestar.connection.request import Request
+diff --git a/litestar/connection/base.py b/litestar/connection/base.py
+index 1c589d24d0..100fcd460b 100644
+--- a/litestar/connection/base.py
++++ b/litestar/connection/base.py
+@@ -19,7 +19,6 @@
+     from litestar.handlers import BaseRouteHandler
+     from litestar.types import DataContainerType, EmptyType
+     from litestar.types.asgi_types import Message, Receive, Scope, Send
+-    from litestar.types.protocols import Logger
+ 
+ 
+ __all__ = ("ASGIConnection", "empty_receive", "empty_send")
+@@ -268,18 +267,6 @@ def session(self) -> dict[str, Any]:
+ 
+         return cast("dict[str, Any]", self.scope["session"])
+ 
+-    @property
+-    def logger(self) -> Logger:
+-        """Return the ``Logger`` instance for this connection.
+-
+-        Returns:
+-            A ``Logger`` instance.
+-
+-        Raises:
+-            ImproperlyConfiguredException: if ``log_config`` has not been passed to the Litestar constructor.
+-        """
+-        return self.app.get_logger()
+-
+     def set_session(self, value: dict[str, Any] | DataContainerType | EmptyType) -> None:
+         """Set the session in the connection's ``Scope``.
+ 
+diff --git a/litestar/data_extractors.py b/litestar/data_extractors.py
+index 5f8d56787a..1af5af7e98 100644
+--- a/litestar/data_extractors.py
++++ b/litestar/data_extractors.py
+@@ -19,7 +19,7 @@
+ 
+ 
+ if TYPE_CHECKING:
+-    from collections.abc import Coroutine, Iterable
++    from collections.abc import Coroutine, Iterable, Set
+ 
+     from litestar.connection import ASGIConnection
+     from litestar.types import Method
+@@ -88,8 +88,8 @@ def __init__(
+         extract_path_params: bool = True,
+         extract_query: bool = True,
+         extract_scheme: bool = True,
+-        obfuscate_cookies: set[str] | None = None,
+-        obfuscate_headers: set[str] | None = None,
++        obfuscate_cookies: Set[str] | None = None,
++        obfuscate_headers: Set[str] | None = None,
+         parse_body: bool = False,
+         parse_query: bool = False,
+         skip_parse_malformed_body: bool = False,
+@@ -334,8 +334,8 @@ def __init__(
+         extract_cookies: bool = True,
+         extract_headers: bool = True,
+         extract_status_code: bool = True,
+-        obfuscate_cookies: set[str] | None = None,
+-        obfuscate_headers: set[str] | None = None,
++        obfuscate_cookies: Set[str] | None = None,
++        obfuscate_headers: Set[str] | None = None,
+     ) -> None:
+         """Initialize ``ResponseDataExtractor`` with options.
+ 
+diff --git a/litestar/logging/__init__.py b/litestar/logging/__init__.py
+deleted file mode 100644
+index 8c4ba81f56..0000000000
+--- a/litestar/logging/__init__.py
++++ /dev/null
+@@ -1,3 +0,0 @@
+-from .config import BaseLoggingConfig, LoggingConfig, StructLoggingConfig
+-
+-__all__ = ("BaseLoggingConfig", "LoggingConfig", "StructLoggingConfig")
+diff --git a/litestar/logging/_utils.py b/litestar/logging/_utils.py
+deleted file mode 100644
+index ee67b9f98c..0000000000
+--- a/litestar/logging/_utils.py
++++ /dev/null
+@@ -1,22 +0,0 @@
+-from __future__ import annotations
+-
+-from typing import Any
+-
+-__all__ = ("resolve_handlers",)
+-
+-
+-def resolve_handlers(handlers: list[Any]) -> list[Any]:
+-    """Convert list of string of handlers to the object of respective handler.
+-
+-    Indexing the list performs the evaluation of the object.
+-
+-    Args:
+-        handlers: An instance of 'ConvertingList'
+-
+-    Returns:
+-        A list of resolved handlers.
+-
+-    Notes:
+-        Due to missing typing in 'typeshed' we cannot type this as ConvertingList for now.
+-    """
+-    return [handlers[i] for i in range(len(handlers))]
+diff --git a/litestar/logging/config.py b/litestar/logging/config.py
+deleted file mode 100644
+index 17f9b25b00..0000000000
+--- a/litestar/logging/config.py
++++ /dev/null
+@@ -1,535 +0,0 @@
+-from __future__ import annotations
+-
+-import sys
+-from abc import ABC, abstractmethod
+-from dataclasses import dataclass, field, fields
+-from importlib.util import find_spec
+-from logging import INFO
+-from typing import TYPE_CHECKING, Any, Callable, Literal, Union, cast
+-
+-from litestar.exceptions import ImproperlyConfiguredException, MissingDependencyException
+-from litestar.serialization.msgspec_hooks import _msgspec_json_encoder
+-from litestar.utils.dataclass import simple_asdict
+-from litestar.utils.deprecation import deprecated
+-
+-__all__ = ("BaseLoggingConfig", "LoggingConfig", "StructLoggingConfig")
+-
+-
+-if TYPE_CHECKING:
+-    from collections.abc import Iterable
+-    from typing import NoReturn
+-
+-    # these imports are duplicated on purpose so sphinx autodoc can find and link them
+-    from structlog.types import BindableLogger, Processor, WrappedLogger
+-    from structlog.typing import EventDict
+-
+-    from litestar.types import Logger, Scope
+-    from litestar.types.callable_types import ExceptionLoggingHandler, GetLogger
+-
+-
+-default_handlers: dict[str, dict[str, Any]] = {
+-    "console": {
+-        "class": "logging.StreamHandler",
+-        "level": "DEBUG",
+-        "formatter": "standard",
+-    },
+-    "queue_listener": {
+-        "class": "litestar.logging.standard.QueueListenerHandler",
+-        "level": "DEBUG",
+-        "formatter": "standard",
+-    },
+-}
+-
+-if sys.version_info >= (3, 12, 0):
+-    default_handlers["queue_listener"].update(
+-        {
+-            "class": "logging.handlers.QueueHandler",
+-            "queue": {
+-                "()": "queue.Queue",
+-                "maxsize": -1,
+-            },
+-            "listener": "litestar.logging.standard.LoggingQueueListener",
+-            "handlers": ["console"],
+-        }
+-    )
+-
+-    # do not format twice, the console handler will do the job
+-    del default_handlers["queue_listener"]["formatter"]
+-
+-
+-default_picologging_handlers: dict[str, dict[str, Any]] = {
+-    "console": {
+-        "class": "picologging.StreamHandler",
+-        "level": "DEBUG",
+-        "formatter": "standard",
+-    },
+-    "queue_listener": {
+-        "class": "litestar.logging.picologging.QueueListenerHandler",
+-        "level": "DEBUG",
+-        "formatter": "standard",
+-    },
+-}
+-
+-
+-def _get_default_formatters() -> dict[str, dict[str, Any]]:
+-    return {
+-        "standard": {"format": "%(levelname)s - %(asctime)s - %(name)s - %(module)s - %(message)s"},
+-    }
+-
+-
+-def _get_default_loggers() -> dict[str, dict[str, Any]]:
+-    return {
+-        "litestar": {"level": "INFO", "handlers": ["queue_listener"], "propagate": False},
+-    }
+-
+-
+-def get_logger_placeholder(_: str | None = None) -> NoReturn:
+-    """Raise: An :class:`ImproperlyConfiguredException <.exceptions.ImproperlyConfiguredException>`"""
+-    raise ImproperlyConfiguredException(
+-        "cannot call '.get_logger' without passing 'logging_config' to the Litestar constructor first"
+-    )
+-
+-
+-def _get_default_logging_module() -> str:
+-    if find_spec("picologging"):
+-        return "picologging"
+-    return "logging"
+-
+-
+-def _get_default_handlers(logging_module: str) -> dict[str, dict[str, Any]]:
+-    """Return the default logging handlers for the config.
+-
+-    Returns:
+-        A dictionary of logging handlers
+-    """
+-    if logging_module == "picologging":
+-        return default_picologging_handlers
+-    return default_handlers
+-
+-
+-def _default_exception_logging_handler_factory(is_struct_logger: bool) -> ExceptionLoggingHandler:
+-    """Create an exception logging handler function.
+-
+-    Args:
+-        is_struct_logger: Whether the logger is a structlog instance.
+-
+-    Returns:
+-        An exception logging handler.
+-    """
+-
+-    if is_struct_logger:
+-
+-        def _default_exception_logging_handler(logger: Logger, scope: Scope, tb: list[str]) -> None:
+-            logger.exception(
+-                "Uncaught exception",
+-                connection_type=scope["type"],
+-                path=scope["path"],
+-            )
+-
+-    else:
+-
+-        def _default_exception_logging_handler(logger: Logger, scope: Scope, tb: list[str]) -> None:
+-            logger.exception(
+-                "Uncaught exception (connection_type=%s, path=%r):",
+-                scope["type"],
+-                scope["path"],
+-            )
+-
+-    return _default_exception_logging_handler
+-
+-
+-class BaseLoggingConfig(ABC):
+-    """Abstract class that should be extended by logging configs."""
+-
+-    __slots__ = ("exception_logging_handler", "log_exceptions")
+-
+-    log_exceptions: Literal["always", "debug", "never"]
+-    """Should exceptions be logged, defaults to log exceptions when ``app.debug == True``'"""
+-
+-    exception_logging_handler: ExceptionLoggingHandler | None
+-    """Handler function for logging exceptions."""
+-    disable_stack_trace: set[Union[int, type[Exception]]]  # noqa: UP007
+-    """Set of http status codes and exceptions to disable stack trace logging for."""
+-
+-    @abstractmethod
+-    def configure(self) -> GetLogger:
+-        """Return logger with the given configuration.
+-
+-        Returns:
+-            A 'logging.getLogger' like function.
+-        """
+-        raise NotImplementedError("abstract method")
+-
+-    @staticmethod
+-    def set_level(logger: Any, level: int) -> None:
+-        """Provides a consistent interface to call `setLevel` for all loggers."""
+-        raise NotImplementedError("abstract method")
+-
+-
+-@dataclass
+-class LoggingConfig(BaseLoggingConfig):
+-    """Configuration class for standard logging."""
+-
+-    logging_module: str = field(default_factory=_get_default_logging_module)
+-    """Logging module. ``logging`` and ``picologging`` are supported. ``picologging`` will be used by default if
+-    installed."""
+-    version: Literal[1] = field(default=1)
+-    """The only valid value at present is 1."""
+-    incremental: bool = field(default=False)
+-    """Whether the configuration is to be interpreted as incremental to the existing configuration.
+-
+-    Notes:
+-        - This option is ignored for 'picologging'
+-    """
+-    disable_existing_loggers: bool = field(default=False)
+-    """Whether any existing non-root loggers are to be disabled."""
+-    filters: dict[str, dict[str, Any]] | None = field(default=None)
+-    """A dict in which each key is a filter id and each value is a dict describing how to configure the
+-    corresponding Filter_ instance.
+-
+-    .. _Filter: https://docs.python.org/3/library/logging.html#filter-objects
+-    """
+-    propagate: bool = field(default=True)
+-    """If messages must propagate to handlers higher up the logger hierarchy from this logger.
+-
+-    .. deprecated:: 2.10.0
+-        This parameter is deprecated. It will be removed in a future release. Use ``propagate`` at the logger level.
+-    """
+-    formatters: dict[str, dict[str, Any]] = field(default_factory=_get_default_formatters)
+-    """A dict in which each key is a formatter and each value is a dict describing how to configure the
+-    corresponding Formatter_ instance. A ``standard`` formatter is provided.
+-
+-    .. _Formatter: https://docs.python.org/3/library/logging.html#formatter-objects
+-    """
+-    handlers: dict[str, dict[str, Any]] = field(default_factory=dict)
+-    """A dict in which each key is a handler id and each value is a dict describing how to configure the
+-    corresponding Handler_ instance. Two handlers are provided, ``console`` and ``queue_listener``.
+-
+-    .. _Handler: https://docs.python.org/3/library/logging.html#handler-objects
+-    """
+-    loggers: dict[str, dict[str, Any]] = field(default_factory=_get_default_loggers)
+-    """A dict in which each key is a logger name and each value is a dict describing how to configure the
+-    corresponding Logger_ instance. A ``litestar`` logger is mandatory and will be configured as required.
+-
+-    .. _Logger: https://docs.python.org/3/library/logging.html#logger-objects
+-    """
+-    root: dict[str, dict[str, Any] | list[Any] | str] = field(
+-        default_factory=lambda: {
+-            "handlers": ["queue_listener"],
+-            "level": "INFO",
+-        }
+-    )
+-    """This will be the configuration for the root logger.
+-
+-    Processing of the configuration will be as for any logger, except that the propagate setting will not be applicable.
+-    """
+-    configure_root_logger: bool = field(default=True)
+-    """Should the root logger be configured, defaults to True for ease of configuration."""
+-    log_exceptions: Literal["always", "debug", "never"] = field(default="always")
+-    """Should exceptions be logged, defaults to log exceptions when 'app.debug == True'"""
+-    disable_stack_trace: set[Union[int, type[Exception]]] = field(default_factory=set)  # noqa: UP007
+-    """Set of http status codes and exceptions to disable stack trace logging for."""
+-    exception_logging_handler: ExceptionLoggingHandler | None = field(default=None)
+-    """Handler function for logging exceptions."""
+-
+-    def __post_init__(self) -> None:
+-        if "standard" not in self.formatters:
+-            self.formatters["standard"] = _get_default_formatters()["standard"]
+-
+-        if "console" not in self.handlers:
+-            self.handlers["console"] = _get_default_handlers(self.logging_module)["console"]
+-
+-        if "queue_listener" not in self.handlers:
+-            self.handlers["queue_listener"] = _get_default_handlers(self.logging_module)["queue_listener"]
+-
+-        if "litestar" not in self.loggers:
+-            self.loggers["litestar"] = _get_default_loggers()["litestar"]
+-
+-        if self.log_exceptions != "never" and self.exception_logging_handler is None:
+-            self.exception_logging_handler = _default_exception_logging_handler_factory(is_struct_logger=False)
+-
+-    def configure(self) -> GetLogger:
+-        """Return logger with the given configuration.
+-
+-        Returns:
+-            A 'logging.getLogger' like function.
+-        """
+-
+-        excluded_fields: set[str] = {
+-            "logging_module",
+-            "configure_root_logger",
+-            "exception_logging_handler",
+-            "log_exceptions",
+-            "propagate",
+-            "disable_stack_trace",
+-        }
+-
+-        if not self.configure_root_logger:
+-            excluded_fields.add("root")
+-
+-        if self.logging_module == "picologging":
+-            try:
+-                from picologging import (  # pyright: ignore[reportMissingImports,reportGeneralTypeIssues]
+-                    config,  # pyright: ignore[reportMissingImports,reportGeneralTypeIssues]
+-                    getLogger,  # pyright: ignore[reportMissingImports,reportGeneralTypeIssues]
+-                )
+-            except ImportError as e:
+-                raise MissingDependencyException("picologging") from e
+-
+-            excluded_fields.add("incremental")
+-        else:
+-            from logging import config, getLogger  # type: ignore[no-redef,assignment,unused-ignore]
+-
+-        values = {
+-            _field.name: getattr(self, _field.name)
+-            for _field in fields(self)
+-            if getattr(self, _field.name) is not None and _field.name not in excluded_fields
+-        }
+-
+-        config.dictConfig(values)
+-        return cast("Callable[[str], Logger]", getLogger)
+-
+-    @staticmethod
+-    def set_level(logger: Logger, level: int) -> None:
+-        """Provides a consistent interface to call `setLevel` for all loggers."""
+-        logger.setLevel(level)
+-
+-
+-class StructlogEventFilter:
+-    """Remove keys from the log event.
+-
+-    Add an instance to the processor chain.
+-
+-    .. code-block:: python
+-        :caption: Examples
+-
+-        structlog.configure(
+-            ...,
+-            processors=[
+-                ...,
+-                EventFilter(["color_message"]),
+-                ...,
+-            ],
+-        )
+-
+-    """
+-
+-    def __init__(self, filter_keys: Iterable[str]) -> None:
+-        """Initialize the EventFilter.
+-
+-        Args:
+-            filter_keys: Iterable of string keys to be excluded from the log event.
+-        """
+-        self.filter_keys = filter_keys
+-
+-    def __call__(self, _: WrappedLogger, __: str, event_dict: EventDict) -> EventDict:
+-        """Receive the log event, and filter keys.
+-
+-        Args:
+-            _ ():
+-            __ ():
+-            event_dict (): The data to be logged.
+-
+-        Returns:
+-            The log event with any key in `self.filter_keys` removed.
+-        """
+-        for key in self.filter_keys:
+-            event_dict.pop(key, None)
+-        return event_dict
+-
+-
+-def default_json_serializer(value: EventDict, **_: Any) -> bytes:
+-    return _msgspec_json_encoder.encode(value)
+-
+-
+-def stdlib_json_serializer(value: EventDict, **_: Any) -> str:  # pragma: no cover
+-    return _msgspec_json_encoder.encode(value).decode("utf-8")
+-
+-
+-def default_structlog_processors(
+-    as_json: bool = True, json_serializer: Callable[[Any], Any] = default_json_serializer
+-) -> list[Processor]:  # pyright: ignore
+-    """Set the default processors for structlog.
+-
+-    Returns:
+-        An optional list of processors.
+-    """
+-    try:
+-        import structlog
+-        from structlog.dev import RichTracebackFormatter
+-
+-        if as_json:
+-            return [
+-                structlog.contextvars.merge_contextvars,
+-                structlog.processors.add_log_level,
+-                structlog.processors.format_exc_info,
+-                structlog.processors.TimeStamper(fmt="iso"),
+-                structlog.processors.JSONRenderer(serializer=json_serializer),
+-            ]
+-        return [
+-            structlog.contextvars.merge_contextvars,
+-            structlog.processors.add_log_level,
+-            structlog.processors.TimeStamper(fmt="iso"),
+-            structlog.dev.ConsoleRenderer(
+-                colors=True, exception_formatter=RichTracebackFormatter(max_frames=1, show_locals=False, width=80)
+-            ),
+-        ]
+-
+-    except ImportError:
+-        return []
+-
+-
+-def default_structlog_standard_lib_processors(as_json: bool = True) -> list[Processor]:  # pyright: ignore
+-    """Set the default processors for structlog stdlib.
+-
+-    Returns:
+-        An optional list of processors.
+-    """
+-    try:
+-        import structlog
+-        from structlog.dev import RichTracebackFormatter
+-
+-        if as_json:
+-            return [
+-                structlog.processors.TimeStamper(fmt="iso"),
+-                structlog.stdlib.add_log_level,
+-                structlog.stdlib.ExtraAdder(),
+-                StructlogEventFilter(["color_message"]),
+-                structlog.stdlib.ProcessorFormatter.remove_processors_meta,
+-                structlog.processors.JSONRenderer(serializer=stdlib_json_serializer),
+-            ]
+-        return [
+-            structlog.processors.TimeStamper(fmt="iso"),
+-            structlog.stdlib.add_log_level,
+-            structlog.stdlib.ExtraAdder(),
+-            StructlogEventFilter(["color_message"]),
+-            structlog.stdlib.ProcessorFormatter.remove_processors_meta,
+-            structlog.dev.ConsoleRenderer(
+-                colors=True, exception_formatter=RichTracebackFormatter(max_frames=1, show_locals=False, width=80)
+-            ),
+-        ]
+-    except ImportError:
+-        return []
+-
+-
+-def default_logger_factory(as_json: bool = True) -> Callable[..., WrappedLogger] | None:
+-    """Set the default logger factory for structlog.
+-
+-    Returns:
+-        An optional logger factory.
+-    """
+-    try:
+-        import structlog
+-
+-        if as_json:
+-            return structlog.BytesLoggerFactory()
+-        return structlog.WriteLoggerFactory()
+-    except ImportError:
+-        return None
+-
+-
+-@dataclass
+-class StructLoggingConfig(BaseLoggingConfig):
+-    """Configuration class for structlog.
+-
+-    Notes:
+-        - requires ``structlog`` to be installed.
+-    """
+-
+-    processors: list[Processor] | None = field(default=None)  # pyright: ignore
+-    """Iterable of structlog logging processors."""
+-    standard_lib_logging_config: LoggingConfig | None = field(default=None)  # pyright: ignore
+-    """Optional customized standard logging configuration.
+-
+-    Use this when you need to modify the standard library outside of the Structlog pre-configured implementation.
+-    """
+-    wrapper_class: type[BindableLogger] | None = field(default=None)  # pyright: ignore
+-    """Structlog bindable logger."""
+-    context_class: dict[str, Any] | None = None
+-    """Context class (a 'contextvar' context) for the logger."""
+-    logger_factory: Callable[..., WrappedLogger] | None = field(default=None)  # pyright: ignore
+-    """Logger factory to use."""
+-    cache_logger_on_first_use: bool = field(default=True)
+-    """Whether to cache the logger configuration and reuse."""
+-    log_exceptions: Literal["always", "debug", "never"] = field(default="always")
+-    """Should exceptions be logged, defaults to log exceptions when 'app.debug == True'"""
+-    disable_stack_trace: set[Union[int, type[Exception]]] = field(default_factory=set)  # noqa: UP007
+-    """Set of http status codes and exceptions to disable stack trace logging for."""
+-    exception_logging_handler: ExceptionLoggingHandler | None = field(default=None)
+-    """Handler function for logging exceptions."""
+-    pretty_print_tty: bool = field(default=True)
+-    """Pretty print log output when run from an interactive terminal."""
+-
+-    def __post_init__(self) -> None:
+-        if self.processors is None:
+-            self.processors = default_structlog_processors(as_json=self.as_json())
+-        if self.logger_factory is None:
+-            self.logger_factory = default_logger_factory(as_json=self.as_json())
+-        if self.log_exceptions != "never" and self.exception_logging_handler is None:
+-            self.exception_logging_handler = _default_exception_logging_handler_factory(is_struct_logger=True)
+-        try:
+-            import structlog
+-
+-            if self.standard_lib_logging_config is None:
+-                self.standard_lib_logging_config = LoggingConfig(
+-                    formatters={
+-                        "standard": {
+-                            "()": structlog.stdlib.ProcessorFormatter,
+-                            "processors": default_structlog_standard_lib_processors(as_json=self.as_json()),
+-                        }
+-                    }
+-                )
+-        except ImportError:
+-            self.standard_lib_logging_config = LoggingConfig()
+-
+-    def as_json(self) -> bool:
+-        return not (sys.stderr.isatty() and self.pretty_print_tty)
+-
+-    def configure(self) -> GetLogger:
+-        """Return logger with the given configuration.
+-
+-        Returns:
+-            A 'logging.getLogger' like function.
+-        """
+-        try:
+-            import structlog
+-        except ImportError as e:
+-            raise MissingDependencyException("structlog") from e
+-
+-        structlog.configure(
+-            **{
+-                k: v
+-                for k, v in simple_asdict(self).items()
+-                if k
+-                not in (
+-                    "standard_lib_logging_config",
+-                    "log_exceptions",
+-                    "exception_logging_handler",
+-                    "pretty_print_tty",
+-                    "disable_stack_trace",
+-                )
+-            }
+-        )
+-        return structlog.get_logger
+-
+-    @staticmethod
+-    def set_level(logger: Logger, level: int) -> None:
+-        """Provides a consistent interface to call `setLevel` for all loggers."""
+-
+-        try:
+-            import structlog
+-
+-            structlog.configure(wrapper_class=structlog.make_filtering_bound_logger(level))
+-        except ImportError:
+-            """"""
+-            return
+-
+-
+-@deprecated(version="2.6.0", removal_in="3.0.0", alternative="`StructLoggingConfig.set_level`")
+-def default_wrapper_class(log_level: int = INFO) -> type[BindableLogger] | None:  # pragma: no cover  # pyright: ignore
+-    try:  # pragma: no cover
+-        import structlog
+-
+-        return structlog.make_filtering_bound_logger(log_level)
+-    except ImportError:
+-        return None
+diff --git a/litestar/logging/picol
+
+... [truncated, 175765 chars total]

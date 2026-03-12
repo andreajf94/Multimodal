@@ -1,0 +1,137 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "data_modeling",
+      "recommendation": "Added joinFieldPathsByCollection map to track relationship between orderable field names and their join 'on' field paths",
+      "rationale": "To implement scoped ordering, we need to know which field defines the parent relationship for each orderable field. This map provides a lookup from generated orderable field names (like '_collection_field_order') to the actual relationship field path that determines the scope.",
+      "alternatives_considered": [
+        "Storing scope info in field metadata",
+        "Computing scope dynamically each time from field config"
+      ],
+      "files_affected": [
+        "packages/payload/src/config/orderable/index.ts"
+      ]
+    },
+    {
+      "dimension": "api_design",
+      "recommendation": "Created focused utility functions for scoped ordering logic instead of embedding it in main functions",
+      "rationale": "The scoped ordering logic involves multiple steps: extracting scope values, building WHERE constraints, resolving pending keys, and getting context. Separating these into focused utilities improves maintainability, testability, and follows single responsibility principle.",
+      "alternatives_considered": [
+        "Adding all logic inline in existing functions",
+        "Creating a single monolithic scoped ordering function"
+      ],
+      "files_affected": [
+        "packages/payload/src/config/orderable/utils/buildJoinScopeWhere.ts",
+        "packages/payload/src/config/orderable/utils/getJoinScopeContext.ts",
+        "packages/payload/src/config/orderable/utils/getJoinScopeWhereFromDocData.ts",
+        "packages/payload/src/config/orderable/utils/getValueAtPath.ts",
+        "packages/payload/src/config/orderable/utils/resolvePendingTargetKey.ts"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Used combineWhereConstraints utility instead of manual WHERE clause construction",
+      "rationale": "The scoped ordering needs to combine existing WHERE constraints (like checking if order field exists) with new scope constraints. Using combineWhereConstraints ensures consistent handling of AND/OR logic and prevents bugs from manual WHERE clause manipulation.",
+      "alternatives_considered": [
+        "Manually constructing WHERE objects with spread operators",
+        "Creating custom logic for combining constraints"
+      ],
+      "files_affected": [
+        "packages/payload/src/config/orderable/index.ts"
+      ]
+    },
+    {
+      "dimension": "data_modeling",
+      "recommendation": "Added support for different relationship value types (direct IDs, polymorphic relations, arrays)",
+      "rationale": "Payload supports multiple relationship types: direct IDs, polymorphic relations (with relationTo/value), and arrays. The buildJoinScopeWhere function handles all these cases to ensure scoped ordering works across all relationship field configurations.",
+      "alternatives_considered": [
+        "Only supporting direct ID relationships",
+        "Requiring all relationships to be polymorphic"
+      ],
+      "files_affected": [
+        "packages/payload/src/config/orderable/utils/buildJoinScopeWhere.ts"
+      ]
+    },
+    {
+      "dimension": "performance",
+      "recommendation": "Batched target document fetching to get both order key and scope value in single query",
+      "rationale": "When resolving pending keys or getting scope context, we need both the order key and the relationship value. Fetching them together in a single findByID call reduces database queries and improves performance, especially important for fast drag/drop operations.",
+      "alternatives_considered": [
+        "Separate queries for order key and scope value",
+        "Caching relationship values separately"
+      ],
+      "files_affected": [
+        "packages/payload/src/config/orderable/utils/getJoinScopeContext.ts"
+      ]
+    },
+    {
+      "dimension": "testing",
+      "recommendation": "Added comprehensive integration tests for scoped ordering scenarios including localization",
+      "rationale": "Scoped ordering has complex edge cases: different parent relationships, localized fields, pending operations. The tests verify that ordering operations don't leak across scopes and work correctly with Payload's localization system.",
+      "alternatives_considered": [
+        "Only unit testing utility functions",
+        "Skipping localization testing"
+      ],
+      "files_affected": [
+        "test/sort/int.spec.ts",
+        "test/sort/collections/Orderable/index.ts"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Implement scoped ordering infrastructure",
+      "description": "Add joinFieldPathsByCollection tracking and modify setupOrderable to pass scope information through the system",
+      "files_to_modify": [
+        "packages/payload/src/config/orderable/index.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-002",
+      "title": "Create scoped ordering utility functions",
+      "description": "Build focused utilities for extracting scope values, building WHERE constraints, and resolving pending operations within scopes",
+      "files_to_modify": [],
+      "files_to_create": [
+        "packages/payload/src/config/orderable/utils/buildJoinScopeWhere.ts",
+        "packages/payload/src/config/orderable/utils/getJoinScopeContext.ts",
+        "packages/payload/src/config/orderable/utils/getJoinScopeWhereFromDocData.ts",
+        "packages/payload/src/config/orderable/utils/getValueAtPath.ts",
+        "packages/payload/src/config/orderable/utils/resolvePendingTargetKey.ts"
+      ],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-003",
+      "title": "Integrate scoped ordering into existing hooks and endpoints",
+      "description": "Update beforeChange hook and reorder endpoint to use scope-aware queries and operations",
+      "files_to_modify": [
+        "packages/payload/src/config/orderable/index.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-004",
+      "title": "Add comprehensive scoped ordering tests",
+      "description": "Create integration tests for scoped ordering scenarios including cross-scope protection and localization",
+      "files_to_modify": [
+        "test/sort/int.spec.ts",
+        "test/sort/collections/Orderable/index.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    }
+  ],
+  "implementation_summary": "The implementation adds scoped join-based ordering to prevent cross-context interference when reordering items within parent relationships. The core approach involves tracking which orderable fields correspond to which relationship fields, then using this mapping to scope all ordering operations to documents sharing the same parent relationship value.\n\nKey patterns used include: 1) A centralized joinFieldPathsByCollection map that tracks the relationship between generated orderable field names and their corresponding 'on' field paths, 2) Focused utility functions that handle specific aspects of scoped ordering (building WHERE constraints, extracting scope values, resolving pending operations), and 3) Integration with existing Payload utilities like combineWhereConstraints for consistent query construction.\n\nThe changes integrate with the existing codebase by extending the setupOrderable function to track scope information, modifying the beforeChange hook to generate order keys within the correct scope, and updating the reorder endpoint to perform all operations (finding adjacent documents, backfilling missing keys, moving documents) within the appropriate scope. The implementation also handles Payload's relationship field variations including direct IDs, polymorphic relations, and arrays, ensuring compatibility with existing field configurations.\n\nNotable design choices include batching database queries to fetch both order keys and scope values together, creating reusable utilities instead of inline logic, and maintaining backward compatibility by making scoped ordering opt-in through the existing orderable configuration. The comprehensive test suite validates that ordering operations respect parent relationship boundaries and work correctly with Payload's localization system, where relationship values can differ by locale.",
+  "source_pr": "https://github.com/payloadcms/payload/pull/15842",
+  "before_sha": "fe36dded4bcf1c54289c6687bb2308d02fbeba99",
+  "after_sha": "17a0d196f4570951715fe9782884591f659ceffe",
+  "diff_stats": {
+    "additions": 517,
+    "deletions": 32,
+    "files_changed": 8
+  }
+}

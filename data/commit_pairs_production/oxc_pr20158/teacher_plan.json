@@ -1,0 +1,100 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "error_handling",
+      "recommendation": "Added help messages to diagnostic functions using the OxcDiagnostic builder pattern with `.with_help()` method",
+      "rationale": "The OxcDiagnostic API already supports help messages through its builder pattern. Adding `.with_help()` to existing diagnostic functions is the most straightforward way to provide actionable guidance without changing the rule logic. This maintains consistency with the existing error handling patterns in the codebase.",
+      "alternatives_considered": [
+        "Creating separate help-only diagnostic functions",
+        "Adding help messages directly in rule logic instead of diagnostic functions",
+        "Using a different API for help messages"
+      ],
+      "files_affected": [
+        "crates/oxc_linter/src/rules/import/exports_last.rs",
+        "crates/oxc_linter/src/rules/import/no_absolute_path.rs",
+        "crates/oxc_linter/src/rules/import/no_default_export.rs",
+        "crates/oxc_linter/src/rules/import/no_mutable_exports.rs",
+        "crates/oxc_linter/src/rules/import/no_self_import.rs"
+      ]
+    },
+    {
+      "dimension": "testing",
+      "recommendation": "Updated snapshot tests to include help messages and created a new snapshot file for the no-self-import rule",
+      "rationale": "Snapshot testing is already established in the codebase for verifying diagnostic output. Updating existing snapshots ensures the help messages are validated in CI. Creating a new snapshot file for no-self-import follows the established pattern where each rule has its own snapshot file. The change from `.test()` to `.test_and_snapshot()` in no_self_import.rs enables snapshot generation for that rule.",
+      "alternatives_considered": [
+        "Creating integration tests instead of snapshot updates",
+        "Adding help message assertions in unit tests",
+        "Not testing help messages at all"
+      ],
+      "files_affected": [
+        "crates/oxc_linter/src/snapshots/import_exports_last.snap",
+        "crates/oxc_linter/src/snapshots/import_no_absolute_path.snap",
+        "crates/oxc_linter/src/snapshots/import_no_default_export.snap",
+        "crates/oxc_linter/src/snapshots/import_no_mutable_exports.snap",
+        "crates/oxc_linter/src/rules/import/no_self_import.rs"
+      ]
+    },
+    {
+      "dimension": "api_design",
+      "recommendation": "Used dynamic help messages for no-mutable-exports rule that adapt to the variable declaration kind",
+      "rationale": "The no-mutable-exports rule needs to distinguish between 'var' and 'let' declarations to provide specific guidance. By passing the VariableDeclarationKind to the diagnostic function and using format strings, we can generate context-specific help messages. This approach is more helpful than a generic message and follows the pattern of dynamic diagnostics already used for the warning message.",
+      "alternatives_considered": [
+        "Using a generic help message for both 'var' and 'let'",
+        "Creating separate diagnostic functions for each declaration type",
+        "Embedding the logic in the rule instead of the diagnostic function"
+      ],
+      "files_affected": [
+        "crates/oxc_linter/src/rules/import/no_mutable_exports.rs"
+      ]
+    },
+    {
+      "dimension": "developer_experience",
+      "recommendation": "Ensured help messages are actionable, specific, and follow consistent formatting",
+      "rationale": "Each help message provides concrete, actionable advice that developers can immediately apply. The messages use imperative verbs ('Move', 'Replace', 'Remove') and specify exactly what to do. This improves the developer experience by reducing the cognitive load of interpreting lint warnings and speeds up fixing violations.",
+      "alternatives_considered": [
+        "Generic help messages like 'Fix this issue'",
+        "Links to documentation instead of direct instructions",
+        "Technical explanations of why the rule exists"
+      ],
+      "files_affected": [
+        "crates/oxc_linter/src/rules/import/exports_last.rs",
+        "crates/oxc_linter/src/rules/import/no_absolute_path.rs",
+        "crates/oxc_linter/src/rules/import/no_default_export.rs",
+        "crates/oxc_linter/src/rules/import/no_mutable_exports.rs",
+        "crates/oxc_linter/src/rules/import/no_self_import.rs"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Add help messages to import lint rules",
+      "description": "Add actionable help messages to five import-related lint rules to provide developers with specific guidance on fixing violations",
+      "files_to_modify": [
+        "crates/oxc_linter/src/rules/import/exports_last.rs",
+        "crates/oxc_linter/src/rules/import/no_absolute_path.rs",
+        "crates/oxc_linter/src/rules/import/no_default_export.rs",
+        "crates/oxc_linter/src/rules/import/no_mutable_exports.rs",
+        "crates/oxc_linter/src/rules/import/no_self_import.rs",
+        "crates/oxc_linter/src/snapshots/import_exports_last.snap",
+        "crates/oxc_linter/src/snapshots/import_no_absolute_path.snap",
+        "crates/oxc_linter/src/snapshots/import_no_default_export.snap",
+        "crates/oxc_linter/src/snapshots/import_no_mutable_exports.snap",
+        "apps/oxlint/src/snapshots/fixtures__cli__import_-c .oxlintrc.json test.js -c .oxlintrc-import-x.json test.js@oxlint.snap"
+      ],
+      "files_to_create": [
+        "crates/oxc_linter/src/snapshots/import_no_self_import.snap"
+      ],
+      "estimated_effort": "medium"
+    }
+  ],
+  "implementation_summary": "The implementation adds actionable help messages to five import-related lint rules in the OXC linter. The approach leverages the existing OxcDiagnostic builder pattern by adding `.with_help()` calls to each rule's diagnostic function. This maintains consistency with the codebase's error handling patterns while providing immediate value to developers.\n\nFor the no-mutable-exports rule, a dynamic approach was used where the help message adapts to whether the violation involves 'var' or 'let' declarations. This provides more specific guidance than a generic message. The implementation also includes comprehensive snapshot test updates to validate that help messages appear correctly in the output. A new snapshot file was created for the no-self-import rule, which previously didn't have one, and the test method was changed from `.test()` to `.test_and_snapshot()` to enable snapshot generation.\n\nThe changes integrate seamlessly with the existing architecture. The rule logic remains unchanged\u2014only the diagnostic functions were enhanced. This minimal approach reduces risk while delivering the requested functionality. The help messages follow a consistent pattern of using imperative verbs and providing concrete, actionable advice, which aligns with good developer experience practices for linting tools.",
+  "source_pr": "https://github.com/oxc-project/oxc/pull/20158",
+  "before_sha": "542a04a47b51edf65791524377b99d4dc5fe649e",
+  "after_sha": "ad27fd64a97e3fcbf3c373a55ede69e34b17ec97",
+  "diff_stats": {
+    "additions": 62,
+    "deletions": 5,
+    "files_changed": 11
+  }
+}

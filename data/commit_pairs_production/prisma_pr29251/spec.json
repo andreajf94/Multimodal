@@ -1,0 +1,14 @@
+{
+  "feature_name": "Flexible Join Key Type Casting",
+  "description": "Implement support for joins that don't require strict equality between parent and child key types. Add a configuration flag to control strict-equality assumptions and enable automatic type casting for child rows when needed. This will fix edge cases with MySQL BigInt relations and improve compatibility across different database types.",
+  "functional_requirements": [
+    "Add a 'canAssumeStrictEquality' flag to join configuration that determines whether strict type equality is required for key matching",
+    "Implement automatic type inference for parent row keys and inject appropriate type casts for child rows when strict equality is not assumed",
+    "Ensure the solution handles MySQL BigInt edge cases where parent and child key types may differ",
+    "Update the in-memory join processing logic to use the new flag and casting mechanism",
+    "Add validation to maintain backward compatibility with existing join behavior when the flag is not set or defaults to true",
+    "Include comprehensive testing for view relations with large BigInt keys, particularly for MySQL-specific scenarios"
+  ],
+  "project_name": "prisma",
+  "source_pr": "https://github.com/prisma/prisma/pull/29251"
+}
