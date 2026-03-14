@@ -44,35 +44,33 @@ QWEN3_VL_MAX_PIXELS = 16777216  # longest_edge in preprocessor_config
 def compute_image_tokens(image_data: bytes) -> int:
     """Compute the expected number of vision tokens for a Qwen3-VL image.
 
-    Qwen3-VL processes images by:
-      1. Resizing to fit within min/max pixel constraints
-      2. Rounding dimensions to multiples of (patch_size * merge_size)
-      3. Dividing into patches and spatially merging
+    Matches Qwen3-VL smart_resize: round dimensions to factor first,
+    then scale into pixel budget if needed (same order as server-side).
 
     tokens = (H / patch_size) * (W / patch_size) / (merge_size^2)
     """
     img = Image.open(io.BytesIO(image_data))
     w, h = img.size
 
-    # Smart resize to fit within pixel budget
-    total_pixels = w * h
-    factor = (patch_size := QWEN3_VL_PATCH_SIZE) * (merge_size := QWEN3_VL_MERGE_SIZE)  # 32
+    patch_size = QWEN3_VL_PATCH_SIZE
+    merge_size = QWEN3_VL_MERGE_SIZE
+    factor = patch_size * merge_size  # 32
 
-    if total_pixels < QWEN3_VL_MIN_PIXELS:
-        scale = math.sqrt(QWEN3_VL_MIN_PIXELS / total_pixels)
-        w = int(w * scale)
-        h = int(h * scale)
-    elif total_pixels > QWEN3_VL_MAX_PIXELS:
-        scale = math.sqrt(QWEN3_VL_MAX_PIXELS / total_pixels)
-        w = int(w * scale)
-        h = int(h * scale)
+    # Step 1: round to nearest multiple of factor
+    h_bar = max(factor, round(h / factor) * factor)
+    w_bar = max(factor, round(w / factor) * factor)
 
-    # Round to nearest multiple of factor (patch_size * merge_size = 32)
-    w = max(factor, round(w / factor) * factor)
-    h = max(factor, round(h / factor) * factor)
+    # Step 2: scale into pixel budget if outside bounds
+    if h_bar * w_bar > QWEN3_VL_MAX_PIXELS:
+        beta = math.sqrt((h * w) / QWEN3_VL_MAX_PIXELS)
+        h_bar = math.floor(h / beta / factor) * factor
+        w_bar = math.floor(w / beta / factor) * factor
+    elif h_bar * w_bar < QWEN3_VL_MIN_PIXELS:
+        beta = math.sqrt(QWEN3_VL_MIN_PIXELS / (h * w))
+        h_bar = math.ceil(h * beta / factor) * factor
+        w_bar = math.ceil(w * beta / factor) * factor
 
-    # Compute token count
-    tokens = (h // patch_size) * (w // patch_size) // (merge_size * merge_size)
+    tokens = (h_bar // patch_size) * (w_bar // patch_size) // (merge_size * merge_size)
     return tokens
 
 

@@ -29,6 +29,7 @@ from tinker import types
 from tinker.types.tensor_data import TensorData
 
 import torch
+import wandb
 
 from repodesign.training.reward import compute_rewards
 from repodesign.training.data_gen import summarize_repo_ir_for_prompt
@@ -42,7 +43,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 class Config:
-    model_name: str = "Qwen/Qwen3-VL-235B-A22B-Instruct"
+    model_name: str = "Qwen/Qwen3-VL-30B-A3B-Instruct"
     lora_rank: int = 64
     learning_rate: float = 1e-5
     batch_size: int = 4          # prompts per batch
@@ -53,6 +54,7 @@ class Config:
     log_path: str = "output/grpo_training"
     use_llm_judge: bool = True   # use DeepSeek as judge (slower but better signal)
     use_diagrams: bool = True    # feed diagram images to VLM
+    max_samples: int | None = None  # limit training examples (None = use all)
 
 
 # ---------------------------------------------------------------------------
@@ -159,15 +161,31 @@ def load_training_examples(repo_irs_dir: str, use_diagrams: bool = True) -> list
 # ---------------------------------------------------------------------------
 
 class MetricsLogger:
-    def __init__(self, log_path: str):
+    def __init__(self, log_path: str, config: "Config"):
         self.log_path = Path(log_path)
         self.log_path.mkdir(parents=True, exist_ok=True)
         self.metrics_file = open(self.log_path / "metrics.jsonl", "a")
+
+        wandb.init(
+            project="repodesign-grpo",
+            config={
+                "model_name": config.model_name,
+                "lora_rank": config.lora_rank,
+                "learning_rate": config.learning_rate,
+                "batch_size": config.batch_size,
+                "group_size": config.group_size,
+                "max_tokens": config.max_tokens,
+                "num_epochs": config.num_epochs,
+                "use_llm_judge": config.use_llm_judge,
+                "use_diagrams": config.use_diagrams,
+            },
+        )
 
     def log(self, metrics: dict, step: int):
         metrics["step"] = step
         self.metrics_file.write(json.dumps(metrics) + "\n")
         self.metrics_file.flush()
+        wandb.log(metrics, step=step)
 
         # Print summary
         reward_total = metrics.get("reward/total", 0)
@@ -178,6 +196,7 @@ class MetricsLogger:
 
     def close(self):
         self.metrics_file.close()
+        wandb.finish()
 
 
 # ---------------------------------------------------------------------------
@@ -192,6 +211,8 @@ def train(config: Config, repo_irs_dir: str):
     if not examples:
         print("ERROR: No complete training examples found. Run generate_training_data.py first.")
         sys.exit(1)
+    if config.max_samples is not None:
+        examples = examples[:config.max_samples]
     print(f"Loaded {len(examples)} training examples")
 
     # Setup Tinker
@@ -220,7 +241,7 @@ def train(config: Config, repo_irs_dir: str):
     )
 
     # Metrics
-    ml_logger = MetricsLogger(config.log_path)
+    ml_logger = MetricsLogger(config.log_path, config)
 
     # Calculate batches
     n_batches = len(examples) // config.batch_size
@@ -362,34 +383,46 @@ def train(config: Config, repo_irs_dir: str):
             # Log metrics
             metrics["time/total"] = time.time() - t_start
             metrics["reward/total"] = sum(all_rewards) / len(all_rewards) if all_rewards else 0
+            metrics["train/reward"] = metrics["reward/total"]  # Duplicate for standard wandb tracking
             metrics["reward/rgs_mean"] = sum(all_rgs) / len(all_rgs) if all_rgs else 0
             metrics["reward/format_mean"] = sum(all_fmt) / len(all_fmt) if all_fmt else 0
             metrics["training/n_datums"] = len(datums_D)
+            
+            # If Tinker returned a loss metric, bubble it up to train/loss
+            if "loss" in metrics:
+                metrics["train/loss"] = metrics["loss"]
+                
             ml_logger.log(metrics, step=global_step)
 
             # Save checkpoint
             if config.save_every > 0 and global_step % config.save_every == 0 and global_step > 0:
-                from tinker_cookbook import checkpoint_utils
-                checkpoint_utils.save_checkpoint(
-                    training_client=training_client,
-                    name=f"{global_step:06d}",
-                    log_path=config.log_path,
-                    kind="state",
-                    loop_state={"batch": global_step},
-                )
-                logger.info(f"  Saved checkpoint at step {global_step}")
+                try:
+                    from tinker_cookbook import checkpoint_utils
+                    checkpoint_utils.save_checkpoint(
+                        training_client=training_client,
+                        name=f"{global_step:06d}",
+                        log_path=config.log_path,
+                        kind="state",
+                        loop_state={"batch": global_step},
+                    )
+                    logger.info(f"  Saved checkpoint at step {global_step}")
+                except Exception as e:
+                    logger.warning(f"  Checkpoint save failed at step {global_step}: {e}")
 
             global_step += 1
 
     # Save final checkpoint
-    from tinker_cookbook import checkpoint_utils
-    checkpoint_utils.save_checkpoint(
-        training_client=training_client,
-        name="final",
-        log_path=config.log_path,
-        kind="both",
-        loop_state={"batch": global_step},
-    )
+    try:
+        from tinker_cookbook import checkpoint_utils
+        checkpoint_utils.save_checkpoint(
+            training_client=training_client,
+            name="final",
+            log_path=config.log_path,
+            kind="both",
+            loop_state={"batch": global_step},
+        )
+    except Exception as e:
+        logger.warning(f"Final checkpoint save failed: {e}")
     ml_logger.close()
     print(f"\nTraining complete! Final checkpoint saved to {config.log_path}")
 
@@ -401,7 +434,7 @@ def train(config: Config, repo_irs_dir: str):
 def main():
     parser = argparse.ArgumentParser(description="GRPO training for RepoDesign via Tinker")
     parser.add_argument("repo_irs_dir", help="Directory with per-repo training data")
-    parser.add_argument("--model", default="Qwen/Qwen3-VL-235B-A22B-Instruct", help="Base model")
+    parser.add_argument("--model", default="Qwen/Qwen3-VL-30B-A3B-Instruct", help="Base model")
     parser.add_argument("--lora-rank", type=int, default=64, help="LoRA rank")
     parser.add_argument("--lr", type=float, default=1e-5, help="Learning rate")
     parser.add_argument("--batch-size", type=int, default=4, help="Prompts per batch")
@@ -412,6 +445,7 @@ def main():
     parser.add_argument("--log-path", default="output/grpo_training", help="Log/checkpoint directory")
     parser.add_argument("--no-llm-judge", action="store_true", help="Disable LLM-as-judge (faster)")
     parser.add_argument("--no-diagrams", action="store_true", help="Disable diagram images")
+    parser.add_argument("--max-samples", type=int, default=None, help="Limit number of training examples")
     parser.add_argument("--verbose", "-v", action="store_true")
     args = parser.parse_args()
 
@@ -432,6 +466,7 @@ def main():
     config.log_path = args.log_path
     config.use_llm_judge = not args.no_llm_judge
     config.use_diagrams = not args.no_diagrams
+    config.max_samples = args.max_samples
 
     train(config, args.repo_irs_dir)
 

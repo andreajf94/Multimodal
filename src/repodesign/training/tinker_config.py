@@ -36,7 +36,7 @@ class SFTConfig:
        implementation plan with real file paths.
     """
 
-    model_name: str = "Qwen/Qwen3-VL-235B-A22B-Instruct"
+    model_name: str = "Qwen/Qwen3-VL-30B-A3B-Instruct"
     lora: LoRAConfig = field(default_factory=LoRAConfig)
 
     # Training hyperparameters
@@ -78,7 +78,7 @@ class GRPOConfig:
     function, and optimizes using group-based advantages (no critic model needed).
     """
 
-    model_name: str = "Qwen/Qwen3-VL-235B-A22B-Instruct"
+    model_name: str = "Qwen/Qwen3-VL-30B-A3B-Instruct"
     sft_checkpoint: str = "output/sft_checkpoints/final"
     lora: LoRAConfig = field(default_factory=LoRAConfig)
 

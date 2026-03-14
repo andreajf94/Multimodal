@@ -26,7 +26,7 @@ Multimodal/
 │   ├── spec_normalizer/        # PRD → canonical Spec JSON
 │   ├── diagrams/               # Diagram mining from repos
 │   ├── evaluation/             # Repo Grounding Score (RGS)
-│   └── training/               # Tinker/LoRA config for Qwen3-VL-235B
+│   └── training/               # Tinker/LoRA config for Qwen3-VL-30B
 ├── scripts/                    # CLI entry points
 ├── tests/                      # Test suite
 └── data/                       # Data directory (gitignored)
@@ -76,7 +76,7 @@ python -m pytest tests/ -v
 
 ## Training Pipeline
 
-**Model:** Qwen3-VL-235B-A22B-Instruct via full LoRA (Tinker)
+**Model:** Qwen3-VL-30B-A3B-Instruct via full LoRA (Tinker)
 - **Stage 1 (SFT):** Repo→IR extraction + Spec+IR→Plan generation
 - **Stage 2 (GRPO):** Scale-contrastive preference pairs
 
