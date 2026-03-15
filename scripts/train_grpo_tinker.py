@@ -43,7 +43,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 class Config:
-    model_name: str = "Qwen/Qwen3-VL-30B-A3B-Instruct"
+    model_name: str = "Qwen/Qwen3-VL-235B-A22B-Instruct"
     lora_rank: int = 64
     learning_rate: float = 1e-5
     batch_size: int = 4          # prompts per batch
@@ -189,10 +189,11 @@ class MetricsLogger:
 
         # Print summary
         reward_total = metrics.get("reward/total", 0)
-        rgs_mean = metrics.get("reward/rgs_mean", 0)
-        fmt_mean = metrics.get("reward/format_mean", 0)
+        rgs = metrics.get("reward/rgs_score", 0)
+        fmt_exact = metrics.get("reward/format_compliance", 0)
+        judge = metrics.get("reward/llm_judge", 0)
         t = metrics.get("time/total", 0)
-        print(f"  Step {step}: reward={reward_total:.3f} rgs={rgs_mean:.3f} fmt={fmt_mean:.3f} time={t:.1f}s")
+        print(f"  Step {step}: reward={reward_total:.3f} rgs={rgs:.3f} fmt={fmt_exact:.3f} judge={judge:.3f} time={t:.1f}s")
 
     def close(self):
         self.metrics_file.close()
@@ -289,7 +290,9 @@ def train(config: Config, repo_irs_dir: str):
             datums_D: list[types.Datum] = []
             all_rewards: list[float] = []
             all_rgs: list[float] = []
-            all_fmt: list[float] = []
+            all_fmt_exact: list[float] = []
+            all_fmt_partial: list[float] = []
+            all_judge: list[float] = []
 
             for ex in batch:
                 # Build prompt
@@ -335,7 +338,9 @@ def train(config: Config, repo_irs_dir: str):
                 # Track metrics
                 all_rewards.append(mean_reward)
                 all_rgs.extend(r["rgs_score"] for r in reward_results)
-                all_fmt.extend(r["format_compliance"] for r in reward_results)
+                all_fmt_exact.extend(r["format_compliance"] for r in reward_results)
+                all_fmt_partial.extend(r["format_partial"] for r in reward_results)
+                all_judge.extend(r["llm_judge"] for r in reward_results)
 
                 # Skip if all advantages are zero (no signal)
                 if all(a == 0.0 for a in advantages_G):
@@ -384,8 +389,13 @@ def train(config: Config, repo_irs_dir: str):
             metrics["time/total"] = time.time() - t_start
             metrics["reward/total"] = sum(all_rewards) / len(all_rewards) if all_rewards else 0
             metrics["train/reward"] = metrics["reward/total"]  # Duplicate for standard wandb tracking
-            metrics["reward/rgs_mean"] = sum(all_rgs) / len(all_rgs) if all_rgs else 0
-            metrics["reward/format_mean"] = sum(all_fmt) / len(all_fmt) if all_fmt else 0
+            
+            # Individual reward components (all logged separately for W&B tracking)
+            metrics["reward/rgs_score"] = sum(all_rgs) / len(all_rgs) if all_rgs else 0
+            metrics["reward/format_compliance"] = sum(all_fmt_exact) / len(all_fmt_exact) if all_fmt_exact else 0
+            metrics["reward/format_partial"] = sum(all_fmt_partial) / len(all_fmt_partial) if all_fmt_partial else 0
+            metrics["reward/llm_judge"] = sum(all_judge) / len(all_judge) if all_judge else 0
+            
             metrics["training/n_datums"] = len(datums_D)
             
             # If Tinker returned a loss metric, bubble it up to train/loss
@@ -434,7 +444,7 @@ def train(config: Config, repo_irs_dir: str):
 def main():
     parser = argparse.ArgumentParser(description="GRPO training for RepoDesign via Tinker")
     parser.add_argument("repo_irs_dir", help="Directory with per-repo training data")
-    parser.add_argument("--model", default="Qwen/Qwen3-VL-30B-A3B-Instruct", help="Base model")
+    parser.add_argument("--model", default="Qwen/Qwen3-VL-235B-A22B-Instruct", help="Base model")
     parser.add_argument("--lora-rank", type=int, default=64, help="LoRA rank")
     parser.add_argument("--lr", type=float, default=1e-5, help="Learning rate")
     parser.add_argument("--batch-size", type=int, default=4, help="Prompts per batch")

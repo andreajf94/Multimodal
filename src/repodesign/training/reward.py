@@ -133,14 +133,17 @@ def rgs_score(completions: list[str], file_manifests: list[list[str]]) -> list[f
         plan = _parse_plan_json(text)
         if plan is not None:
             must_exist, _ = _extract_file_paths(plan)
+            # Valid JSON but no files_to_modify = perfect score (valid for creation-only)
+            if not must_exist:
+                scores.append(3.0)
+                continue
         else:
-            # Fallback: extract path-like strings from raw text
+            # JSON parsing failed - try regex fallback
             must_exist = _extract_paths_regex(text)
-
-        if not must_exist:
-            # No files_to_modify = nothing to ground-check = perfect score
-            scores.append(3.0)
-            continue
+            # If regex also found nothing, this is garbage output = 0 score
+            if not must_exist:
+                scores.append(0.0)
+                continue
 
         valid = sum(
             1 for p in must_exist
