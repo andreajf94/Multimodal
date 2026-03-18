@@ -31,9 +31,9 @@ from tinker.types.tensor_data import TensorData
 import torch
 import wandb
 
-from repodesign.training.reward import compute_rewards
-from repodesign.training.data_gen import summarize_repo_ir_for_prompt
+from repodesign.training.reward import compute_rewards, _normalize_path, parse_diff_files
 from repodesign.training.vl_renderer import Qwen3VLRenderer, load_diagram_images
+from repodesign.training.data_gen import summarize_repo_ir_for_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -47,12 +47,12 @@ class Config:
     lora_rank: int = 64
     learning_rate: float = 1e-5
     batch_size: int = 4          # prompts per batch
-    group_size: int = 4          # completions per prompt (G in GRPO)
-    max_tokens: int = 4096       # max generation length
+    group_size: int = 2          # completions per prompt (G in GRPO)
+    max_tokens: int = 8192       # max generation length
     num_epochs: int = 1
     save_every: int = 5          # save checkpoint every N batches
     log_path: str = "output/grpo_training"
-    use_llm_judge: bool = True   # use DeepSeek as judge (slower but better signal)
+    use_llm_judge: bool = True   # DEPRECATED: kept for backward compat, LLM judge replaced by TF-IDF
     use_diagrams: bool = True    # feed diagram images to VLM
     max_samples: int | None = None  # limit training examples (None = use all)
 
@@ -67,25 +67,43 @@ Return a JSON object with these fields:
 {
   "architecture_decisions": [{"dimension": "...", "recommendation": "...", "rationale": "...", "alternatives_considered": [...], "files_affected": [...]}],
   "tickets": [{"id": "T-001", "title": "...", "description": "...", "files_to_modify": [...], "files_to_create": [...], "estimated_effort": "small|medium|large", "dependencies": [...]}],
-  "implementation_summary": "2-3 paragraph explanation of the overall approach"
+  "implementation_summary": "2-3 paragraph explanation of the overall approach, key patterns used, and how the changes integrate with the existing codebase"
 }
 
 IMPORTANT:
-- files_to_modify must reference REAL file paths from the codebase
-- files_to_create should follow the project's existing conventions
+- files_to_modify and files_to_create must reference REAL file paths from the codebase
+- files_affected in architecture_decisions should also use real paths from the diff
 - Generate 3-8 architecture decisions and 4-10 actionable tickets
-- implementation_summary should explain WHY each decision was made, not just WHAT"""
+- implementation_summary should explain the overall approach, key patterns used, and how changes integrate with existing code"""
 
 
 def build_prompt(
     repo_ir_summary: str,
     spec: dict,
+    file_manifest: list[str],
+    diff_files: dict,
     renderer: Qwen3VLRenderer,
     diagram_images: list[bytes] | None = None,
 ) -> types.ModelInput:
     """Build a Tinker ModelInput prompt from RepoIR + Spec + optional diagrams."""
+    # Full manifest for context (500 files)
+    manifest_str = "\n".join(file_manifest[:500])
+    
+    # Build candidate list: actual modified/created files + 50 distractors
+    import random
+    actual_files = set(diff_files.get("modified", [])) | set(diff_files.get("created", []))
+    available_distractors = [f for f in file_manifest if f not in actual_files]
+    num_distractors = min(50, len(available_distractors))
+    distractors = random.sample(available_distractors, num_distractors) if available_distractors else []
+    
+    candidate_files = sorted(list(actual_files) + distractors)
+    candidate_str = "\n".join(candidate_files)
+    
     user_text = f"""## Codebase Analysis
 {repo_ir_summary}
+
+## File Manifest (for context - all files in repo)
+{manifest_str}
 
 ## Feature Specification
 Project: {spec.get('project_name', 'Unknown')}
@@ -95,8 +113,15 @@ Description: {spec.get('description', '')}
 Requirements:
 {chr(10).join(f'- {r}' for r in spec.get('functional_requirements', []))}
 
-{f"Scale: {spec['scale_tier']}" + chr(10) if spec.get('scale_tier') else ''}
-Generate a detailed implementation plan as JSON."""
+{f"Scale: {spec['scale_tier']}" + chr(10) if spec.get('scale_tier') else ''}## CRITICAL INSTRUCTION - File Selection Constraint
+You MUST ONLY select files from the "Candidate Files" list below for files_to_modify and files_to_create.
+Do NOT invent new file paths. Do NOT reference files from the full manifest above.
+ONLY use files from this candidate list:
+
+## Candidate Files (ONLY modify/create files from this list)
+{candidate_str}
+
+Generate an implementation plan following the JSON schema. Remember: ALL file references must come from the Candidate Files list above."""
 
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
@@ -123,8 +148,9 @@ def load_training_examples(repo_irs_dir: str, use_diagrams: bool = True) -> list
         repo_ir_path = repo_dir / "repo_ir.json"
         spec_path = repo_dir / "spec.json"
         plan_path = repo_dir / "teacher_plan.json"
+        diff_path = repo_dir / "ground_truth_diff.txt"
 
-        if not all(p.exists() for p in [repo_ir_path, spec_path, plan_path]):
+        if not all(p.exists() for p in [repo_ir_path, spec_path, plan_path, diff_path]):
             continue
 
         try:
@@ -134,6 +160,9 @@ def load_training_examples(repo_irs_dir: str, use_diagrams: bool = True) -> list
                 spec = json.load(f)
             with open(plan_path, encoding="utf-8") as f:
                 teacher_plan = json.load(f)
+            with open(diff_path, encoding="utf-8") as f:
+                diff_text = f.read()
+            diff_files = parse_diff_files(diff_text)
         except Exception as e:
             logger.warning(f"Failed to load {repo_dir.name}: {e}")
             continue
@@ -150,6 +179,7 @@ def load_training_examples(repo_irs_dir: str, use_diagrams: bool = True) -> list
             "spec": spec,
             "teacher_plan": teacher_plan,
             "file_manifest": repo_ir.get("file_manifest", []),
+            "diff_files": diff_files,
             "diagram_images": diagram_images,
         })
 
@@ -189,11 +219,12 @@ class MetricsLogger:
 
         # Print summary
         reward_total = metrics.get("reward/total", 0)
-        rgs = metrics.get("reward/rgs_score", 0)
+        existing_acc = metrics.get("reward/existing_file_accuracy", 0)
+        created_acc = metrics.get("reward/created_file_accuracy", 0)
         fmt_exact = metrics.get("reward/format_compliance", 0)
-        judge = metrics.get("reward/llm_judge", 0)
+        tfidf = metrics.get("reward/tfidf_similarity", 0)
         t = metrics.get("time/total", 0)
-        print(f"  Step {step}: reward={reward_total:.3f} rgs={rgs:.3f} fmt={fmt_exact:.3f} judge={judge:.3f} time={t:.1f}s")
+        print(f"  Step {step}: reward={reward_total:.3f} exist={existing_acc:.3f} created={created_acc:.3f} fmt={fmt_exact:.3f} tfidf={tfidf:.3f} time={t:.1f}s")
 
     def close(self):
         self.metrics_file.close()
@@ -208,13 +239,25 @@ def train(config: Config, repo_irs_dir: str):
     """Run GRPO training loop."""
     # Load data
     logger.info(f"Loading training examples from {repo_irs_dir}...")
-    examples = load_training_examples(repo_irs_dir, use_diagrams=config.use_diagrams)
-    if not examples:
+    all_examples = load_training_examples(repo_irs_dir, use_diagrams=config.use_diagrams)
+    if not all_examples:
         print("ERROR: No complete training examples found. Run generate_training_data.py first.")
         sys.exit(1)
+    
+    # Stratify BEFORE truncation to use full pool
+    examples_with_created = [ex for ex in all_examples if len(ex["diff_files"].get("created", [])) > 0]
+    examples_without_created = [ex for ex in all_examples if len(ex["diff_files"].get("created", [])) == 0]
+    
+    logger.info(f"Full dataset: {len(all_examples)} examples ({len(examples_with_created)} with created, {len(examples_without_created)} without)")
+    
+    # Apply max_samples by taking equal amounts from each group
     if config.max_samples is not None:
-        examples = examples[:config.max_samples]
-    print(f"Loaded {len(examples)} training examples")
+        half_samples = config.max_samples // 2
+        examples_with_created = examples_with_created[:half_samples]
+        examples_without_created = examples_without_created[:half_samples]
+    
+    examples = examples_with_created + examples_without_created
+    print(f"Loaded {len(examples)} training examples ({len(examples_with_created)} with created, {len(examples_without_created)} without)")
 
     # Setup Tinker
     logger.info(f"Connecting to Tinker with model {config.model_name}...")
@@ -250,6 +293,11 @@ def train(config: Config, repo_irs_dir: str):
         n_batches = 1
         config.batch_size = len(examples)
 
+    # Shuffle the balanced examples
+    import random
+    random.seed(42)
+    random.shuffle(examples)
+
     print(f"\nTraining config:")
     print(f"  Model: {config.model_name}")
     print(f"  LoRA rank: {config.lora_rank}")
@@ -277,7 +325,7 @@ def train(config: Config, repo_irs_dir: str):
                 "optim/lr": config.learning_rate,
             }
 
-            # Get batch
+            # Get batch (examples already stratified and balanced)
             start = batch_idx * config.batch_size
             end = min(start + config.batch_size, len(examples))
             batch = examples[start:end]
@@ -289,16 +337,19 @@ def train(config: Config, repo_irs_dir: str):
 
             datums_D: list[types.Datum] = []
             all_rewards: list[float] = []
-            all_rgs: list[float] = []
+            all_existing_acc: list[float] = []
+            all_created_acc: list[float] = []
             all_fmt_exact: list[float] = []
             all_fmt_partial: list[float] = []
-            all_judge: list[float] = []
+            all_tfidf: list[float] = []
 
             for ex in batch:
                 # Build prompt
                 prompt = build_prompt(
                     repo_ir_summary=ex["repo_ir_summary"],
                     spec=ex["spec"],
+                    file_manifest=ex["file_manifest"],
+                    diff_files=ex["diff_files"],
                     renderer=renderer,
                     diagram_images=ex["diagram_images"] if config.use_diagrams else None,
                 )
@@ -328,19 +379,37 @@ def train(config: Config, repo_irs_dir: str):
                     file_manifests=[ex["file_manifest"]] * len(completions),
                     specs=[ex["spec"]] * len(completions),
                     teacher_plans=[ex["teacher_plan"]] * len(completions),
+                    diff_files=[ex["diff_files"]] * len(completions),
                     use_llm_judge=config.use_llm_judge,
                 )
 
                 rewards_G = [r["total"] for r in reward_results]
                 mean_reward = sum(rewards_G) / len(rewards_G)
                 advantages_G = [r - mean_reward for r in rewards_G]
+                
+                # Log completions for inspection (save best completion from group)
+                best_idx = max(range(len(rewards_G)), key=lambda i: rewards_G[i])
+                completion_log = {
+                    "step": global_step,
+                    "batch_idx": batch_idx,
+                    "repo": ex.get("repo_name", "unknown"),
+                    "spec_title": ex["spec"].get("title", ""),
+                    "completion": completions[best_idx],  # Full completion
+                    "rewards": reward_results[best_idx],
+                    "diff_files": ex["diff_files"],
+                }
+                completion_log_path = Path(config.log_path) / "completions.jsonl"
+                completion_log_path.parent.mkdir(parents=True, exist_ok=True)
+                with open(completion_log_path, "a", encoding="utf-8") as f:
+                    f.write(json.dumps(completion_log) + "\n")
 
                 # Track metrics
                 all_rewards.append(mean_reward)
-                all_rgs.extend(r["rgs_score"] for r in reward_results)
+                all_existing_acc.extend(r["existing_file_accuracy"] for r in reward_results)
+                all_created_acc.extend(r["created_file_accuracy"] for r in reward_results)
                 all_fmt_exact.extend(r["format_compliance"] for r in reward_results)
                 all_fmt_partial.extend(r["format_partial"] for r in reward_results)
-                all_judge.extend(r["llm_judge"] for r in reward_results)
+                all_tfidf.extend(r["tfidf_similarity"] for r in reward_results)
 
                 # Skip if all advantages are zero (no signal)
                 if all(a == 0.0 for a in advantages_G):
@@ -391,10 +460,11 @@ def train(config: Config, repo_irs_dir: str):
             metrics["train/reward"] = metrics["reward/total"]  # Duplicate for standard wandb tracking
             
             # Individual reward components (all logged separately for W&B tracking)
-            metrics["reward/rgs_score"] = sum(all_rgs) / len(all_rgs) if all_rgs else 0
+            metrics["reward/existing_file_accuracy"] = sum(all_existing_acc) / len(all_existing_acc) if all_existing_acc else 0
+            metrics["reward/created_file_accuracy"] = sum(all_created_acc) / len(all_created_acc) if all_created_acc else 0
             metrics["reward/format_compliance"] = sum(all_fmt_exact) / len(all_fmt_exact) if all_fmt_exact else 0
             metrics["reward/format_partial"] = sum(all_fmt_partial) / len(all_fmt_partial) if all_fmt_partial else 0
-            metrics["reward/llm_judge"] = sum(all_judge) / len(all_judge) if all_judge else 0
+            metrics["reward/tfidf_similarity"] = sum(all_tfidf) / len(all_tfidf) if all_tfidf else 0
             
             metrics["training/n_datums"] = len(datums_D)
             

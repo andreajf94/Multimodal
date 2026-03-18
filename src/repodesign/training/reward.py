@@ -1,13 +1,13 @@
 """Reward functions for GRPO training of the RepoDesign model.
 
-Adapted from deepmind_tunix/general_reasoning reward patterns,
-specialized for implementation plan evaluation.
+Adapted from IDEA-E Tunix GRPO reward patterns.
 
 Components:
-  1. format_compliance  (max 0.5)  — valid JSON with required fields
-  2. format_partial     (max 0.25) — partial credit for near-valid structure
-  3. rgs_score          (max 3.0)  — Repo Grounding Score against file manifest
-  4. llm_judge          (max 3.0)  — DeepSeek Chat evaluates plan quality vs teacher
+  1. format_compliance         (max 0.5)  — valid JSON with required fields
+  2. format_partial            (max 0.25) — partial credit for near-valid structure
+  3. existing_file_accuracy    (max 1.5)  — Jaccard similarity of files_to_modify vs ground_truth_diff modified files
+  4. created_file_accuracy     (max 1.5)  — Jaccard similarity of files_to_create vs ground_truth_diff created files
+  5. tfidf_similarity          (max 3.0)  — TF-IDF cosine similarity of implementation_summary to teacher
 """
 
 from __future__ import annotations
@@ -16,8 +16,14 @@ import json
 import logging
 import os
 import re
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
+import numpy as np
 
 logger = logging.getLogger(__name__)
+
+# Global TF-IDF vectorizer (initialized lazily)
+_tfidf_vectorizer = None
 
 # Required top-level keys in a valid plan
 # Core keys are always required; one of the optional sets must be present
@@ -113,118 +119,152 @@ def format_partial(completions: list[str]) -> list[float]:
 
 
 # ---------------------------------------------------------------------------
-# 3. RGS score (Repo Grounding Score against file manifest)
+# 3. Existing File Accuracy (files_to_modify vs ground truth modified files)
 # ---------------------------------------------------------------------------
 
-def rgs_score(completions: list[str], file_manifests: list[list[str]]) -> list[float]:
-    """Score based on fraction of files_to_modify paths that exist in manifest.
+def existing_file_accuracy(completions: list[str], diff_files: list[dict]) -> list[float]:
+    """Score based on Jaccard similarity of files_to_modify vs ground_truth_diff modified files.
 
-    Max score: 3.0 (scaled from 0-1 RGS ratio).
-    Only checks files_to_modify against manifest — files_to_create are expected
-    to be new and should NOT be penalised for not existing.
-    Falls back to regex path extraction if JSON parsing fails.
+    Max score: 1.5.
+    Compares model's files_to_modify against actual modified files from the PR diff.
+    Returns Jaccard similarity: |intersection| / |union| * 1.5
     """
     scores = []
-    for text, manifest in zip(completions, file_manifests):
-        manifest_set = set(manifest)
-        manifest_norm = {_normalize_path(p) for p in manifest}
+    for text, diff_info in zip(completions, diff_files):
+        # Extract ground truth modified files from diff
+        gt_modified = {_normalize_path(f) for f in diff_info.get("modified", [])}
 
-        # Try structured extraction first
+        # Extract generated files_to_modify from tickets
         plan = _parse_plan_json(text)
         if plan is not None:
-            must_exist, _ = _extract_file_paths(plan)
-            # Valid JSON but no files_to_modify = perfect score (valid for creation-only)
-            if not must_exist:
-                scores.append(3.0)
-                continue
+            gen_modified = set()
+            for ticket in plan.get("tickets", []):
+                gen_modified.update(ticket.get("files_to_modify", []))
+            gen_modified = {_normalize_path(f) for f in gen_modified if f}
         else:
             # JSON parsing failed - try regex fallback
-            must_exist = _extract_paths_regex(text)
-            # If regex also found nothing, this is garbage output = 0 score
-            if not must_exist:
-                scores.append(0.0)
-                continue
+            gen_modified = {_normalize_path(p) for p in _extract_paths_regex(text)}
 
-        valid = sum(
-            1 for p in must_exist
-            if _normalize_path(p) in manifest_set or _normalize_path(p) in manifest_norm
-        )
-        ratio = valid / len(must_exist)
-        scores.append(ratio * 3.0)
+        # If both are empty, full credit (correctly identified no modifications)
+        if not gt_modified and not gen_modified:
+            scores.append(1.5)
+            continue
+        
+        # If ground truth has files but generated doesn't, score 0
+        if gt_modified and not gen_modified:
+            scores.append(0.0)
+            continue
+
+        # If generated has files but ground truth doesn't, score 0 (hallucinated)
+        if not gt_modified and gen_modified:
+            scores.append(0.0)
+            continue
+
+        # Jaccard similarity: intersection / union
+        intersection = len(gt_modified & gen_modified)
+        union = len(gt_modified | gen_modified)
+        jaccard = intersection / union if union > 0 else 0.0
+        scores.append(jaccard * 1.5)
     return scores
 
 
 # ---------------------------------------------------------------------------
-# 4. LLM-as-judge (DeepSeek Chat)
+# 4. Created File Accuracy (files_to_create vs ground truth created files)
 # ---------------------------------------------------------------------------
 
-JUDGE_SYSTEM_PROMPT = """You are a code review judge. Evaluate an implementation plan for a software feature.
+def created_file_accuracy(completions: list[str], diff_files: list[dict]) -> list[float]:
+    """Score based on Jaccard similarity of files_to_create vs ground_truth_diff created files.
 
-Score the plan from 0 to 10 on these criteria:
-1. **Coherence** (0-3): Are decisions logically connected? Do tickets follow from decisions?
-2. **Specificity** (0-3): Are file paths specific? Are descriptions actionable?
-3. **Completeness** (0-2): Does the plan cover the feature requirements?
-4. **Appropriateness** (0-2): Are technology choices suitable for the project's scale?
-
-Also compare to the reference plan if provided.
-
-Return ONLY a JSON object: {"score": <0-10>, "reasoning": "<brief explanation>"}"""
-
-
-def llm_judge(
-    completions: list[str],
-    specs: list[dict],
-    teacher_plans: list[dict],
-) -> list[float]:
-    """Use DeepSeek Chat as judge. Returns scores in [0, 3.0]."""
-    api_key = os.environ.get("DEEPSEEK_API_KEY")
-    if not api_key:
-        logger.warning("DEEPSEEK_API_KEY not set, returning 0 for LLM judge scores")
-        return [0.0] * len(completions)
-
-    import openai
-    client = openai.OpenAI(api_key=api_key, base_url="https://api.deepseek.com")
-
+    Max score: 1.5.
+    Compares model's files_to_create against actual created files from the PR diff.
+    Returns Jaccard similarity: |intersection| / |union| * 1.5
+    """
     scores = []
-    for text, spec, teacher in zip(completions, specs, teacher_plans):
-        try:
-            user_prompt = f"""## Feature Specification
-{json.dumps(spec, indent=2)}
+    for text, diff_info in zip(completions, diff_files):
+        # Extract ground truth created files from diff
+        gt_created = {_normalize_path(f) for f in diff_info.get("created", [])}
 
-## Generated Plan (to evaluate)
-{text[:4000]}
+        # Extract generated files_to_create from tickets
+        plan = _parse_plan_json(text)
+        if plan is not None:
+            gen_created = set()
+            for ticket in plan.get("tickets", []):
+                gen_created.update(ticket.get("files_to_create", []))
+            gen_created = {_normalize_path(f) for f in gen_created if f}
+        else:
+            gen_created = set()
 
-## Reference Plan (from expert)
-{json.dumps(teacher, indent=2)[:4000]}
-
-Score the generated plan."""
-
-            response = client.chat.completions.create(
-                model="deepseek-chat",
-                max_tokens=512,
-                messages=[
-                    {"role": "system", "content": JUDGE_SYSTEM_PROMPT},
-                    {"role": "user", "content": user_prompt},
-                ],
-            )
-            result_text = response.choices[0].message.content or ""
-
-            # Parse score
-            try:
-                result = json.loads(result_text)
-                raw_score = float(result.get("score", 0))
-            except (json.JSONDecodeError, ValueError):
-                # Try regex fallback
-                match = re.search(r'"score"\s*:\s*(\d+(?:\.\d+)?)', result_text)
-                raw_score = float(match.group(1)) if match else 0.0
-
-            # Scale from 0-10 to 0-3
-            scores.append(min(raw_score / 10.0 * 3.0, 3.0))
-
-        except Exception as e:
-            logger.warning(f"LLM judge failed: {e}")
+        # If both are empty, full credit (correctly identified no new files)
+        if not gt_created and not gen_created:
+            scores.append(1.5)
+            continue
+        
+        # If ground truth has files but generated doesn't, score 0
+        if gt_created and not gen_created:
             scores.append(0.0)
+            continue
 
+        # If generated has files but ground truth doesn't, score 0 (hallucinated new files)
+        if not gt_created and gen_created:
+            scores.append(0.0)
+            continue
+
+        # Jaccard similarity: intersection / union
+        intersection = len(gt_created & gen_created)
+        union = len(gt_created | gen_created)
+        jaccard = intersection / union if union > 0 else 0.0
+        scores.append(jaccard * 1.5)
+    return scores
+
+
+# ---------------------------------------------------------------------------
+# 5. TF-IDF Similarity (implementation_summary text similarity to teacher)
+# ---------------------------------------------------------------------------
+
+def tfidf_similarity(completions: list[str], teacher_plans: list[dict]) -> list[float]:
+    """Compute TF-IDF cosine similarity between generated and teacher implementation summaries.
+
+    Max score: 3.0.
+    Extracts implementation_summary from both generated and teacher plans.
+    Returns cosine similarity * 3.0
+    """
+    global _tfidf_vectorizer
+    
+    # Initialize vectorizer if needed
+    if _tfidf_vectorizer is None:
+        _tfidf_vectorizer = TfidfVectorizer(max_features=500, stop_words='english')
+    
+    scores = []
+    for text, teacher in zip(completions, teacher_plans):
+        # Extract teacher summary
+        teacher_summary = teacher.get("implementation_summary", "")
+        if not teacher_summary or not isinstance(teacher_summary, str):
+            scores.append(0.0)
+            continue
+        
+        # Extract generated summary
+        plan = _parse_plan_json(text)
+        if plan is not None:
+            gen_summary = plan.get("implementation_summary", "")
+        else:
+            # JSON parsing failed - try to extract any text that looks like summary
+            match = re.search(r'"implementation_summary"\s*:\s*"(.+?)"', text, re.DOTALL)
+            gen_summary = match.group(1) if match else ""
+        
+        if not gen_summary:
+            scores.append(0.0)
+            continue
+        
+        # Compute TF-IDF cosine similarity
+        try:
+            # Fit on both documents then transform
+            tfidf_matrix = _tfidf_vectorizer.fit_transform([teacher_summary, gen_summary])
+            similarity = cosine_similarity(tfidf_matrix[0:1], tfidf_matrix[1:2])[0][0]
+            scores.append(float(similarity) * 3.0)
+        except Exception as e:
+            logger.warning(f"TF-IDF similarity failed: {e}")
+            scores.append(0.0)
+    
     return scores
 
 
@@ -237,29 +277,37 @@ def compute_rewards(
     file_manifests: list[list[str]],
     specs: list[dict],
     teacher_plans: list[dict],
-    use_llm_judge: bool = True,
+    diff_files: list[dict],
+    use_llm_judge: bool = True,  # Kept for backward compat but ignored
 ) -> list[dict]:
     """Compute all reward components for a batch of completions.
 
-    Returns list of dicts with per-component scores and total.
+    Args:
+        completions: Model-generated plan texts
+        file_manifests: Repo file lists (currently unused, kept for compat)
+        specs: Feature specifications (currently unused, kept for compat)
+        teacher_plans: Teacher reference plans
+        diff_files: Ground truth diff files (modified/created) per example
+        use_llm_judge: Deprecated, ignored
+
+    Returns:
+        List of dicts with per-component scores and total.
     """
     fmt_exact = format_compliance(completions)
     fmt_partial = format_partial(completions)
-    rgs = rgs_score(completions, file_manifests)
-
-    if use_llm_judge:
-        judge = llm_judge(completions, specs, teacher_plans)
-    else:
-        judge = [0.0] * len(completions)
+    existing_acc = existing_file_accuracy(completions, diff_files)
+    created_acc = created_file_accuracy(completions, diff_files)
+    tfidf_sim = tfidf_similarity(completions, teacher_plans)
 
     results = []
     for i in range(len(completions)):
-        total = fmt_exact[i] + fmt_partial[i] + rgs[i] + judge[i]
+        total = fmt_exact[i] + fmt_partial[i] + existing_acc[i] + created_acc[i] + tfidf_sim[i]
         results.append({
             "format_compliance": fmt_exact[i],
             "format_partial": fmt_partial[i],
-            "rgs_score": rgs[i],
-            "llm_judge": judge[i],
+            "existing_file_accuracy": existing_acc[i],
+            "created_file_accuracy": created_acc[i],
+            "tfidf_similarity": tfidf_sim[i],
             "total": total,
         })
     return results
@@ -338,3 +386,31 @@ def _normalize_path(path: str) -> str:
     if p.startswith("/"):
         p = p[1:]
     return p
+
+
+def parse_diff_files(diff_text: str) -> dict[str, list[str]]:
+    """Parse ground_truth_diff.txt to extract modified and created files.
+    
+    Returns:
+        Dict with "modified" and "created" lists of file paths.
+    """
+    modified = []
+    created = []
+    
+    # Parse git diff headers: "diff --git a/path b/path"
+    for line in diff_text.split('\n'):
+        if line.startswith('diff --git'):
+            # Extract path: "diff --git a/path b/path"
+            match = re.search(r'a/(.*?) b/', line)
+            if match:
+                filepath = match.group(1)
+                
+                # Check if it's a new file by looking ahead
+                idx = diff_text.find(line)
+                lines_after = diff_text[idx:idx+200].split('\n')[:5]
+                if 'new file mode' in '\n'.join(lines_after):
+                    created.append(filepath)
+                else:
+                    modified.append(filepath)
+    
+    return {"modified": modified, "created": created}
