@@ -1,0 +1,43 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "Implementation Strategy",
+      "recommendation": "Modify 9 existing files and create 0 new files",
+      "rationale": "Extend PrivateAttr default_factory so the factory callable can optionally accept a dict of already-validated model data (public fields and earlier private attrs), matching the existing capability on regular Field defaults. This allows private attributes to be computed from validated public field values during model construction.",
+      "alternatives_considered": [],
+      "files_affected": [
+        "docs/concepts/fields.md",
+        "docs/concepts/models.md",
+        "pydantic/_internal/_fields.py",
+        "pydantic/_internal/_model_construction.py",
+        "pydantic/_internal/_utils.py",
+        "pydantic/fields.py",
+        "tests/test_fields.py",
+        "tests/test_internal.py",
+        "tests/test_private_attributes.py"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Allow default factories of private attributes to take validated model data",
+      "description": "Extend PrivateAttr default_factory so the factory callable can optionally accept a dict of already-validated model data (public fields and earlier private attrs), matching the existing capability on regular Field defaults. This allows private attributes to be computed from validated public field values during model construction.",
+      "files_to_modify": [
+        "docs/concepts/fields.md",
+        "docs/concepts/models.md",
+        "pydantic/_internal/_fields.py",
+        "pydantic/_internal/_model_construction.py",
+        "pydantic/_internal/_utils.py",
+        "pydantic/fields.py",
+        "tests/test_fields.py",
+        "tests/test_internal.py",
+        "tests/test_private_attributes.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium",
+      "dependencies": []
+    }
+  ],
+  "implementation_summary": "This change implements 'Allow default factories of private attributes to take validated model data' for the pydantic project. Extend PrivateAttr default_factory so the factory callable can optionally accept a dict of already-validated model data (public fields and earlier private attrs), matching the existing capability on regular Field defaults. This allows private attributes to be computed from validated public field values during model construction. The implementation modifies 9 existing files (docs/concepts/fields.md, docs/concepts/models.md, pydantic/_internal/_fields.py, pydantic/_internal/_model_construction.py, pydantic/_internal/_utils.py) and creates 0 new files. Allow PrivateAttr default_factory callables to optionally accept validated model data as a parameter Ensure the factory receives both public fields and previously-set private attributes Maintain backward compatibility for existing default_factory callables that take no arguments"
+}

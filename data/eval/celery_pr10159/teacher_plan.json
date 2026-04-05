@@ -1,0 +1,39 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "Implementation Strategy",
+      "recommendation": "Modify 6 files",
+      "rationale": "Fix a bug where acks_late with worker_deduplicate_successful_tasks caused chains/callbacks to be permanently lost when a worker crashed after storing SUCCESS but before the broker ack.",
+      "alternatives_considered": [],
+      "files_affected": [
+        ".github/workflows/python-package.yml",
+        "celery/app/trace.py",
+        "t/integration/conftest.py",
+        "t/integration/tasks.py",
+        "t/integration/test_canvas.py",
+        "t/unit/tasks/test_trace.py"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Fix chain/callback dispatch on dedup fast-path for redelivered tasks",
+      "description": "Fix a bug where acks_late with worker_deduplicate_successful_tasks caused chains/callbacks to be permanently lost when a worker crashed after storing SUCCESS but before the broker ack.",
+      "files_to_modify": [
+        ".github/workflows/python-package.yml",
+        "celery/app/trace.py",
+        "t/integration/conftest.py",
+        "t/integration/tasks.py",
+        "t/integration/test_canvas.py",
+        "t/unit/tasks/test_trace.py"
+      ],
+      "files_to_create": [
+        "t/integration/test_dedup_chain_dispatch.py"
+      ],
+      "estimated_effort": "medium",
+      "dependencies": []
+    }
+  ],
+  "implementation_summary": "This change implements 'Fix chain/callback dispatch on dedup fast-path for redelivered tasks' for celery. Fix a bug where acks_late with worker_deduplicate_successful_tasks caused chains/callbacks to be permanently lost when a worker crashed after storing SUCCESS but before the broker ack. Modified files: .github/workflows/python-package.yml, celery/app/trace.py, t/integration/conftest.py, t/integration/tasks.py, t/integration/test_canvas.py."
+}

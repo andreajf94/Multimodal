@@ -1,0 +1,45 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "Implementation Strategy",
+      "recommendation": "Modify 10 existing files and create 0 new files",
+      "rationale": "Introduce a mechanism so that all request and app-context teardown callbacks run even if earlier ones raise exceptions. On Python 3.11+, collected errors should be raised as a BaseExceptionGroup; on older versions the first error should be re-raised. This prevents resource leaks when teardown handlers fail.",
+      "alternatives_considered": [],
+      "files_affected": [
+        "CHANGES.rst",
+        "docs/appcontext.rst",
+        "src/flask/app.py",
+        "src/flask/ctx.py",
+        "src/flask/helpers.py",
+        "tests/test_appctx.py",
+        "tests/test_basic.py",
+        "tests/test_blueprints.py",
+        "tests/test_helpers.py",
+        "tests/test_testing.py"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Ensure all teardown callbacks are called despite errors",
+      "description": "Introduce a mechanism so that all request and app-context teardown callbacks run even if earlier ones raise exceptions. On Python 3.11+, collected errors should be raised as a BaseExceptionGroup; on older versions the first error should be re-raised. This prevents resource leaks when teardown handlers fail.",
+      "files_to_modify": [
+        "CHANGES.rst",
+        "docs/appcontext.rst",
+        "src/flask/app.py",
+        "src/flask/ctx.py",
+        "src/flask/helpers.py",
+        "tests/test_appctx.py",
+        "tests/test_basic.py",
+        "tests/test_blueprints.py",
+        "tests/test_helpers.py",
+        "tests/test_testing.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium",
+      "dependencies": []
+    }
+  ],
+  "implementation_summary": "This change implements 'Ensure all teardown callbacks are called despite errors' for the flask project. Introduce a mechanism so that all request and app-context teardown callbacks run even if earlier ones raise exceptions. On Python 3.11+, collected errors should be raised as a BaseExceptionGroup; on older versions the first error should be re-raised. This prevents resource leaks when teardown handlers fail. The implementation modifies 10 existing files (CHANGES.rst, docs/appcontext.rst, src/flask/app.py, src/flask/ctx.py, src/flask/helpers.py) and creates 0 new files. Create a context manager that collects errors from multiple callbacks without stopping execution Ensure all teardown callbacks run even if earlier ones raise exceptions On Python 3.11+, raise collected errors as a BaseExceptionGroup"
+}
