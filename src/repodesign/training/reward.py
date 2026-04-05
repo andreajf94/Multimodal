@@ -22,8 +22,9 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
-# Global TF-IDF vectorizer (initialized lazily)
+# Global TF-IDF vectorizer — call init_tfidf_corpus() before training to pre-fit
 _tfidf_vectorizer = None
+_tfidf_fitted = False
 
 # Required top-level keys in a valid plan
 # Core keys are always required; one of the optional sets must be present
@@ -221,16 +222,42 @@ def created_file_accuracy(completions: list[str], diff_files: list[dict]) -> lis
 # 5. TF-IDF Similarity (implementation_summary text similarity to teacher)
 # ---------------------------------------------------------------------------
 
+def init_tfidf_corpus(teacher_plans: list[dict]) -> None:
+    """Pre-fit the TF-IDF vectorizer on all teacher implementation summaries.
+
+    Must be called once before training so that IDF weights reflect the full
+    corpus rather than being computed per-pair (which is degenerate with N=2).
+    """
+    global _tfidf_vectorizer, _tfidf_fitted
+
+    summaries = [
+        tp.get("implementation_summary", "")
+        for tp in teacher_plans
+        if isinstance(tp.get("implementation_summary"), str) and tp.get("implementation_summary")
+    ]
+    if not summaries:
+        logger.warning("init_tfidf_corpus: no teacher summaries found, TF-IDF will fall back to per-pair fit")
+        return
+
+    _tfidf_vectorizer = TfidfVectorizer(max_features=500, stop_words='english')
+    _tfidf_vectorizer.fit(summaries)
+    _tfidf_fitted = True
+    logger.info(f"TF-IDF vectorizer fitted on {len(summaries)} teacher summaries ")
+
+
 def tfidf_similarity(completions: list[str], teacher_plans: list[dict]) -> list[float]:
     """Compute TF-IDF cosine similarity between generated and teacher implementation summaries.
 
     Max score: 3.0.
     Extracts implementation_summary from both generated and teacher plans.
     Returns cosine similarity * 3.0
+
+    If init_tfidf_corpus() was called, uses the pre-fitted vectorizer (proper IDF).
+    Otherwise falls back to per-pair fit_transform (degenerate but functional).
     """
-    global _tfidf_vectorizer
+    global _tfidf_vectorizer, _tfidf_fitted
     
-    # Initialize vectorizer if needed
+    # Lazy init if corpus was never provided
     if _tfidf_vectorizer is None:
         _tfidf_vectorizer = TfidfVectorizer(max_features=500, stop_words='english')
     
@@ -257,9 +284,13 @@ def tfidf_similarity(completions: list[str], teacher_plans: list[dict]) -> list[
         
         # Compute TF-IDF cosine similarity
         try:
-            # Fit on both documents then transform
-            tfidf_matrix = _tfidf_vectorizer.fit_transform([teacher_summary, gen_summary])
-            similarity = cosine_similarity(tfidf_matrix[0:1], tfidf_matrix[1:2])[0][0]
+            if _tfidf_fitted:
+                # Use pre-fitted corpus IDF weights
+                vecs = _tfidf_vectorizer.transform([teacher_summary, gen_summary])
+            else:
+                # Fallback: per-pair fit (degenerate IDF, but still gives TF signal)
+                vecs = _tfidf_vectorizer.fit_transform([teacher_summary, gen_summary])
+            similarity = cosine_similarity(vecs[0:1], vecs[1:2])[0][0]
             scores.append(float(similarity) * 3.0)
         except Exception as e:
             logger.warning(f"TF-IDF similarity failed: {e}")
