@@ -3,7 +3,7 @@
     {
       "dimension": "data_modeling",
       "recommendation": "Added circular reference detection algorithm to identify relationship cycles between collections during schema generation",
-      "rationale": "Circular relationships (e.g., media \u2192 teams \u2192 organizations \u2192 media) cause TypeScript compilation errors when generating Drizzle schemas because they create self-referential type definitions that TypeScript cannot resolve. The algorithm builds a directed graph of foreign key relationships and performs depth-first search to detect cycles.",
+      "rationale": "Circular relationships (e.g., media → teams → organizations → media) cause TypeScript compilation errors when generating Drizzle schemas because they create self-referential type definitions that TypeScript cannot resolve. The algorithm builds a directed graph of foreign key relationships and performs depth-first search to detect cycles.",
       "alternatives_considered": [
         "Using TypeScript's `any` type which would lose type safety",
         "Manually configuring circular references in collection definitions",
@@ -45,7 +45,7 @@
     {
       "dimension": "testing",
       "recommendation": "Created comprehensive test fixtures with a three-collection circular relationship chain to validate the fix",
-      "rationale": "The test configuration (media \u2192 teams \u2192 organizations \u2192 media) represents a realistic circular reference scenario that would previously fail. By generating and including the actual schema output, we ensure the fix works end-to-end and prevents regression.",
+      "rationale": "The test configuration (media → teams → organizations → media) represents a realistic circular reference scenario that would previously fail. By generating and including the actual schema output, we ensure the fix works end-to-end and prevents regression.",
       "alternatives_considered": [
         "Only unit testing the detection algorithm",
         "Mocking the schema generation output",
@@ -107,7 +107,7 @@
       "estimated_effort": "small"
     }
   ],
-  "implementation_summary": "The implementation addresses circular reference handling in Drizzle schema generation through a three-part approach. First, a graph-based detection algorithm analyzes foreign key relationships between collections to identify circular dependencies. This is implemented in createSchemaGenerator.ts, which builds a directed graph and performs depth-first search to find cycles, storing them as edge pairs (e.g., 'media:teams').\n\nSecond, the detection results are passed to both PostgreSQL and SQLite column converters via a new optional circularEdges parameter. When a column reference is part of a circular relationship, the converters use database-specific type-safe column references (AnyPgColumn for PostgreSQL, AnySQLiteColumn for SQLite) instead of direct table references. This maintains type safety while avoiding TypeScript compilation errors caused by circular type dependencies.\n\nThird, comprehensive test fixtures validate the solution with a realistic three-collection circular chain (media \u2192 teams \u2192 organizations \u2192 media). The test includes both the configuration and the generated schema output, ensuring the fix works end-to-end. The approach maintains backward compatibility by making the circularEdges parameter optional and integrates seamlessly with the existing schema generation pipeline, requiring minimal changes to the overall architecture while solving a critical TypeScript compilation issue.",
+  "implementation_summary": "The implementation addresses circular reference handling in Drizzle schema generation through a three-part approach. First, a graph-based detection algorithm analyzes foreign key relationships between collections to identify circular dependencies. This is implemented in createSchemaGenerator.ts, which builds a directed graph and performs depth-first search to find cycles, storing them as edge pairs (e.g., 'media:teams').\n\nSecond, the detection results are passed to both PostgreSQL and SQLite column converters via a new optional circularEdges parameter. When a column reference is part of a circular relationship, the converters use database-specific type-safe column references (AnyPgColumn for PostgreSQL, AnySQLiteColumn for SQLite) instead of direct table references. This maintains type safety while avoiding TypeScript compilation errors caused by circular type dependencies.\n\nThird, comprehensive test fixtures validate the solution with a realistic three-collection circular chain (media → teams → organizations → media). The test includes both the configuration and the generated schema output, ensuring the fix works end-to-end. The approach maintains backward compatibility by making the circularEdges parameter optional and integrates seamlessly with the existing schema generation pipeline, requiring minimal changes to the overall architecture while solving a critical TypeScript compilation issue. New files introduced by this change: `test/database/circular-relation/config.ts`, `test/database/circular-relation/payload-generated-schema.ts`.",
   "source_pr": "https://github.com/payloadcms/payload/pull/15895",
   "before_sha": "dc049fe00fb5bd9adc116e9d70dbf5b23e55f381",
   "after_sha": "66a2efa0df59988b7afd007d54b324701264ecbb",
