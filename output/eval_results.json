@@ -1,0 +1,313 @@
+[
+  {
+    "repo_name": "flask_pr5917",
+    "spec": {
+      "feature_name": "Fix provide_automatic_options override",
+      "description": "Fix a bug where setting provide_automatic_options=True on a view function or class had no effect when the config-level PROVIDE_AUTOMATIC_OPTIONS was False. Refactor the logic in add_url_rule so the explicit attribute/argument can both enable and disable automatic OPTIONS handling, overriding the global config.",
+      "functional_requirements": [
+        "Allow view-level provide_automatic_options to override the global config setting in both directions (enable and disable)",
+        "Refactor add_url_rule to correctly handle the precedence of view-level vs config-level OPTIONS handling",
+        "Maintain backward compatibility for views that do not set provide_automatic_options",
+        "Add test coverage verifying the override works in both directions"
+      ],
+      "project_name": "flask",
+      "source_pr": "https://github.com/pallets/flask/pull/5917",
+      "scale_tier": "growth"
+    },
+    "ground_truth": {
+      "modified": [
+        "CHANGES.rst",
+        "docs/config.rst",
+        "src/flask/sansio/app.py",
+        "tests/test_basic.py",
+        "tests/test_blueprints.py",
+        "tests/test_cli.py",
+        "tests/test_views.py"
+      ],
+      "created": []
+    },
+    "best_completion": "{\n  \"architecture_decisions\": [],\n  \"tickets\": [],\n  \"implementation_summary\": \"The implementation plan addresses the bug where view-level provide_automatic_options overrides were ignored when the global config setting was False. The core change involves refactoring the add_url_rule logic in src/flask/app.py to respect the explicit view-level attribute over the global config setting, enabling both enabling and disabling of automatic OPTIONS handling at the view level. We will also update the config documentation to clarify this behavior, and add comprehensive unit tests to verify the override works in both directions while maintaining backward compatibility for views that do not set the flag. This approach preserves Flask\u2019s principle of explicit configuration over implicit defaults while ensuring API compatibility for existing applications.\"\n}\n<|endoftext|>",
+    "best_rewards": {
+      "format_compliance": 0.0,
+      "format_partial": 0.09600000000000002,
+      "existing_file_accuracy": 0.0,
+      "created_file_accuracy": 0.0,
+      "semantic_similarity": 2.551869213581085,
+      "structural_quality": 0.0,
+      "total": 2.6478692135810853
+    },
+    "all_rewards": [
+      {
+        "format_compliance": 0.0,
+        "format_partial": 0.09500000000000001,
+        "existing_file_accuracy": 0.0,
+        "created_file_accuracy": 0.0,
+        "semantic_similarity": 0.0,
+        "structural_quality": 0.0,
+        "total": 0.09500000000000001
+      },
+      {
+        "format_compliance": 0.0,
+        "format_partial": 0.09500000000000001,
+        "existing_file_accuracy": 0.0,
+        "created_file_accuracy": 0.0,
+        "semantic_similarity": 0.0,
+        "structural_quality": 0.0,
+        "total": 0.09500000000000001
+      },
+      {
+        "format_compliance": 0.0,
+        "format_partial": 0.09500000000000001,
+        "existing_file_accuracy": 0.0,
+        "created_file_accuracy": 0.0,
+        "semantic_similarity": 0.0,
+        "structural_quality": 0.0,
+        "total": 0.09500000000000001
+      },
+      {
+        "format_compliance": 0.0,
+        "format_partial": 0.09600000000000002,
+        "existing_file_accuracy": 0.0,
+        "created_file_accuracy": 0.0,
+        "semantic_similarity": 2.551869213581085,
+        "structural_quality": 0.0,
+        "total": 2.6478692135810853
+      }
+    ],
+    "time_seconds": 17.383928775787354
+  },
+  {
+    "repo_name": "flask_pr5928",
+    "spec": {
+      "feature_name": "Ensure all teardown callbacks are called despite errors",
+      "description": "Introduce a mechanism so that all request and app-context teardown callbacks run even if earlier ones raise exceptions. On Python 3.11+, collected errors should be raised as a BaseExceptionGroup; on older versions the first error should be re-raised. This prevents resource leaks when teardown handlers fail.",
+      "functional_requirements": [
+        "Create a context manager that collects errors from multiple callbacks without stopping execution",
+        "Ensure all teardown callbacks run even if earlier ones raise exceptions",
+        "On Python 3.11+, raise collected errors as a BaseExceptionGroup",
+        "On older Python versions, re-raise the first collected error",
+        "Update both request context and app context teardown handling",
+        "Add comprehensive test coverage for error collection across multiple teardown callbacks"
+      ],
+      "project_name": "flask",
+      "source_pr": "https://github.com/pallets/flask/pull/5928",
+      "scale_tier": "growth"
+    },
+    "ground_truth": {
+      "modified": [
+        "CHANGES.rst",
+        "docs/appcontext.rst",
+        "src/flask/app.py",
+        "src/flask/ctx.py",
+        "src/flask/helpers.py",
+        "tests/test_appctx.py",
+        "tests/test_basic.py",
+        "tests/test_blueprints.py",
+        "tests/test_helpers.py",
+        "tests/test_testing.py"
+      ],
+      "created": []
+    },
+    "best_completion": "{\n  \"architecture_decisions\": [\n    {\n      \"dimension\": \"Error Handling Strategy\",\n      \"recommendation\": \"Implement a context manager that collects exceptions during teardown callback execution and raises them as a BaseExceptionGroup on Python 3.11+, or re-raises the first error on older versions.\",\n      \"rationale\": \"This ensures all teardown callbacks run regardless of errors, preventing resource leaks. Using BaseExceptionGroup on modern Python versions provides more informative error reporting when multiple teardown callbacks fail.\",\n      \"alternatives_considered\": [\n        \"Stop execution on first error (would cause resource leaks)\",\n        \"Log errors and continue silently (would hide failures)\",\n        \"Use custom exception container (would not integrate with Python's native error grouping)\"\n      ],\n      \"files_affected\": [\n        \"src/flask/ctx.py\",\n        \"src/flask/app.py\"\n      ]\n    },\n    {\n      \"dimension\": \"Context Integration\",\n      \"recommendation\": \"Modify both request context and app context teardown handling to use the new error-collecting context manager.\",\n      \"rationale\": \"Both contexts need error-resilient teardown to prevent resource leaks. The implementation should be consistent across both contexts to maintain predictability.\",\n      \"alternatives_considered\": [\n        \"Only implement in request context (would leave app context vulnerable)\",\n        \"Implement separate error handling per context (would create inconsistency)\",\n        \"Use decorator pattern (would be less transparent and harder to maintain)\"\n      ],\n      \"files_affected\": [\n        \"src/flask/ctx.py\"\n      ]\n    },\n    {\n      \"dimension\": \"Python Version Compatibility\",\n      \"recommendation\": \"Use try-except to detect BaseExceptionGroup availability and provide fallback behavior for older Python versions.\",\n      \"rationale\": \"Flask must maintain compatibility with multiple Python versions. Detecting BaseExceptionGroup availability at runtime allows we to use modern Python features without breaking older versions.\",\n      \"alternatives_considered\": [\n        \"Require Python 3.11+ (would break backwards compatibility)\",\n        \"Use external library for exception grouping (would add unnecessary dependencies)\",\n        \"Maintain separate code branches (would increase maintenance complexity)\"\n      ],\n      \"files_affected\": [\n        \"src/flask/ctx.py\",\n        \"src/flask/app.py\"\n      ]\n    },\n    {\n      \"dimension\": \"Testing Strategy\",\n      \"recommendation\": \"Create comprehensive tests that verify teardown callback execution order and error collection behavior across multiple Python versions.\",\n      \"rationale\": \"This functionality is critical for preventing resource leaks. Tests must verify that all callbacks execute even when some raise exceptions, and that errors are properly collected and raised according to Python version.\",\n      \"alternatives_considered\": [\n        \"Test only on one Python version (would miss version-specific behavior)\",\n        \"Test only basic case (would miss edge cases)\",\n        \"Rely on CI to catch failures (would lack targeted verification)\"\n      ],\n      \"files_affected\": [\n        \"tests/test_appctx.py\",\n        \"tests/test_basic.py\"\n      ]\n    },\n    {\n      \"dimension\": \"Documentation\",\n      \"recommendation\": \"Update documentation to explain the new error behavior in teardown callbacks and provide examples of expected behavior.\",\n      \"rationale\": \"Users need to understand how error handling works during teardown to properly manage resources and handle exceptions. Clear documentation prevents confusion about why multiple exceptions might be raised.\",\n      \"alternatives_considered\": [\n        \"No documentation update (would leave users confused)\",\n        \"Add only docstring comments (would not be discoverable to users)\",\n        \"Add to changelog only (would not explain behavior)\"\n      ],\n      \"files_affected\": [\n        \"docs/appcontext.rst\",\n        \"docs/changes.rst\"\n      ]\n    }\n  ],\n  \"tickets\": [\n    {\n      \"id\": \"T-001\",\n      \"title\": \"Implement ErrorCollectingContextManager for teardown callbacks\",\n      \"description\": \"Create a context manager that collects errors from multiple callbacks without stopping execution. On Python 3.11+, raise collected errors as a BaseExceptionGroup; on older versions, re-raise the first collected error.\",\n      \"files_to_modify\": [\n        \"src/flask/ctx.py\"\n      ],\n      \"files_to_create\": [],\n      \"estimated_effort\": \"medium\",\n      \"dependencies\": []\n    },\n    {\n      \"id\": \"T-002\",\n      \"title\": \"Update request context teardown to use error-collecting context manager\",\n      \"description\": \"Modify the request context teardown handler to use the new ErrorCollectingContextManager to ensure all teardown callbacks run even if some raise exceptions.\",\n      \"files_to_modify\": [\n        \"src/flask/ctx.py\"\n      ],\n      \"files_to_create\": [],\n      \"estimated_effort\": \"small\",\n      \"dependencies\": [\"T-001\"]\n    },\n    {\n      \"id\": \"T-003\",\n      \"title\": \"Update app context teardown to use error-collecting context manager\",\n      \"description\": \"Modify the app context teardown handler to use the new ErrorCollectingContextManager to ensure all teardown callbacks run even if some raise exceptions.\",\n      \"files_to_modify\": [\n        \"src/flask/ctx.py\"\n      ],\n      \"files_to_create\": [],\n      \"estimated_effort\": \"small\",\n      \"dependencies\": [\"T-001\"]\n    },\n    {\n      \"id\": \"T-004\",\n      \"title\": \"Add comprehensive tests for teardown error collection\",\n      \"description\": \"Create tests that verify all teardown callbacks execute even when some raise exceptions, and that errors are properly collected and raised according to Python version.\",\n      \"files_to_modify\": [\n        \"tests/test_appctx.py\",\n        \"tests/test_basic.py\"\n      ],\n      \"files_to_create\": [],\n      \"estimated_effort\": \"medium\",\n      \"dependencies\": [\"T-001\", \"T-002\", \"T-003\"]\n    },\n    {\n      \"id\": \"T-005\",\n      \"title\": \"Update documentation to explain new teardown error behavior\",\n      \"description\": \"Update the app context documentation to explain how teardown callback errors are now collected and raised, including version-specific behavior and examples.\",\n      \"files_to_modify\": [\n        \"docs/appcontext.rst\",\n        \"docs/changes.rst\"\n      ],\n      \"files_to_create\": [],\n      \"estimated_effort\": \"small\",\n      \"dependencies\": [\"T-001\", \"T-002\", \"T-003\"]\n    },\n    {\n      \"id\": \"T-006\",\n      \"title\": \"Verify Python version compatibility in error handling\",\n      \"description\": \"Add code to detect BaseExceptionGroup availability at runtime and provide appropriate fallback behavior for older Python versions.\",\n      \"files_to_modify\": [\n        \"src/flask/ctx.py\"\n      ],\n      \"files_to_create\": [],\n      \"estimated_effort\": \"small\",\n      \"dependencies\": [\"T-001\"]\n    }\n  ],\n  \"implementation_summary\": \"The implementation will introduce a new ErrorCollectingContextManager that ensures all teardown callbacks execute even when some raise exceptions, preventing resource leaks. This context manager will collect all exceptions raised during teardown and, on Python 3.11+, raise them as a BaseExceptionGroup to provide comprehensive error information. For older Python versions, it will re-raise only the first collected error to maintain compatibility. Both request context and app context teardown handling will be updated to use this context manager, ensuring consistent behavior across all contexts. The implementation will be tested comprehensively with unit tests that verify the execution of all callbacks regardless of errors and validate the appropriate error handling behavior for different Python versions. Documentation will be updated to explain the new behavior, helping users understand how to handle teardown errors and manage resources properly. This approach maintains Flask's backward compatibility while leveraging modern Python features where available, ensuring robust error handling without compromising the framework's stability or requiring users to upgrade Python versions.\"\n}\n<|endoftext|>",
+    "best_rewards": {
+      "format_compliance": 0.5,
+      "format_partial": 0.25,
+      "existing_file_accuracy": 0.8,
+      "created_file_accuracy": 0.0,
+      "semantic_similarity": 2.613660156726837,
+      "structural_quality": 0.5,
+      "total": 4.663660156726837
+    },
+    "all_rewards": [
+      {
+        "format_compliance": 0.5,
+        "format_partial": 0.25,
+        "existing_file_accuracy": 0.7058823529411764,
+        "created_file_accuracy": 0.0,
+        "semantic_similarity": 2.512406587600708,
+        "structural_quality": 0.5,
+        "total": 4.468288940541885
+      },
+      {
+        "format_compliance": 0.0,
+        "format_partial": 0.09500000000000001,
+        "existing_file_accuracy": 0.0,
+        "created_file_accuracy": 0.0,
+        "semantic_similarity": 0.0,
+        "structural_quality": 0.0,
+        "total": 0.09500000000000001
+      },
+      {
+        "format_compliance": 0.5,
+        "format_partial": 0.25,
+        "existing_file_accuracy": 0.8,
+        "created_file_accuracy": 0.0,
+        "semantic_similarity": 2.613660156726837,
+        "structural_quality": 0.5,
+        "total": 4.663660156726837
+      },
+      {
+        "format_compliance": 0.0,
+        "format_partial": 0.09500000000000001,
+        "existing_file_accuracy": 0.0,
+        "created_file_accuracy": 0.0,
+        "semantic_similarity": 0.0,
+        "structural_quality": 0.0,
+        "total": 0.09500000000000001
+      }
+    ],
+    "time_seconds": 75.88202404975891
+  },
+  {
+    "repo_name": "pydantic_pr13013",
+    "spec": {
+      "feature_name": "Allow default factories of private attributes to take validated model data",
+      "description": "Extend PrivateAttr default_factory so the factory callable can optionally accept a dict of already-validated model data (public fields and earlier private attrs), matching the existing capability on regular Field defaults. This allows private attributes to be computed from validated public field values during model construction.",
+      "functional_requirements": [
+        "Allow PrivateAttr default_factory callables to optionally accept validated model data as a parameter",
+        "Ensure the factory receives both public fields and previously-set private attributes",
+        "Maintain backward compatibility for existing default_factory callables that take no arguments",
+        "Add a shared utility function for resolving default values across both Field and PrivateAttr",
+        "Add comprehensive test coverage for the new default_factory behavior"
+      ],
+      "project_name": "pydantic",
+      "source_pr": "https://github.com/pydantic/pydantic/pull/13013",
+      "scale_tier": "enterprise"
+    },
+    "ground_truth": {
+      "modified": [
+        "docs/concepts/fields.md",
+        "docs/concepts/models.md",
+        "pydantic/_internal/_fields.py",
+        "pydantic/_internal/_model_construction.py",
+        "pydantic/_internal/_utils.py",
+        "pydantic/fields.py",
+        "tests/test_fields.py",
+        "tests/test_internal.py",
+        "tests/test_private_attributes.py"
+      ],
+      "created": []
+    },
+    "best_completion": "{\n  \"architecture_decisions\": [\n    {\n      \"dimension\": \"API Design\",\n      \"recommendation\": \"Extend PrivateAttr default_factory to optionally accept a model_data parameter that contains validated public fields and already-computed private attributes\",\n      \"rationale\": \"This matches existing Field behavior and enables powerful composition patterns. The optional parameter maintains backward compatibility with existing code that uses parameterless factories.\",\n      \"alternatives_considered\": [\n        \"Separate default_factory_v2 signature\",\n        \"Pass entire model instance to factory\",\n        \"Require factory to be a class method\"\n      ],\n      \"files_affected\": [\n        \"pydantic/_internal/_fields.py\",\n        \"pydantic/fields.py\"\n      ]\n    },\n    {\n      \"dimension\": \"Code Reuse\",\n      \"recommendation\": \"Create a shared _resolve_default_value utility function in _internal/_utils.py that handles both Field and PrivateAttr default resolution\",\n      \"rationale\": \"Reducing duplication between field and private attribute default resolution logic improves maintainability and ensures consistent behavior. The utility can handle parameter inspection and data passing.\",\n      \"alternatives_considered\": [\n        \"Duplicate logic in both _fields.py and _model_construction.py\",\n        \"Extend existing _get_default_value function\",\n        \"Create separate resolver classes\"\n      ],\n      \"files_affected\": [\n        \"pydantic/_internal/_utils.py\",\n        \"pydantic/_internal/_fields.py\",\n        \"pydantic/_internal/_model_construction.py\"\n      ]\n    },\n    {\n      \"dimension\": \"Performance\",\n      \"recommendation\": \"Cache parameter inspection results for default_factory callables to avoid repeated introspection during model instantiation\",\n      \"rationale\": \"Parameter inspection can be expensive and should only be performed once per callable. Caching enables efficient reuse across multiple model instances.\",\n      \"alternatives_considered\": [\n        \"Perform parameter inspection on every call\",\n        \"Require users to specify parameter requirements\",\n        \"Pre-compile factory functions\"\n      ],\n      \"files_affected\": [\n        \"pydantic/_internal/_utils.py\",\n        \"pydantic/_internal/_fields.py\"\n      ]\n    },\n    {\n      \"dimension\": \"Backward Compatibility\",\n      \"recommendation\": \"Maintain existing behavior for default_factory callables that take no parameters, while adding support for those accepting model_data\",\n      \"rationale\": \"This ensures existing code continues to work without modification while providing new functionality for advanced use cases. The change is additive rather than breaking.\",\n      \"alternatives_considered\": [\n        \"Require explicit opt-in for new behavior\",\n        \"Deprecate parameterless factories\",\n        \"Add version-specific behavior\"\n      ],\n      \"files_affected\": [\n        \"pydantic/_internal/_fields.py\",\n        \"pydantic/_internal/_model_construction.py\",\n        \"pydantic/fields.py\"\n      ]\n    },\n    {\n      \"dimension\": \"Testing Strategy\",\n      \"recommendation\": \"Add comprehensive test coverage in test_private_attributes.py that verifies both backward compatibility and new functionality\",\n      \"rationale\": \"Private attributes are critical to model construction. Comprehensive testing ensures the feature works as specified and doesn't introduce regressions in existing behavior.\",\n      \"alternatives_considered\": [\n        \"Test only in test_fields.py\",\n        \"Rely on integration tests\",\n        \"Add tests to test_model_construction.py\"\n      ],\n      \"files_affected\": [\n        \"tests/test_private_attributes.py\"\n      ]\n    }\n  ],\n  \"tickets\": [\n    {\n      \"id\": \"T-001\",\n      \"title\": \"Create shared default value resolver utility\",\n      \"description\": \"Implement a _resolve_default_value function in _internal/_utils.py that can handle both Field and PrivateAttr default factories, inspecting parameters and passing validated data when appropriate.\",\n      \"files_to_modify\": [\n        \"pydantic/_internal/_utils.py\"\n      ],\n      \"files_to_create\": [],\n      \"estimated_effort\": \"medium\",\n      \"dependencies\": []\n    },\n    {\n      \"id\": \"T-002\",\n      \"title\": \"Extend PrivateAttr default_factory to accept model data\",\n      \"description\": \"Modify _internal/_fields.py to use the new resolver utility and pass validated model data to private attribute factories when they accept parameters.\",\n      \"files_to_modify\": [\n        \"pydantic/_internal/_fields.py\"\n      ],\n      \"files_to_create\": [],\n      \"estimated_effort\": \"medium\",\n      \"dependencies\": [\"T-001\"]\n    },\n    {\n      \"id\": \"T-003\",\n      \"title\": \"Update model construction to collect validated data for private attributes\",\n      \"description\": \"Modify _internal/_model_construction.py to collect validated public fields and already-set private attributes and pass them to the default factory resolver.\",\n      \"files_to_modify\": [\n        \"pydantic/_internal/_model_construction.py\"\n      ],\n      \"files_to_create\": [],\n      \"estimated_effort\": \"medium\",\n      \"dependencies\": [\"T-001\"]\n    },\n    {\n      \"id\": \"T-004\",\n      \"title\": \"Add comprehensive tests for private attribute default factories\",\n      \"description\": \"Add tests to test_private_attributes.py that verify backward compatibility and new functionality, including factories accepting model data, parameter inspection caching, and edge cases.\",\n      \"files_to_modify\": [\n        \"tests/test_private_attributes.py\"\n      ],\n      \"files_to_create\": [],\n      \"estimated_effort\": \"large\",\n      \"dependencies\": [\"T-001\", \"T-002\", \"T-003\"]\n    },\n    {\n      \"id\": \"T-005\",\n      \"title\": \"Update documentation to reflect new private attribute default factory behavior\",\n      \"description\": \"Update the fields documentation to explain that private attributes can now have default factories that accept validated model data, matching Field behavior.\",\n      \"files_to_modify\": [\n        \"docs/concepts/fields.md\"\n      ],\n      \"files_to_create\": [],\n      \"estimated_effort\": \"small\",\n      \"dependencies\": [\"T-002\"]\n    },\n    {\n      \"id\": \"T-006\",\n      \"title\": \"Add type hints and improve docstrings for new functionality\",\n      \"description\": \"Add appropriate type hints and comprehensive docstrings to the new resolver utility and updated functions to ensure good IDE support and documentation.\",\n      \"files_to_modify\": [\n        \"pydantic/_internal/_utils.py\",\n        \"pydantic/_internal/_fields.py\",\n        \"pydantic/_internal/_model_construction.py\"\n      ],\n      \"files_to_create\": [],\n      \"estimated_effort\": \"small\",\n      \"dependencies\": [\"T-001\", \"T-002\", \"T-003\"]\n    },\n    {\n      \"id\": \"T-007\",\n      \"title\": \"Update migration guide with private attribute default factory changes\",\n      \"description\": \"Add a section to docs/migration.md explaining the new private attribute default factory behavior and any potential migration considerations.\",\n      \"files_to_modify\": [\n        \"docs/migration.md\"\n      ],\n      \"files_to_create\": [],\n      \"estimated_effort\": \"small\",\n      \"dependencies\": [\"T-002\"]\n    }\n  ],\n  \"implementation_summary\": \"The implementation will extend Pydantic's PrivateAttr default_factory functionality to match the existing capabilities of regular Field defaults, allowing factories to optionally accept validated model data. This will be achieved through a new shared utility function in _internal/_utils.py that handles default value resolution for both Field and PrivateAttr, inspecting callable parameters and passing appropriate data without breaking backward compatibility. The model construction process will be updated to collect validated public fields and already-computed private attributes for passing to these factories. Comprehensive tests will be added to ensure the new functionality works as expected and doesn't introduce regressions. The implementation prioritizes maintainability through code reuse, performance through parameter inspection caching, and backward compatibility by making the model data parameter optional. This approach aligns with Pydantic's existing patterns while extending its capabilities for more sophisticated model construction scenarios where private attributes need to be computed from validated public field values.\"\n}\n",
+    "best_rewards": {
+      "format_compliance": 0.5,
+      "format_partial": 0.25,
+      "existing_file_accuracy": 1.0,
+      "created_file_accuracy": 0.0,
+      "semantic_similarity": 2.66968435049057,
+      "structural_quality": 0.5,
+      "total": 4.91968435049057
+    },
+    "all_rewards": [
+      {
+        "format_compliance": 0.0,
+        "format_partial": 0.09500000000000001,
+        "existing_file_accuracy": 0.0,
+        "created_file_accuracy": 0.0,
+        "semantic_similarity": 0.0,
+        "structural_quality": 0.0,
+        "total": 0.09500000000000001
+      },
+      {
+        "format_compliance": 0.5,
+        "format_partial": 0.25,
+        "existing_file_accuracy": 1.0,
+        "created_file_accuracy": 0.0,
+        "semantic_similarity": 2.66968435049057,
+        "structural_quality": 0.5,
+        "total": 4.91968435049057
+      },
+      {
+        "format_compliance": 0.0,
+        "format_partial": 0.09600000000000002,
+        "existing_file_accuracy": 0.0,
+        "created_file_accuracy": 0.0,
+        "semantic_similarity": 2.4440354704856873,
+        "structural_quality": 0.0,
+        "total": 2.5400354704856873
+      },
+      {
+        "format_compliance": 0.0,
+        "format_partial": 0.09500000000000001,
+        "existing_file_accuracy": 0.0,
+        "created_file_accuracy": 0.0,
+        "semantic_similarity": 0.0,
+        "structural_quality": 0.0,
+        "total": 0.09500000000000001
+      }
+    ],
+    "time_seconds": 69.03080296516418
+  },
+  {
+    "repo_name": "pydantic_pr13016",
+    "spec": {
+      "feature_name": "Warn when serializing fixed length tuples with too few items",
+      "description": "Add a PydanticSerializationUnexpectedValue warning in the Rust serializer when a fixed-length tuple has fewer items than the schema expects. Currently only too-many items triggers a warning; this change adds symmetry by also warning on too-few items.",
+      "functional_requirements": [
+        "Emit a PydanticSerializationUnexpectedValue warning when a tuple has fewer items than the fixed-length schema expects",
+        "Maintain the existing warning behavior for tuples with too many items",
+        "Implement the check in the Rust tuple serializer code",
+        "Add test coverage for the new too-few-items warning case"
+      ],
+      "project_name": "pydantic",
+      "source_pr": "https://github.com/pydantic/pydantic/pull/13016",
+      "scale_tier": "enterprise"
+    },
+    "ground_truth": {
+      "modified": [
+        "pydantic-core/src/serializers/type_serializers/tuple.rs",
+        "pydantic-core/tests/serializers/test_list_tuple.py"
+      ],
+      "created": []
+    },
+    "best_completion": "{\n  \"architecture_decisions\": [],\n  \"tickets\": [],\n  \"implementation_summary\": \"\"\n}\n",
+    "best_rewards": {
+      "format_compliance": 0.0,
+      "format_partial": 0.09500000000000001,
+      "existing_file_accuracy": 0.0,
+      "created_file_accuracy": 0.0,
+      "semantic_similarity": 0.0,
+      "structural_quality": 0.0,
+      "total": 0.09500000000000001
+    },
+    "all_rewards": [
+      {
+        "format_compliance": 0.0,
+        "format_partial": 0.09500000000000001,
+        "existing_file_accuracy": 0.0,
+        "created_file_accuracy": 0.0,
+        "semantic_similarity": 0.0,
+        "structural_quality": 0.0,
+        "total": 0.09500000000000001
+      },
+      {
+        "format_compliance": 0.0,
+        "format_partial": 0.09500000000000001,
+        "existing_file_accuracy": 0.0,
+        "created_file_accuracy": 0.0,
+        "semantic_similarity": 0.0,
+        "structural_quality": 0.0,
+        "total": 0.09500000000000001
+      },
+      {
+        "format_compliance": 0.0,
+        "format_partial": 0.09500000000000001,
+        "existing_file_accuracy": 0.0,
+        "created_file_accuracy": 0.0,
+        "semantic_similarity": 0.0,
+        "structural_quality": 0.0,
+        "total": 0.09500000000000001
+      },
+      {
+        "format_compliance": 0.0,
+        "format_partial": 0.09500000000000001,
+        "existing_file_accuracy": 0.0,
+        "created_file_accuracy": 0.0,
+        "semantic_similarity": 0.0,
+        "structural_quality": 0.0,
+        "total": 0.09500000000000001
+      }
+    ],
+    "time_seconds": 7.555110692977905
+  }
+]
