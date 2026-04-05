@@ -151,21 +151,97 @@ def existing_file_accuracy(completions: list[str], diff_files: list[dict]) -> li
 
 
 # ---------------------------------------------------------------------------
-# 4. Created File Accuracy (F1 of files_to_create vs ground truth)
+# 4. Created File Accuracy (fuzzy nearest-neighbor matching)
 # ---------------------------------------------------------------------------
 
+def _path_similarity(path_a: str, path_b: str) -> float:
+    """Score similarity between two file paths using component-level matching.
+
+    Returns a value in [0, 1]:
+      - 1.0 = exact match
+      - 0.7+ = same directory, similar filename
+      - 0.3+ = same parent dir, different filename
+      - 0.1+ = same extension, different location
+      - 0.0  = completely different
+
+    Scoring:
+      - Directory overlap (60% weight): fraction of shared path components
+      - Filename similarity (25% weight): character-level similarity
+      - Extension match (15% weight): same file type
+    """
+    from difflib import SequenceMatcher
+
+    parts_a = path_a.split("/")
+    parts_b = path_b.split("/")
+    dir_a, file_a = parts_a[:-1], parts_a[-1]
+    dir_b, file_b = parts_b[:-1], parts_b[-1]
+
+    # Directory overlap: shared components / max components
+    if dir_a or dir_b:
+        shared_dirs = sum(1 for a, b in zip(dir_a, dir_b) if a == b)
+        max_dirs = max(len(dir_a), len(dir_b), 1)
+        dir_score = shared_dirs / max_dirs
+    else:
+        dir_score = 1.0  # both in root
+
+    # Filename similarity (SequenceMatcher ratio)
+    name_score = SequenceMatcher(None, file_a, file_b).ratio()
+
+    # Extension match
+    ext_a = file_a.rsplit(".", 1)[-1] if "." in file_a else ""
+    ext_b = file_b.rsplit(".", 1)[-1] if "." in file_b else ""
+    ext_score = 1.0 if ext_a == ext_b else 0.0
+
+    return 0.60 * dir_score + 0.25 * name_score + 0.15 * ext_score
+
+
+def _best_alignment_score(gt_paths: set[str], gen_paths: set[str]) -> float:
+    """Compute F1 using nearest-neighbor alignment with fuzzy path matching.
+
+    For each GT file, find the best-matching generated file (and vice versa).
+    A match scores between 0 and 1 based on path similarity.
+    Exact matches still score 1.0; partial matches get proportional credit.
+    """
+    if not gt_paths or not gen_paths:
+        return 0.0
+
+    gt_list = sorted(gt_paths)
+    gen_list = sorted(gen_paths)
+
+    # For recall: for each GT file, best similarity to any generated file
+    recall_scores = []
+    for gt in gt_list:
+        best = max(_path_similarity(gt, g) for g in gen_list)
+        recall_scores.append(best)
+
+    # For precision: for each generated file, best similarity to any GT file
+    precision_scores = []
+    for g in gen_list:
+        best = max(_path_similarity(gt, g) for gt in gt_list)
+        precision_scores.append(best)
+
+    precision = sum(precision_scores) / len(precision_scores)
+    recall = sum(recall_scores) / len(recall_scores)
+
+    if precision + recall == 0:
+        return 0.0
+    return 2 * precision * recall / (precision + recall)
+
+
 def created_file_accuracy(completions: list[str], diff_files: list[dict]) -> list[float]:
-    """F1 score of files_to_create vs ground truth created files.
+    """Fuzzy F1 of files_to_create vs ground truth created files.
 
     Max score: 1.5.
-    When ground truth has no created files, this component is excluded
-    (returns 0.0) to avoid rewarding minimal output.
+    Uses nearest-neighbor alignment with component-level path similarity
+    so that predicting the right directory + similar filename gets partial
+    credit instead of zero.
+
+    When ground truth has no created files, returns 0.0.
     """
     scores = []
     for text, diff_info in zip(completions, diff_files):
         gt_created = {_normalize_path(f) for f in diff_info.get("created", [])}
 
-        # If ground truth has no created files, exclude this component
         if not gt_created:
             scores.append(0.0)
             continue
@@ -184,10 +260,7 @@ def created_file_accuracy(completions: list[str], diff_files: list[dict]) -> lis
             scores.append(0.0)
             continue
 
-        tp = len(gt_created & gen_created)
-        precision = tp / len(gen_created) if gen_created else 0.0
-        recall = tp / len(gt_created) if gt_created else 0.0
-        f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0.0
+        f1 = _best_alignment_score(gt_created, gen_created)
         scores.append(f1 * 1.5)
     return scores
 
@@ -196,45 +269,110 @@ def created_file_accuracy(completions: list[str], diff_files: list[dict]) -> lis
 # 5. Semantic Similarity (sentence embeddings)
 # ---------------------------------------------------------------------------
 
+def _cosine_sim(model, text_a: str, text_b: str) -> float:
+    """Compute cosine similarity between two texts using sentence-transformers."""
+    from numpy import dot
+    from numpy.linalg import norm
+    embeddings = model.encode([text_a, text_b])
+    sim = dot(embeddings[0], embeddings[1]) / (norm(embeddings[0]) * norm(embeddings[1]))
+    return max(0.0, float(sim))
+
+
 def semantic_similarity(completions: list[str], teacher_plans: list[dict]) -> list[float]:
-    """Cosine similarity of implementation_summary embeddings vs teacher.
+    """Component-level semantic similarity against teacher plan.
 
     Max score: 3.0.
-    Uses all-MiniLM-L6-v2 sentence-transformer for dense, meaningful similarity.
+    Three sub-components (weighted):
+      - Summary similarity (50%):  implementation_summary vs teacher summary
+      - Decision similarity (30%): best-match rationale across architecture_decisions
+      - Ticket similarity (20%):   best-match description across tickets
+
+    This gives more targeted signal than comparing summaries alone.
     """
     model = _get_sentence_model()
 
     scores = []
     for text, teacher in zip(completions, teacher_plans):
-        teacher_summary = teacher.get("implementation_summary", "")
-        if not teacher_summary or not isinstance(teacher_summary, str):
-            scores.append(0.0)
-            continue
-
         plan = _parse_plan_json(text)
-        if plan is not None:
-            gen_summary = plan.get("implementation_summary", "")
-        else:
+        if plan is None:
             scores.append(0.0)
             continue
 
-        if not gen_summary:
-            scores.append(0.0)
-            continue
+        total = 0.0
 
-        try:
-            embeddings = model.encode([teacher_summary, gen_summary])
-            # Cosine similarity
-            from numpy import dot
-            from numpy.linalg import norm
-            cos_sim = dot(embeddings[0], embeddings[1]) / (norm(embeddings[0]) * norm(embeddings[1]))
-            # Clamp to [0, 1] (can be slightly negative for unrelated texts)
-            cos_sim = max(0.0, float(cos_sim))
-            scores.append(cos_sim * 3.0)
-        except Exception as e:
-            logger.warning(f"Semantic similarity failed: {e}")
-            scores.append(0.0)
+        # --- Summary similarity (50% of 3.0 = 1.5 max) ---
+        teacher_summary = teacher.get("implementation_summary", "")
+        gen_summary = plan.get("implementation_summary", "")
+        if teacher_summary and gen_summary:
+            try:
+                total += _cosine_sim(model, teacher_summary, gen_summary) * 1.5
+            except Exception:
+                pass
 
+        # --- Decision similarity (30% of 3.0 = 0.9 max) ---
+        teacher_decisions = teacher.get("architecture_decisions", [])
+        gen_decisions = plan.get("architecture_decisions", [])
+        if teacher_decisions and gen_decisions:
+            try:
+                teacher_rationales = [d.get("rationale", "") or d.get("recommendation", "")
+                                      for d in teacher_decisions if isinstance(d, dict)]
+                gen_rationales = [d.get("rationale", "") or d.get("recommendation", "")
+                                  for d in gen_decisions if isinstance(d, dict)]
+                teacher_rationales = [r for r in teacher_rationales if r]
+                gen_rationales = [r for r in gen_rationales if r]
+
+                if teacher_rationales and gen_rationales:
+                    # Best-match: for each teacher decision, find best generated match
+                    all_texts = teacher_rationales + gen_rationales
+                    embs = model.encode(all_texts)
+                    t_embs = embs[:len(teacher_rationales)]
+                    g_embs = embs[len(teacher_rationales):]
+
+                    from numpy import dot
+                    from numpy.linalg import norm
+                    match_scores = []
+                    for t_emb in t_embs:
+                        best = max(
+                            float(dot(t_emb, g_emb) / (norm(t_emb) * norm(g_emb)))
+                            for g_emb in g_embs
+                        )
+                        match_scores.append(max(0.0, best))
+                    total += (sum(match_scores) / len(match_scores)) * 0.9
+            except Exception:
+                pass
+
+        # --- Ticket similarity (20% of 3.0 = 0.6 max) ---
+        teacher_tickets = teacher.get("tickets", [])
+        gen_tickets = plan.get("tickets", [])
+        if teacher_tickets and gen_tickets:
+            try:
+                teacher_descs = [t.get("description", "") or t.get("title", "")
+                                 for t in teacher_tickets if isinstance(t, dict)]
+                gen_descs = [t.get("description", "") or t.get("title", "")
+                             for t in gen_tickets if isinstance(t, dict)]
+                teacher_descs = [d for d in teacher_descs if d]
+                gen_descs = [d for d in gen_descs if d]
+
+                if teacher_descs and gen_descs:
+                    all_texts = teacher_descs + gen_descs
+                    embs = model.encode(all_texts)
+                    t_embs = embs[:len(teacher_descs)]
+                    g_embs = embs[len(teacher_descs):]
+
+                    from numpy import dot
+                    from numpy.linalg import norm
+                    match_scores = []
+                    for t_emb in t_embs:
+                        best = max(
+                            float(dot(t_emb, g_emb) / (norm(t_emb) * norm(g_emb)))
+                            for g_emb in g_embs
+                        )
+                        match_scores.append(max(0.0, best))
+                    total += (sum(match_scores) / len(match_scores)) * 0.6
+            except Exception:
+                pass
+
+        scores.append(total)
     return scores
 
 
