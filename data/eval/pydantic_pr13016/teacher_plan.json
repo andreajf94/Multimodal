@@ -1,0 +1,29 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "Implementation Strategy",
+      "recommendation": "Modify 2 existing files and create 0 new files",
+      "rationale": "Add a PydanticSerializationUnexpectedValue warning in the Rust serializer when a fixed-length tuple has fewer items than the schema expects. Currently only too-many items triggers a warning; this change adds symmetry by also warning on too-few items.",
+      "alternatives_considered": [],
+      "files_affected": [
+        "pydantic-core/src/serializers/type_serializers/tuple.rs",
+        "pydantic-core/tests/serializers/test_list_tuple.py"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Warn when serializing fixed length tuples with too few items",
+      "description": "Add a PydanticSerializationUnexpectedValue warning in the Rust serializer when a fixed-length tuple has fewer items than the schema expects. Currently only too-many items triggers a warning; this change adds symmetry by also warning on too-few items.",
+      "files_to_modify": [
+        "pydantic-core/src/serializers/type_serializers/tuple.rs",
+        "pydantic-core/tests/serializers/test_list_tuple.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium",
+      "dependencies": []
+    }
+  ],
+  "implementation_summary": "This change implements 'Warn when serializing fixed length tuples with too few items' for the pydantic project. Add a PydanticSerializationUnexpectedValue warning in the Rust serializer when a fixed-length tuple has fewer items than the schema expects. Currently only too-many items triggers a warning; this change adds symmetry by also warning on too-few items. The implementation modifies 2 existing files (pydantic-core/src/serializers/type_serializers/tuple.rs, pydantic-core/tests/serializers/test_list_tuple.py) and creates 0 new files. Emit a PydanticSerializationUnexpectedValue warning when a tuple has fewer items than the fixed-length schema expects Maintain the existing warning behavior for tuples with too many items Implement the check in the Rust tuple serializer code"
+}

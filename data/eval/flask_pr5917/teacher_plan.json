@@ -1,0 +1,39 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "Implementation Strategy",
+      "recommendation": "Modify 7 existing files and create 0 new files",
+      "rationale": "Fix a bug where setting provide_automatic_options=True on a view function or class had no effect when the config-level PROVIDE_AUTOMATIC_OPTIONS was False. Refactor the logic in add_url_rule so the explicit attribute/argument can both enable and disable automatic OPTIONS handling, overriding the global config.",
+      "alternatives_considered": [],
+      "files_affected": [
+        "CHANGES.rst",
+        "docs/config.rst",
+        "src/flask/sansio/app.py",
+        "tests/test_basic.py",
+        "tests/test_blueprints.py",
+        "tests/test_cli.py",
+        "tests/test_views.py"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Fix provide_automatic_options override",
+      "description": "Fix a bug where setting provide_automatic_options=True on a view function or class had no effect when the config-level PROVIDE_AUTOMATIC_OPTIONS was False. Refactor the logic in add_url_rule so the explicit attribute/argument can both enable and disable automatic OPTIONS handling, overriding the global config.",
+      "files_to_modify": [
+        "CHANGES.rst",
+        "docs/config.rst",
+        "src/flask/sansio/app.py",
+        "tests/test_basic.py",
+        "tests/test_blueprints.py",
+        "tests/test_cli.py",
+        "tests/test_views.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium",
+      "dependencies": []
+    }
+  ],
+  "implementation_summary": "This change implements 'Fix provide_automatic_options override' for the flask project. Fix a bug where setting provide_automatic_options=True on a view function or class had no effect when the config-level PROVIDE_AUTOMATIC_OPTIONS was False. Refactor the logic in add_url_rule so the explicit attribute/argument can both enable and disable automatic OPTIONS handling, overriding the global config. The implementation modifies 7 existing files (CHANGES.rst, docs/config.rst, src/flask/sansio/app.py, tests/test_basic.py, tests/test_blueprints.py) and creates 0 new files. Allow view-level provide_automatic_options to override the global config setting in both directions (enable and disable) Refactor add_url_rule to correctly handle the precedence of view-level vs config-level OPTIONS handling Maintain backward compatibility for views that do not set provide_automatic_options"
+}

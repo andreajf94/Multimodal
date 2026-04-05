@@ -1,0 +1,15 @@
+{
+  "feature_name": "Ensure all teardown callbacks are called despite errors",
+  "description": "Introduce a mechanism so that all request and app-context teardown callbacks run even if earlier ones raise exceptions. On Python 3.11+, collected errors should be raised as a BaseExceptionGroup; on older versions the first error should be re-raised. This prevents resource leaks when teardown handlers fail.",
+  "functional_requirements": [
+    "Create a context manager that collects errors from multiple callbacks without stopping execution",
+    "Ensure all teardown callbacks run even if earlier ones raise exceptions",
+    "On Python 3.11+, raise collected errors as a BaseExceptionGroup",
+    "On older Python versions, re-raise the first collected error",
+    "Update both request context and app context teardown handling",
+    "Add comprehensive test coverage for error collection across multiple teardown callbacks"
+  ],
+  "project_name": "flask",
+  "source_pr": "https://github.com/pallets/flask/pull/5928",
+  "scale_tier": "growth"
+}

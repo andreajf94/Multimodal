@@ -1,0 +1,743 @@
+diff --git a/crates/next-core/src/next_client/context.rs b/crates/next-core/src/next_client/context.rs
+index 553e597450b91..d53d1b2ad5237 100644
+--- a/crates/next-core/src/next_client/context.rs
++++ b/crates/next-core/src/next_client/context.rs
+@@ -29,6 +29,7 @@ use turbopack_core::{
+ use turbopack_css::chunk::CssChunkType;
+ use turbopack_ecmascript::{
+     AnalyzeMode, TypeofWindow, chunk::EcmascriptChunkType, references::esm::UrlRewriteBehavior,
++    transform::PresetEnvConfig,
+ };
+ use turbopack_node::{
+     execution_context::ExecutionContext,
+@@ -330,6 +331,24 @@ pub async fn get_client_module_options_context(
+     let enable_foreign_postcss_transform = Some(postcss_foreign_transform_options.resolved_cell());
+ 
+     let source_maps = *next_config.client_source_maps(mode).await?;
++
++    let preset_env_config = (*next_config.experimental_swc_env_options().await?)
++        .as_ref()
++        .map(|opts| {
++            PresetEnvConfig {
++                mode: opts.mode.clone(),
++                core_js: opts.core_js.clone(),
++                skip: opts.skip.clone(),
++                include: opts.include.clone(),
++                exclude: opts.exclude.clone(),
++                shipped_proposals: opts.shipped_proposals,
++                force_all_transforms: opts.force_all_transforms,
++                debug: opts.debug,
++                loose: opts.loose,
++            }
++            .resolved_cell()
++        });
++
+     let module_options_context = ModuleOptionsContext {
+         ecmascript: EcmascriptOptionsContext {
+             esm_url_rewrite_behavior: Some(UrlRewriteBehavior::Relative),
+@@ -338,6 +357,7 @@ pub async fn get_client_module_options_context(
+             enable_import_as_text: *next_config.turbopack_import_type_text().await?,
+             source_maps,
+             infer_module_side_effects: *next_config.turbopack_infer_module_side_effects().await?,
++            preset_env_config,
+             ..Default::default()
+         },
+         css: CssOptionsContext {
+@@ -374,6 +394,9 @@ pub async fn get_client_module_options_context(
+             enable_typeof_window_inlining: None,
+             // Ignore e.g. import(`${url}`) requests in node_modules.
+             ignore_dynamic_requests: true,
++            // Don't inject core-js polyfills into node_modules — only user code
++            // should be processed by preset_env's usage/entry mode.
++            preset_env_config: None,
+             ..module_options_context.ecmascript
+         },
+         enable_webpack_loaders: foreign_enable_webpack_loaders,
+@@ -390,6 +413,8 @@ pub async fn get_client_module_options_context(
+                 TypescriptTransformOptions::default().resolved_cell(),
+             ),
+             enable_jsx: Some(JsxTransformOptions::default().resolved_cell()),
++            // Don't inject core-js polyfills into framework internals.
++            preset_env_config: None,
+             ..module_options_context.ecmascript.clone()
+         },
+         enable_postcss_transform: None,
+diff --git a/crates/next-core/src/next_config.rs b/crates/next-core/src/next_config.rs
+index 8e2db3bee4d9c..ec6b3e76ea1ba 100644
+--- a/crates/next-core/src/next_config.rs
++++ b/crates/next-core/src/next_config.rs
+@@ -1081,6 +1081,7 @@ pub struct ExperimentalConfig {
+     strict_next_head: Option<bool>,
+     #[bincode(with = "turbo_bincode::serde_self_describing")]
+     swc_plugins: Option<Vec<(RcStr, serde_json::Value)>>,
++    swc_env_options: Option<SwcEnvOptions>,
+     external_middleware_rewrites_resolve: Option<bool>,
+     scroll_restoration: Option<bool>,
+     manual_client_base_path: Option<bool>,
+@@ -1419,6 +1420,37 @@ pub struct SwcPlugins(
+     #[bincode(with = "turbo_bincode::serde_self_describing")] Vec<(RcStr, serde_json::Value)>,
+ );
+ 
++/// Options for SWC's preset-env, exposed via `experimental.swcEnvOptions`.
++#[derive(
++    Clone,
++    Debug,
++    Default,
++    PartialEq,
++    Eq,
++    Serialize,
++    Deserialize,
++    TraceRawVcs,
++    NonLocalValue,
++    OperationValue,
++    Encode,
++    Decode,
++)]
++#[serde(rename_all = "camelCase")]
++pub struct SwcEnvOptions {
++    pub mode: Option<RcStr>,
++    pub core_js: Option<RcStr>,
++    pub skip: Option<Vec<RcStr>>,
++    pub include: Option<Vec<RcStr>>,
++    pub exclude: Option<Vec<RcStr>>,
++    pub shipped_proposals: Option<bool>,
++    pub force_all_transforms: Option<bool>,
++    pub debug: Option<bool>,
++    pub loose: Option<bool>,
++}
++
++#[turbo_tasks::value(transparent)]
++pub struct OptionSwcEnvOptions(Option<SwcEnvOptions>);
++
+ #[turbo_tasks::value(transparent)]
+ pub struct OptionalMdxTransformOptions(Option<ResolvedVc<MdxTransformOptions>>);
+ 
+@@ -1854,6 +1886,11 @@ impl NextConfig {
+         Vc::cell(self.experimental.swc_plugins.clone().unwrap_or_default())
+     }
+ 
++    #[turbo_tasks::function]
++    pub fn experimental_swc_env_options(&self) -> Vc<OptionSwcEnvOptions> {
++        Vc::cell(self.experimental.swc_env_options.clone())
++    }
++
+     #[turbo_tasks::function]
+     pub fn experimental_sri(&self) -> Vc<OptionSubResourceIntegrity> {
+         Vc::cell(self.experimental.sri.clone())
+diff --git a/packages/next/src/build/swc/options.ts b/packages/next/src/build/swc/options.ts
+index ad8fa39d6a42b..3958f6250af7e 100644
+--- a/packages/next/src/build/swc/options.ts
++++ b/packages/next/src/build/swc/options.ts
+@@ -397,6 +397,7 @@ export function getLoaderSWCOptions({
+   optimizeServerReact,
+   optimizePackageImports,
+   swcPlugins,
++  swcEnvOptions,
+   compilerOptions,
+   jsConfig,
+   supportedBrowsers,
+@@ -426,6 +427,7 @@ export function getLoaderSWCOptions({
+     NextConfig['experimental']
+   >['optimizePackageImports']
+   swcPlugins: ExperimentalConfig['swcPlugins']
++  swcEnvOptions?: ExperimentalConfig['swcEnvOptions']
+   compilerOptions: NextConfig['compiler']
+   jsConfig: any
+   supportedBrowsers: string[] | undefined
+@@ -539,6 +541,7 @@ export function getLoaderSWCOptions({
+         ? {
+             env: {
+               targets: supportedBrowsers,
++              ...swcEnvOptions,
+             },
+           }
+         : {}),
+diff --git a/packages/next/src/build/webpack/loaders/next-swc-loader.ts b/packages/next/src/build/webpack/loaders/next-swc-loader.ts
+index 636115419d5c2..54bcdc941b7f4 100644
+--- a/packages/next/src/build/webpack/loaders/next-swc-loader.ts
++++ b/packages/next/src/build/webpack/loaders/next-swc-loader.ts
+@@ -155,6 +155,7 @@ async function loaderTransform(
+     modularizeImports: nextConfig?.modularizeImports,
+     optimizePackageImports: nextConfig?.experimental?.optimizePackageImports,
+     swcPlugins: nextConfig?.experimental?.swcPlugins,
++    swcEnvOptions: nextConfig?.experimental?.swcEnvOptions,
+     compilerOptions: nextConfig?.compiler,
+     optimizeServerReact: nextConfig?.experimental?.optimizeServerReact,
+     jsConfig,
+diff --git a/packages/next/src/server/config-schema.ts b/packages/next/src/server/config-schema.ts
+index c639c9b8a2c94..929efaa767e2d 100644
+--- a/packages/next/src/server/config-schema.ts
++++ b/packages/next/src/server/config-schema.ts
+@@ -300,6 +300,19 @@ export const experimentalSchema = {
+     // The specific swc plugin's option is unknown, use z.any() here
+     .array(z.tuple([z.string(), z.record(z.string(), z.any())]))
+     .optional(),
++  swcEnvOptions: z
++    .object({
++      mode: z.enum(['usage', 'entry']).optional(),
++      coreJs: z.string().optional(),
++      skip: z.array(z.string()).optional(),
++      include: z.array(z.string()).optional(),
++      exclude: z.array(z.string()).optional(),
++      shippedProposals: z.boolean().optional(),
++      forceAllTransforms: z.boolean().optional(),
++      debug: z.boolean().optional(),
++      loose: z.boolean().optional(),
++    })
++    .optional(),
+   swcTraceProfiling: z.boolean().optional(),
+   // NonNullable<webpack.Configuration['experiments']>['buildHttp']
+   urlImports: z.any().optional(),
+diff --git a/packages/next/src/server/config-shared.ts b/packages/next/src/server/config-shared.ts
+index 2b73b4a2a4bdb..30fb0b34069c7 100644
+--- a/packages/next/src/server/config-shared.ts
++++ b/packages/next/src/server/config-shared.ts
+@@ -534,6 +534,53 @@ export interface ExperimentalConfig {
+   forceSwcTransforms?: boolean
+ 
+   swcPlugins?: Array<[string, Record<string, unknown>]>
++
++  /**
++   * Additional options for SWC's preset-env (`env` configuration).
++   * These are merged into the `env` block that Next.js passes to SWC,
++   * alongside the browserslist-derived `targets`.
++   *
++   * See https://swc.rs/docs/configuration/supported-browsers for full details.
++   *
++   * @example
++   * ```js
++   * // next.config.js
++   * module.exports = {
++   *   experimental: {
++   *     swcEnvOptions: {
++   *       mode: 'usage',
++   *       coreJs: '3.38',
++   *     },
++   *   },
++   * }
++   * ```
++   */
++  swcEnvOptions?: {
++    /**
++     * Polyfill injection mode, matching Babel's `useBuiltIns`.
++     * - `'usage'`: Adds specific polyfill imports per file based on actual usage.
++     * - `'entry'`: Replaces a single `import 'core-js'` with only the polyfills
++     *   needed for the target browsers.
++     */
++    mode?: 'usage' | 'entry'
++    /** The core-js version to use (e.g. `'3.38'`). Required when `mode` is set. */
++    coreJs?: string
++    /** Core-js modules or SWC transform passes to skip. */
++    skip?: string[]
++    /** Core-js modules or SWC transform passes to always include. */
++    include?: string[]
++    /** Core-js modules or SWC transform passes to always exclude. */
++    exclude?: string[]
++    /** Enable shipped TC39 proposals. */
++    shippedProposals?: boolean
++    /** Force all transforms regardless of targets. */
++    forceAllTransforms?: boolean
++    /** Enable debug output for preset-env. */
++    debug?: boolean
++    /** Enable loose mode for transforms. */
++    loose?: boolean
++  }
++
+   largePageDataBytes?: number
+   /**
+    * If set to `false`, webpack won't fall back to polyfill Node.js modules in the browser
+diff --git a/test/e2e/swc-auto-polyfill-disabled/app/layout.tsx b/test/e2e/swc-auto-polyfill-disabled/app/layout.tsx
+new file mode 100644
+index 0000000000000..888614deda3ba
+--- /dev/null
++++ b/test/e2e/swc-auto-polyfill-disabled/app/layout.tsx
+@@ -0,0 +1,8 @@
++import { ReactNode } from 'react'
++export default function Root({ children }: { children: ReactNode }) {
++  return (
++    <html>
++      <body>{children}</body>
++    </html>
++  )
++}
+diff --git a/test/e2e/swc-auto-polyfill-disabled/app/page.tsx b/test/e2e/swc-auto-polyfill-disabled/app/page.tsx
+new file mode 100644
+index 0000000000000..954c151ff593f
+--- /dev/null
++++ b/test/e2e/swc-auto-polyfill-disabled/app/page.tsx
+@@ -0,0 +1,9 @@
++'use client'
++
++export default function Page() {
++  // Same code as the enabled fixture, but without swcEnvOptions
++  const text = 'a-b-c'
++  const result = text.replaceAll('-', '_')
++
++  return <p id="result">{result}</p>
++}
+diff --git a/test/e2e/swc-auto-polyfill-disabled/next.config.js b/test/e2e/swc-auto-polyfill-disabled/next.config.js
+new file mode 100644
+index 0000000000000..807126e4cf0bf
+--- /dev/null
++++ b/test/e2e/swc-auto-polyfill-disabled/next.config.js
+@@ -0,0 +1,6 @@
++/**
++ * @type {import('next').NextConfig}
++ */
++const nextConfig = {}
++
++module.exports = nextConfig
+diff --git a/test/e2e/swc-auto-polyfill-disabled/swc-auto-polyfill-disabled.test.ts b/test/e2e/swc-auto-polyfill-disabled/swc-auto-polyfill-disabled.test.ts
+new file mode 100644
+index 0000000000000..8d05b2d97fe9f
+--- /dev/null
++++ b/test/e2e/swc-auto-polyfill-disabled/swc-auto-polyfill-disabled.test.ts
+@@ -0,0 +1,35 @@
++import { nextTestSetup } from 'e2e-utils'
++import { retry } from 'next-test-utils'
++import fs from 'fs'
++import path from 'path'
++
++describe('swc-auto-polyfill-disabled', () => {
++  const { next, isNextDev, isNextDeploy } = nextTestSetup({
++    files: __dirname,
++  })
++
++  it('should render the page correctly without swcEnvOptions', async () => {
++    const browser = await next.browser('/')
++    await retry(async () => {
++      const text = await browser.elementByCss('#result').text()
++      expect(text).toBe('a_b_c')
++    })
++  })
++
++  if (!isNextDev && !isNextDeploy) {
++    it('should not include replaceAll polyfill in non-framework chunks', async () => {
++      const chunksDir = path.join(next.testDir, '.next', 'static', 'chunks')
++      const files = fs.readdirSync(chunksDir, { recursive: true }) as string[]
++      const jsFiles = files.filter((f) => f.endsWith('.js'))
++
++      for (const file of jsFiles) {
++        const content = fs.readFileSync(path.join(chunksDir, file), 'utf-8')
++        // Skip the built-in polyfill-nomodule chunk (contains core-js license URL)
++        if (content.includes('core-js/blob/')) continue
++
++        // Without swcEnvOptions, no replaceAll polyfill should be injected
++        expect(content).not.toMatch(/replaceAll[:]\s*function/)
++      }
++    })
++  }
++})
+diff --git a/test/e2e/swc-auto-polyfill/.browserslistrc b/test/e2e/swc-auto-polyfill/.browserslistrc
+new file mode 100644
+index 0000000000000..ffcc05aa9ecba
+--- /dev/null
++++ b/test/e2e/swc-auto-polyfill/.browserslistrc
+@@ -0,0 +1 @@
++chrome 60
+diff --git a/test/e2e/swc-auto-polyfill/app/layout.tsx b/test/e2e/swc-auto-polyfill/app/layout.tsx
+new file mode 100644
+index 0000000000000..888614deda3ba
+--- /dev/null
++++ b/test/e2e/swc-auto-polyfill/app/layout.tsx
+@@ -0,0 +1,8 @@
++import { ReactNode } from 'react'
++export default function Root({ children }: { children: ReactNode }) {
++  return (
++    <html>
++      <body>{children}</body>
++    </html>
++  )
++}
+diff --git a/test/e2e/swc-auto-polyfill/app/page.tsx b/test/e2e/swc-auto-polyfill/app/page.tsx
+new file mode 100644
+index 0000000000000..1aeeb1ee2d040
+--- /dev/null
++++ b/test/e2e/swc-auto-polyfill/app/page.tsx
+@@ -0,0 +1,9 @@
++'use client'
++
++export default function Page() {
++  // String.prototype.replaceAll requires polyfill for Chrome < 85
++  const text = 'a-b-c'
++  const result = text.replaceAll('-', '_')
++
++  return <p id="result">{result}</p>
++}
+diff --git a/test/e2e/swc-auto-polyfill/next.config.js b/test/e2e/swc-auto-polyfill/next.config.js
+new file mode 100644
+index 0000000000000..e9bef6c699557
+--- /dev/null
++++ b/test/e2e/swc-auto-polyfill/next.config.js
+@@ -0,0 +1,13 @@
++/**
++ * @type {import('next').NextConfig}
++ */
++const nextConfig = {
++  experimental: {
++    swcEnvOptions: {
++      mode: 'usage',
++      coreJs: '3.38',
++    },
++  },
++}
++
++module.exports = nextConfig
+diff --git a/test/e2e/swc-auto-polyfill/swc-auto-polyfill.test.ts b/test/e2e/swc-auto-polyfill/swc-auto-polyfill.test.ts
+new file mode 100644
+index 0000000000000..ba321f3748020
+--- /dev/null
++++ b/test/e2e/swc-auto-polyfill/swc-auto-polyfill.test.ts
+@@ -0,0 +1,50 @@
++import { nextTestSetup } from 'e2e-utils'
++import { retry } from 'next-test-utils'
++import fs from 'fs'
++import path from 'path'
++
++describe('swc-auto-polyfill', () => {
++  const { next, isNextDev, isNextDeploy } = nextTestSetup({
++    files: __dirname,
++    dependencies: {
++      'core-js': '3.38.1',
++    },
++  })
++
++  it('should render the page correctly with swcEnvOptions enabled', async () => {
++    const browser = await next.browser('/')
++    await retry(async () => {
++      const text = await browser.elementByCss('#result').text()
++      expect(text).toBe('a_b_c')
++    })
++  })
++
++  if (!isNextDev && !isNextDeploy) {
++    it('should include core-js polyfill in a chunk with user code', async () => {
++      const chunksDir = path.join(next.testDir, '.next', 'static', 'chunks')
++      const files = fs.readdirSync(chunksDir, { recursive: true }) as string[]
++      const jsFiles = files.filter((f) => f.endsWith('.js'))
++
++      // Find a chunk that contains BOTH the user code (a-b-c / a_b_c) AND
++      // core-js polyfill artifacts. This proves SWC's usage-mode polyfill
++      // injection is working: the user's page.tsx pulled in core-js modules
++      // for String.prototype.replaceAll.
++      let found = false
++      for (const file of jsFiles) {
++        const content = fs.readFileSync(path.join(chunksDir, file), 'utf-8')
++        const hasUserCode =
++          content.includes('a-b-c') || content.includes('a_b_c')
++        const hasPolyfill =
++          content.includes('replaceAll:function') ||
++          content.includes('replaceAll: function')
++
++        if (hasUserCode && hasPolyfill) {
++          found = true
++          break
++        }
++      }
++
++      expect(found).toBe(true)
++    })
++  }
++})
+diff --git a/test/unit/swc-auto-polyfill-options.test.ts b/test/unit/swc-auto-polyfill-options.test.ts
+new file mode 100644
+index 0000000000000..fbfed4c598082
+--- /dev/null
++++ b/test/unit/swc-auto-polyfill-options.test.ts
+@@ -0,0 +1,102 @@
++import { getLoaderSWCOptions } from 'next/dist/build/swc/options'
++
++describe('swcEnvOptions', () => {
++  const baseArgs = {
++    filename: '/app/page.tsx',
++    development: false,
++    isServer: false,
++    pagesDir: '/pages',
++    appDir: '/app',
++    isPageFile: false,
++    hasReactRefresh: false,
++    modularizeImports: undefined,
++    swcPlugins: undefined,
++    compilerOptions: undefined,
++    jsConfig: {},
++    swcCacheDir: '/tmp/swc',
++    relativeFilePathFromRoot: 'app/page.tsx',
++    serverComponents: false,
++    serverReferenceHashSalt: 'test-salt',
++    bundleLayer: undefined,
++    cacheHandlers: undefined,
++  }
++
++  it('should not include extra env options when swcEnvOptions is not set', () => {
++    const options = getLoaderSWCOptions({
++      ...baseArgs,
++      supportedBrowsers: ['chrome 80'],
++    })
++    expect(options.env).toEqual({ targets: ['chrome 80'] })
++  })
++
++  it('should include mode and coreJs when configured', () => {
++    const options = getLoaderSWCOptions({
++      ...baseArgs,
++      supportedBrowsers: ['chrome 80'],
++      swcEnvOptions: { mode: 'usage', coreJs: '3.38' },
++    })
++    expect(options.env).toEqual({
++      targets: ['chrome 80'],
++      mode: 'usage',
++      coreJs: '3.38',
++    })
++  })
++
++  it('should support entry mode', () => {
++    const options = getLoaderSWCOptions({
++      ...baseArgs,
++      supportedBrowsers: ['chrome 60', 'safari 11'],
++      swcEnvOptions: { mode: 'entry', coreJs: '3.38' },
++    })
++    expect(options.env.mode).toBe('entry')
++    expect(options.env.coreJs).toBe('3.38')
++  })
++
++  it('should pass through include, exclude, and other options', () => {
++    const options = getLoaderSWCOptions({
++      ...baseArgs,
++      supportedBrowsers: ['chrome 80'],
++      swcEnvOptions: {
++        mode: 'usage',
++        coreJs: '3.38',
++        include: ['es.array.at'],
++        exclude: ['es.promise'],
++        shippedProposals: true,
++        loose: true,
++      },
++    })
++    expect(options.env).toEqual({
++      targets: ['chrome 80'],
++      mode: 'usage',
++      coreJs: '3.38',
++      include: ['es.array.at'],
++      exclude: ['es.promise'],
++      shippedProposals: true,
++      loose: true,
++    })
++  })
++
++  it('should not set env when supportedBrowsers is empty', () => {
++    const options = getLoaderSWCOptions({
++      ...baseArgs,
++      supportedBrowsers: undefined,
++      swcEnvOptions: { mode: 'usage', coreJs: '3.38' },
++    })
++    expect(options.env).toBeUndefined()
++    expect(options.jsc.target).toBe('es5')
++  })
++
++  it('should not affect server-side compilation', () => {
++    const options = getLoaderSWCOptions({
++      ...baseArgs,
++      isServer: true,
++      supportedBrowsers: ['chrome 80'],
++      swcEnvOptions: { mode: 'usage', coreJs: '3.38' },
++    })
++    // Server targets node, not browsers
++    expect(options.env.targets).toEqual({
++      node: process.versions.node,
++    })
++    expect(options.env.mode).toBeUndefined()
++  })
++})
+diff --git a/turbopack/crates/turbopack-ecmascript/src/lib.rs b/turbopack/crates/turbopack-ecmascript/src/lib.rs
+index 8c74d782b363f..6cf2560653371 100644
+--- a/turbopack/crates/turbopack-ecmascript/src/lib.rs
++++ b/turbopack/crates/turbopack-ecmascript/src/lib.rs
+@@ -31,7 +31,7 @@ pub(crate) mod static_code;
+ mod swc_comments;
+ pub mod text;
+ pub mod text_source_transform;
+-pub(crate) mod transform;
++pub mod transform;
+ pub mod tree_shake;
+ pub mod typescript;
+ pub mod utils;
+diff --git a/turbopack/crates/turbopack-ecmascript/src/transform/mod.rs b/turbopack/crates/turbopack-ecmascript/src/transform/mod.rs
+index b88c716d8fb5b..53a5318ee57b8 100644
+--- a/turbopack/crates/turbopack-ecmascript/src/transform/mod.rs
++++ b/turbopack/crates/turbopack-ecmascript/src/transform/mod.rs
+@@ -28,11 +28,40 @@ use turbopack_core::{environment::Environment, source::Source};
+ 
+ use crate::runtime_functions::{TURBOPACK_MODULE, TURBOPACK_REFRESH};
+ 
++/// Additional options for SWC's preset-env, beyond the browserslist-derived
++/// targets that are already provided by the `Environment`.
++///
++/// These correspond to the fields documented at
++/// <https://swc.rs/docs/configuration/supported-browsers>.
++#[turbo_tasks::value(shared)]
++#[derive(Default, Clone, Debug)]
++pub struct PresetEnvConfig {
++    /// Polyfill injection mode (`"usage"` or `"entry"`), matching Babel's
++    /// `useBuiltIns`.
++    pub mode: Option<RcStr>,
++    /// The core-js version string (e.g. `"3.38"`).
++    pub core_js: Option<RcStr>,
++    /// Core-js modules or SWC transform passes to skip.
++    pub skip: Option<Vec<RcStr>>,
++    /// Core-js modules or SWC transform passes to always include.
++    pub include: Option<Vec<RcStr>>,
++    /// Core-js modules or SWC transform passes to always exclude.
++    pub exclude: Option<Vec<RcStr>>,
++    /// Enable shipped TC39 proposals.
++    pub shipped_proposals: Option<bool>,
++    /// Force all transforms regardless of targets.
++    pub force_all_transforms: Option<bool>,
++    /// Enable debug output.
++    pub debug: Option<bool>,
++    /// Enable loose mode for transforms.
++    pub loose: Option<bool>,
++}
++
+ #[turbo_tasks::value]
+ #[derive(Debug, Clone, Hash)]
+ pub enum EcmascriptInputTransform {
+     Plugin(ResolvedVc<TransformPlugin>),
+-    PresetEnv(ResolvedVc<Environment>),
++    PresetEnv(ResolvedVc<Environment>, ResolvedVc<PresetEnvConfig>),
+     React {
+         development: bool,
+         refresh: bool,
+@@ -199,19 +228,70 @@ impl EcmascriptInputTransform {
+ 
+                 helpers
+             }
+-            EcmascriptInputTransform::PresetEnv(env) => {
++            EcmascriptInputTransform::PresetEnv(env, preset_env_config) => {
+                 let versions = env.runtime_versions().await?;
++                let extra = preset_env_config.await?;
++
++                let mode = match extra.mode.as_deref() {
++                    Some("usage") => Some(preset_env::Mode::Usage),
++                    Some("entry") => Some(preset_env::Mode::Entry),
++                    _ => None,
++                };
++
++                let core_js = extra.core_js.as_ref().and_then(|v| {
++                    let parts: Vec<&str> = v.split('.').collect();
++                    Some(preset_env::Version {
++                        major: parts.first()?.parse().ok()?,
++                        minor: parts.get(1).and_then(|s| s.parse().ok()).unwrap_or(0),
++                        patch: parts.get(2).and_then(|s| s.parse().ok()).unwrap_or(0),
++                    })
++                });
++
++                let skip = extra
++                    .skip
++                    .as_ref()
++                    .map(|v| v.iter().map(|s| Atom::from(s.as_str())).collect())
++                    .unwrap_or_default();
++
++                let parse_feature_or_module = |s: &str| -> FeatureOrModule {
++                    if let Ok(feature) = s.parse::<Feature>() {
++                        FeatureOrModule::Feature(feature)
++                    } else {
++                        FeatureOrModule::CoreJsModule(s.to_string())
++                    }
++                };
++
++                let include: Vec<FeatureOrModule> = extra
++                    .include
++                    .as_ref()
++                    .map(|v| v.iter().map(|s| parse_feature_or_module(s)).collect())
++                    .unwrap_or_default();
++
++                // Disable some ancient ES3 transforms; ReservedWords breaks resolving of
++                // some ident references.
++                let mut exclude: Vec<FeatureOrModule> = vec![
++                    FeatureOrModule::Feature(Feature::ReservedWords),
++                    FeatureOrModule::Feature(Feature::MemberExpressionLiterals),
++                    FeatureOrModule::Feature(Feature::PropertyLiterals),
++                ];
++                if let Some(user_exclude) = &extra.exclude {
++                    for s in user_exclude {
++                        exclude.push(parse_feature_or_module(s));
++                    }
++                }
++
+                 let config = swc_core::ecma::preset_env::EnvConfig::from(
+                     swc_core::ecma::preset_env::Config {
+                         targets: Some(Targets::Versions(*versions)),
+-                        mode: None, // Don't insert core-js polyfills
+-                        // Disable some ancient ES3 transforms, ReservedWords breaks resolving of
+-                        // some idents references
+-                        exclude: vec![
+-                            FeatureOrModule::Feature(Feature::ReservedWords),
+-                            FeatureOrModule::Feature(Feature::MemberExpressionLiterals),
+-                            FeatureOrModule::Feature(Feature::PropertyLiterals),
+-                        ],
++                        mode,
++                        core_js,
++                        skip,
++                        include,
++                        exclude,
++                        shipped_proposals: extra.shipped_proposals.unwrap_or(false),
++                        force_all_transforms: extra.force_all_transforms.unwrap_or(false),
++                        debug: extra.debug.unwrap_or(false),
++                        loose: extra.loose.unwrap_or(false),
+                         ..Default::default()
+                     },
+                 );
+diff --git a/turbopack/crates/turbopack/src/module_options/mod.rs b/turbopack/crates/turbopack/src/module_options/mod.rs
+index 4148e3906d95d..203919ae5a8f1 100644
+--- a/turbopack/crates/turbopack/src/module_options/mod.rs
++++ b/turbopack/crates/turbopack/src/module_options/mod.rs
+@@ -30,6 +30,7 @@ use turbopack_ecmascript::{
+     AnalyzeMode, EcmascriptInputTransform, EcmascriptInputTransforms, EcmascriptOptions,
+     SpecifiedModuleType, bytes_source_transform::BytesSourceTransform,
+     json_source_transform::JsonSourceTransform, text_source_transform::TextSourceTransform,
++    transform::PresetEnvConfig,
+ };
+ use turbopack_mdx::MdxTransform;
+ use turbopack_node::{
+@@ -244,6 +245,7 @@ impl ModuleOptions {
+                     source_maps: ecmascript_source_maps,
+                     inline_helpers,
+                     infer_module_side_effects,
++                    ref preset_env_config,
+                     ..
+                 },
+             enable_mdx,
+@@ -331,7 +333,11 @@ impl ModuleOptions {
+         let ecmascript_options_vc = ecmascript_options.resolved_cell();
+ 
+         if let Some(environment) = environment {
+-            postprocess.push(EcmascriptInputTransform::PresetEnv(environment));
++            let env_config = match preset_env_config {
++                Some(c) => *c,
++                None => PresetEnvConfig::default().resolved_cell(),
++            };
++            postprocess.push(EcmascriptInputTransform::PresetEnv(environment, env_config));
+         }
+ 
+         let decorators_transform = if let Some(options) = &enable_decorators {
+diff --git a/turbopack/crates/turbopack/src/module_options/module_options_context.rs b/turbopack/crates/turbopack/src/module_options/module_options_context.rs
+index c262d1b078920..123d1ece8b348 100644
+--- a/turbopack/crates/turbopack/src/module_options/module_options_context.rs
++++ b/turbopack/crates/turbopack/src/module_options/module_options_context.rs
+@@ -15,6 +15,7 @@ use turbopack_core::{
+ };
+ use turbopack_ecmascript::{
+     AnalyzeMode, TreeShakingMode, TypeofWindow, references::esm::UrlRewriteBehavior,
++    transform::PresetEnvConfig,
+ };
+ pub use turbopack_mdx::MdxTransformOptions;
+ use turbopack_node::{
+@@ -296,6 +297,9 @@ pub struct EcmascriptOptionsContext {
+     /// Whether to infer side effect free modules via local analysis. Defaults to true.
+     pub infer_module_side_effects: bool,
+ 
++    /// Additional SWC preset-env options (mode, coreJs, include, exclude, etc.).
++    pub preset_env_config: Option<ResolvedVc<PresetEnvConfig>>,
++
+     pub placeholder_for_future_extensions: (),
+ }
+ 
