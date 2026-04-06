@@ -1,3 +1,8 @@
+System design is one of the most consequential activities in software engineering; a poor architectural decision in week one can cost months of rework. Yet today’s AI tools leave a critical gap, plus the best tools are not open source. 
+
+We are Kevin, Cerine, and Andrea, a multidisciplinary team that is working on the problem.
+
+
 # RepoDesign: Codebase-Aware Multimodal System Design Planning
 
 A multimodal agent pipeline that accepts a product specification, an existing code repository, and (optionally) architecture diagrams, and produces a **codebase-aware implementation plan** with real file paths, scale-appropriate technology choices, and executable ticket descriptions.
