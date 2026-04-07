@@ -503,6 +503,9 @@ def compute_rewards(
 
 def _parse_plan_json(text: str) -> dict | None:
     """Try to parse JSON from model output (handles markdown blocks)."""
+    # Strip common stop tokens that some Tinker models append after the JSON
+    for stop in ["<|endoftext|>", "<|im_end|>", "<|end|>", "</s>"]:
+        text = text.replace(stop, "")
     text = text.strip()
     try:
         return json.loads(text)
