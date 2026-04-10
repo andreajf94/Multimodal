@@ -1,0 +1,23 @@
+diff --git a/.github/workflows/build-package.yml b/.github/workflows/build-package.yml
+index 8f4be0d1ee1..ec25226cfe4 100644
+--- a/.github/workflows/build-package.yml
++++ b/.github/workflows/build-package.yml
+@@ -69,6 +69,8 @@ jobs:
+ 
+       - name: Check out repository
+         uses: actions/checkout@v4
++        with:
++          ref: ${{ inputs.ref || github.sha }}
+ 
+       - name: Set up python
+         uses: actions/setup-python@v5
+diff --git a/.github/workflows/publish.yml b/.github/workflows/publish.yml
+index 3203478ea43..00668822870 100644
+--- a/.github/workflows/publish.yml
++++ b/.github/workflows/publish.yml
+@@ -75,4 +75,4 @@ jobs:
+             ${{ inputs.tags }}
+           labels: ${{ steps.meta.outputs.labels }}
+           build-args: |
+-            COMMIT=${{ github.sha }}
++            COMMIT=${{ inputs.ref || github.sha }}

@@ -1,0 +1,609 @@
+diff --git a/.devcontainer/Dockerfile b/.devcontainer/Dockerfile
+index 4aa9d56e7b..c5bd4ec6c0 100644
+--- a/.devcontainer/Dockerfile
++++ b/.devcontainer/Dockerfile
+@@ -64,8 +64,6 @@ ARG RUNTIME_PACKAGES="\
+   libmagic1 \
+   media-types \
+   zlib1g \
+-  # Barcode splitter
+-  libzbar0 \
+   poppler-utils \
+   htop \
+   sudo"
+diff --git a/.github/dependabot.yml b/.github/dependabot.yml
+index 0cd9a445e6..1d4481a96e 100644
+--- a/.github/dependabot.yml
++++ b/.github/dependabot.yml
+@@ -69,7 +69,6 @@ updates:
+         patterns:
+           - "ocrmypdf"
+           - "pdf2image"
+-          - "pyzbar"
+           - "zxing-cpp"
+           - "tika-client"
+           - "gotenberg-client"
+diff --git a/.github/workflows/ci-backend.yml b/.github/workflows/ci-backend.yml
+index a4ffa06dcf..85d1fe3a98 100644
+--- a/.github/workflows/ci-backend.yml
++++ b/.github/workflows/ci-backend.yml
+@@ -55,7 +55,7 @@ jobs:
+         run: |
+           sudo apt-get update -qq
+           sudo apt-get install -qq --no-install-recommends \
+-            unpaper tesseract-ocr imagemagick ghostscript libzbar0 poppler-utils
++            unpaper tesseract-ocr imagemagick ghostscript poppler-utils
+       - name: Configure ImageMagick
+         run: |
+           sudo cp docker/rootfs/etc/ImageMagick-6/paperless-policy.xml /etc/ImageMagick-6/policy.xml
+diff --git a/.github/workflows/ci-docs.yml b/.github/workflows/ci-docs.yml
+index 213f6e4093..9496037f49 100644
+--- a/.github/workflows/ci-docs.yml
++++ b/.github/workflows/ci-docs.yml
+@@ -26,8 +26,8 @@ permissions:
+   pages: write
+   id-token: write
+ env:
+-  DEFAULT_UV_VERSION: "0.9.x"
+-  DEFAULT_PYTHON_VERSION: "3.11"
++  DEFAULT_UV_VERSION: "0.10.x"
++  DEFAULT_PYTHON_VERSION: "3.12"
+ jobs:
+   build:
+     name: Build Documentation
+diff --git a/.github/workflows/ci-release.yml b/.github/workflows/ci-release.yml
+index 822d225b6c..11b90f7132 100644
+--- a/.github/workflows/ci-release.yml
++++ b/.github/workflows/ci-release.yml
+@@ -8,8 +8,8 @@ concurrency:
+   group: release-${{ github.ref }}
+   cancel-in-progress: false
+ env:
+-  DEFAULT_UV_VERSION: "0.9.x"
+-  DEFAULT_PYTHON_VERSION: "3.11"
++  DEFAULT_UV_VERSION: "0.10.x"
++  DEFAULT_PYTHON_VERSION: "3.12"
+ jobs:
+   wait-for-docker:
+     name: Wait for Docker Build
+diff --git a/.mypy-baseline.txt b/.mypy-baseline.txt
+index 1f63f20237..c7abe67c01 100644
+--- a/.mypy-baseline.txt
++++ b/.mypy-baseline.txt
+@@ -20,7 +20,6 @@ src/documents/admin.py:0: error: Skipping analyzing "auditlog.models": module is
+ src/documents/admin.py:0: error: Skipping analyzing "treenode.admin": module is installed, but missing library stubs or py.typed marker  [import-untyped]
+ src/documents/barcodes.py:0: error: "Image" has no attribute "filename"  [attr-defined]
+ src/documents/barcodes.py:0: error: Cannot find implementation or library stub for module named "zxingcpp"  [import-not-found]
+-src/documents/barcodes.py:0: error: Skipping analyzing "pyzbar": module is installed, but missing library stubs or py.typed marker  [import-untyped]
+ src/documents/bulk_download.py:0: error: Return type "None" of "add_document" incompatible with return type "Never" in supertype "BulkArchiveStrategy"  [override]
+ src/documents/bulk_download.py:0: error: Return type "None" of "add_document" incompatible with return type "Never" in supertype "BulkArchiveStrategy"  [override]
+ src/documents/bulk_download.py:0: error: Return type "None" of "add_document" incompatible with return type "Never" in supertype "BulkArchiveStrategy"  [override]
+@@ -939,7 +938,6 @@ src/documents/tests/test_barcodes.py:0: error: Argument 1 to "get_reader" of "Ge
+ src/documents/tests/test_barcodes.py:0: error: Argument 3 to "BarcodePlugin" has incompatible type "DummyProgressManager"; expected "ProgressManager"  [arg-type]
+ src/documents/tests/test_barcodes.py:0: error: Argument 3 to "BarcodePlugin" has incompatible type "DummyProgressManager"; expected "ProgressManager"  [arg-type]
+ src/documents/tests/test_barcodes.py:0: error: Argument 3 to "BarcodePlugin" has incompatible type "DummyProgressManager"; expected "ProgressManager"  [arg-type]
+-src/documents/tests/test_barcodes.py:0: error: Cannot find implementation or library stub for module named "zxingcpp"  [import-not-found]
+ src/documents/tests/test_barcodes.py:0: error: Function is missing a return type annotation  [no-untyped-def]
+ src/documents/tests/test_barcodes.py:0: error: Incompatible types in assignment (expression has type "Path", variable has type "str")  [assignment]
+ src/documents/tests/test_barcodes.py:0: error: Item "None" of "ApplicationConfiguration | None" has no attribute "barcode_string"  [union-attr]
+@@ -1830,7 +1828,6 @@ src/paperless/checks.py:0: error: Argument 2 to "path_check" has incompatible ty
+ src/paperless/checks.py:0: error: Function is missing a return type annotation  [no-untyped-def]
+ src/paperless/checks.py:0: error: Function is missing a return type annotation  [no-untyped-def]
+ src/paperless/checks.py:0: error: Function is missing a return type annotation  [no-untyped-def]
+-src/paperless/checks.py:0: error: Function is missing a return type annotation  [no-untyped-def]
+ src/paperless/checks.py:0: error: Function is missing a type annotation  [no-untyped-def]
+ src/paperless/checks.py:0: error: Function is missing a type annotation  [no-untyped-def]
+ src/paperless/checks.py:0: error: Function is missing a type annotation  [no-untyped-def]
+diff --git a/Dockerfile b/Dockerfile
+index d8c87a8122..d0c3770500 100644
+--- a/Dockerfile
++++ b/Dockerfile
+@@ -154,8 +154,6 @@ ARG RUNTIME_PACKAGES="\
+   libmagic1 \
+   media-types \
+   zlib1g \
+-  # Barcode splitter
+-  libzbar0 \
+   poppler-utils"
+ 
+ # Install basic runtime packages.
+diff --git a/docs/advanced_usage.md b/docs/advanced_usage.md
+index 638544005f..6d0ec2b418 100644
+--- a/docs/advanced_usage.md
++++ b/docs/advanced_usage.md
+@@ -774,7 +774,6 @@ At this time, the library utilized for detection of barcodes supports the follow
+ -   QR Code
+ -   SQ Code
+ 
+-You may check for updates on the [zbar library homepage](https://github.com/mchehab/zbar).
+ For usage in Paperless, the type of barcode does not matter, only the contents of it.
+ 
+ For how to enable barcode usage, see [the configuration](configuration.md#barcodes).
+diff --git a/docs/configuration.md b/docs/configuration.md
+index 32d56408fa..10b20fe9a9 100644
+--- a/docs/configuration.md
++++ b/docs/configuration.md
+@@ -1222,14 +1222,6 @@ using Python's `re.match()`, which anchors at the start of the filename.
+ 
+     The default ignores are `[.stfolder, .stversions, .localized, @eaDir, .Spotlight-V100, .Trashes, __MACOSX]` and cannot be overridden.
+ 
+-#### [`PAPERLESS_CONSUMER_BARCODE_SCANNER=<string>`](#PAPERLESS_CONSUMER_BARCODE_SCANNER) {#PAPERLESS_CONSUMER_BARCODE_SCANNER}
+-
+-: Sets the barcode scanner used for barcode functionality.
+-
+-    Currently, "PYZBAR" (the default) or "ZXING" might be selected.
+-    If you have problems that your Barcodes/QR-Codes are not detected
+-    (especially with bad scan quality and/or small codes), try the other one.
+-
+ #### [`PAPERLESS_PRE_CONSUME_SCRIPT=<filename>`](#PAPERLESS_PRE_CONSUME_SCRIPT) {#PAPERLESS_PRE_CONSUME_SCRIPT}
+ 
+ : After some initial validation, Paperless can trigger an arbitrary
+diff --git a/docs/migration.md b/docs/migration.md
+index 1c934e6df4..60ffbf0749 100644
+--- a/docs/migration.md
++++ b/docs/migration.md
+@@ -23,3 +23,28 @@ separating the directory ignore from the file ignore.
+ Document and thumbnail encryption is no longer supported. This was previously deprecated in [paperless-ng 0.9.3](https://github.com/paperless-ngx/paperless-ngx/blob/dev/docs/changelog.md#paperless-ng-093)
+ 
+ Users must decrypt their document using the `decrypt_documents` command before upgrading.
++
++## Barcode Scanner Changes
++
++Support for [pyzbar](https://github.com/NaturalHistoryMuseum/pyzbar) has been removed. The underlying libzbar library has
++seen no updates in 16 years and is largely unmaintained, and the pyzbar Python wrapper last saw a release in March 2022. In
++practice, pyzbar struggled with barcode detection reliability, particularly on skewed, low-contrast, or partially
++obscured barcodes. [zxing-cpp](https://github.com/zxing-cpp/zxing-cpp) is actively maintained, significantly more
++reliable at finding barcodes, and now ships pre-built wheels for both x86_64 and arm64, removing the need to build the library.
++
++The `CONSUMER_BARCODE_SCANNER` setting has been removed. zxing-cpp is now the only backend.
++
++### Summary
++
++| Old Setting                | New Setting | Notes                             |
++| -------------------------- | ----------- | --------------------------------- |
++| `CONSUMER_BARCODE_SCANNER` | _Removed_   | zxing-cpp is now the only backend |
++
++### Action Required
++
++-   If you were already using `CONSUMER_BARCODE_SCANNER=ZXING`, simply remove the setting.
++-   If you had `CONSUMER_BARCODE_SCANNER=PYZBAR` or were using the default, no functional changes are needed beyond
++    removing the setting. zxing-cpp supports all the same barcode formats and you should see improved detection
++    reliability.
++-   The `libzbar0` / `libzbar-dev` system packages are no longer required and can be removed from any custom Docker
++    images or host installations.
+diff --git a/docs/setup.md b/docs/setup.md
+index 13cf6a63d2..2b83049c48 100644
+--- a/docs/setup.md
++++ b/docs/setup.md
+@@ -207,13 +207,12 @@ are released, dependency support is confirmed, etc.
+     -   `libpq-dev` for PostgreSQL
+     -   `libmagic-dev` for mime type detection
+     -   `mariadb-client` for MariaDB compile time
+-    -   `libzbar0` for barcode detection
+     -   `poppler-utils` for barcode detection
+ 
+     Use this list for your preferred package management:
+ 
+     ```
+-    python3 python3-pip python3-dev imagemagick fonts-liberation gnupg libpq-dev default-libmysqlclient-dev pkg-config libmagic-dev libzbar0 poppler-utils
++    python3 python3-pip python3-dev imagemagick fonts-liberation gnupg libpq-dev default-libmysqlclient-dev pkg-config libmagic-dev poppler-utils
+     ```
+ 
+     These dependencies are required for OCRmyPDF, which is used for text
+diff --git a/pyproject.toml b/pyproject.toml
+index eaa917a6f4..030c724f9c 100644
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -68,7 +68,6 @@ dependencies = [
+   "python-gnupg~=0.5.4",
+   "python-ipware~=3.0.0",
+   "python-magic~=0.4.27",
+-  "pyzbar~=0.1.9",
+   "rapidfuzz~=3.14.0",
+   "redis[hiredis]~=5.2.1",
+   "regex>=2025.9.18",
+@@ -81,7 +80,7 @@ dependencies = [
+   "watchfiles>=1.1.1",
+   "whitenoise~=6.11",
+   "whoosh-reloaded>=2.7.5",
+-  "zxing-cpp~=2.3.0",
++  "zxing-cpp~=3.0.0",
+ ]
+ 
+ optional-dependencies.mariadb = [
+@@ -172,10 +171,6 @@ psycopg-c = [
+   { url = "https://github.com/paperless-ngx/builder/releases/download/psycopg-trixie-3.3.0/psycopg_c-3.3.0-cp312-cp312-linux_x86_64.whl", marker = "sys_platform == 'linux' and platform_machine == 'x86_64' and python_version == '3.12'" },
+   { url = "https://github.com/paperless-ngx/builder/releases/download/psycopg-trixie-3.3.0/psycopg_c-3.3.0-cp312-cp312-linux_aarch64.whl", marker = "sys_platform == 'linux' and platform_machine == 'aarch64' and python_version == '3.12'" },
+ ]
+-zxing-cpp = [
+-  { url = "https://github.com/paperless-ngx/builder/releases/download/zxing-2.3.0/zxing_cpp-2.3.0-cp312-cp312-linux_x86_64.whl", marker = "sys_platform == 'linux' and platform_machine == 'x86_64' and python_version == '3.12'" },
+-  { url = "https://github.com/paperless-ngx/builder/releases/download/zxing-2.3.0/zxing_cpp-2.3.0-cp312-cp312-linux_aarch64.whl", marker = "sys_platform == 'linux' and platform_machine == 'aarch64' and python_version == '3.12'" },
+-]
+ 
+ torch = [
+   { index = "pytorch-cpu" },
+diff --git a/src/documents/barcodes.py b/src/documents/barcodes.py
+index 668b775475..31ef052c47 100644
+--- a/src/documents/barcodes.py
++++ b/src/documents/barcodes.py
+@@ -28,8 +28,6 @@
+ from paperless.config import BarcodeConfig
+ 
+ if TYPE_CHECKING:
+-    from collections.abc import Callable
+-
+     from PIL import Image
+ 
+ logger = logging.getLogger("paperless.barcodes")
+@@ -262,26 +260,6 @@ def read_barcodes_zxing(image: Image.Image) -> list[str]:
+ 
+         return barcodes
+ 
+-    @staticmethod
+-    def read_barcodes_pyzbar(image: Image.Image) -> list[str]:
+-        barcodes = []
+-
+-        from pyzbar import pyzbar
+-
+-        # Decode the barcode image
+-        detected_barcodes = pyzbar.decode(image)
+-
+-        # Traverse through all the detected barcodes in image
+-        for barcode in detected_barcodes:
+-            if barcode.data:
+-                decoded_barcode = barcode.data.decode("utf-8")
+-                barcodes.append(decoded_barcode)
+-                logger.debug(
+-                    f"Barcode of type {barcode.type} found: {decoded_barcode}",
+-                )
+-
+-        return barcodes
+-
+     def detect(self) -> None:
+         """
+         Scan all pages of the PDF as images, updating barcodes and the pages
+@@ -294,14 +272,6 @@ def detect(self) -> None:
+         # No op if not a TIFF
+         self.convert_from_tiff_to_pdf()
+ 
+-        # Choose the library for reading
+-        if settings.CONSUMER_BARCODE_SCANNER == "PYZBAR":
+-            reader: Callable[[Image.Image], list[str]] = self.read_barcodes_pyzbar
+-            logger.debug("Scanning for barcodes using PYZBAR")
+-        else:
+-            reader = self.read_barcodes_zxing
+-            logger.debug("Scanning for barcodes using ZXING")
+-
+         try:
+             # Read number of pages from pdf
+             with Pdf.open(self.pdf_file) as pdf:
+@@ -349,7 +319,7 @@ def detect(self) -> None:
+                     )
+ 
+                 # Detect barcodes
+-                for barcode_value in reader(page):
++                for barcode_value in self.read_barcodes_zxing(page):
+                     self.barcodes.append(
+                         Barcode(current_page_number, barcode_value, self.settings),
+                     )
+diff --git a/src/documents/tests/test_barcodes.py b/src/documents/tests/test_barcodes.py
+index d7dab5a2db..2d9ac58f07 100644
+--- a/src/documents/tests/test_barcodes.py
++++ b/src/documents/tests/test_barcodes.py
+@@ -4,7 +4,6 @@
+ from pathlib import Path
+ from unittest import mock
+ 
+-import pytest
+ from django.conf import settings
+ from django.test import TestCase
+ from django.test import override_settings
+@@ -25,13 +24,6 @@
+ from documents.tests.utils import SampleDirMixin
+ from paperless.models import ApplicationConfiguration
+ 
+-try:
+-    import zxingcpp  # noqa: F401
+-
+-    HAS_ZXING_LIB = True
+-except ImportError:
+-    HAS_ZXING_LIB = False
+-
+ 
+ class GetReaderPluginMixin:
+     @contextmanager
+@@ -48,7 +40,6 @@ def get_reader(self, filepath: Path) -> Generator[BarcodePlugin, None, None]:
+         reader.cleanup()
+ 
+ 
+-@override_settings(CONSUMER_BARCODE_SCANNER="PYZBAR")
+ class TestBarcode(
+     DirectoriesMixin,
+     FileSystemAssertsMixin,
+@@ -606,7 +597,6 @@ def test_barcode_config(self) -> None:
+             self.assertDictEqual(separator_page_numbers, {0: False})
+ 
+ 
+-@override_settings(CONSUMER_BARCODE_SCANNER="PYZBAR")
+ class TestBarcodeNewConsume(
+     DirectoriesMixin,
+     FileSystemAssertsMixin,
+@@ -784,25 +774,23 @@ def test_consume_barcode_file_asn_assignment(self) -> None:
+ 
+             self.assertEqual(document.archive_serial_number, 123)
+ 
+-    @override_settings(CONSUMER_BARCODE_SCANNER="PYZBAR")
+     def test_scan_file_for_qrcode_without_upscale(self) -> None:
+         """
+         GIVEN:
+             - A printed and scanned PDF document with a rather small QR code
+         WHEN:
+             - ASN barcode detection is run with default settings
+-            - pyzbar is used for detection, as zxing would behave differently, and detect the QR code
+         THEN:
+-            - ASN is not detected
++            - ASN 123 is detected
+         """
+ 
+         test_file = self.BARCODE_SAMPLE_DIR / "barcode-qr-asn-000123-upscale-dpi.pdf"
+ 
+         with self.get_reader(test_file) as reader:
+             reader.detect()
+-            self.assertEqual(len(reader.barcodes), 0)
++            self.assertEqual(len(reader.barcodes), 1)
++            self.assertEqual(reader.asn, 123)
+ 
+-    @override_settings(CONSUMER_BARCODE_SCANNER="PYZBAR")
+     @override_settings(CONSUMER_BARCODE_DPI=600)
+     @override_settings(CONSUMER_BARCODE_UPSCALE=1.5)
+     def test_scan_file_for_qrcode_with_upscale(self) -> None:
+@@ -810,10 +798,7 @@ def test_scan_file_for_qrcode_with_upscale(self) -> None:
+         GIVEN:
+             - A printed and scanned PDF document with a rather small QR code
+         WHEN:
+-            - ASN barcode detection is run with 600dpi and an upscale factor of 1.5 and pyzbar
+-            - pyzbar is used for detection, as zxing would behave differently.
+-              Upscaling is a workaround for detection problems with pyzbar,
+-              when you cannot switch to zxing (aarch64 build problems of zxing)
++            - ASN barcode detection is run with 600dpi and an upscale factor of 1.5
+         THEN:
+             - ASN 123 is detected
+         """
+@@ -826,24 +811,6 @@ def test_scan_file_for_qrcode_with_upscale(self) -> None:
+             self.assertEqual(reader.asn, 123)
+ 
+ 
+-@pytest.mark.skipif(
+-    not HAS_ZXING_LIB,
+-    reason="No zxingcpp",
+-)
+-@override_settings(CONSUMER_BARCODE_SCANNER="ZXING")
+-class TestBarcodeZxing(TestBarcode):
+-    pass
+-
+-
+-@pytest.mark.skipif(
+-    not HAS_ZXING_LIB,
+-    reason="No zxingcpp",
+-)
+-@override_settings(CONSUMER_BARCODE_SCANNER="ZXING")
+-class TestAsnBarcodesZxing(TestAsnBarcode):
+-    pass
+-
+-
+ class TestTagBarcode(DirectoriesMixin, SampleDirMixin, GetReaderPluginMixin, TestCase):
+     @contextmanager
+     def get_reader(self, filepath: Path) -> BarcodePlugin:
+diff --git a/src/paperless/checks.py b/src/paperless/checks.py
+index 29d35f76b5..7df85d1465 100644
+--- a/src/paperless/checks.py
++++ b/src/paperless/checks.py
+@@ -167,17 +167,6 @@ def _timezone_validate():
+             )
+         return msgs
+ 
+-    def _barcode_scanner_validate():
+-        """
+-        Validates the barcode scanner type
+-        """
+-        msgs = []
+-        if settings.CONSUMER_BARCODE_SCANNER not in ["PYZBAR", "ZXING"]:
+-            msgs.append(
+-                Error(f'Invalid Barcode Scanner "{settings.CONSUMER_BARCODE_SCANNER}"'),
+-            )
+-        return msgs
+-
+     def _email_certificate_validate():
+         msgs = []
+         # Existence checks
+@@ -195,7 +184,6 @@ def _email_certificate_validate():
+     return (
+         _ocrmypdf_settings_check()
+         + _timezone_validate()
+-        + _barcode_scanner_validate()
+         + _email_certificate_validate()
+     )
+ 
+diff --git a/src/paperless/settings.py b/src/paperless/settings.py
+index 490727e8f1..910d206c1f 100644
+--- a/src/paperless/settings.py
++++ b/src/paperless/settings.py
+@@ -1106,11 +1106,6 @@ def default_threads_per_worker(task_workers) -> int:
+     "PATCHT",
+ )
+ 
+-CONSUMER_BARCODE_SCANNER: Final[str] = os.getenv(
+-    "PAPERLESS_CONSUMER_BARCODE_SCANNER",
+-    "PYZBAR",
+-).upper()
+-
+ CONSUMER_ENABLE_ASN_BARCODE: Final[bool] = __get_boolean(
+     "PAPERLESS_CONSUMER_ENABLE_ASN_BARCODE",
+ )
+diff --git a/src/paperless/tests/test_checks.py b/src/paperless/tests/test_checks.py
+index 30fdde182a..fc61508264 100644
+--- a/src/paperless/tests/test_checks.py
++++ b/src/paperless/tests/test_checks.py
+@@ -187,31 +187,6 @@ def test_invalid_timezone(self) -> None:
+         self.assertIn('Timezone "TheMoon\\MyCrater"', msg.msg)
+ 
+ 
+-class TestBarcodeSettingsChecks(DirectoriesMixin, TestCase):
+-    @override_settings(CONSUMER_BARCODE_SCANNER="Invalid")
+-    def test_barcode_scanner_invalid(self) -> None:
+-        msgs = settings_values_check(None)
+-        self.assertEqual(len(msgs), 1)
+-
+-        msg = msgs[0]
+-
+-        self.assertIn('Invalid Barcode Scanner "Invalid"', msg.msg)
+-
+-    @override_settings(CONSUMER_BARCODE_SCANNER="")
+-    def test_barcode_scanner_empty(self) -> None:
+-        msgs = settings_values_check(None)
+-        self.assertEqual(len(msgs), 1)
+-
+-        msg = msgs[0]
+-
+-        self.assertIn('Invalid Barcode Scanner ""', msg.msg)
+-
+-    @override_settings(CONSUMER_BARCODE_SCANNER="PYZBAR")
+-    def test_barcode_scanner_valid(self) -> None:
+-        msgs = settings_values_check(None)
+-        self.assertEqual(len(msgs), 0)
+-
+-
+ class TestEmailCertSettingsChecks(DirectoriesMixin, FileSystemAssertsMixin, TestCase):
+     @override_settings(EMAIL_CERTIFICATE_FILE=Path("/tmp/not_actually_here.pem"))
+     def test_not_valid_file(self) -> None:
+diff --git a/uv.lock b/uv.lock
+index dd92a8488a..1b8af1b5b4 100644
+--- a/uv.lock
++++ b/uv.lock
+@@ -3072,7 +3072,6 @@ dependencies = [
+     { name = "python-gnupg", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
+     { name = "python-ipware", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
+     { name = "python-magic", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
+-    { name = "pyzbar", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
+     { name = "rapidfuzz", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
+     { name = "redis", extra = ["hiredis"], marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
+     { name = "regex", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
+@@ -3086,9 +3085,7 @@ dependencies = [
+     { name = "watchfiles", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
+     { name = "whitenoise", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
+     { name = "whoosh-reloaded", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
+-    { name = "zxing-cpp", version = "2.3.0", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version != '3.12.*' and platform_machine == 'aarch64' and sys_platform == 'linux') or (python_full_version != '3.12.*' and platform_machine == 'x86_64' and sys_platform == 'linux') or (platform_machine != 'aarch64' and platform_machine != 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
+-    { name = "zxing-cpp", version = "2.3.0", source = { url = "https://github.com/paperless-ngx/builder/releases/download/zxing-2.3.0/zxing_cpp-2.3.0-cp312-cp312-linux_aarch64.whl" }, marker = "python_full_version == '3.12.*' and platform_machine == 'aarch64' and sys_platform == 'linux'" },
+-    { name = "zxing-cpp", version = "2.3.0", source = { url = "https://github.com/paperless-ngx/builder/releases/download/zxing-2.3.0/zxing_cpp-2.3.0-cp312-cp312-linux_x86_64.whl" }, marker = "python_full_version == '3.12.*' and platform_machine == 'x86_64' and sys_platform == 'linux'" },
++    { name = "zxing-cpp", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
+ ]
+ 
+ [package.optional-dependencies]
+@@ -3227,7 +3224,6 @@ requires-dist = [
+     { name = "python-gnupg", specifier = "~=0.5.4" },
+     { name = "python-ipware", specifier = "~=3.0.0" },
+     { name = "python-magic", specifier = "~=0.4.27" },
+-    { name = "pyzbar", specifier = "~=0.1.9" },
+     { name = "rapidfuzz", specifier = "~=3.14.0" },
+     { name = "redis", extras = ["hiredis"], specifier = "~=5.2.1" },
+     { name = "regex", specifier = ">=2025.9.18" },
+@@ -3240,9 +3236,7 @@ requires-dist = [
+     { name = "watchfiles", specifier = ">=1.1.1" },
+     { name = "whitenoise", specifier = "~=6.11" },
+     { name = "whoosh-reloaded", specifier = ">=2.7.5" },
+-    { name = "zxing-cpp", marker = "(python_full_version != '3.12.*' and platform_machine == 'aarch64') or (python_full_version != '3.12.*' and platform_machine == 'x86_64') or (platform_machine != 'aarch64' and platform_machine != 'x86_64') or sys_platform != 'linux'", specifier = "~=2.3.0" },
+-    { name = "zxing-cpp", marker = "python_full_version == '3.12.*' and platform_machine == 'aarch64' and sys_platform == 'linux'", url = "https://github.com/paperless-ngx/builder/releases/download/zxing-2.3.0/zxing_cpp-2.3.0-cp312-cp312-linux_aarch64.whl" },
+-    { name = "zxing-cpp", marker = "python_full_version == '3.12.*' and platform_machine == 'x86_64' and sys_platform == 'linux'", url = "https://github.com/paperless-ngx/builder/releases/download/zxing-2.3.0/zxing_cpp-2.3.0-cp312-cp312-linux_x86_64.whl" },
++    { name = "zxing-cpp", specifier = "~=3.0.0" },
+ ]
+ provides-extras = ["mariadb", "postgres", "webserver"]
+ 
+@@ -4282,14 +4276,6 @@ wheels = [
+     { url = "https://files.pythonhosted.org/packages/da/92/1446574745d74df0c92e6aa4a7b0b3130706a4142b2d1a5869f2eaa423c6/pyyaml-6.0.3-cp314-cp314t-musllinux_1_2_x86_64.whl", hash = "sha256:16249ee61e95f858e83976573de0f5b2893b3677ba71c9dd36b9cf8be9ac6d65", size = 829923, upload-time = "2025-09-25T21:32:54.537Z" },
+ ]
+ 
+-[[package]]
+-name = "pyzbar"
+-version = "0.1.9"
+-source = { registry = "https://pypi.org/simple" }
+-wheels = [
+-    { url = "https://files.pythonhosted.org/packages/6d/24/81ebe6a1c00760471a3028a23cbe0b94e5fa2926e5ba47adc895920887bc/pyzbar-0.1.9-py2.py3-none-any.whl", hash = "sha256:4559628b8192feb25766d954b36a3753baaf5c97c03135aec7e4a026036b475d", size = 32560, upload-time = "2022-03-15T14:53:40.637Z" },
+-]
+-
+ [[package]]
+ name = "qrcode"
+ version = "8.2"
+@@ -6244,50 +6230,28 @@ wheels = [
+ 
+ [[package]]
+ name = "zxing-cpp"
+-version = "2.3.0"
++version = "3.0.0"
+ source = { registry = "https://pypi.org/simple" }
+-resolution-markers = [
+-    "python_full_version >= '3.12' and sys_platform == 'darwin'",
+-    "python_full_version == '3.11.*' and sys_platform == 'darwin'",
+-    "python_full_version < '3.11' and sys_platform == 'darwin'",
+-    "(python_full_version >= '3.12' and platform_machine != 'aarch64' and platform_machine != 'x86_64' and sys_platform == 'linux') or (python_full_version >= '3.13' and platform_machine == 'aarch64' and sys_platform == 'linux') or (python_full_version >= '3.13' and platform_machine == 'x86_64' and sys_platform == 'linux')",
+-    "python_full_version == '3.11.*' and sys_platform == 'linux'",
+-    "python_full_version < '3.11' and sys_platform == 'linux'",
+-]
+-sdist = { url = "https://files.pythonhosted.org/packages/d9/f2/b781bf6119abe665069777e3c0f154752cf924fe8a55fca027243abbc555/zxing_cpp-2.3.0.tar.gz", hash = "sha256:3babedb67a4c15c9de2c2b4c42d70af83a6c85780c1b2d9803ac64c6ae69f14e", size = 1172666, upload-time = "2025-01-01T21:54:05.856Z" }
+-wheels = [
+-    { url = "https://files.pythonhosted.org/packages/31/93/3e830a3dd44a9f7d11219883bc6f131ca68da2a5ad48690d9645e19c3b55/zxing_cpp-2.3.0-cp310-cp310-macosx_10_9_universal2.whl", hash = "sha256:4e1ffcdd8e44a344cbf32bb0435e1fbe67241337c0a0f22452c2b8f7c16dc75e", size = 1694502, upload-time = "2025-01-01T21:53:06.339Z" },
+-    { url = "https://files.pythonhosted.org/packages/d7/4c/6bf1551c9b0097e13bcc54b82828e66719c021afd3ef05fd3d7650e0e768/zxing_cpp-2.3.0-cp310-cp310-manylinux_2_17_i686.manylinux2014_i686.whl", hash = "sha256:bfde95506d3fec439705dbc8771ace025d049dce324861ddbf74be3ab0fabd36", size = 991445, upload-time = "2025-01-01T21:53:08.204Z" },
+-    { url = "https://files.pythonhosted.org/packages/64/6c/1bf6e40fadcb73958f672385c5186b062485c818cecc32b36ddf5666da1e/zxing_cpp-2.3.0-cp310-cp310-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:fd3f175f7b57cfbdea56afdb5335eaebaadeebc06e20a087d9aa3f99637c4aa5", size = 982960, upload-time = "2025-01-01T21:53:10.136Z" },
+-    { url = "https://files.pythonhosted.org/packages/ab/60/d420be9446b25a65064a665603bd24295e143e2bafde500bfc952a07fbee/zxing_cpp-2.3.0-cp311-cp311-macosx_10_9_universal2.whl", hash = "sha256:6ef0548f4247480da988ce1dad4d9c5b8d7cb2871538894fb9615c9ac0bb8656", size = 1697594, upload-time = "2025-01-01T21:53:17.292Z" },
+-    { url = "https://files.pythonhosted.org/packages/3e/34/ea057223cc34e63b1ff27b2794bcddfa58a1a64af7314882291255b56980/zxing_cpp-2.3.0-cp311-cp311-manylinux_2_17_i686.manylinux2014_i686.whl", hash = "sha256:bfc1095dc3303ed24be2622916e199a071bae19b19d432a0ce7ca993f95879ec", size = 991930, upload-time = "2025-01-01T21:53:18.808Z" },
+-    { url = "https://files.pythonhosted.org/packages/2e/d3/75a6d6485e704527c5e18f825f6bd6b5e5129f56c3526f28142911b48410/zxing_cpp-2.3.0-cp311-cp311-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:64e5a4ff5168142d8b33ca648978c8ec4125c50b33aa1521e0c5344c6ffacef7", size = 983751, upload-time = "2025-01-01T21:53:21.757Z" },
+-    { url = "https://files.pythonhosted.org/packages/94/d2/e4552dc7d341ccf6242410a13bf95cbd37d7bf194a482d400729b5934b87/zxing_cpp-2.3.0-cp312-cp312-macosx_10_13_universal2.whl", hash = "sha256:2f457c0aa53c1de263e34cac9917ef647bfb9adcc9e3d4f42a8a1fc02558e1a6", size = 1698659, upload-time = "2025-01-01T21:53:36.692Z" },
+-    { url = "https://files.pythonhosted.org/packages/0e/6c/00252c1b3545c13d68922b67cb7c555f739b3a1755cc2a694fd8705ecae2/zxing_cpp-2.3.0-cp312-cp312-manylinux_2_17_i686.manylinux2014_i686.whl", hash = "sha256:899955e0091fa0e159b9eb429e43d0a23e2be4a5347c9629c858844f02024b4b", size = 992014, upload-time = "2025-01-01T21:53:39.621Z" },
+-    { url = "https://files.pythonhosted.org/packages/95/30/3143bf75944d65c9432349a79b97f9414965a44875ec9eeb5745592b4ecd/zxing_cpp-2.3.0-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:dec2805c0e9dec0d7707c97ca5196f98d2730d2dfcea80442807123b9f8ec850", size = 984542, upload-time = "2025-01-01T21:53:41.01Z" },
+-    { url = "https://files.pythonhosted.org/packages/3d/46/ef7c69bea44a7c64d4a740679dd18c59616d610fb468c057d8bfbda5f063/zxing_cpp-2.3.0-cp313-cp313-macosx_10_13_universal2.whl", hash = "sha256:3da0fbf0d93ef85663def561e8f7880447970710ea6b1768dfc05550a9ee3e00", size = 1698948, upload-time = "2025-01-01T21:53:46.768Z" },
+-    { url = "https://files.pythonhosted.org/packages/49/2e/8ed22a7b3743a8aa6a588366e34c44056d118ea7614b6bdbc44817ab4a7f/zxing_cpp-2.3.0-cp313-cp313-manylinux_2_17_i686.manylinux2014_i686.whl", hash = "sha256:a0b36f3be2e6d928bea9bd529f173ef41092061f0f46d27f591c87486f9a7366", size = 992070, upload-time = "2025-01-01T21:53:48.258Z" },
+-    { url = "https://files.pythonhosted.org/packages/ce/5e/5784ad14f8514e4321f3a828dccc00ebcf70202f6ef967174d26bcb65568/zxing_cpp-2.3.0-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:7ba641ca5a0f19b97d7bc6a0212e61dab267a2b1a52a84946d02bdcd859ec318", size = 984869, upload-time = "2025-01-01T21:53:51.256Z" },
+-]
+-
+-[[package]]
+-name = "zxing-cpp"
+-version = "2.3.0"
+-source = { url = "https://github.com/paperless-ngx/builder/releases/download/zxing-2.3.0/zxing_cpp-2.3.0-cp312-cp312-linux_aarch64.whl" }
+-resolution-markers = [
+-    "python_full_version == '3.12.*' and platform_machine == 'aarch64' and sys_platform == 'linux'",
+-]
+-wheels = [
+-    { url = "https://github.com/paperless-ngx/builder/releases/download/zxing-2.3.0/zxing_cpp-2.3.0-cp312-cp312-linux_aarch64.whl", hash = "sha256:cfe600ed871ac540733fea3dac15c345b1ef61b703dd73ab0b618d29a491e611" },
+-]
+-
+-[[package]]
+-name = "zxing-cpp"
+-version = "2.3.0"
+-source = { url = "https://github.com/paperless-ngx/builder/releases/download/zxing-2.3.0/zxing_cpp-2.3.0-cp312-cp312-linux_x86_64.whl" }
+-resolution-markers = [
+-    "python_full_version == '3.12.*' and platform_machine == 'x86_64' and sys_platform == 'linux'",
+-]
+-wheels = [
+-    { url = "https://github.com/paperless-ngx/builder/releases/download/zxing-2.3.0/zxing_cpp-2.3.0-cp312-cp312-linux_x86_64.whl", hash = "sha256:15c6b1b6975a2a7d3dc679a05f6aed435753e39a105f37bed11098d00e0b5e79" },
++sdist = { url = "https://files.pythonhosted.org/packages/f1/c6/ac2a12cdc2b1c296804fc6a65bf112b607825ca7f47742a5aca541134711/zxing_cpp-3.0.0.tar.gz", hash = "sha256:703353304de24d947bd68044fac4e062953a7b64029de6941ba8ffeb4476b60d", size = 1197544, upload-time = "2026-02-10T12:50:11.252Z" }
++wheels = [
++    { url = "https://files.pythonhosted.org/packages/ac/84/689a748f08635ff1543265905532cbe6dfaa299350cfd6591e4456da3014/zxing_cpp-3.0.0-cp310-cp310-macosx_10_9_x86_64.whl", hash = "sha256:63bcc80e7a6c741f1948381bb1b9c36082400624a217e3306aebb1e2bec21f6f", size = 910995, upload-time = "2026-02-10T12:49:22.189Z" },
++    { url = "https://files.pythonhosted.org/packages/28/3d/f3c23181697a2407e2079dc122ba8c266b46842e3ffc810d510716a95759/zxing_cpp-3.0.0-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:0b30e2f4b081a85fe5f09ba34cb17486d607625f2ddeb0c80d5212d2872e5530", size = 865029, upload-time = "2026-02-10T12:49:24.719Z" },
++    { url = "https://files.pythonhosted.org/packages/1e/48/1e56b02edfda18d557abea7cf5790a7a0aade06191f7c2bbce4a4efab0fd/zxing_cpp-3.0.0-cp310-cp310-manylinux_2_26_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:dd640c33a06da8b15e36a8e0c3c8236531fea13a95d7eaa8deb91ccb5d76c4e7", size = 993311, upload-time = "2026-02-10T12:49:26.487Z" },
++    { url = "https://files.pythonhosted.org/packages/db/47/78fe46ee99e4f6b67467a96ca61e75e907d2e469f63bbd92127b91008c02/zxing_cpp-3.0.0-cp310-cp310-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:630adc04f3a7916054a91c71d7dd55568e798289be5f16186a17ea05555eb60f", size = 1070707, upload-time = "2026-02-10T12:49:27.746Z" },
++    { url = "https://files.pythonhosted.org/packages/e6/9c/25ddd83cd109a97a0382fe807a8b0904b3eefcf42d22df6aa6ae6a5e2b86/zxing_cpp-3.0.0-cp311-cp311-macosx_10_9_x86_64.whl", hash = "sha256:c171e9b37f596293d1134e74c3285a8b7cf06ef72e2ad39c4a7d54b1aa939782", size = 912816, upload-time = "2026-02-10T12:49:33.174Z" },
++    { url = "https://files.pythonhosted.org/packages/32/cc/e2e0d68e60fb132c31c728e24dc529cbb5579bfa1365c64b62290aefe317/zxing_cpp-3.0.0-cp311-cp311-macosx_11_0_arm64.whl", hash = "sha256:e712d958155408c8e902ea91d8feb3f4edfa41fd207ef85ca9e59f3f0c7060ad", size = 866684, upload-time = "2026-02-10T12:49:34.913Z" },
++    { url = "https://files.pythonhosted.org/packages/96/f9/538488cacaea1e3e989cf87c389d075e2139ee50fab786de7e59b64f9411/zxing_cpp-3.0.0-cp311-cp311-manylinux_2_26_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:e4f62174643de2012bde470bf2048d8a29b5d93bb23bbdc6c075e7e92dbd5794", size = 994390, upload-time = "2026-02-10T12:49:36.294Z" },
++    { url = "https://files.pythonhosted.org/packages/51/c1/3eab6fa0b1c6e83a23ce94727e1551ca49a6edabe4691adaa8d03ff742a2/zxing_cpp-3.0.0-cp311-cp311-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:156b363a0aae0b2472c58628346b5223ebb72935f0fa5def3d7ab4a7211c3e88", size = 1071503, upload-time = "2026-02-10T12:49:38.575Z" },
++    { url = "https://files.pythonhosted.org/packages/7b/7f/32b4cc8545da72061d360aca9d96c51738d48e2f3a8eebe06a47f4103dd6/zxing_cpp-3.0.0-cp312-cp312-macosx_10_13_x86_64.whl", hash = "sha256:8b76fac77c94545c5a6e2e6184a121c09409fff29f9c7557e350c16b78025d74", size = 914798, upload-time = "2026-02-10T12:49:43.556Z" },
++    { url = "https://files.pythonhosted.org/packages/df/21/5ba18d19383fe5f044fefa79640f4234665bc77057cf3d584e5eb979685f/zxing_cpp-3.0.0-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:0bf58043c543d3440f1cbef6bfa9e5ad7139c39c90955d1f294f4778f0cd1ec0", size = 867437, upload-time = "2026-02-10T12:49:45.424Z" },
++    { url = "https://files.pythonhosted.org/packages/8a/2a/94d98c5b728e1dfeec3a343f2581bf7f372ca448cefff50076cab0c6e0c4/zxing_cpp-3.0.0-cp312-cp312-manylinux_2_26_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:548cc0e767f24193038031c76f60f2de0965ab5b05106dff6095bcae89607748", size = 995650, upload-time = "2026-02-10T12:49:47.222Z" },
++    { url = "https://files.pythonhosted.org/packages/39/0f/03f09d048b7dde279a5bed8839ffbb21f7e8995747afa17970791c0356ff/zxing_cpp-3.0.0-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:cfdf7a393541f4cd7c7c9329ec5d56b49a5cfc91bf24cdc53ec301d41c2afd68", size = 1074289, upload-time = "2026-02-10T12:49:48.804Z" },
++    { url = "https://files.pythonhosted.org/packages/a0/c4/c4f276e43c4df74896b7cac2a3e5deabaf743e8256ee6736380d64f7295b/zxing_cpp-3.0.0-cp313-cp313-macosx_10_13_x86_64.whl", hash = "sha256:26ee52319b545a0db5adc19c682d5bd7efa210456daff0293f5cc78311c52d90", size = 914828, upload-time = "2026-02-10T12:49:53.306Z" },
++    { url = "https://files.pythonhosted.org/packages/52/7e/971bb37b9091b02fd12f7c13745335a77a8e9e907abc3e0530ff9c4e6b32/zxing_cpp-3.0.0-cp313-cp313-macosx_11_0_arm64.whl", hash = "sha256:c4d44e63c0cb06df1d7ab636018b3e7139d5b010c22a5dcb18f3badfa29e1e1c", size = 867410, upload-time = "2026-02-10T12:49:55.061Z" },
++    { url = "https://files.pythonhosted.org/packages/8e/df/cbf7e3ad2ca5f80f71df39c99fb7061f39fb390a9cab031dab2be361c8be/zxing_cpp-3.0.0-cp313-cp313-manylinux_2_26_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:d9e9f7404b9b33abf863ccb243f6b0e99c4818028894dfdd8fb41e142fcdad65", size = 996406, upload-time = "2026-02-10T12:49:56.42Z" },
++    { url = "https://files.pythonhosted.org/packages/a3/ac/ae87a5ed87a7623e18a986e4394c3e12a5fa0f4fa55dae3be7f5ca6ef392/zxing_cpp-3.0.0-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:0a96c8eaf1adff4c5aaf99c74d2b5ce3d542d44c21f964ac3f70eaaefcdc141e", size = 1074221, upload-time = "2026-02-10T12:49:57.971Z" },
++    { url = "https://files.pythonhosted.org/packages/7a/06/8ecd68d8a9e9bb7166808480a1c09ab059c9974b5c54a40640d4e4e1d814/zxing_cpp-3.0.0-cp314-cp314-macosx_10_15_x86_64.whl", hash = "sha256:af13fcbbe24ca4285bda83309f50954107ddf7d12686c332a838f4eaf88ff619", size = 915701, upload-time = "2026-02-10T12:50:01.942Z" },
++    { url = "https://files.pythonhosted.org/packages/f5/38/76f89b42fff2fae62595b3adc88b72e6eb1460acb9c43a8ed4c2455297df/zxing_cpp-3.0.0-cp314-cp314-macosx_11_0_arm64.whl", hash = "sha256:1b74a6b3608d035818d6d4fa9545875acae92635028b8927e3922175cb4fe19b", size = 868123, upload-time = "2026-02-10T12:50:03.222Z" },
++    { url = "https://files.pythonhosted.org/packages/0a/3b/b76d979f74f09a7d764fe4c22583ba8322ef0f347e3193eceb1461b84913/zxing_cpp-3.0.0-cp314-cp314-manylinux_2_26_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:27901910b14e2d6a6f8eba585249d02ac23660de1a6fef3dc3a283bb017c41d0", size = 997309, upload-time = "2026-02-10T12:50:04.835Z" },
++    { url = "https://files.pythonhosted.org/packages/f8/e4/dd9ce2a725c83c15b1bc45b3d4e6be30f9528bcb9a4749002e1c4c8dca51/zxing_cpp-3.0.0-cp314-cp314-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:489fc0ab4af893e1b10b58b70c34db80fbbaf6e5c27c216e8f3f2367cf18a45d", size = 1074223, upload-time = "2026-02-10T12:50:06.622Z" },
+ ]

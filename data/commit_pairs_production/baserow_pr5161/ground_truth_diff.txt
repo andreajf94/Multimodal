@@ -1,0 +1,155 @@
+diff --git a/backend/src/baserow/contrib/database/field_rules/handlers.py b/backend/src/baserow/contrib/database/field_rules/handlers.py
+index 0f4673a0da..cb0e24bba9 100644
+--- a/backend/src/baserow/contrib/database/field_rules/handlers.py
++++ b/backend/src/baserow/contrib/database/field_rules/handlers.py
+@@ -180,7 +180,28 @@ def create_rule(
+         self, rule_type_name: str, in_data: dict, primary_key_value: int | None = None
+     ) -> FieldRule:
+         """
+-        Creates a rule of a given type.
++        Creates a rule of a given type after checking rule-type preconditions.
++
++        Delegates to `can_create_rule` on the rule type (which may raise if
++        the required feature or license is unavailable) and then to
++        `force_create_rule`.
++
++        :param rule_type_name: registered rule type name.
++        :param in_data: a dictionary with all rule params.
++        :param primary_key_value: (optional) the primary key value for the rule (if
++            the instance is being restored).
++        :return: rule instance.
++        """
++
++        rule_type = self.get_type_handler(rule_type_name)
++        rule_type.can_create_rule(self.table)
++        return self.force_create_rule(rule_type_name, in_data, primary_key_value)
++
++    def force_create_rule(
++        self, rule_type_name: str, in_data: dict, primary_key_value: int | None = None
++    ) -> FieldRule:
++        """
++        Creates a rule of a given type without checking rule-type preconditions.
+ 
+         This method creates an instance of a field rule. Field rule type is provided
+         in `rule_type_name` param. Each field rule type should validate additional
+@@ -190,7 +211,7 @@ def create_rule(
+         This is used in undo/redo operations, because we want to preserve
+         rule identification.
+ 
+-        :param rule_type_name: registered rule type name .
++        :param rule_type_name: registered rule type name.
+         :param in_data: a dictionary with all rule params.
+         :param primary_key_value: (optional) the primary key value for the rule (if
+             the instance is being restored).
+@@ -597,4 +618,4 @@ def import_rule(self, rule_data: dict, id_mapping: dict) -> FieldRule:
+         rule_type = self.get_type_handler(rule_type_name)
+ 
+         prepared_values = rule_type.prepare_values_for_import(rule_data, id_mapping)
+-        return self.create_rule(rule_type_name, prepared_values)
++        return self.force_create_rule(rule_type_name, prepared_values)
+diff --git a/backend/src/baserow/contrib/database/field_rules/registries.py b/backend/src/baserow/contrib/database/field_rules/registries.py
+index 82b3ebc57c..cefbea891f 100644
+--- a/backend/src/baserow/contrib/database/field_rules/registries.py
++++ b/backend/src/baserow/contrib/database/field_rules/registries.py
+@@ -154,6 +154,16 @@ def prepare_values_for_import(self, rule_data: dict, id_mapping: dict) -> dict:
+ 
+         return rule_data
+ 
++    def can_create_rule(self, table: Table) -> None:
++        """
++        Called before creating a new rule to check if the rule can be created.
++
++        Raises an exception if the rule cannot be created (e.g. missing license).
++        Does nothing by default.
++
++        :param table: the table for which the rule is being created
++        """
++
+     def prepare_values_for_create(self, table, in_data: dict) -> dict:
+         """
+         Called before creating a new rule. Resulting dict should contain
+diff --git a/changelog/entries/unreleased/bug/fix_sync_templates_license_check_field_rules.json b/changelog/entries/unreleased/bug/fix_sync_templates_license_check_field_rules.json
+new file mode 100644
+index 0000000000..f35d15573d
+--- /dev/null
++++ b/changelog/entries/unreleased/bug/fix_sync_templates_license_check_field_rules.json
+@@ -0,0 +1,9 @@
++{
++    "type": "bug",
++    "message": "Fix template sync failing when importing enterprise field rules without a license.",
++    "issue_origin": "github",
++    "issue_number": null,
++    "domain": "database",
++    "bullet_points": [],
++    "created_at": "2026-04-09"
++}
+diff --git a/enterprise/backend/src/baserow_enterprise/date_dependency/field_rule_types.py b/enterprise/backend/src/baserow_enterprise/date_dependency/field_rule_types.py
+index ada0ad16bc..3785ec88e7 100644
+--- a/enterprise/backend/src/baserow_enterprise/date_dependency/field_rule_types.py
++++ b/enterprise/backend/src/baserow_enterprise/date_dependency/field_rule_types.py
+@@ -288,6 +288,9 @@ def _validate_data(self, table: Table, in_data: dict) -> DateDepenencyDict:
+         )
+ 
+     # lifecycle hooks
++    def can_create_rule(self, table: Table) -> None:
++        self.check_license(table)
++
+     def prepare_values_for_create(
+         self, table: Table, in_data: dict
+     ) -> DateDepenencyDict:
+@@ -295,7 +298,6 @@ def prepare_values_for_create(
+         Returns a dictionary with values needed to create a new rule.
+         """
+ 
+-        self.check_license(table)
+         return self._validate_data(table, in_data)
+ 
+     def prepare_values_for_update(
+diff --git a/enterprise/backend/tests/baserow_enterprise_tests/date_dependency/test_date_dependency_handler.py b/enterprise/backend/tests/baserow_enterprise_tests/date_dependency/test_date_dependency_handler.py
+index f8f26e3926..97e728b355 100644
+--- a/enterprise/backend/tests/baserow_enterprise_tests/date_dependency/test_date_dependency_handler.py
++++ b/enterprise/backend/tests/baserow_enterprise_tests/date_dependency/test_date_dependency_handler.py
+@@ -88,6 +88,43 @@ def test_date_dependency_handler_create_rule_serializer(
+     assert serializer.is_valid(raise_exception=False)
+ 
+ 
++@pytest.mark.django_db
++def test_date_dependency_import_rule_without_license(data_fixture):
++    user = data_fixture.create_user()
++    table = data_fixture.create_database_table(user=user)
++
++    start_date_field = data_fixture.create_date_field(
++        table=table, name="start_date_field"
++    )
++    end_date_field = data_fixture.create_date_field(table=table, name="end_date_field")
++    duration_field = data_fixture.create_duration_field(
++        table=table, name="duration_field", duration_format="d h"
++    )
++
++    serialized_rule = {
++        "type": "date_dependency",
++        "is_active": True,
++        "start_date_field_id": start_date_field.id,
++        "end_date_field_id": end_date_field.id,
++        "duration_field_id": duration_field.id,
++        "dependency_linkrow_field_id": None,
++        "dependency_linkrow_role": "predecessors",
++        "dependency_connection_type": "end-to-start",
++        "dependency_buffer_type": "fixed",
++        "dependency_buffer": 0,
++    }
++    id_mapping = {
++        f.id: f.id for f in [start_date_field, end_date_field, duration_field]
++    }
++
++    handler = FieldRuleHandler(table, user)
++    rule = handler.import_rule(serialized_rule, id_mapping)
++
++    assert rule is not None
++    assert rule.table == table
++    assert DateDependency.objects.filter(pk=rule.pk).exists()
++
++
+ @pytest.mark.django_db
+ def test_date_dependency_handler_create_rule_no_license(data_fixture):
+     user = data_fixture.create_user()

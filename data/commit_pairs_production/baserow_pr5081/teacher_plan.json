@@ -1,0 +1,97 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "error_handling",
+      "recommendation": "Added specific exception handling for FieldDataConstraintException in the local Baserow upsert service to prevent crashes when field constraints are violated",
+      "rationale": "The service was previously crashing with unhandled exceptions when users tried to create or update rows that violated field constraints (like unique constraints). By catching FieldDataConstraintException and converting it to InvalidContextContentDispatchException, we provide user-friendly error messages while maintaining the existing error handling structure.",
+      "alternatives_considered": [
+        "Letting the exception propagate unchanged (current behavior that causes crashes)",
+        "Creating a new exception type specifically for constraint violations",
+        "Returning generic error responses without specific constraint violation details"
+      ],
+      "files_affected": [
+        "backend/src/baserow/contrib/integrations/local_baserow/service_types.py"
+      ]
+    },
+    {
+      "dimension": "testing",
+      "recommendation": "Added comprehensive test coverage for both create and update operations with field constraint violations",
+      "rationale": "Tests verify that constraint violations are properly caught and converted to appropriate error responses. Separate tests for create and update operations ensure both code paths are covered. Tests use actual field constraints (TextTypeUniqueWithEmptyConstraint) to simulate real-world scenarios.",
+      "alternatives_considered": [
+        "Only testing create operations (missing update scenario coverage)",
+        "Using mocked exceptions instead of actual constraint violations",
+        "Adding minimal test coverage without specific constraint scenarios"
+      ],
+      "files_affected": [
+        "backend/tests/baserow/contrib/builder/api/workflow_actions/test_workflow_actions_views.py"
+      ]
+    },
+    {
+      "dimension": "api_design",
+      "recommendation": "Maintained consistent error response format by using InvalidContextContentDispatchException for constraint violations",
+      "rationale": "Using the existing InvalidContextContentDispatchException ensures that constraint violation errors follow the same pattern as other dispatch errors, making them easily consumable by the frontend. The error messages are descriptive enough for users to understand what went wrong without exposing internal implementation details.",
+      "alternatives_considered": [
+        "Creating a new exception type with different error codes",
+        "Returning raw database constraint violation messages",
+        "Using different error response formats for constraint violations vs other errors"
+      ],
+      "files_affected": [
+        "backend/src/baserow/contrib/integrations/local_baserow/service_types.py"
+      ]
+    },
+    {
+      "dimension": "documentation",
+      "recommendation": "Added changelog entry to document the bug fix for field constraint error handling",
+      "rationale": "The changelog entry provides traceability for the fix and helps users understand what was changed. It follows the established format for bug fixes in the project and will be included in release notes.",
+      "alternatives_considered": [
+        "Not documenting the change in changelog",
+        "Adding documentation in code comments only",
+        "Creating separate release notes outside the changelog system"
+      ],
+      "files_affected": [
+        "changelog/entries/unreleased/bug/ensure_local_baserow_upsert_integration_handles_unique_const.json"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Add Field Constraint Exception Handling to Local Baserow Service",
+      "description": "Implement error handling for field constraint violations in the local Baserow upsert service to prevent crashes when users try to create or update rows that violate constraints like unique fields",
+      "files_to_modify": [
+        "backend/src/baserow/contrib/integrations/local_baserow/service_types.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-002",
+      "title": "Add Test Coverage for Constraint Violation Scenarios",
+      "description": "Create comprehensive tests for both create and update operations that trigger field constraint violations to ensure the error handling works correctly",
+      "files_to_modify": [
+        "backend/tests/baserow/contrib/builder/api/workflow_actions/test_workflow_actions_views.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-003",
+      "title": "Document Bug Fix in Changelog",
+      "description": "Add changelog entry to document the fix for field constraint error handling in the local Baserow upsert integration",
+      "files_to_modify": [],
+      "files_to_create": [
+        "changelog/entries/unreleased/bug/ensure_local_baserow_upsert_integration_handles_unique_const.json"
+      ],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation addresses a critical bug where the local Baserow upsert service would crash when users attempted to create or update rows that violated field constraints (such as unique field constraints). The fix follows a three-part approach: error handling enhancement, comprehensive testing, and proper documentation.\n\nFirst, in the service_types.py file, specific exception handling was added for FieldDataConstraintException in both the update and create row operations. When updating an existing row, the service now catches constraint violations and raises an InvalidContextContentDispatchException with a message indicating the specific row ID that violates constraints. For create operations, a similar approach is taken with a message indicating the table ID. This maintains consistency with existing error patterns while providing meaningful feedback to users.\n\nSecond, two comprehensive tests were added to verify both create and update scenarios. The tests create actual fields with unique constraints, populate the database with conflicting data, and verify that the service returns appropriate error responses (HTTP 400 with specific error codes and messages). This ensures the error handling works end-to-end and prevents regressions.\n\nThird, a changelog entry was created following the project's established format to document the bug fix. The implementation integrates seamlessly with the existing codebase by leveraging the established exception hierarchy and error response patterns, ensuring frontend compatibility while fixing the crash issue.",
+  "source_pr": "https://github.com/baserow/baserow/pull/5081",
+  "before_sha": "8d9e3dc8ffa96b289be061f7eb56db834fbe9b1f",
+  "after_sha": "adcfdacc7a2cc80e334aeff7d4db77209e5de2af",
+  "diff_stats": {
+    "additions": 130,
+    "deletions": 0,
+    "files_changed": 3
+  }
+}

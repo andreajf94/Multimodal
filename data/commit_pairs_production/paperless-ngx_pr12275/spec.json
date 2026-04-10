@@ -1,0 +1,13 @@
+{
+  "feature_name": "Lazy AI Module Imports",
+  "description": "Implement lazy loading for AI-related modules to reduce memory usage during application startup. Currently, the AI libraries (including llama_index, sentence_transformers, transformers, and torch) are imported during Django initialization even when not needed, causing unnecessary memory allocation for management commands and other operations that don't use AI features. This change should defer importing these heavy dependencies until they're actually required.",
+  "functional_requirements": [
+    "Modify the AI module imports so they're only loaded when specific AI functionality is invoked",
+    "Ensure all existing AI features (indexing, embedding, chat, client operations) continue to work exactly as before",
+    "Maintain backward compatibility with existing code that depends on the AI modules",
+    "Update test files to verify that lazy loading works correctly without breaking functionality",
+    "Ensure the import chain from Django setup through documents.tasks to paperless_ai modules doesn't trigger premature AI library loading"
+  ],
+  "project_name": "paperless-ngx",
+  "source_pr": "https://github.com/paperless-ngx/paperless-ngx/pull/12275"
+}

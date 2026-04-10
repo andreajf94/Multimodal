@@ -1,0 +1,48 @@
+diff --git a/apps/web/playwright/apps/analytics/analyticsApps.e2e.ts b/apps/web/playwright/apps/analytics/analyticsApps.e2e.ts
+index 306b054bcc7151..1f1ee90b542fe3 100644
+--- a/apps/web/playwright/apps/analytics/analyticsApps.e2e.ts
++++ b/apps/web/playwright/apps/analytics/analyticsApps.e2e.ts
+@@ -22,9 +22,9 @@ test.describe("check analytics Apps", () => {
+         await page.goto("/event-types");
+         await appsPage.goToEventType("30 min");
+         await appsPage.goToAppsTab();
+-        await appsPage.verifyAppsInfo(0);
++        await appsPage.verifyAppsInfo(1, 0);
+         await appsPage.activeApp(app);
+-        await appsPage.verifyAppsInfo(1);
++        await appsPage.verifyAppsInfo(1, 1);
+       });
+     });
+   });
+diff --git a/apps/web/playwright/fixtures/apps.ts b/apps/web/playwright/fixtures/apps.ts
+index 353c228f4671c3..7ff8f5f4d04591 100644
+--- a/apps/web/playwright/fixtures/apps.ts
++++ b/apps/web/playwright/fixtures/apps.ts
+@@ -127,8 +127,11 @@ export function createAppsFixture(page: Page) {
+     activeApp: async (app: string) => {
+       await page.locator(`[data-testid='${app}-app-switch']`).click();
+     },
+-    verifyAppsInfo: async (activeApps: number) => {
+-      await expect(page.locator(`text=1 apps, ${activeApps} active`)).toBeVisible();
++    verifyAppsInfo: async (installedApps: number, activeApps: number) => {
++      const appsLabel = installedApps === 1 ? "app" : "apps";
++      await expect(
++        page.locator(`text=${installedApps} ${appsLabel}, ${activeApps} active`)
++      ).toBeVisible();
+     },
+     verifyAppsInfoNew: async (app: string, eventTypeId: number) => {
+       await page.goto(`event-types/${eventTypeId}?tabName=apps`);
+diff --git a/packages/platform/atoms/event-types/hooks/useTabsNavigations.tsx b/packages/platform/atoms/event-types/hooks/useTabsNavigations.tsx
+index 7abaecd1a0d3e4..7a08cadb9bf372 100644
+--- a/packages/platform/atoms/event-types/hooks/useTabsNavigations.tsx
++++ b/packages/platform/atoms/event-types/hooks/useTabsNavigations.tsx
+@@ -216,8 +216,7 @@ function getNavigation({
+       name: t("apps"),
+       href: `/event-types/${id}?tabName=apps`,
+       icon: "grid-3x3",
+-      //TODO: Handle proper translation with count handling
+-      info: `${installedAppsNumber} apps, ${enabledAppsNumber} ${t("active")}`,
++      info: `${t("number_apps", { count: installedAppsNumber })}, ${enabledAppsNumber} ${t("active")}`,
+       "data-testid": "apps",
+     },
+   ];

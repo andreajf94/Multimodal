@@ -1,0 +1,180 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "dependency_management",
+      "recommendation": "Removed pyzbar dependency and upgraded zxing-cpp to version 3.0.0, eliminating the need for custom wheel builds",
+      "rationale": "pyzbar was unmaintained (last release March 2022) and relied on libzbar which hadn't been updated in 16 years. zxing-cpp 3.0.0 now provides pre-built wheels for all supported architectures, simplifying dependency management and removing the need for custom builds.",
+      "alternatives_considered": [
+        "Keeping both libraries with pyzbar as fallback",
+        "Maintaining custom wheel builds for zxing-cpp",
+        "Switching to a different barcode library entirely"
+      ],
+      "files_affected": [
+        ".github/dependabot.yml",
+        "pyproject.toml",
+        "uv.lock"
+      ]
+    },
+    {
+      "dimension": "system_dependencies",
+      "recommendation": "Removed libzbar0 system package from all Docker and CI configurations",
+      "rationale": "Since pyzbar is no longer used, its underlying system dependency libzbar0 is no longer required. This reduces container size and simplifies installation requirements across all deployment scenarios.",
+      "alternatives_considered": [
+        "Keeping libzbar0 for potential future compatibility",
+        "Making libzbar0 optional with conditional installation"
+      ],
+      "files_affected": [
+        ".devcontainer/Dockerfile",
+        ".github/workflows/ci-backend.yml",
+        "Dockerfile",
+        "docs/setup.md"
+      ]
+    },
+    {
+      "dimension": "configuration_simplification",
+      "recommendation": "Removed CONSUMER_BARCODE_SCANNER setting and associated validation logic",
+      "rationale": "With only one barcode reader backend (zxing-cpp), the configuration option becomes unnecessary. This eliminates conditional code paths, reduces complexity, and prevents user confusion about which scanner to choose.",
+      "alternatives_considered": [
+        "Keeping the setting as a no-op for backward compatibility",
+        "Deprecating the setting first before removal",
+        "Making the setting read-only with a fixed value"
+      ],
+      "files_affected": [
+        "docs/configuration.md",
+        "src/documents/barcodes.py",
+        "src/paperless/checks.py",
+        "src/paperless/settings.py",
+        "src/paperless/tests/test_checks.py"
+      ]
+    },
+    {
+      "dimension": "code_refactoring",
+      "recommendation": "Removed pyzbar-specific code and consolidated to use only zxing-cpp in barcode detection logic",
+      "rationale": "Eliminated conditional branching based on scanner type, simplified the detect() method by directly calling read_barcodes_zxing(), and removed the now-unused reader function selection logic. This makes the code more maintainable and reduces cognitive load.",
+      "alternatives_considered": [
+        "Keeping the pyzbar code as commented-out reference",
+        "Creating an abstract barcode reader interface",
+        "Moving pyzbar code to a separate module for potential future use"
+      ],
+      "files_affected": [
+        "src/documents/barcodes.py"
+      ]
+    },
+    {
+      "dimension": "testing_strategy",
+      "recommendation": "Removed pyzbar-specific test classes and consolidated test coverage around zxing-cpp",
+      "rationale": "Eliminated duplicate test classes (TestBarcodeZxing, TestAsnBarcodesZxing) that were created to test both backends. Updated remaining tests to reflect that zxing-cpp now detects barcodes that pyzbar couldn't detect (like small QR codes without upscaling).",
+      "alternatives_considered": [
+        "Keeping pyzbar tests as historical reference",
+        "Creating generic tests that work with any backend",
+        "Maintaining separate test suites for regression testing"
+      ],
+      "files_affected": [
+        "src/documents/tests/test_barcodes.py"
+      ]
+    },
+    {
+      "dimension": "documentation",
+      "recommendation": "Updated all documentation to reflect the removal of pyzbar and the CONSUMER_BARCODE_SCANNER setting",
+      "rationale": "Provided clear migration guidance in docs/migration.md, removed references to pyzbar from configuration documentation, and updated installation instructions to exclude libzbar0. This ensures users understand the change and know what actions to take.",
+      "alternatives_considered": [
+        "Keeping old documentation for historical reference",
+        "Creating a separate migration document",
+        "Only documenting the change in release notes"
+      ],
+      "files_affected": [
+        "docs/advanced_usage.md",
+        "docs/configuration.md",
+        "docs/migration.md",
+        "docs/setup.md"
+      ]
+    },
+    {
+      "dimension": "tooling_infrastructure",
+      "recommendation": "Updated Python version and uv version in CI workflows and cleaned up mypy baseline",
+      "rationale": "While removing barcode support, also updated tooling versions to stay current. Removed mypy errors related to pyzbar imports that are no longer relevant, keeping the type checking baseline clean.",
+      "alternatives_considered": [
+        "Making tooling updates in a separate PR",
+        "Keeping old Python/uv versions for stability",
+        "Ignoring mypy errors instead of removing them"
+      ],
+      "files_affected": [
+        ".github/workflows/ci-docs.yml",
+        ".github/workflows/ci-release.yml",
+        ".mypy-baseline.txt"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Remove pyzbar dependency and system packages",
+      "description": "Remove pyzbar Python dependency and libzbar0 system package from all configurations, upgrade zxing-cpp to 3.0.0",
+      "files_to_modify": [
+        ".devcontainer/Dockerfile",
+        ".github/dependabot.yml",
+        ".github/workflows/ci-backend.yml",
+        "Dockerfile",
+        "pyproject.toml",
+        "uv.lock",
+        "docs/setup.md"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-002",
+      "title": "Remove barcode scanner configuration and validation",
+      "description": "Remove CONSUMER_BARCODE_SCANNER setting, associated validation logic, and update documentation",
+      "files_to_modify": [
+        "docs/configuration.md",
+        "src/paperless/checks.py",
+        "src/paperless/settings.py",
+        "src/paperless/tests/test_checks.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-003",
+      "title": "Refactor barcode detection code",
+      "description": "Remove pyzbar-specific code paths and consolidate to use only zxing-cpp in barcode detection logic",
+      "files_to_modify": [
+        "src/documents/barcodes.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-004",
+      "title": "Update test suite for single barcode backend",
+      "description": "Remove pyzbar-specific test classes and update tests to reflect zxing-cpp's capabilities",
+      "files_to_modify": [
+        "src/documents/tests/test_barcodes.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-005",
+      "title": "Update documentation and migration guide",
+      "description": "Add migration documentation and update all references to barcode functionality",
+      "files_to_modify": [
+        "docs/advanced_usage.md",
+        "docs/configuration.md",
+        "docs/migration.md"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation removes legacy barcode reader support by consolidating all barcode functionality to use zxing-cpp exclusively. This was a strategic decision to simplify the codebase, reduce maintenance burden, and improve barcode detection reliability.\n\nThe key approach was systematic removal: starting with dependencies (removing pyzbar from pyproject.toml and libzbar0 from system packages), then configuration (removing the CONSUMER_BARCODE_SCANNER setting), followed by code refactoring (eliminating conditional logic in barcodes.py), and finally updating tests and documentation. The migration was made seamless by ensuring zxing-cpp supports all the same barcode formats as pyzbar while providing better detection capabilities.\n\nAn important pattern in this change is the comprehensive nature of the removal - not just deleting code but also updating CI configurations, documentation, type checking baselines, and dependency files. The implementation maintains backward compatibility in functionality while simplifying the user experience by removing configuration options. The documentation updates in docs/migration.md provide clear guidance for users, explaining the rationale and required actions, which is crucial for a breaking change like this.",
+  "source_pr": "https://github.com/paperless-ngx/paperless-ngx/pull/12065",
+  "before_sha": "1c70d3f8a824e09aae2f93c5bf93946120a1e726",
+  "after_sha": "8db1c4e08b58227cc5a383b12ffe13e309b747e7",
+  "diff_stats": {
+    "additions": 62,
+    "deletions": 201,
+    "files_changed": 18
+  }
+}

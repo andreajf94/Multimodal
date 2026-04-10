@@ -1,0 +1,120 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "api_design",
+      "recommendation": "Extracted license validation into a separate 'can_create_rule' hook in the rule type registry, separating permission checks from core creation logic.",
+      "rationale": "This follows the Single Responsibility Principle - license validation is now a distinct concern from rule creation. The hook-based approach allows enterprise rule types to implement license checks while keeping the base registry clean. This enables the import system to bypass license checks while maintaining all other validation.",
+      "alternatives_considered": [
+        "Adding a boolean parameter to create_rule to skip license checks",
+        "Creating a separate import-specific method in each rule type",
+        "Moving license validation to middleware or decorators"
+      ],
+      "files_affected": [
+        "backend/src/baserow/contrib/database/field_rules/registries.py",
+        "enterprise/backend/src/baserow_enterprise/date_dependency/field_rule_types.py"
+      ]
+    },
+    {
+      "dimension": "data_modeling",
+      "recommendation": "Refactored the rule creation flow into two distinct methods: 'create_rule' (with validation) and 'force_create_rule' (without validation).",
+      "rationale": "This creates a clear separation between user-initiated operations (which require license checks) and system operations like imports (which should bypass them). The 'force_create_rule' method preserves all other validation and lifecycle hooks, ensuring imported rules are still properly validated for data integrity.",
+      "alternatives_considered": [
+        "Creating a separate handler class for imports",
+        "Using a context manager to temporarily disable license checks",
+        "Adding a 'skip_license_check' flag to the existing create_rule method"
+      ],
+      "files_affected": [
+        "backend/src/baserow/contrib/database/field_rules/handlers.py"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Maintained existing error behavior for direct API requests while allowing imports to succeed without licenses.",
+      "rationale": "The solution preserves backward compatibility for user-facing APIs - direct creation requests without a license still raise appropriate errors. Only the import path bypasses license checks, which is acceptable because templates are system-generated content that should be importable regardless of licensing status.",
+      "alternatives_considered": [
+        "Silently downgrading enterprise features during import",
+        "Creating placeholder rules that activate when licensed",
+        "Logging warnings instead of raising exceptions"
+      ],
+      "files_affected": [
+        "backend/src/baserow/contrib/database/field_rules/handlers.py",
+        "enterprise/backend/src/baserow_enterprise/date_dependency/field_rule_types.py"
+      ]
+    },
+    {
+      "dimension": "testing",
+      "recommendation": "Added a specific test for importing date dependency rules without a license to verify the fix works correctly.",
+      "rationale": "The test validates that the import flow can successfully create enterprise field rules even when the instance lacks an enterprise license. This ensures the fix addresses the exact scenario described in the feature request and prevents regression.",
+      "alternatives_considered": [
+        "Only testing the generic import mechanism",
+        "Relying on existing integration tests",
+        "Adding the test to the core test suite instead of enterprise"
+      ],
+      "files_affected": [
+        "enterprise/backend/tests/baserow_enterprise_tests/date_dependency/test_date_dependency_handler.py"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Extract license validation into separate hook",
+      "description": "Add 'can_create_rule' hook to field rule type registry to separate license validation from creation logic",
+      "files_to_modify": [
+        "backend/src/baserow/contrib/database/field_rules/registries.py",
+        "enterprise/backend/src/baserow_enterprise/date_dependency/field_rule_types.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-002",
+      "title": "Refactor rule creation into two methods",
+      "description": "Split create_rule into create_rule (with validation) and force_create_rule (without validation) to support license-bypassing imports",
+      "files_to_modify": [
+        "backend/src/baserow/contrib/database/field_rules/handlers.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-003",
+      "title": "Update import logic to use force_create_rule",
+      "description": "Modify import_rule method to call force_create_rule instead of create_rule, allowing template imports without license checks",
+      "files_to_modify": [
+        "backend/src/baserow/contrib/database/field_rules/handlers.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-004",
+      "title": "Add test for license-bypassing import",
+      "description": "Create test to verify date dependency rules can be imported without an enterprise license",
+      "files_to_modify": [
+        "enterprise/backend/tests/baserow_enterprise_tests/date_dependency/test_date_dependency_handler.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-005",
+      "title": "Add changelog entry",
+      "description": "Document the fix for template sync failing when importing enterprise field rules without a license",
+      "files_to_modify": [],
+      "files_to_create": [
+        "changelog/entries/unreleased/bug/fix_sync_templates_license_check_field_rules.json"
+      ],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation addresses the template import issue by separating license validation from rule creation logic. The core change introduces a new 'can_create_rule' hook in the field rule type registry, allowing enterprise rule types like date dependency to implement license checks separately from their creation logic. This hook is called in the existing 'create_rule' method but bypassed in the new 'force_create_rule' method.\n\nThe handler's 'create_rule' method was refactored into two distinct methods: 'create_rule' (which calls 'can_create_rule' then delegates to 'force_create_rule') and 'force_create_rule' (which performs the actual rule creation without permission checks). This separation maintains the existing API behavior for user-initiated requests while allowing the import system to bypass license validation when restoring templates.\n\nThe import logic was updated to use 'force_create_rule', ensuring that template synchronization can succeed regardless of licensing status. All other validation and lifecycle hooks (like 'prepare_values_for_import') remain intact, preserving data integrity. The solution is minimal and focused, touching only the necessary components while maintaining backward compatibility and clear separation of concerns.",
+  "source_pr": "https://github.com/baserow/baserow/pull/5161",
+  "before_sha": "7e03df615bf19d16784d2eb083a2434da07766e7",
+  "after_sha": "c43ef8eb600118167b417fc3ac70fbd90572ffc8",
+  "diff_stats": {
+    "additions": 83,
+    "deletions": 4,
+    "files_changed": 5
+  }
+}

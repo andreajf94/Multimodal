@@ -1,0 +1,1325 @@
+diff --git a/.agents/plans/bright-emerald-flower-bullmq-background-jobs.md b/.agents/plans/bright-emerald-flower-bullmq-background-jobs.md
+new file mode 100644
+index 0000000000..04438bfc84
+--- /dev/null
++++ b/.agents/plans/bright-emerald-flower-bullmq-background-jobs.md
+@@ -0,0 +1,239 @@
++---
++date: 2026-03-26
++title: Bullmq Background Jobs
++---
++
++## Context
++
++The codebase has a well-designed background job provider abstraction (`BaseJobProvider`) with two existing implementations:
++
++- **InngestJobProvider** — cloud/SaaS provider, externally hosted
++- **LocalJobProvider** — database-backed (Postgres via Prisma), uses HTTP self-calls to dispatch
++
++The goal is to add a third provider backed by a proper job queue library for self-hosted deployments that need more reliability than the Local provider offers.
++
++### Current Architecture
++
++All code lives in `packages/lib/jobs/`:
++
++- `client/base.ts` — Abstract `BaseJobProvider` with 4 methods: `defineJob()`, `triggerJob()`, `getApiHandler()`, `startCron()`
++- `client/client.ts` — `JobClient` facade, selects provider via `NEXT_PRIVATE_JOBS_PROVIDER` env var
++- `client/inngest.ts` — Inngest implementation
++- `client/local.ts` — Local/Postgres implementation
++- `client/_internal/job.ts` — Core types: `JobDefinition`, `JobRunIO`, `SimpleTriggerJobOptions`
++- `definitions/` — 19 job definitions (15 event-triggered, 4 cron)
++
++The `JobRunIO` interface provided to handlers includes:
++
++- `runTask(cacheKey, callback)` — idempotent task execution (cached via `BackgroundJobTask` table)
++- `triggerJob(cacheKey, options)` — chain jobs from within handlers
++- `wait(cacheKey, ms)` — delay/sleep (not implemented in Local provider)
++- `logger` — structured logging
++
++### Local Provider Limitations
++
++The current Local provider has several issues that motivate this work:
++
++1. `io.wait()` throws "Not implemented"
++2. HTTP self-call with 150ms fire-and-forget `Promise.race` is fragile
++3. No concurrency control — jobs run in the web server process
++4. No real retry backoff (immediate re-dispatch)
++5. No monitoring/visibility into job status
++6. Jobs compete for resources with HTTP request handling
++
++---
++
++## Provider Evaluation
++
++Three alternatives were evaluated against the existing provider interface and project requirements.
++
++### BullMQ (Redis-backed) — Recommended
++
++| Attribute           | Detail                     |
++| ------------------- | -------------------------- |
++| Backend             | Redis 7.x                  |
++| npm downloads/month | ~15M                       |
++| TypeScript          | Native                     |
++| Delayed jobs        | Yes (ms precision)         |
++| Cron/repeatable     | Yes (`upsertJobScheduler`) |
++| Retries + backoff   | Yes (exponential, custom)  |
++| Concurrency control | Yes (per-worker)           |
++| Rate limiting       | Yes (per-queue, per-group) |
++| Dashboard           | Bull Board (mature)        |
++| New infrastructure  | Yes — Redis required       |
++
++**Why BullMQ**: Most mature and widely-adopted Node.js queue. Native delayed jobs solve the `io.wait()` gap. Redis is purpose-built for queue workloads and keeps Postgres clean for application data. Bull Board gives immediate operational visibility. The provider abstraction already exists so wrapping BullMQ is straightforward.
++
++**Trade-off**: Requires Redis, which is additional infrastructure. However, Redis is a single Docker Compose service or a free Upstash tier, and the operational benefit is significant.
++
++### pg-boss (PostgreSQL-backed) — Strong Alternative
++
++| Attribute           | Detail                        |
++| ------------------- | ----------------------------- |
++| Backend             | PostgreSQL (existing)         |
++| npm downloads/month | ~1.4M                         |
++| TypeScript          | Native                        |
++| Delayed jobs        | Yes (`startAfter`)            |
++| Cron/repeatable     | Yes (`schedule()`)            |
++| New infrastructure  | No — reuses existing Postgres |
++
++**Why it could work**: Zero new infrastructure since the project already uses Postgres. API maps well to existing patterns.
++
++**Why it's second choice**: Polling-based (no LISTEN/NOTIFY), adds write amplification to the primary database, smaller ecosystem, no dashboard. At scale, queue operations on the primary database become a concern.
++
++### Graphile Worker (PostgreSQL-backed) — Less Suitable
++
++Uses LISTEN/NOTIFY for instant pickup but has a file-based task convention and separate schema that don't mesh well with the existing Prisma-centric architecture. Would require more adapter work.
++
++### Improving the Local Provider — Not Recommended
++
++Fixing the Local provider's issues (wait support, replacing HTTP self-calls, adding concurrency control, backoff) essentially means rebuilding a queue library from scratch with less robustness and no community maintenance.
++
++---
++
++## Recommendation
++
++**Proceed with BullMQ.** It's the most capable option, maps cleanly to the existing provider interface, and is the standard choice for production Node.js applications. Redis is lightweight infrastructure with managed options available at every cloud provider.
++
++**If Redis is a hard blocker**, pg-boss is the clear fallback — but the plan below assumes BullMQ.
++
++---
++
++## Implementation Plan
++
++### Phase 1: BullMQ Provider Core
++
++**File: `packages/lib/jobs/client/bullmq.ts`**
++
++Create `BullMQJobProvider extends BaseJobProvider` with singleton pattern matching the existing providers.
++
++Key implementation details:
++
++1. **Constructor / `getInstance()`**
++   - Initialize a Redis `IORedis` connection using new env var: `NEXT_PRIVATE_REDIS_URL`
++   - Create a single `Queue` instance for dispatching jobs, using `NEXT_PRIVATE_REDIS_PREFIX` as the BullMQ `prefix` option (defaults to `documenso` if unset). This namespaces all Redis keys so multiple environments (worktrees, branches, developers) sharing the same Redis instance don't collide.
++   - Create a single `Worker` instance for processing jobs (in-process, same prefix)
++   - Store job definitions in a `_jobDefinitions` record (same pattern as Local provider)
++
++2. **`defineJob()`**
++   - Store definition in `_jobDefinitions` keyed by ID
++   - If the definition has a `trigger.cron`, register it via `queue.upsertJobScheduler()` with the cron expression
++
++3. **`triggerJob(options)`**
++   - Find eligible definitions by `trigger.name` (same lookup as Local provider)
++   - For each, call `queue.add(jobDefinitionId, payload)` with appropriate options
++   - Support `options.id` for deduplication via BullMQ's `jobId` option
++
++4. **`getApiHandler()`**
++   - Return a minimal health-check / queue-status handler. Unlike the Local provider, BullMQ workers don't need an HTTP endpoint to receive jobs — they pull from Redis directly. The API handler can return queue metrics for monitoring.
++
++5. **`startCron()`**
++   - No-op — cron is handled by BullMQ's `upsertJobScheduler` registered during `defineJob()`
++
++6. **Worker setup**
++   - Single worker processes all job types by dispatching to the correct handler from `_jobDefinitions`
++   - Configure concurrency with a default of 10 (overridable via `NEXT_PRIVATE_BULLMQ_CONCURRENCY` env var for those who need to tune it)
++   - Configure retry with exponential backoff: `backoff: { type: 'exponential', delay: 1000 }`
++   - Default 3 retries (matching current Local provider behavior)
++
++7. **`createJobRunIO(jobId)`** — Implement `JobRunIO`:
++   - `runTask()`: Reuse the existing `BackgroundJobTask` Prisma table for idempotent task tracking (same pattern as Local provider)
++   - `triggerJob()`: Delegate to `this.triggerJob()`
++   - `wait()`: Throw "Not implemented" (same as Local provider). No handler uses `io.wait()` so this has zero impact
++   - `logger`: Same console-based logger pattern as Local provider
++
++### Phase 2: Provider Registration
++
++**File: `packages/lib/jobs/client/client.ts`**
++
++Add `'bullmq'` case to the provider match:
++
++```typescript
++this._provider = match(env('NEXT_PRIVATE_JOBS_PROVIDER'))
++  .with('inngest', () => InngestJobProvider.getInstance())
++  .with('bullmq', () => BullMQJobProvider.getInstance())
++  .otherwise(() => LocalJobProvider.getInstance());
++```
++
++**File: `packages/tsconfig/process-env.d.ts`**
++
++Add `'bullmq'` to the `NEXT_PRIVATE_JOBS_PROVIDER` type union and add Redis env var types:
++
++```typescript
++NEXT_PRIVATE_JOBS_PROVIDER?: 'inngest' | 'local' | 'bullmq';
++NEXT_PRIVATE_REDIS_URL?: string;
++NEXT_PRIVATE_REDIS_PREFIX?: string;
++NEXT_PRIVATE_BULLMQ_CONCURRENCY?: string;
++```
++
++**File: `.env.example`**
++
++Add Redis configuration examples:
++
++```env
++NEXT_PRIVATE_JOBS_PROVIDER="local"  # Options: local, inngest, bullmq
++NEXT_PRIVATE_REDIS_URL="redis://localhost:63790"
++NEXT_PRIVATE_REDIS_PREFIX="documenso"  # Namespace for Redis keys (useful when sharing a Redis instance)
++```
++
++**File: `turbo.json`**
++
++Add `NEXT_PRIVATE_REDIS_URL`, `NEXT_PRIVATE_REDIS_PREFIX`, and `NEXT_PRIVATE_BULLMQ_CONCURRENCY` to the env vars list for cache invalidation.
++
++### Phase 3: Infrastructure & Dependencies
++
++**File: `packages/lib/package.json`**
++
++Add dependencies:
++
++- `bullmq` — the queue library
++- `ioredis` — Redis client (peer dependency of BullMQ, but explicit is better)
++
++**File: `docker-compose.yml` (or equivalent)**
++
++Add Redis service for local development:
++
++```yaml
++redis:
++  image: redis:7-alpine
++  ports:
++    - '6379:6379'
++```
++
++### Phase 4: Optional Enhancements
++
++These are not required for the initial implementation but worth considering for follow-up:
++
++1. **Bull Board integration** — Add a `/api/jobs/dashboard` route that serves Bull Board UI for monitoring. Gate behind an admin auth check.
++
++2. **Separate worker process** — Add an `apps/worker` entry point that runs BullMQ workers without the web server, for deployments that want to isolate job processing from request handling.
++
++3. **Graceful shutdown** — Register `SIGTERM`/`SIGINT` handlers to call `worker.close()` and `queue.close()` for clean shutdown.
++
++4. **BackgroundJob table integration** — Optionally continue writing to the `BackgroundJob` Prisma table for audit/history, using BullMQ events (`completed`, `failed`) to update status. This preserves the existing database-level visibility.
++
++---
++
++## Files to Create/Modify
++
++| File                                 | Action     | Description                              |
++| ------------------------------------ | ---------- | ---------------------------------------- |
++| `packages/lib/jobs/client/bullmq.ts` | **Create** | BullMQ provider implementation           |
++| `packages/lib/jobs/client/client.ts` | Modify     | Add `'bullmq'` provider case             |
++| `packages/tsconfig/process-env.d.ts` | Modify     | Add type for `'bullmq'` + Redis env vars |
++| `.env.example`                       | Modify     | Add Redis config example                 |
++| `turbo.json`                         | Modify     | Add Redis env var to cache keys          |
++| `packages/lib/package.json`          | Modify     | Add `bullmq` + `ioredis` dependencies    |
++| `docker-compose.yml`                 | Modify     | Add Redis service                        |
++
++---
++
++## Open Questions
++
++1. **Should the BullMQ provider also write to the `BackgroundJob` Prisma table?** This would maintain audit history and allow existing admin tooling to query job status. Trade-off is dual-write complexity.
++
++2. **Redis connection resilience**: Should the provider gracefully degrade if Redis is unavailable (e.g., fall back to Local provider), or fail hard? Failing hard is simpler and more predictable.
++
++## Resolved Questions
++
++- **`io.wait()`**: Not a concern. Only Inngest implements it (via `step.sleep`), the Local provider throws "Not implemented", and no job handler calls `io.wait()`. The BullMQ provider can throw "Not implemented" identically to the Local provider.
+diff --git a/.env.example b/.env.example
+index 69bd1961df..950a475fb4 100644
+--- a/.env.example
++++ b/.env.example
+@@ -143,8 +143,15 @@ NEXT_PRIVATE_STRIPE_API_KEY=
+ NEXT_PRIVATE_STRIPE_WEBHOOK_SECRET=
+ 
+ # [[BACKGROUND JOBS]]
++# Available options: local (default) | inngest | bullmq
+ NEXT_PRIVATE_JOBS_PROVIDER="local"
+ NEXT_PRIVATE_INNGEST_EVENT_KEY=
++# OPTIONAL: Redis URL for the BullMQ jobs provider.
++NEXT_PRIVATE_REDIS_URL="redis://localhost:63790"
++# OPTIONAL: Key prefix for Redis to namespace queues (useful when sharing a Redis instance).
++NEXT_PRIVATE_REDIS_PREFIX="documenso"
++# OPTIONAL: Number of concurrent jobs to process. Defaults to 10.
++# NEXT_PRIVATE_BULLMQ_CONCURRENCY=10
+ 
+ # [[FEATURES]]
+ # OPTIONAL: Leave blank to disable PostHog and feature flags.
+diff --git a/ARCHITECTURE.md b/ARCHITECTURE.md
+index b3710da550..b50cc0aa5b 100644
+--- a/ARCHITECTURE.md
++++ b/ARCHITECTURE.md
+@@ -235,6 +235,7 @@ Processes async jobs.
+ | Provider | Description           | Env Value         |
+ | -------- | --------------------- | ----------------- |
+ | Local    | Database-backed queue | `local` (default) |
++| BullMQ   | Redis-backed queue    | `bullmq`          |
+ | Inngest  | Managed cloud service | `inngest`         |
+ 
+ **Config**: `NEXT_PRIVATE_JOBS_PROVIDER`
+diff --git a/apps/docs/content/docs/self-hosting/configuration/background-jobs.mdx b/apps/docs/content/docs/self-hosting/configuration/background-jobs.mdx
+new file mode 100644
+index 0000000000..f449b46563
+--- /dev/null
++++ b/apps/docs/content/docs/self-hosting/configuration/background-jobs.mdx
+@@ -0,0 +1,187 @@
++---
++title: Background Jobs
++description: Configure how Documenso processes background tasks like email delivery, document processing, and webhook dispatch.
++---
++
++import { Callout } from 'fumadocs-ui/components/callout';
++import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
++
++## Overview
++
++Documenso processes background jobs for email delivery, document sealing, webhook dispatch, and scheduled maintenance tasks. Three providers are available:
++
++| Provider | Backend    | Best For                                        | Infrastructure |
++| -------- | ---------- | ----------------------------------------------- | -------------- |
++| Inngest  | Managed    | Production with zero ops overhead               | None           |
++| BullMQ   | Redis      | Self-hosted production with full control         | Redis          |
++| Local    | PostgreSQL | Development and small self-hosted deployments   | None           |
++
++Select a provider with the `NEXT_PRIVATE_JOBS_PROVIDER` environment variable:
++
++```bash
++NEXT_PRIVATE_JOBS_PROVIDER=inngest  # or bullmq, local
++```
++
++<Callout type="info">
++  The default provider is `local`. It requires no additional infrastructure and works well for development and small deployments, but is not recommended for production workloads.
++</Callout>
++
++---
++
++## Inngest (Recommended)
++
++[Inngest](https://www.inngest.com/) is a managed background job service. It handles scheduling, retries, concurrency, and observability without any infrastructure to manage. This is the recommended provider for production deployments.
++
++### Setup
++
++{/* prettier-ignore */}
++1. Create an account at [inngest.com](https://www.inngest.com/)
++2. Create an app and obtain your event key and signing key
++3. Configure the environment variables:
++
++```bash
++NEXT_PRIVATE_JOBS_PROVIDER=inngest
++NEXT_PRIVATE_INNGEST_EVENT_KEY=your-event-key
++INNGEST_SIGNING_KEY=your-signing-key
++```
++
++### Environment Variables
++
++| Variable                         | Description                                  | Required |
++| -------------------------------- | -------------------------------------------- | -------- |
++| `NEXT_PRIVATE_INNGEST_EVENT_KEY` | Inngest event key                            | Yes      |
++| `INNGEST_EVENT_KEY`              | Alternative Inngest event key                | No       |
++| `INNGEST_SIGNING_KEY`            | Inngest signing key for webhook verification | Yes      |
++| `NEXT_PRIVATE_INNGEST_APP_ID`    | Custom Inngest app ID                        | No       |
++
++### Advantages
++
++- No infrastructure to manage
++- Built-in monitoring dashboard
++- Automatic retries with backoff
++- Cron scheduling handled externally
++- Scales automatically
++
++---
++
++## BullMQ
++
++[BullMQ](https://docs.bullmq.io/) is a Redis-backed job queue that runs inside the Documenso process. It provides higher throughput than the local provider, configurable concurrency, and a built-in dashboard for monitoring jobs.
++
++### Requirements
++
++- **Redis 6.2+** - any Redis-compatible service works (Redis, KeyDB, Dragonfly, AWS ElastiCache, Upstash, etc.)
++
++### Setup
++
++```bash
++NEXT_PRIVATE_JOBS_PROVIDER=bullmq
++NEXT_PRIVATE_REDIS_URL=redis://localhost:6379
++```
++
++### Environment Variables
++
++| Variable                           | Description                                                                | Default     |
++| ---------------------------------- | -------------------------------------------------------------------------- | ----------- |
++| `NEXT_PRIVATE_REDIS_URL`           | Redis connection URL                                                       | _(required)_ |
++| `NEXT_PRIVATE_REDIS_PREFIX`        | Key prefix for Redis queues (useful when sharing an instance)              | `documenso` |
++| `NEXT_PRIVATE_BULLMQ_CONCURRENCY` | Number of concurrent jobs to process                                       | `10`        |
++
++### Dashboard
++
++BullMQ includes a job monitoring dashboard at `/api/jobs/board`. In production, only admin users can access the dashboard. In development, it is open to all users.
++
++The dashboard provides visibility into queued, active, completed, and failed jobs.
++
++### Docker Compose with Redis
++
++If you're using Docker Compose, add a Redis service:
++
++```yaml
++services:
++  redis:
++    image: redis:8-alpine
++    ports:
++      - '6379:6379'
++    volumes:
++      - redis_data:/data
++
++volumes:
++  redis_data:
++```
++
++Then set `NEXT_PRIVATE_REDIS_URL=redis://redis:6379` in your Documenso environment.
++
++### Advantages
++
++- Self-hosted with no external service dependencies beyond Redis
++- Configurable concurrency
++- Built-in job monitoring dashboard
++- Reliable retries with exponential backoff
++- Queue namespacing for shared Redis instances
++
++---
++
++## Local
++
++The local provider uses your PostgreSQL database as a job queue. Jobs are stored in the `BackgroundJob` table and processed via internal HTTP requests that Documenso sends to itself.
++
++### Setup
++
++No configuration required. The local provider is the default when `NEXT_PRIVATE_JOBS_PROVIDER` is unset or set to `local`.
++
++```bash
++# Optional - this is the default
++NEXT_PRIVATE_JOBS_PROVIDER=local
++```
++
++### Internal URL
++
++Background jobs in the local provider work by Documenso sending HTTP requests to itself. If your reverse proxy or network setup causes issues with the app reaching its own public URL, set the internal URL:
++
++```bash
++NEXT_PRIVATE_INTERNAL_WEBAPP_URL=http://localhost:3000
++```
++
++This tells the job system to use the internal address instead of `NEXT_PUBLIC_WEBAPP_URL` for self-requests.
++
++<Callout type="warn">
++  The local provider is suitable for development and small deployments. For production workloads, use Inngest or BullMQ.
++</Callout>
++
++### Limitations
++
++- No concurrency control - jobs are processed one at a time per request cycle
++- No built-in monitoring
++- Depends on the application being able to reach itself over HTTP
++- Not suitable for high-throughput workloads
++
++---
++
++## Choosing a Provider
++
++<Tabs items={['Managed hosting', 'Self-hosted production', 'Development']}>
++<Tab value="Managed hosting">
++
++Use **Inngest**. Zero infrastructure, automatic scaling, and built-in observability. The simplest path to reliable background jobs in production.
++
++</Tab>
++<Tab value="Self-hosted production">
++
++Use **BullMQ**. Add a Redis instance to your infrastructure and get reliable job processing with a monitoring dashboard. Good fit if you already run Redis or want to keep everything self-hosted.
++
++</Tab>
++<Tab value="Development">
++
++Use **Local** (the default). No additional setup required. Works out of the box with just PostgreSQL.
++
++</Tab>
++</Tabs>
++
++---
++
++## See Also
++
++- [Environment Variables](/docs/self-hosting/configuration/environment) - Complete configuration reference
++- [Requirements](/docs/self-hosting/getting-started/requirements) - Infrastructure requirements
++- [Docker Compose](/docs/self-hosting/deployment/docker-compose) - Deploy with Docker Compose
+diff --git a/apps/docs/content/docs/self-hosting/configuration/environment.mdx b/apps/docs/content/docs/self-hosting/configuration/environment.mdx
+index 712551c14d..29508a92e2 100644
+--- a/apps/docs/content/docs/self-hosting/configuration/environment.mdx
++++ b/apps/docs/content/docs/self-hosting/configuration/environment.mdx
+@@ -268,20 +268,40 @@ AI features must also be enabled in organisation/team settings after configurati
+ 
+ ## Background Jobs
+ 
+-Documenso uses a PostgreSQL-based job queue by default. Jobs (email delivery, document processing, webhook dispatch) are stored in the `BackgroundJob` table and processed via internal HTTP requests. No external queue service like Redis is required.
++Documenso supports multiple background job providers for processing emails, documents, webhooks, and scheduled tasks.
+ 
+-| Variable                     | Description                                                                    | Default |
+-| ---------------------------- | ------------------------------------------------------------------------------ | ------- |
+-| `NEXT_PRIVATE_JOBS_PROVIDER` | Jobs provider: `local` (PostgreSQL-based queue) or `inngest` (managed service) | `local` |
++### Provider Selection
+ 
+-### Inngest Configuration
++| Variable                     | Description                                                                            | Default |
++| ---------------------------- | -------------------------------------------------------------------------------------- | ------- |
++| `NEXT_PRIVATE_JOBS_PROVIDER` | Jobs provider: `local` (PostgreSQL), `bullmq` (Redis), or `inngest` (managed service) | `local` |
+ 
+-| Variable                         | Description                                  |
+-| -------------------------------- | -------------------------------------------- |
+-| `NEXT_PRIVATE_INNGEST_EVENT_KEY` | Inngest event key                            |
+-| `INNGEST_EVENT_KEY`              | Alternative Inngest event key                |
+-| `INNGEST_SIGNING_KEY`            | Inngest signing key for webhook verification |
+-| `NEXT_PRIVATE_INNGEST_APP_ID`    | Custom Inngest app ID                        |
++### Local (local)
++
++No additional configuration required. Jobs are stored in PostgreSQL and processed via internal HTTP requests.
++
++| Variable                           | Description                                                  | Default                          |
++| ---------------------------------- | ------------------------------------------------------------ | -------------------------------- |
++| `NEXT_PRIVATE_INTERNAL_WEBAPP_URL` | Internal URL for the app to send job requests to itself      | Same as `NEXT_PUBLIC_WEBAPP_URL` |
++
++### BullMQ (bullmq)
++
++| Variable                           | Required | Description                                                   | Default     |
++| ---------------------------------- | -------- | ------------------------------------------------------------- | ----------- |
++| `NEXT_PRIVATE_REDIS_URL`           | Yes      | Redis connection URL (e.g., `redis://localhost:6379`)         |             |
++| `NEXT_PRIVATE_REDIS_PREFIX`        | No       | Key prefix for Redis queues (useful when sharing an instance) | `documenso` |
++| `NEXT_PRIVATE_BULLMQ_CONCURRENCY` | No       | Number of concurrent jobs to process                          | `10`        |
++
++### Inngest (inngest)
++
++| Variable                         | Required | Description                                  |
++| -------------------------------- | -------- | -------------------------------------------- |
++| `NEXT_PRIVATE_INNGEST_EVENT_KEY` | Yes      | Inngest event key                            |
++| `INNGEST_EVENT_KEY`              | No       | Alternative Inngest event key                |
++| `INNGEST_SIGNING_KEY`            | Yes      | Inngest signing key for webhook verification |
++| `NEXT_PRIVATE_INNGEST_APP_ID`    | No       | Custom Inngest app ID                        |
++
++For setup guides and provider recommendations, see [Background Jobs](/docs/self-hosting/configuration/background-jobs).
+ 
+ ---
+ 
+diff --git a/apps/docs/content/docs/self-hosting/configuration/meta.json b/apps/docs/content/docs/self-hosting/configuration/meta.json
+index 88d922748e..32b92f8536 100644
+--- a/apps/docs/content/docs/self-hosting/configuration/meta.json
++++ b/apps/docs/content/docs/self-hosting/configuration/meta.json
+@@ -5,6 +5,7 @@
+     "database",
+     "email",
+     "storage",
++    "background-jobs",
+     "signing-certificate",
+     "telemetry",
+     "advanced"
+diff --git a/apps/docs/content/docs/self-hosting/getting-started/requirements.mdx b/apps/docs/content/docs/self-hosting/getting-started/requirements.mdx
+index 202f739b3f..e4ca2a71f0 100644
+--- a/apps/docs/content/docs/self-hosting/getting-started/requirements.mdx
++++ b/apps/docs/content/docs/self-hosting/getting-started/requirements.mdx
+@@ -85,9 +85,13 @@ See [Storage Configuration](/docs/self-hosting/configuration/storage) for setup
+ 
+ ### Background Jobs
+ 
+-Documenso processes background jobs (email delivery, document processing) using a PostgreSQL-based queue. No additional services like Redis are required: the job queue is built into the application and uses your existing database.
++Documenso processes background jobs (email delivery, document processing) using a PostgreSQL-based queue by default. No additional services are required: the job queue is built into the application and uses your existing database.
+ 
+-For high-throughput deployments, Documenso optionally supports [Inngest](https://www.inngest.com/) as an alternative job provider. Set `NEXT_PRIVATE_JOBS_PROVIDER=inngest` and configure `INNGEST_EVENT_KEY` and `INNGEST_SIGNING_KEY`. Most self-hosted instances do not need this.
++For production deployments that need higher throughput or more reliable job processing, Documenso supports [BullMQ](https://docs.bullmq.io/) as an alternative provider. BullMQ requires a **Redis** instance (v6.2+). Set `NEXT_PRIVATE_JOBS_PROVIDER=bullmq` and configure `NEXT_PRIVATE_REDIS_URL`.
++
++For managed/cloud deployments, [Inngest](https://www.inngest.com/) is also supported as a job provider. Set `NEXT_PRIVATE_JOBS_PROVIDER=inngest` and configure `INNGEST_EVENT_KEY` and `INNGEST_SIGNING_KEY`.
++
++See [Background Jobs Configuration](/docs/self-hosting/configuration/background-jobs) for full details.
+ 
+ ---
+ 
+diff --git a/apps/docs/content/docs/self-hosting/getting-started/tips.mdx b/apps/docs/content/docs/self-hosting/getting-started/tips.mdx
+index dc4f7e074e..4673ae6aa4 100644
+--- a/apps/docs/content/docs/self-hosting/getting-started/tips.mdx
++++ b/apps/docs/content/docs/self-hosting/getting-started/tips.mdx
+@@ -144,19 +144,13 @@ See [Storage Configuration](/docs/self-hosting/configuration/storage) for full s
+ 
+ ---
+ 
+-## Background Jobs Don't Need Redis
++## Background Jobs
+ 
+-Documenso uses a PostgreSQL-based job queue by default. No Redis, no external message broker. The job system uses your existing database to store and process background tasks like email delivery and document processing.
++Documenso uses a PostgreSQL-based job queue by default (`local` provider). No Redis or external message broker is required for basic deployments.
+ 
+-For high-throughput deployments, Documenso optionally supports [Inngest](https://www.inngest.com/) as an alternative job provider:
++For production workloads, consider switching to **Inngest** (managed) or **BullMQ** (self-hosted with Redis) for better reliability and throughput.
+ 
+-```bash
+-NEXT_PRIVATE_JOBS_PROVIDER=inngest
+-INNGEST_EVENT_KEY=your-event-key
+-INNGEST_SIGNING_KEY=your-signing-key
+-```
+-
+-Most self-hosted instances do not need Inngest.
++See [Background Jobs Configuration](/docs/self-hosting/configuration/background-jobs) for setup instructions and provider comparison.
+ 
+ ---
+ 
+diff --git a/apps/remix/server/router.ts b/apps/remix/server/router.ts
+index 8285f1e4af..b07f0c94f9 100644
+--- a/apps/remix/server/router.ts
++++ b/apps/remix/server/router.ts
+@@ -99,6 +99,7 @@ app.route('/api/ai', aiRoute);
+ // API servers.
+ app.route('/api/v1', tsRestHonoApp);
+ app.use('/api/jobs/*', jobsClient.getApiHandler());
++
+ app.use('/api/trpc/*', trpcRateLimitMiddleware);
+ app.use('/api/trpc/*', reactRouterTrpcServer);
+ 
+diff --git a/apps/remix/vite.config.ts b/apps/remix/vite.config.ts
+index 0dbc5a0c4f..606819a6ad 100644
+--- a/apps/remix/vite.config.ts
++++ b/apps/remix/vite.config.ts
+@@ -1,3 +1,4 @@
++import { defaultOptions as devServerDefaults } from '@hono/vite-dev-server';
+ import { lingui } from '@lingui/vite-plugin';
+ import { reactRouter } from '@react-router/dev/vite';
+ import autoprefixer from 'autoprefixer';
+@@ -46,6 +47,18 @@ export default defineConfig({
+     tsconfigPaths(),
+     serverAdapter({
+       entry: 'server/router.ts',
++      exclude: [
++        // Spread the defaults but replace the /.css$/ rule so that Bull
++        // Board's static CSS at /api/jobs/board/static/** passes through to Hono.
++        ...devServerDefaults.exclude.map((pattern) =>
++          pattern instanceof RegExp && pattern.source === '.*\\.css$'
++            ? /^(?!\/api\/jobs\/board\/).*\.css$/
++            : pattern,
++        ),
++        '/assets/**',
++        '/src/app/**',
++        /\?(?:inline|url|no-inline|raw|import(?:&(?:inline|url|no-inline|raw)?)?)$/,
++      ],
+     }),
+   ],
+   ssr: {
+diff --git a/docker/development/compose.yml b/docker/development/compose.yml
+index 3922ce6149..2b7626e5c8 100644
+--- a/docker/development/compose.yml
++++ b/docker/development/compose.yml
+@@ -26,6 +26,14 @@ services:
+       - 2500:2500
+       - 1100:1100
+ 
++  redis:
++    image: redis:8-alpine
++    container_name: redis
++    ports:
++      - 63790:6379
++    volumes:
++      - redis:/data
++
+   minio:
+     image: minio/minio
+     container_name: minio
+@@ -42,4 +50,5 @@ services:
+ 
+ volumes:
+   minio:
++  redis:
+   documenso_database:
+diff --git a/package-lock.json b/package-lock.json
+index 95b6d2a8de..dcb342fed1 100644
+--- a/package-lock.json
++++ b/package-lock.json
+@@ -235,9 +235,9 @@
+       }
+     },
+     "apps/docs/node_modules/@types/node": {
+-      "version": "25.3.5",
+-      "resolved": "https://registry.npmjs.org/@types/node/-/node-25.3.5.tgz",
+-      "integrity": "sha512-oX8xrhvpiyRCQkG1MFchB09f+cXftgIXb3a7UUa4Y3wpmZPw5tyZGTLWhlESOLq1Rq6oDlc8npVU2/9xiCuXMA==",
++      "version": "25.5.0",
++      "resolved": "https://registry.npmjs.org/@types/node/-/node-25.5.0.tgz",
++      "integrity": "sha512-jp2P3tQMSxWugkCUKLRPVUpGaL5MVFwF8RDuSRztfwgN1wmqJeMSbKlnEtQqU8UrhTmzEmZdu2I6v2dpp7XIxw==",
+       "dev": true,
+       "license": "MIT",
+       "dependencies": {
+@@ -280,9 +280,9 @@
+       }
+     },
+     "apps/docs/node_modules/esbuild": {
+-      "version": "0.27.3",
+-      "resolved": "https://registry.npmjs.org/esbuild/-/esbuild-0.27.3.tgz",
+-      "integrity": "sha512-8VwMnyGCONIs6cWue2IdpHxHnAjzxnw2Zr7MkVxB2vjmQ2ivqGFb4LEG3SMnv0Gb2F/G/2yA8zUaiL1gywDCCg==",
++      "version": "0.27.4",
++      "resolved": "https://registry.npmjs.org/esbuild/-/esbuild-0.27.4.tgz",
++      "integrity": "sha512-Rq4vbHnYkK5fws5NF7MYTU68FPRE1ajX7heQ/8QXXWqNgqqJ/GkmmyxIzUnf2Sr/bakf8l54716CcMGHYhMrrQ==",
+       "hasInstallScript": true,
+       "license": "MIT",
+       "bin": {
+@@ -292,32 +292,32 @@
+         "node": ">=18"
+       },
+       "optionalDependencies": {
+-        "@esbuild/aix-ppc64": "0.27.3",
+-        "@esbuild/android-arm": "0.27.3",
+-        "@esbuild/android-arm64": "0.27.3",
+-        "@esbuild/android-x64": "0.27.3",
+-        "@esbuild/darwin-arm64": "0.27.3",
+-        "@esbuild/darwin-x64": "0.27.3",
+-        "@esbuild/freebsd-arm64": "0.27.3",
+-        "@esbuild/freebsd-x64": "0.27.3",
+-        "@esbuild/linux-arm": "0.27.3",
+-        "@esbuild/linux-arm64": "0.27.3",
+-        "@esbuild/linux-ia32": "0.27.3",
+-        "@esbuild/linux-loong64": "0.27.3",
+-        "@esbuild/linux-mips64el": "0.27.3",
+-        "@esbuild/linux-ppc64": "0.27.3",
+-        "@esbuild/linux-riscv64": "0.27.3",
+-        "@esbuild/linux-s390x": "0.27.3",
+-        "@esbuild/linux-x64": "0.27.3",
+-        "@esbuild/netbsd-arm64": "0.27.3",
+-        "@esbuild/netbsd-x64": "0.27.3",
+-        "@esbuild/openbsd-arm64": "0.27.3",
+-        "@esbuild/openbsd-x64": "0.27.3",
+-        "@esbuild/openharmony-arm64": "0.27.3",
+-        "@esbuild/sunos-x64": "0.27.3",
+-        "@esbuild/win32-arm64": "0.27.3",
+-        "@esbuild/win32-ia32": "0.27.3",
+-        "@esbuild/win32-x64": "0.27.3"
++        "@esbuild/aix-ppc64": "0.27.4",
++        "@esbuild/android-arm": "0.27.4",
++        "@esbuild/android-arm64": "0.27.4",
++        "@esbuild/android-x64": "0.27.4",
++        "@esbuild/darwin-arm64": "0.27.4",
++        "@esbuild/darwin-x64": "0.27.4",
++        "@esbuild/freebsd-arm64": "0.27.4",
++        "@esbuild/freebsd-x64": "0.27.4",
++        "@esbuild/linux-arm": "0.27.4",
++        "@esbuild/linux-arm64": "0.27.4",
++        "@esbuild/linux-ia32": "0.27.4",
++        "@esbuild/linux-loong64": "0.27.4",
++        "@esbuild/linux-mips64el": "0.27.4",
++        "@esbuild/linux-ppc64": "0.27.4",
++        "@esbuild/linux-riscv64": "0.27.4",
++        "@esbuild/linux-s390x": "0.27.4",
++        "@esbuild/linux-x64": "0.27.4",
++        "@esbuild/netbsd-arm64": "0.27.4",
++        "@esbuild/netbsd-x64": "0.27.4",
++        "@esbuild/openbsd-arm64": "0.27.4",
++        "@esbuild/openbsd-x64": "0.27.4",
++        "@esbuild/openharmony-arm64": "0.27.4",
++        "@esbuild/sunos-x64": "0.27.4",
++        "@esbuild/win32-arm64": "0.27.4",
++        "@esbuild/win32-ia32": "0.27.4",
++        "@esbuild/win32-x64": "0.27.4"
+       }
+     },
+     "apps/docs/node_modules/fumadocs-mdx": {
+@@ -575,9 +575,9 @@
+       }
+     },
+     "apps/docs/node_modules/tailwindcss": {
+-      "version": "4.2.1",
+-      "resolved": "https://registry.npmjs.org/tailwindcss/-/tailwindcss-4.2.1.tgz",
+-      "integrity": "sha512-/tBrSQ36vCleJkAOsy9kbNTgaxvGbyOamC30PRePTQe/o1MFwEKHQk4Cn7BNGaPtjp+PuUrByJehM1hgxfq4sw==",
++      "version": "4.2.2",
++      "resolved": "https://registry.npmjs.org/tailwindcss/-/tailwindcss-4.2.2.tgz",
++      "integrity": "sha512-KWBIxs1Xb6NoLdMVqhbhgwZf2PGBpPEiwOqgI4pFIYbNTfBXiKYyWoTsXgBQ9WFg/OlhnvHaY+AEpW7wSmFo2Q==",
+       "dev": true,
+       "license": "MIT"
+     },
+@@ -748,9 +748,9 @@
+       }
+     },
+     "apps/remix/node_modules/esbuild": {
+-      "version": "0.27.3",
+-      "resolved": "https://registry.npmjs.org/esbuild/-/esbuild-0.27.3.tgz",
+-      "integrity": "sha512-8VwMnyGCONIs6cWue2IdpHxHnAjzxnw2Zr7MkVxB2vjmQ2ivqGFb4LEG3SMnv0Gb2F/G/2yA8zUaiL1gywDCCg==",
++      "version": "0.27.4",
++      "resolved": "https://registry.npmjs.org/esbuild/-/esbuild-0.27.4.tgz",
++      "integrity": "sha512-Rq4vbHnYkK5fws5NF7MYTU68FPRE1ajX7heQ/8QXXWqNgqqJ/GkmmyxIzUnf2Sr/bakf8l54716CcMGHYhMrrQ==",
+       "dev": true,
+       "hasInstallScript": true,
+       "license": "MIT",
+@@ -761,32 +761,32 @@
+         "node": ">=18"
+       },
+       "optionalDependencies": {
+-        "@esbuild/aix-ppc64": "0.27.3",
+-        "@esbuild/android-arm": "0.27.3",
+-        "@esbuild/android-arm64": "0.27.3",
+-        "@esbuild/android-x64": "0.27.3",
+-        "@esbuild/darwin-arm64": "0.27.3",
+-        "@esbuild/darwin-x64": "0.27.3",
+-        "@esbuild/freebsd-arm64": "0.27.3",
+-        "@esbuild/freebsd-x64": "0.27.3",
+-        "@esbuild/linux-arm": "0.27.3",
+-        "@esbuild/linux-arm64": "0.27.3",
+-        "@esbuild/linux-ia32": "0.27.3",
+-        "@esbuild/linux-loong64": "0.27.3",
+-        "@esbuild/linux-mips64el": "0.27.3",
+-        "@esbuild/linux-ppc64": "0.27.3",
+-        "@esbuild/linux-riscv64": "0.27.3",
+-        "@esbuild/linux-s390x": "0.27.3",
+-        "@esbuild/linux-x64": "0.27.3",
+-        "@esbuild/netbsd-arm64": "0.27.3",
+-        "@esbuild/netbsd-x64": "0.27.3",
+-        "@esbuild/openbsd-arm64": "0.27.3",
+-        "@esbuild/openbsd-x64": "0.27.3",
+-        "@esbuild/openharmony-arm64": "0.27.3",
+-        "@esbuild/sunos-x64": "0.27.3",
+-        "@esbuild/win32-arm64": "0.27.3",
+-        "@esbuild/win32-ia32": "0.27.3",
+-        "@esbuild/win32-x64": "0.27.3"
++        "@esbuild/aix-ppc64": "0.27.4",
++        "@esbuild/android-arm": "0.27.4",
++        "@esbuild/android-arm64": "0.27.4",
++        "@esbuild/android-x64": "0.27.4",
++        "@esbuild/darwin-arm64": "0.27.4",
++        "@esbuild/darwin-x64": "0.27.4",
++        "@esbuild/freebsd-arm64": "0.27.4",
++        "@esbuild/freebsd-x64": "0.27.4",
++        "@esbuild/linux-arm": "0.27.4",
++        "@esbuild/linux-arm64": "0.27.4",
++        "@esbuild/linux-ia32": "0.27.4",
++        "@esbuild/linux-loong64": "0.27.4",
++        "@esbuild/linux-mips64el": "0.27.4",
++        "@esbuild/linux-ppc64": "0.27.4",
++        "@esbuild/linux-riscv64": "0.27.4",
++        "@esbuild/linux-s390x": "0.27.4",
++        "@esbuild/linux-x64": "0.27.4",
++        "@esbuild/netbsd-arm64": "0.27.4",
++        "@esbuild/netbsd-x64": "0.27.4",
++        "@esbuild/openbsd-arm64": "0.27.4",
++        "@esbuild/openbsd-x64": "0.27.4",
++        "@esbuild/openharmony-arm64": "0.27.4",
++        "@esbuild/sunos-x64": "0.27.4",
++        "@esbuild/win32-arm64": "0.27.4",
++        "@esbuild/win32-ia32": "0.27.4",
++        "@esbuild/win32-x64": "0.27.4"
+       }
+     },
+     "node_modules/@ai-sdk/anthropic": {
+@@ -2543,6 +2543,41 @@
+       "integrity": "sha512-ckS3+vyJb5qGpEYv/s1OebUHDi/xSNtfgw1wqKZo7MR9F2z+qXr0q5XagafAG/9O0QPVIUfST0smluYSTpYFkg==",
+       "license": "(Apache-2.0 AND BSD-3-Clause)"
+     },
++    "node_modules/@bull-board/api": {
++      "version": "6.20.6",
++      "resolved": "https://registry.npmjs.org/@bull-board/api/-/api-6.20.6.tgz",
++      "integrity": "sha512-B/9OlKWJ/He421Lyuc7htMpKN4R8hcNu5uoIRiyh9y9J0kMOfxfs82GKXdfR9R0595LvAcCOSvjn8EtWHXesTA==",
++      "license": "MIT",
++      "dependencies": {
++        "redis-info": "^3.1.0"
++      },
++      "peerDependencies": {
++        "@bull-board/ui": "6.20.6"
++      }
++    },
++    "node_modules/@bull-board/hono": {
++      "version": "6.20.6",
++      "resolved": "https://registry.npmjs.org/@bull-board/hono/-/hono-6.20.6.tgz",
++      "integrity": "sha512-l2yGfL6gT2Z5sVP12YRw4kmyNISA2NqR+5h5QaSHQfHAv62hnARPPrvzOCjPBXpzIWwBQwjhnYQXv89QoyoQiw==",
++      "license": "MIT",
++      "dependencies": {
++        "@bull-board/api": "6.20.6",
++        "@bull-board/ui": "6.20.6",
++        "ejs": "^3.1.10"
++      },
++      "peerDependencies": {
++        "hono": "^4"
++      }
++    },
++    "node_modules/@bull-board/ui": {
++      "version": "6.20.6",
++      "resolved": "https://registry.npmjs.org/@bull-board/ui/-/ui-6.20.6.tgz",
++      "integrity": "sha512-nEXRgMHHd48ssINgvDqT7b4p/+57XRf3CUcTGQ7UIJb4F7n/kRRj8+ZQvQmMFsYGdNmbNU2eNheQ05vXSYiqdQ==",
++      "license": "MIT",
++      "dependencies": {
++        "@bull-board/api": "6.20.6"
++      }
++    },
+     "node_modules/@cantoo/pdf-lib": {
+       "version": "2.5.3",
+       "resolved": "https://registry.npmjs.org/@cantoo/pdf-lib/-/pdf-lib-2.5.3.tgz",
+@@ -3039,9 +3074,9 @@
+       "license": "MIT"
+     },
+     "node_modules/@esbuild/aix-ppc64": {
+-      "version": "0.27.3",
+-      "resolved": "https://registry.npmjs.org/@esbuild/aix-ppc64/-/aix-ppc64-0.27.3.tgz",
+-      "integrity": "sha512-9fJMTNFTWZMh5qwrBItuziu834eOCUcEqymSH7pY+zoMVEZg3gcPuBNxH1EvfVYe9h0x/Ptw8KBzv7qxb7l8dg==",
++      "version": "0.27.4",
++      "resolved": "https://registry.npmjs.org/@esbuild/aix-ppc64/-/aix-ppc64-0.27.4.tgz",
++      "integrity": "sha512-cQPwL2mp2nSmHHJlCyoXgHGhbEPMrEEU5xhkcy3Hs/O7nGZqEpZ2sUtLaL9MORLtDfRvVl2/3PAuEkYZH0Ty8Q==",
+       "cpu": [
+         "ppc64"
+       ],
+@@ -3055,9 +3090,9 @@
+       }
+     },
+     "node_modules/@esbuild/android-arm": {
+-      "version": "0.27.3",
+-      "resolved": "https://registry.npmjs.org/@esbuild/android-arm/-/android-arm-0.27.3.tgz",
+-      "integrity": "sha512-i5D1hPY7GIQmXlXhs2w8AWHhenb00+GxjxRncS2ZM7YNVGNfaMxgzSGuO8o8SJzRc/oZwU2bcScvVERk03QhzA==",
++      "version": "0.27.4",
++      "resolved": "https://registry.npmjs.org/@esbuild/android-arm/-/android-arm-0.27.4.tgz",
++      "integrity": "sha512-X9bUgvxiC8CHAGKYufLIHGXPJWnr0OCdR0anD2e21vdvgCI8lIfqFbnoeOz7lBjdrAGUhqLZLcQo6MLhTO2DKQ==",
+       "cpu": [
+         "arm"
+       ],
+@@ -3071,9 +3106,9 @@
+       }
+     },
+     "node_modules/@esbuild/android-arm64": {
+-      "version": "0.27.3",
+-      "resolved": "https://registry.npmjs.org/@esbuild/android-arm64/-/android-arm64-0.27.3.tgz",
+-      "integrity": "sha512-YdghPYUmj/FX2SYKJ0OZxf+iaKgMsKHVPF1MAq/P8WirnSpCStzKJFjOjzsW0QQ7oIAiccHdcqjbHmJxRb/dmg==",
++      "version": "0.27.4",
++      "resolved": "https://registry.npmjs.org/@esbuild/android-arm64/-/android-arm64-0.27.4.tgz",
++      "integrity": "sha512-gdLscB7v75wRfu7QSm/zg6Rx29VLdy9eTr2t44sfTW7CxwAtQghZ4ZnqHk3/ogz7xao0QAgrkradbBzcqFPasw==",
+       "cpu": [
+         "arm64"
+       ],
+@@ -3087,9 +3122,9 @@
+       }
+     },
+     "node_modules/@esbuild/android-x64": {
+-      "version": "0.27.3",
+-      "resolved": "https://registry.npmjs.org/@esbuild/android-x64/-/android-x64-0.27.3.tgz",
+-      "integrity": "sha512-IN/0BNTkHtk8lkOM8JWAYFg4ORxBkZQf9zXiEOfERX/CzxW3Vg1ewAhU7QSWQpVIzTW+b8Xy+lGzdYXV6UZObQ==",
++      "version": "0.27.4",
++      "resolved": "https://registry.npmjs.org/@esbuild/android-x64/-/android-x64-0.27.4.tgz",
++      "integrity": "sha512-PzPFnBNVF292sfpfhiyiXCGSn9HZg5BcAz+ivBuSsl6Rk4ga1oEXAamhOXRFyMcjwr2DVtm40G65N3GLeH1Lvw==",
+       "cpu": [
+         "x64"
+       ],
+@@ -3103,9 +3138,9 @@
+       }
+     },
+     "node_modules/@esbuild/darwin-arm64": {
+-      "version": "0.27.3",
+-      "resolved": "https://registry.npmjs.org/@esbuild/darwin-arm64/-/darwin-arm64-0.27.3.tgz",
+-      "integrity": "sha512-Re491k7ByTVRy0t3EKWajdLIr0gz2kKKfzafkth4Q8A5n1xTHrkqZgLLjFEHVD+AXdUGgQMq+Godfq45mGpCKg==",
++      "version": "0.27.4",
++      "resolved": "https://registry.npmjs.org/@esbuild/darwin-arm64/-/darwin-arm64-0.27.4.tgz",
++      "integrity": "sha512-b7xaGIwdJlht8ZFCvMkpDN6uiSmnxxK56N2GDTMYPr2/gzvfdQN8rTfBsvVKmIVY/X7EM+/hJKEIbbHs9oA4tQ==",
+       "cpu": [
+         "arm64"
+       ],
+@@ -3119,9 +3154,9 @@
+       }
+     },
+     "node_modules/@esbuild/darwin-x64": {
+-      "version": "0.27.3",
+-      "resolved": "https://registry.npmjs.org/@esbuild/darwin-x64/-/darwin-x64-0.27.3.tgz",
+-      "integrity": "sha512-vHk/hA7/1AckjGzRqi6wbo+jaShzRowYip6rt6q7VYEDX4LEy1pZfDpdxCBnGtl+A5zq8iXDcyuxwtv3hNtHFg==",
++      "version": "0.27.4",
++      "resolved": "https://registry.npmjs.org/@esbuild/darwin-x64/-/darwin-x64-0.27.4.tgz",
++      "integrity": "sha512-sR+OiKLwd15nmCdqpXMnuJ9W2kpy0KigzqScqHI3Hqwr7IXxBp3Yva+yJwoqh7rE8V77tdoheRYataNKL4QrPw==",
+       "cpu": [
+         "x64"
+       ],
+@@ -3135,9 +3170,9 @@
+       }
+     },
+     "node_modules/@esbuild/freebsd-arm64": {
+-      "version": "0.27.3",
+-      "resolved": "https://registry.npmjs.org/@esbuild/freebsd-arm64/-/freebsd-arm64-0.27.3.tgz",
+-      "integrity": "sha512-ipTYM2fjt3kQAYOvo6vcxJx3nBYAzPjgTCk7QEgZG8AUO3ydUhvelmhrbOheMnGOlaSFUoHXB6un+A7q4ygY9w==",
++      "version": "0.27.4",
++      "resolved": "https://registry.npmjs.org/@esbuild/freebsd-arm64/-/freebsd-arm64-0.27.4.tgz",
++      "integrity": "sha512-jnfpKe+p79tCnm4GVav68A7tUFeKQwQyLgESwEAUzyxk/TJr4QdGog9sqWNcUbr/bZt/O/HXouspuQDd9JxFSw==",
+       "cpu": [
+         "arm64"
+       ],
+@@ -3151,9 +3186,9 @@
+       }
+     },
+     "node_modules/@esbuild/freebsd-x64": {
+-      "version": "0.27.3",
+-      "resolved": "https://registry.npmjs.org/@esbuild/freebsd-x64/-/freebsd-x64-0.27.3.tgz",
+-      "integrity": "sha512-dDk0X87T7mI6U3K9VjWtHOXqwAMJBNN2r7bejDsc+j03SEjtD9HrOl8gVFByeM0aJksoUuUVU9TBaZa2rgj0oA==",
++      "version": "0.27.4",
++      "resolved": "https://registry.npmjs.org/@esbuild/freebsd-x64/-/freebsd-x64-0.27.4.tgz",
++      "integrity": "sha512-2kb4ceA/CpfUrIcTUl1wrP/9ad9Atrp5J94Lq69w7UwOMolPIGrfLSvAKJp0RTvkPPyn6CIWrNy13kyLikZRZQ==",
+       "cpu": [
+         "x64"
+       ],
+@@ -3167,9 +3202,9 @@
+       }
+     },
+     "node_modules/@esbuild/linux-arm": {
+-      "version": "0.27.3",
+-      "resolved": "https://registry.npmjs.org/@esbuild/linux-arm/-/linux-arm-0.27.3.tgz",
+-      "integrity": "sha512-s6nPv2QkSupJwLYyfS+gwdirm0ukyTFNl3KTgZEAiJDd+iHZcbTPPcWCcRYH+WlNbwChgH2QkE9NSlNrMT8Gfw==",
++      "version": "0.27.4",
++      "resolved": "https://registry.npmjs.org/@esbuild/linux-arm/-/linux-arm-0.27.4.tgz",
++      "integrity": "sha512-aBYgcIxX/wd5n2ys0yESGeYMGF+pv6g0DhZr3G1ZG4jMfruU9Tl1i2Z+Wnj9/KjGz1lTLCcorqE2viePZqj4Eg==",
+       "cpu": [
+         "arm"
+       ],
+@@ -3183,9 +3218,9 @@
+       }
+     },
+     "node_modules/@esbuild/linux-arm64": {
+-      "version": "0.27.3",
+-      "resolved": "https://registry.npmjs.org/@esbuild/linux-arm64/-/linux-arm64-0.27.3.tgz",
+-      "integrity": "sha512-sZOuFz/xWnZ4KH3YfFrKCf1WyPZHakVzTiqji3WDc0BCl2kBwiJLCXpzLzUBLgmp4veFZdvN5ChW4Eq/8Fc2Fg==",
++      "version": "0.27.4",
++      "resolved": "https://registry.npmjs.org/@esbuild/linux-arm64/-/linux-arm64-0.27.4.tgz",
++      "integrity": "sha512-7nQOttdzVGth1iz57kxg9uCz57dxQLHWxopL6mYuYthohPKEK0vU0C3O21CcBK6KDlkYVcnDXY099HcCDXd9dA==",
+       "cpu": [
+         "arm64"
+       ],
+@@ -3199,9 +3234,9 @@
+       }
+     },
+     "node_modules/@esbuild/linux-ia32": {
+-      "version": "0.27.3",
+-      "resolved": "https://registry.npmjs.org/@esbuild/linux-ia32/-/linux-ia32-0.27.3.tgz",
+-      "integrity": "sha512-yGlQYjdxtLdh0a3jHjuwOrxQjOZYD/C9PfdbgJJF3TIZWnm/tMd/RcNiLngiu4iwcBAOezdnSLAwQDPqTmtTYg==",
++      "version": "0.27.4",
++      "resolved": "https://registry.npmjs.org/@esbuild/linux-ia32/-/linux-ia32-0.27.4.tgz",
++      "integrity": "sha512-oPtixtAIzgvzYcKBQM/qZ3R+9TEUd1aNJQu0HhGyqtx6oS7qTpvjheIWBbes4+qu1bNlo2V4cbkISr8q6gRBFA==",
+       "cpu": [
+         "ia32"
+       ],
+@@ -3215,9 +3250,9 @@
+       }
+     },
+     "node_modules/@esbuild/linux-loong64": {
+-      "version": "0.27.3",
+-      "resolved": "https://registry.npmjs.org/@esbuild/linux-loong64/-/linux-loong64-0.27.3.tgz",
+-      "integrity": "sha512-WO60Sn8ly3gtzhyjATDgieJNet/KqsDlX5nRC5Y3oTFcS1l0KWba+SEa9Ja1GfDqSF1z6hif/SkpQJbL63cgOA==",
++      "version": "0.27.4",
++      "resolved": "https://registry.npmjs.org/@esbuild/linux-loong64/-/linux-loong64-0.27.4.tgz",
++      "integrity": "sha512-8mL/vh8qeCoRcFH2nM8wm5uJP+ZcVYGGayMavi8GmRJjuI3g1v6Z7Ni0JJKAJW+m0EtUuARb6Lmp4hMjzCBWzA==",
+       "cpu": [
+         "loong64"
+       ],
+@@ -3231,9 +3266,9 @@
+       }
+     },
+     "node_modules/@esbuild/linux-mips64el": {
+-      "version": "0.27.3",
+-      "resolved": "https://registry.npmjs.org/@esbuild/linux-mips64el/-/linux-mips64el-0.27.3.tgz",
+-      "integrity": "sha512-APsymYA6sGcZ4pD6k+UxbDjOFSvPWyZhjaiPyl/f79xKxwTnrn5QUnXR5prvetuaSMsb4jgeHewIDCIWljrSxw==",
++      "version": "0.27.4",
++      "resolved": "https://registry.npmjs.org/@esbuild/linux-mips64el/-/linux-mips64el-0.27.4.tgz",
++      "integrity": "sha512-1RdrWFFiiLIW7LQq9Q2NES+HiD4NyT8Itj9AUeCl0IVCA459WnPhREKgwrpaIfTOe+/2rdntisegiPWn/r/aAw==",
+       "cpu": [
+         "mips64el"
+       ],
+@@ -3247,9 +3282,9 @@
+       }
+     },
+     "node_modules/@esbuild/linux-ppc64": {
+-      "version": "0.27.3",
+-      "resolved": "https://registry.npmjs.org/@esbuild/linux-ppc64/-/linux-ppc64-0.27.3.tgz",
+-      "integrity": "sha512-eizBnTeBefojtDb9nSh4vvVQ3V9Qf9Df01PfawPcRzJH4gFSgrObw+LveUyDoKU3kxi5+9RJTCWlj4FjYXVPEA==",
++      "version": "0.27.4",
++      "resolved": "https://registry.npmjs.org/@esbuild/linux-ppc64/-/linux-ppc64-0.27.4.tgz",
++      "integrity": "sha512-tLCwNG47l3sd9lpfyx9LAGEGItCUeRCWeAx6x2Jmbav65nAwoPXfewtAdtbtit/pJFLUWOhpv0FpS6GQAmPrHA==",
+       "cpu": [
+         "ppc64"
+       ],
+@@ -3263,9 +3298,9 @@
+       }
+     },
+     "node_modules/@esbuild/linux-riscv64": {
+-      "version": "0.27.3",
+-      "resolved": "https://registry.npmjs.org/@esbuild/linux-riscv64/-/linux-riscv64-0.27.3.tgz",
+-      "integrity": "sha512-3Emwh0r5wmfm3ssTWRQSyVhbOHvqegUDRd0WhmXKX2mkHJe1SFCMJhagUleMq+Uci34wLSipf8Lagt4LlpRFWQ==",
++      "version": "0.27.4",
++      "resolved": "https://registry.npmjs.org/@esbuild/linux-riscv64/-/linux-riscv64-0.27.4.tgz",
++      "integrity": "sha512-BnASypppbUWyqjd1KIpU4AUBiIhVr6YlHx/cnPgqEkNoVOhHg+YiSVxM1RLfiy4t9cAulbRGTNCKOcqHrEQLIw==",
+       "cpu": [
+         "riscv64"
+       ],
+@@ -3279,9 +3314,9 @@
+       }
+     },
+     "node_modules/@esbuild/linux-s390x": {
+-      "version": "0.27.3",
+-      "resolved": "https://registry.npmjs.org/@esbuild/linux-s390x/-/linux-s390x-0.27.3.tgz",
+-      "integrity": "sha512-pBHUx9LzXWBc7MFIEEL0yD/ZVtNgLytvx60gES28GcWMqil8ElCYR4kvbV2BDqsHOvVDRrOxGySBM9Fcv744hw==",
++      "version": "0.27.4",
++      "resolved": "https://registry.npmjs.org/@esbuild/linux-s390x/-/linux-s390x-0.27.4.tgz",
++      "integrity": "sha512-+eUqgb/Z7vxVLezG8bVB9SfBie89gMueS+I0xYh2tJdw3vqA/0ImZJ2ROeWwVJN59ihBeZ7Tu92dF/5dy5FttA==",
+       "cpu": [
+         "s390x"
+       ],
+@@ -3295,9 +3330,9 @@
+       }
+     },
+     "node_modules/@esbuild/linux-x64": {
+-      "version": "0.27.3",
+-      "resolved": "https://registry.npmjs.org/@esbuild/linux-x64/-/linux-x64-0.27.3.tgz",
+-      "integrity": "sha512-Czi8yzXUWIQYAtL/2y6vogER8pvcsOsk5cpwL4Gk5nJqH5UZiVByIY8Eorm5R13gq+DQKYg0+JyQoytLQas4dA==",
++      "version": "0.27.4",
++      "resolved": "https://registry.npmjs.org/@esbuild/linux-x64/-/linux-x64-0.27.4.tgz",
++      "integrity": "sha512-S5qOXrKV8BQEzJPVxAwnryi2+Iq5pB40gTEIT69BQONqR7JH1EPIcQ/Uiv9mCnn05jff9umq/5nqzxlqTOg9NA==",
+       "cpu": [
+         "x64"
+       ],
+@@ -3311,9 +3346,9 @@
+       }
+     },
+     "node_modules/@esbuild/netbsd-arm64": {
+-      "version": "0.27.3",
+-      "resolved": "https://registry.npmjs.org/@esbuild/netbsd-arm64/-/netbsd-arm64-0.27.3.tgz",
+-      "integrity": "sha512-sDpk0RgmTCR/5HguIZa9n9u+HVKf40fbEUt+iTzSnCaGvY9kFP0YKBWZtJaraonFnqef5SlJ8/TiPAxzyS+UoA==",
++      "version": "0.27.4",
++      "resolved": "https://registry.npmjs.org/@esbuild/netbsd-arm64/-/netbsd-arm64-0.27.4.tgz",
++      "integrity": "sha512-xHT8X4sb0GS8qTqiwzHqpY00C95DPAq7nAwX35Ie/s+LO9830hrMd3oX0ZMKLvy7vsonee73x0lmcdOVXFzd6Q==",
+       "cpu": [
+         "arm64"
+       ],
+@@ -3327,9 +3362,9 @@
+       }
+     },
+     "node_modules/@esbuild/netbsd-x64": {
+-      "version": "0.27.3",
+-      "resolved": "https://registry.npmjs.org/@esbuild/netbsd-x64/-/netbsd-x64-0.27.3.tgz",
+-      "integrity": "sha512-P14lFKJl/DdaE00LItAukUdZO5iqNH7+PjoBm+fLQjtxfcfFE20Xf5CrLsmZdq5LFFZzb5JMZ9grUwvtVYzjiA==",
++      "version": "0.27.4",
++      "resolved": "https://registry.npmjs.org/@esbuild/netbsd-x64/-/netbsd-x64-0.27.4.tgz",
++      "integrity": "sha512-RugOvOdXfdyi5Tyv40kgQnI0byv66BFgAqjdgtAKqHoZTbTF2QqfQrFwa7cHEORJf6X2ht+l9ABLMP0dnKYsgg==",
+       "cpu": [
+         "x64"
+       ],
+@@ -3343,9 +3378,9 @@
+       }
+     },
+     "node_modules/@esbuild/openbsd-arm64": {
+-      "version": "0.27.3",
+-      "resolved": "https://registry.npmjs.org/@esbuild/openbsd-arm64/-/openbsd-arm64-0.27.3.tgz",
+-      "integrity": "sha512-AIcMP77AvirGbRl/UZFTq5hjXK+2wC7qFRGoHSDrZ5v5b8DK/GYpXW3CPRL53NkvDqb9D+alBiC/dV0Fb7eJcw==",
++      "version": "0.27.4",
++      "resolved": "https://registry.npmjs.org/@esbuild/openbsd-arm64/-/openbsd-arm64-0.27.4.tgz",
++      "integrity": "sha512-2MyL3IAaTX+1/qP0O1SwskwcwCoOI4kV2IBX1xYnDDqthmq5ArrW94qSIKCAuRraMgPOmG0RDTA74mzYNQA9ow==",
+       "cpu": [
+         "arm64"
+       ],
+@@ -3359,9 +3394,9 @@
+       }
+     },
+     "node_modules/@esbuild/openbsd-x64": {
+-      "version": "0.27.3",
+-      "resolved": "https://registry.npmjs.org/@esbuild/openbsd-x64/-/openbsd-x64-0.27.3.tgz",
+-      "integrity": "sha512-DnW2sRrBzA+YnE70LKqnM3P+z8vehfJWHXECbwBmH/CU51z6FiqTQTHFenPlHmo3a8UgpLyH3PT+87OViOh1AQ==",
++      "version": "0.27.4",
++      "resolved": "https://registry.npmjs.org/@esbuild/openbsd-x64/-/openbsd-x64-0.27.4.tgz",
++      "integrity": "sha512-u8fg/jQ5aQDfsnIV6+KwLOf1CmJnfu1ShpwqdwC0uA7ZPwFws55Ngc12vBdeUdnuWoQYx/SOQLGDcdlfXhYmXQ==",
+       "cpu": [
+         "x64"
+       ],
+@@ -3375,9 +3410,9 @@
+       }
+     },
+     "node_modules/@esbuild/openharmony-arm64": {
+-      "version": "0.27.3",
+-      "resolved": "https://registry.npmjs.org/@esbuild/openharmony-arm64/-/openharmony-arm64-0.27.3.tgz",
+-      "integrity": "sha512-NinAEgr/etERPTsZJ7aEZQvvg/A6IsZG/LgZy+81wON2huV7SrK3e63dU0XhyZP4RKGyTm7aOgmQk0bGp0fy2g==",
++      "version": "0.27.4",
++      "resolved": "https://registry.npmjs.org/@esbuild/openharmony-arm64/-/openharmony-arm64-0.27.4.tgz",
++      "integrity": "sha512-JkTZrl6VbyO8lDQO3yv26nNr2RM2yZzNrNHEsj9bm6dOwwu9OYN28CjzZkH57bh4w0I2F7IodpQvUAEd1mbWXg==",
+       "cpu": [
+         "arm64"
+       ],
+@@ -3391,9 +3426,9 @@
+       }
+     },
+     "node_modules/@esbuild/sunos-x64": {
+-      "version": "0.27.3",
+-      "resolved": "https://registry.npmjs.org/@esbuild/sunos-x64/-/sunos-x64-0.27.3.tgz",
+-      "integrity": "sha512-PanZ+nEz+eWoBJ8/f8HKxTTD172SKwdXebZ0ndd953gt1HRBbhMsaNqjTyYLGLPdoWHy4zLU7bDVJztF5f3BHA==",
++      "version": "0.27.4",
++      "resolved": "https://registry.npmjs.org/@esbuild/sunos-x64/-/sunos-x64-0.27.4.tgz",
++      "integrity": "sha512-/gOzgaewZJfeJTlsWhvUEmUG4tWEY2Spp5M20INYRg2ZKl9QPO3QEEgPeRtLjEWSW8FilRNacPOg8R1uaYkA6g==",
+       "cpu": [
+         "x64"
+       ],
+@@ -3407,9 +3442,9 @@
+       }
+     },
+     "node_modules/@esbuild/win32-arm64": {
+-      "version": "0.27.3",
+-      "resolved": "https://registry.npmjs.org/@esbuild/win32-arm64/-/win32-arm64-0.27.3.tgz",
+-      "integrity": "sha512-B2t59lWWYrbRDw/tjiWOuzSsFh1Y/E95ofKz7rIVYSQkUYBjfSgf6oeYPNWHToFRr2zx52JKApIcAS/D5TUBnA==",
++      "version": "0.27.4",
++      "resolved": "https://registry.npmjs.org/@esbuild/win32-arm64/-/win32-arm64-0.27.4.tgz",
++      "integrity": "sha512-Z9SExBg2y32smoDQdf1HRwHRt6vAHLXcxD2uGgO/v2jK7Y718Ix4ndsbNMU/+1Qiem9OiOdaqitioZwxivhXYg==",
+       "cpu": [
+         "arm64"
+       ],
+@@ -3423,9 +3458,9 @@
+       }
+     },
+     "node_modules/@esbuild/win32-ia32": {
+-      "version": "0.27.3",
+-      "resolved": "https://registry.npmjs.org/@esbuild/win32-ia32/-/win32-ia32-0.27.3.tgz",
+-      "integrity": "sha512-QLKSFeXNS8+tHW7tZpMtjlNb7HKau0QDpwm49u0vUp9y1WOF+PEzkU84y9GqYaAVW8aH8f3GcBck26jh54cX4Q==",
++      "version": "0.27.4",
++      "resolved": "https://registry.npmjs.org/@esbuild/win32-ia32/-/win32-ia32-0.27.4.tgz",
++      "integrity": "sha512-DAyGLS0Jz5G5iixEbMHi5KdiApqHBWMGzTtMiJ72ZOLhbu/bzxgAe8Ue8CTS3n3HbIUHQz/L51yMdGMeoxXNJw==",
+       "cpu": [
+         "ia32"
+       ],
+@@ -3439,9 +3474,9 @@
+       }
+     },
+     "node_modules/@esbuild/win32-x64": {
+-      "version": "0.27.3",
+-      "resolved": "https://registry.npmjs.org/@esbuild/win32-x64/-/win32-x64-0.27.3.tgz",
+-      "integrity": "sha512-4uJGhsxuptu3OcpVAzli+/gWusVGwZZHTlS63hh++ehExkVT8SgiEf7/uC/PclrPPkLhZqGgCTjd0VWLo6xMqA==",
++      "version": "0.27.4",
++      "resolved": "https://registry.npmjs.org/@esbuild/win32-x64/-/win32-x64-0.27.4.tgz",
++      "integrity": "sha512-+knoa0BDoeXgkNvvV1vvbZX4+hizelrkwmGJBdT17t8FNPwG2lKemmuMZlmaNQ3ws3DKKCxpb4zRZEIp3UxFCg==",
+       "cpu": [
+         "x64"
+       ],
+@@ -4487,6 +4522,12 @@
+         "undici-types": "~6.21.0"
+       }
+     },
++    "node_modules/@ioredis/commands": {
++      "version": "1.5.1",
++      "resolved": "https://registry.npmjs.org/@ioredis/commands/-/commands-1.5.1.tgz",
++      "integrity": "sha512-JH8ZL/ywcJyR9MmJ5BNqZllXNZQqQbnVZOqpPQqE1vHiFgAw4NHbvE0FOduNU8IX9babitBT46571OnPTT0Zcw==",
++      "license": "MIT"
++    },
+     "node_modules/@isaacs/cliui": {
+       "version": "8.0.2",
+       "resolved": "https://registry.npmjs.org/@isaacs/cliui/-/cliui-8.0.2.tgz",
+@@ -4736,9 +4777,9 @@
+       }
+     },
+     "node_modules/@libpdf/core/node_modules/lru-cache": {
+-      "version": "11.2.6",
+-      "resolved": "https://registry.npmjs.org/lru-cache/-/lru-cache-11.2.6.tgz",
+-      "integrity": "sha512-ESL2CrkS/2wTPfuend7Zhkzo2u0daGJ/A2VucJOgQ/C48S/zB8MMeMHSGKYpXhIjbPxfuezITkaBH1wqv00DDQ==",
++      "version": "11.2.7",
++      "resolved": "https://registry.npmjs.org/lru-cache/-/lru-cache-11.2.7.tgz",
++      "integrity": "sha512-aY/R+aEsRelme17KGQa/1ZSIpLpNYYrhcrepKTZgE+W3WM16YMCaPwOHLHsmopZHELU0Ojin1lPVxKR0MihncA==",
+       "license": "BlueOak-1.0.0",
+       "engines": {
+         "node": "20 || >=22"
+@@ -5093,6 +5134,84 @@
+         "node": ">=16"
+       }
+     },
++    "node_modules/@msgpackr-extract/msgpackr-extract-darwin-arm64": {
++      "version": "3.0.3",
++      "resolved": "https://registry.npmjs.org/@msgpackr-extract/msgpackr-extract-darwin-arm64/-/msgpackr-extract-darwin-arm64-3.0.3.tgz",
++      "integrity": "sha512-QZHtlVgbAdy2zAqNA9Gu1UpIuI8Xvsd1v8ic6B2pZmeFnFcMWiPLfWXh7TVw4eGEZ/C9TH281KwhVoeQUKbyjw==",
++      "cpu": [
++        "arm64"
++      ],
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "darwin"
++      ]
++    },
++    "node_modules/@msgpackr-extract/msgpackr-extract-darwin-x64": {
++      "version": "3.0.3",
++      "resolved": "https://registry.npmjs.org/@msgpackr-extract/msgpackr-extract-darwin-x64/-/msgpackr-extract-darwin-x64-3.0.3.tgz",
++      "integrity": "sha512-mdzd3AVzYKuUmiWOQ8GNhl64/IoFGol569zNRdkLReh6LRLHOXxU4U8eq0JwaD8iFHdVGqSy4IjFL4reoWCDFw==",
++      "cpu": [
++        "x64"
++      ],
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "darwin"
++      ]
++    },
++    "node_modules/@msgpackr-extract/msgpackr-extract-linux-arm": {
++      "version": "3.0.3",
++      "resolved": "https://registry.npmjs.org/@msgpackr-extract/msgpackr-extract-linux-arm/-/msgpackr-extract-linux-arm-3.0.3.tgz",
++      "integrity": "sha512-fg0uy/dG/nZEXfYilKoRe7yALaNmHoYeIoJuJ7KJ+YyU2bvY8vPv27f7UKhGRpY6euFYqEVhxCFZgAUNQBM3nw==",
++      "cpu": [
++        "arm"
++      ],
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "linux"
++      ]
++    },
++    "node_modules/@msgpackr-extract/msgpackr-extract-linux-arm64": {
++      "version": "3.0.3",
++      "resolved": "https://registry.npmjs.org/@msgpackr-extract/msgpackr-extract-linux-arm64/-/msgpackr-extract-linux-arm64-3.0.3.tgz",
++      "integrity": "sha512-YxQL+ax0XqBJDZiKimS2XQaf+2wDGVa1enVRGzEvLLVFeqa5kx2bWbtcSXgsxjQB7nRqqIGFIcLteF/sHeVtQg==",
++      "cpu": [
++        "arm64"
++      ],
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "linux"
++      ]
++    },
++    "node_modules/@msgpackr-extract/msgpackr-extract-linux-x64": {
++      "version": "3.0.3",
++      "resolved": "https://registry.npmjs.org/@msgpackr-extract/msgpackr-extract-linux-x64/-/msgpackr-extract-linux-x64-3.0.3.tgz",
++      "integrity": "sha512-cvwNfbP07pKUfq1uH+S6KJ7dT9K8WOE4ZiAcsrSes+UY55E/0jLYc+vq+DO7jlmqRb5zAggExKm0H7O/CBaesg==",
++      "cpu": [
++        "x64"
++      ],
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "linux"
++      ]
++    },
++    "node_modules/@msgpackr-extract/msgpackr-extract-win32-x64": {
++      "version": "3.0.3",
++      "resolved": "https://registry.npmjs.org/@msgpackr-extract/msgpackr-extract-win32-x64/-/msgpackr-extract-win32-x64-3.0.3.tgz",
++      "integrity": "sha512-x0fWaQtYp4E6sktbsdAqnehxDgEc/VwM7uLsRCYWaiGu0ykYdZPiS8zCWdnjHwyiumousxfBm4SO31eXqwEZhQ==",
++      "cpu": [
++        "x64"
++      ],
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "win32"
++      ]
++    },
+     "node_modules/@napi-rs/canvas": {
+       "version": "0.1.83",
+       "resolved": "https://registry.npmjs.org/@napi-rs/canvas/-/canvas-0.1.83.tgz",
+@@ -6113,9 +6232,9 @@
+       }
+     },
+     "node_modules/@opentelemetry/auto-instrumentations-node/node_modules/@opentelemetry/core": {
+-      "version": "2.6.0",
+-      "resolved": "https://registry.npmjs.org/@opentelemetry/core/-/core-2.6.0.tgz",
+-      "integrity": "sha512-HLM1v2cbZ4TgYN6KEOj+Bbj8rAKriOdkF9Ed3tG25FoprS
+
+... [truncated, 123034 chars total]

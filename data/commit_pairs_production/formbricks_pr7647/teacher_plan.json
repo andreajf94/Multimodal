@@ -1,0 +1,163 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "api_design",
+      "recommendation": "Created a server-side PostHog client singleton with serverless-safe flushing using globalThis pattern similar to Prisma client implementation",
+      "rationale": "The globalThis pattern ensures a single PostHog instance across serverless function invocations, preventing connection leaks and ensuring proper resource cleanup. The flushAt:1 and flushInterval:0 configuration makes it serverless-safe by sending events immediately rather than batching.",
+      "alternatives_considered": [
+        "Creating new client per request (wasteful)",
+        "Using client-side PostHog (less reliable)",
+        "Implementing custom batching logic"
+      ],
+      "files_affected": [
+        "apps/web/lib/posthog/server.ts"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Implemented fire-and-forget capture helper that never throws errors and gracefully handles missing PostHog configuration",
+      "rationale": "Analytics should never break core functionality. The try-catch wrapper ensures tracking failures don't affect user workflows. The null check on posthogServerClient allows self-hosted instances without PostHog to run without errors.",
+      "alternatives_considered": [
+        "Throwing errors on tracking failures",
+        "Using async/await with error propagation",
+        "Implementing retry logic"
+      ],
+      "files_affected": [
+        "apps/web/lib/posthog/capture.ts"
+      ]
+    },
+    {
+      "dimension": "infrastructure",
+      "recommendation": "Added signal handlers for graceful shutdown in Node.js runtime to flush pending events",
+      "rationale": "Serverless environments can terminate processes abruptly. SIGTERM/SIGINT handlers ensure pending events are flushed before shutdown, preventing data loss. The posthogHandlersRegistered flag prevents duplicate registration.",
+      "alternatives_considered": [
+        "Relying on process exit handlers",
+        "Using background workers for flushing",
+        "Accepting potential data loss"
+      ],
+      "files_affected": [
+        "apps/web/lib/posthog/server.ts"
+      ]
+    },
+    {
+      "dimension": "data_modeling",
+      "recommendation": "Implemented sampled tracking for high-volume events (survey responses) to reduce PostHog load while maintaining visibility",
+      "rationale": "Survey responses can be extremely high volume. Tracking every response would overwhelm PostHog. Sampling (first response + every 100th) provides visibility into trends without excessive load. Cached response counts prevent database hits on every request.",
+      "alternatives_considered": [
+        "Tracking all responses",
+        "Random sampling",
+        "Time-based sampling"
+      ],
+      "files_affected": [
+        "apps/web/app/api/(internal)/pipeline/route.ts"
+      ]
+    },
+    {
+      "dimension": "testing",
+      "recommendation": "Created comprehensive unit tests for PostHog client initialization, error handling, and event capture",
+      "rationale": "Analytics infrastructure needs to be reliable. Tests verify client singleton behavior, graceful degradation, and proper event formatting. Mocking globalThis ensures tests don't interfere with each other.",
+      "alternatives_considered": [
+        "Integration tests only",
+        "No testing for analytics",
+        "End-to-end tests only"
+      ],
+      "files_affected": [
+        "apps/web/lib/posthog/capture.test.ts",
+        "apps/web/lib/posthog/server.test.ts"
+      ]
+    },
+    {
+      "dimension": "performance",
+      "recommendation": "Used cached response counts for sampling decisions to avoid database hits on every survey response",
+      "rationale": "Checking response count for every survey response would add significant database load. Caching with 1-minute TTL provides good enough accuracy for sampling while reducing database queries by 99% for high-volume surveys.",
+      "alternatives_considered": [
+        "Real-time database queries",
+        "In-memory counters",
+        "External cache service"
+      ],
+      "files_affected": [
+        "apps/web/app/api/(internal)/pipeline/route.ts"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "PostHog Infrastructure Setup",
+      "description": "Create server-side PostHog client with serverless-safe flushing and graceful error handling",
+      "files_to_modify": [],
+      "files_to_create": [
+        "apps/web/lib/posthog/capture.ts",
+        "apps/web/lib/posthog/server.ts",
+        "apps/web/lib/posthog/index.ts",
+        "apps/web/lib/posthog/capture.test.ts",
+        "apps/web/lib/posthog/server.test.ts"
+      ],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-002",
+      "title": "Authentication Event Tracking",
+      "description": "Track user signup and signin events with detailed properties including auth provider and organization context",
+      "files_to_modify": [
+        "apps/web/modules/auth/lib/authOptions.ts",
+        "apps/web/modules/auth/signup/actions.ts",
+        "apps/web/modules/ee/sso/lib/sso-handlers.ts",
+        "apps/web/modules/auth/lib/authOptions.test.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-003",
+      "title": "Survey and Organization Event Tracking",
+      "description": "Migrate autocapture events to explicit server-side tracking for key user actions",
+      "files_to_modify": [
+        "apps/web/app/(app)/environments/[environmentId]/surveys/[surveyId]/actions.ts",
+        "apps/web/app/setup/organization/create/actions.ts",
+        "apps/web/app/api/v1/client/[environmentId]/environment/lib/environmentState.ts",
+        "apps/web/app/api/(internal)/pipeline/route.ts",
+        "apps/web/app/(app)/environments/[environmentId]/workspace/integrations/actions.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-004",
+      "title": "Billing and Upgrade Event Tracking",
+      "description": "Track billing-related events including plan upgrades, trials, and feature usage",
+      "files_to_modify": [
+        "apps/web/modules/ee/billing/actions.ts",
+        "apps/web/modules/ui/components/upgrade-prompt/index.tsx",
+        "apps/web/app/(app)/environments/[environmentId]/surveys/[surveyId]/(analysis)/summary/components/shareEmbedModal/personal-links-tab.tsx",
+        "apps/web/modules/ee/contacts/components/contacts-page-layout.tsx",
+        "apps/web/modules/ee/contacts/segments/page.tsx",
+        "apps/web/modules/ee/quotas/components/quotas-card.tsx"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-005",
+      "title": "Test Updates and Configuration",
+      "description": "Update existing tests to mock PostHog and add new test coverage for event tracking",
+      "files_to_modify": [
+        "apps/web/app/api/v1/client/[environmentId]/environment/lib/environmentState.test.ts",
+        "apps/web/modules/api/v2/auth/tests/authenticated-api-client.test.ts",
+        "apps/web/modules/ee/billing/actions.test.ts",
+        "apps/web/modules/ee/sso/lib/tests/sso-handlers.test.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation creates a robust server-side PostHog analytics system that replaces fragile autocapture tracking. The core architecture centers around a singleton PostHog client (apps/web/lib/posthog/server.ts) that uses the globalThis pattern for serverless safety, similar to the existing Prisma client implementation. This ensures a single instance across function invocations with proper cleanup via SIGTERM/SIGINT handlers.\n\nA key design decision was the fire-and-forget capture helper (apps/web/lib/posthog/capture.ts) that never throws errors, ensuring analytics failures don't break core functionality. This is particularly important for self-hosted deployments where PostHog may not be configured. The system gates all tracking on POSTHOG_KEY availability, allowing seamless operation in both cloud and self-hosted environments.\n\nThe implementation tracks key user actions across the application: authentication events (user_signed_up, user_signed_in) with detailed properties like auth provider and email domain; survey events (survey_response_received with sampling for high volume); organization events (organization_created); and integration events (integration_connected). For high-volume events like survey responses, a smart sampling strategy tracks the first response and every 100th response, using cached counts to avoid database load.\n\nThe changes integrate cleanly with existing workflows by adding capturePostHogEvent calls at strategic points in action handlers and API routes. The system maintains backward compatibility through graceful degradation when PostHOG_KEY is not set, making it safe for all deployment scenarios. Comprehensive tests ensure reliability of both the infrastructure and the event tracking integration points.",
+  "source_pr": "https://github.com/formbricks/formbricks/pull/7647",
+  "before_sha": "af198c56322da3e97934e7d45ed4e5e7896b5da5",
+  "after_sha": "3d16e859c6cf2423a1663931d7c419fef4252d4b",
+  "diff_stats": {
+    "additions": 741,
+    "deletions": 14,
+    "files_changed": 39
+  }
+}

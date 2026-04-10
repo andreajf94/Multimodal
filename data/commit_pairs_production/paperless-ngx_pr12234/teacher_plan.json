@@ -1,0 +1,170 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "dependency_management",
+      "recommendation": "Updated Python version requirements from >=3.10 to >=3.11 in pyproject.toml and uv.lock",
+      "rationale": "Python 3.10 reached end-of-life in October 2024, so removing support allows the project to focus on maintained versions and leverage newer language features. This change aligns with the project's policy of supporting the three most recent Python versions.",
+      "alternatives_considered": [
+        "Maintaining 3.10 support with conditional imports",
+        "Keeping 3.10 but marking as deprecated",
+        "Only updating documentation but not enforcing version"
+      ],
+      "files_affected": [
+        "pyproject.toml",
+        "uv.lock"
+      ]
+    },
+    {
+      "dimension": "ci_cd_infrastructure",
+      "recommendation": "Updated CI/CD workflows to test Python 3.11-3.14 instead of 3.10-3.12, and adjusted codecov configuration accordingly",
+      "rationale": "CI/CD must reflect the actual supported versions to ensure proper testing coverage. Adding Python 3.13 and 3.14 future-proofs the project while removing 3.10. Codecov flags were renamed to match the new version matrix.",
+      "alternatives_considered": [
+        "Keeping 3.10 in CI for backward compatibility testing",
+        "Only removing 3.10 without adding newer versions",
+        "Creating separate workflows for different Python version groups"
+      ],
+      "files_affected": [
+        ".github/workflows/ci-backend.yml",
+        ".codecov.yml"
+      ]
+    },
+    {
+      "dimension": "code_modernization",
+      "recommendation": "Replaced deprecated timezone.utc with datetime.UTC and updated enum usage to StrEnum where appropriate",
+      "rationale": "Python 3.11+ provides datetime.UTC as a standard timezone object, which is more readable and standardized. StrEnum (available from Python 3.11) provides better type safety and string representation for enumeration values that are strings.",
+      "alternatives_considered": [
+        "Keeping timezone.utc for compatibility",
+        "Using typing.Literal instead of StrEnum",
+        "Creating custom string enum base classes"
+      ],
+      "files_affected": [
+        "src/documents/conditionals.py",
+        "src/documents/consumer.py",
+        "src/documents/index.py",
+        "src/documents/plugins/helpers.py",
+        "src/documents/versioning.py",
+        "src/documents/tests/date_parsing/conftest.py",
+        "src/documents/tests/date_parsing/test_date_parsing.py",
+        "src/documents/tests/test_filters.py",
+        "src/documents/tests/test_workflows.py"
+      ]
+    },
+    {
+      "dimension": "import_optimization",
+      "recommendation": "Removed conditional import for typing.Self since it's available in Python 3.11+",
+      "rationale": "Python 3.11 includes typing.Self in the standard library, eliminating the need for typing_extensions backport. This simplifies imports and reduces dependencies.",
+      "alternatives_considered": [
+        "Keeping typing_extensions for broader compatibility",
+        "Using TypeVar instead of Self",
+        "Creating custom Self type alias"
+      ],
+      "files_affected": [
+        "src/documents/plugins/date_parsing/base.py"
+      ]
+    },
+    {
+      "dimension": "documentation",
+      "recommendation": "Updated documentation to reflect new Python version requirements and support policy",
+      "rationale": "Clear documentation prevents user confusion and sets expectations about supported versions. The policy statement helps users understand version support lifecycle.",
+      "alternatives_considered": [
+        "Only updating version numbers without policy explanation",
+        "Keeping old documentation with deprecation notices",
+        "Creating separate migration guide"
+      ],
+      "files_affected": [
+        "CONTRIBUTING.md",
+        "docs/setup.md"
+      ]
+    },
+    {
+      "dimension": "testing",
+      "recommendation": "Updated test files to use datetime.UTC and adjusted test expectations for Python 3.14 date formatting changes",
+      "rationale": "Tests must reflect the actual code behavior with new Python versions. Python 3.14 changes date formatting behavior (strftime padding), so tests needed adjustment to remain version-agnostic.",
+      "alternatives_considered": [
+        "Skipping tests for Python 3.14",
+        "Using version-specific test cases",
+        "Mocking datetime formatting"
+      ],
+      "files_affected": [
+        "src/documents/tests/test_file_handling.py"
+      ]
+    },
+    {
+      "dimension": "tooling_configuration",
+      "recommendation": "Updated ruff configuration target-version from py310 to py311",
+      "rationale": "Code formatter/linter should target the new minimum Python version to properly apply formatting rules and suggest appropriate modern syntax.",
+      "alternatives_considered": [
+        "Keeping py310 target for compatibility",
+        "Setting to py312 or higher",
+        "Making target version dynamic based on environment"
+      ],
+      "files_affected": [
+        "pyproject.toml"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Update Python version requirements and dependencies",
+      "description": "Change minimum Python version from 3.10 to 3.11 in project configuration files and dependency lock file",
+      "files_to_modify": [
+        "pyproject.toml",
+        "uv.lock"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-002",
+      "title": "Modernize code for Python 3.11+ features",
+      "description": "Replace deprecated timezone.utc with datetime.UTC, use StrEnum for string enums, and remove typing_extensions.Self import",
+      "files_to_modify": [
+        "src/documents/conditionals.py",
+        "src/documents/consumer.py",
+        "src/documents/index.py",
+        "src/documents/plugins/date_parsing/base.py",
+        "src/documents/plugins/helpers.py",
+        "src/documents/versioning.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-003",
+      "title": "Update CI/CD and testing infrastructure",
+      "description": "Modify GitHub Actions workflow, Codecov configuration, and test files to support Python 3.11-3.14",
+      "files_to_modify": [
+        ".github/workflows/ci-backend.yml",
+        ".codecov.yml",
+        "src/documents/tests/date_parsing/conftest.py",
+        "src/documents/tests/date_parsing/test_date_parsing.py",
+        "src/documents/tests/test_file_handling.py",
+        "src/documents/tests/test_filters.py",
+        "src/documents/tests/test_workflows.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-004",
+      "title": "Update documentation and contributing guidelines",
+      "description": "Revise documentation to reflect new Python version requirements and support policy",
+      "files_to_modify": [
+        "CONTRIBUTING.md",
+        "docs/setup.md"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation to drop Python 3.10 support follows a systematic approach across multiple dimensions of the codebase. First, the core configuration files (pyproject.toml and uv.lock) were updated to set the minimum Python version to 3.11, removing Python 3.10 classifiers and updating dependency resolution markers. This foundational change ensures the package manager enforces the new version requirement.\n\nThe CI/CD pipeline was comprehensively updated to test Python 3.11, 3.12, 3.13, and 3.14, replacing the previous 3.10-3.12 matrix. Codecov configuration was similarly adjusted to track coverage for the new versions. This ensures continuous integration validates the code against all supported versions.\n\nCode modernization was a key aspect of this change. The implementation leverages Python 3.11+ features by replacing datetime.timezone.utc with the more readable datetime.UTC, using StrEnum for string-based enumerations (which provides better type safety), and removing the conditional import for typing.Self since it's now standard. These changes not only update the code for the new minimum version but also improve code quality and maintainability.\n\nDocumentation was updated to clearly communicate the new version requirements and the project's support policy of maintaining the three most recent Python versions. Test files were adjusted to use the new datetime.UTC and handle Python 3.14's date formatting changes. The ruff formatter configuration was updated to target Python 3.11 syntax. This holistic approach ensures the entire ecosystem\u2014code, tests, documentation, and tooling\u2014aligns with the new Python version requirements while maintaining backward compatibility for users already on supported versions.",
+  "source_pr": "https://github.com/paperless-ngx/paperless-ngx/pull/12234",
+  "before_sha": "a9cb89c6338e871f1f48333453cbb9aa91930186",
+  "after_sha": "1e21bcd26e7e5f85fce85b313d265a2f62f6430f",
+  "diff_stats": {
+    "additions": 107,
+    "deletions": 771,
+    "files_changed": 17
+  }
+}

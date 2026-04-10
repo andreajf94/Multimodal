@@ -1,0 +1,102 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "asynchronous_handling",
+      "recommendation": "Added 'await' keyword when calling the parent class's parse method in RecipeScraperOpenAI to ensure proper asynchronous execution",
+      "rationale": "The missing 'await' was causing the scraping operation to return a coroutine object instead of executing it, leading to premature termination of HTML/JSON imports. This is critical because the OpenAI scraper strategy relies on asynchronous operations to process recipes, and without proper awaiting, the coroutine would never complete.",
+      "alternatives_considered": [
+        "Making the parent parse method synchronous (not feasible as it would break the entire async architecture)",
+        "Using asyncio.create_task (would still require proper await handling elsewhere)",
+        "Wrapping the call in an event loop (overly complex for this simple fix)"
+      ],
+      "files_affected": [
+        "mealie/services/scraper/scraper_strategies.py"
+      ]
+    },
+    {
+      "dimension": "state_management",
+      "recommendation": "Changed Vue component from local reactive variable to composition API state management by updating v-model binding from 'isEditJSON' to 'state.isEditJSON'",
+      "rationale": "The UI bug was likely caused by improper reactivity tracking. By moving the boolean flag into the component's state object (presumably defined with Vue's reactive or ref), we ensure proper reactivity and avoid stale UI state during the import process. This aligns with the Vue 3 Composition API patterns used throughout the codebase.",
+      "alternatives_considered": [
+        "Using Vuex/Pinia store (overkill for a simple UI toggle)",
+        "Keeping as local variable with explicit reactive() wrapper (less consistent with existing patterns)",
+        "Using props/emits (not applicable since this is internal component state)"
+      ],
+      "files_affected": [
+        "frontend/pages/g/[groupSlug]/r/create/html.vue"
+      ]
+    },
+    {
+      "dimension": "testing_infrastructure",
+      "recommendation": "Created comprehensive integration tests for OpenAI recipe creation and extracted SSE parsing helper to shared utilities",
+      "rationale": "The bug was likely introduced due to insufficient test coverage for the OpenAI scraping path. By adding dedicated integration tests, we ensure: 1) URL-based imports work with OpenAI, 2) HTML/JSON imports work with OpenAI, 3) Streaming endpoints emit proper progress events, 4) Error cases (OpenAI disabled or returning None) are handled correctly. Extracting parse_sse_events to a shared helper promotes DRY principles and makes the utility available for other tests.",
+      "alternatives_considered": [
+        "Adding tests only for the specific bug scenario (would miss related edge cases)",
+        "Keeping SSE parsing logic duplicated in test files (violates DRY)",
+        "Mocking at a higher level (would test less of the actual integration)"
+      ],
+      "files_affected": [
+        "tests/integration_tests/user_recipe_tests/test_recipe_create_from_openai.py",
+        "tests/integration_tests/user_recipe_tests/test_recipe_crud.py",
+        "tests/utils/helpers.py"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Added proper test coverage for OpenAI failure scenarios including disabled service and null responses",
+      "rationale": "The tests verify that when OpenAI is disabled or returns None, the API returns appropriate 400 status codes rather than crashing or hanging. This ensures the system gracefully handles OpenAI service unavailability, which is important for reliability since OpenAI is an external dependency.",
+      "alternatives_considered": [
+        "Letting exceptions propagate (would cause 500 errors for users)",
+        "Silently falling back to other scrapers (could mask configuration issues)",
+        "Implementing circuit breaker pattern (more complex than needed for current scale)"
+      ],
+      "files_affected": [
+        "tests/integration_tests/user_recipe_tests/test_recipe_create_from_openai.py"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Fix asynchronous handling in OpenAI scraper",
+      "description": "Add missing 'await' keyword to prevent premature termination of HTML/JSON imports when using OpenAI recipe parsing",
+      "files_to_modify": [
+        "mealie/services/scraper/scraper_strategies.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-002",
+      "title": "Fix UI reactivity bug in recipe import page",
+      "description": "Update Vue component to use proper composition API state management for the JSON editor toggle",
+      "files_to_modify": [
+        "frontend/pages/g/[groupSlug]/r/create/html.vue"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-003",
+      "title": "Add comprehensive OpenAI import tests",
+      "description": "Create integration tests covering all OpenAI scraping scenarios including URL, HTML/JSON, streaming, and error cases",
+      "files_to_modify": [
+        "tests/integration_tests/user_recipe_tests/test_recipe_crud.py",
+        "tests/utils/helpers.py"
+      ],
+      "files_to_create": [
+        "tests/integration_tests/user_recipe_tests/test_recipe_create_from_openai.py"
+      ],
+      "estimated_effort": "medium"
+    }
+  ],
+  "implementation_summary": "The changes address a critical bug where HTML and JSON recipe imports were failing due to improper asynchronous handling in the OpenAI scraper strategy. The core fix is a single-character addition of 'await' in the RecipeScraperOpenAI.parse() method, ensuring the parent class's asynchronous parse method executes completely before returning. This prevents the scraping operation from terminating prematurely.\n\nConcurrently, a UI bug was fixed by updating the Vue component to use proper composition API state management (state.isEditJSON instead of isEditJSON), ensuring reactivity works correctly during the import process. This aligns with Vue 3 best practices used throughout the frontend.\n\nTo prevent regression and ensure comprehensive coverage, a new test file was created with integration tests for all OpenAI scraping scenarios. The tests verify: URL imports, HTML/JSON imports, streaming progress events, and proper error handling when OpenAI is disabled or returns null. Additionally, the SSE parsing helper was extracted from test_recipe_crud.py into a shared utility (helpers.py), promoting code reuse and maintainability.\n\nThe implementation follows the existing architectural patterns: asynchronous backend services with proper await handling, Vue 3 composition API for frontend state, and comprehensive integration testing with proper mocking of external dependencies. The changes are minimal and focused, addressing the specific bug while improving test coverage to prevent similar issues in the future.",
+  "source_pr": "https://github.com/mealie-recipes/mealie/pull/7330",
+  "before_sha": "4dd8d836e11eb118a72f4729999c65940d8988cc",
+  "after_sha": "7c5913b01286f1e861b463b7f19e3d67cdb1b9a3",
+  "diff_stats": {
+    "additions": 207,
+    "deletions": 20,
+    "files_changed": 5
+  }
+}

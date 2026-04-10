@@ -1,0 +1,89 @@
+diff --git a/apps/web/playwright/booking-pages.e2e.ts b/apps/web/playwright/booking-pages.e2e.ts
+index 13dcbf8b0f7d4d..1531efbd66ce74 100644
+--- a/apps/web/playwright/booking-pages.e2e.ts
++++ b/apps/web/playwright/booking-pages.e2e.ts
+@@ -1,23 +1,23 @@
++import { WEBAPP_URL } from "@calcom/lib/constants";
++import { generateHashedLink } from "@calcom/lib/generateHashedLink";
++import { randomString } from "@calcom/lib/random";
++import { SchedulingType } from "@calcom/prisma/enums";
++import type { Schedule, TimeRange } from "@calcom/types/schedule";
++import { expect } from "@playwright/test";
++import { JSDOM } from "jsdom";
+ import { test, todo } from "./lib/fixtures";
+ import {
+   bookFirstEvent,
+   bookOptinEvent,
+   bookTimeSlot,
++  cancelBookingFromBookingsList,
+   confirmBooking,
+   confirmReschedule,
+   expectSlotNotAllowedToBook,
+   selectFirstAvailableTimeSlotNextMonth,
+   testEmail,
+   testName,
+-  cancelBookingFromBookingsList,
+ } from "./lib/testUtils";
+-import { WEBAPP_URL } from "@calcom/lib/constants";
+-import { generateHashedLink } from "@calcom/lib/generateHashedLink";
+-import { randomString } from "@calcom/lib/random";
+-import { SchedulingType } from "@calcom/prisma/enums";
+-import type { Schedule, TimeRange } from "@calcom/types/schedule";
+-import { expect } from "@playwright/test";
+-import { JSDOM } from "jsdom";
+ 
+ const freeUserObj = { name: `Free-user-${randomString(3)}` };
+ test.describe.configure({ mode: "parallel" });
+@@ -486,8 +486,6 @@ test.describe("Booking on different layouts", () => {
+ 
+     await page.click('[data-testid="toggle-group-item-column_view"]');
+ 
+-    // Use the standard helper to select an available time slot next month
+-    // This is more robust than manually clicking incrementMonth and reloading
+     await selectFirstAvailableTimeSlotNextMonth(page);
+ 
+     // Fill what is this meeting about? name email and notes
+diff --git a/apps/web/playwright/lib/testUtils.ts b/apps/web/playwright/lib/testUtils.ts
+index 9fff23a2552f2e..19ab2f8b6c2289 100644
+--- a/apps/web/playwright/lib/testUtils.ts
++++ b/apps/web/playwright/lib/testUtils.ts
+@@ -109,7 +109,22 @@ export async function selectFirstAvailableTimeSlotNextMonth(page: Page | Frame)
+   // Wait for the booker to be ready before interacting
+   const incrementMonth = page.getByTestId("incrementMonth");
+   await incrementMonth.waitFor();
++
++  // Wait for the initial schedule data to load (available days rendered in date picker).
++  // This ensures the waitForResponse listener below only catches the month-change response,
++  // not the initial page load response. Without this, column view can race: stale time slots
++  // from the current month get clicked before the new month's schedule data arrives, causing
++  // the quick availability check to permanently disable the confirm button.
++  await page.locator('[data-testid="day"][data-disabled="false"]').nth(0).waitFor();
++
++  // Listen for the getSchedule response triggered by the month change.
++  // waitForResponse is only available on Page, not Frame.
++  const scheduleResponse =
++    "waitForResponse" in page
++      ? page.waitForResponse((resp) => resp.url().includes("getSchedule") && resp.status() === 200)
++      : Promise.resolve();
+   await incrementMonth.click();
++  await scheduleResponse;
+ 
+   // Wait for available day to appear after month increment
+   const firstAvailableDay = page.locator('[data-testid="day"][data-disabled="false"]').nth(0);
+@@ -125,7 +140,16 @@ export async function selectSecondAvailableTimeSlotNextMonth(page: Page) {
+   // Wait for the booker to be ready before interacting
+   const incrementMonth = page.getByTestId("incrementMonth");
+   await incrementMonth.waitFor();
++
++  // Wait for initial schedule data to load before changing month (see selectFirstAvailableTimeSlotNextMonth)
++  await page.locator('[data-testid="day"][data-disabled="false"]').nth(0).waitFor();
++
++  // Listen for the getSchedule response triggered by the month change
++  const scheduleResponse = page.waitForResponse(
++    (resp) => resp.url().includes("getSchedule") && resp.status() === 200
++  );
+   await incrementMonth.click();
++  await scheduleResponse;
+ 
+   // Wait for available day to appear after month increment
+   const secondAvailableDay = page.locator('[data-testid="day"][data-disabled="false"]').nth(1);

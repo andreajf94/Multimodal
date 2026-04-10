@@ -1,0 +1,103 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "documentation_structure",
+      "recommendation": "Consolidated email configuration documentation by restructuring content from configuration.mdx into a dedicated email.mdx guide, creating a single source of truth for email setup",
+      "rationale": "Email configuration was previously scattered across multiple documentation pages, causing duplication and confusion. By moving detailed explanations and examples from the configuration reference into a dedicated guide, users can find all email-related information in one logical place. This follows the principle of 'one obvious place' for documentation.",
+      "alternatives_considered": [
+        "Leaving email configuration details in the configuration reference only",
+        "Creating a completely new documentation page instead of restructuring existing content",
+        "Adding cross-references without restructuring content"
+      ],
+      "files_affected": [
+        "website/docs/install-config/configuration/configuration.mdx",
+        "website/docs/install-config/email.mdx"
+      ]
+    },
+    {
+      "dimension": "user_experience",
+      "recommendation": "Added clear guidance about TLS modes (STARTTLS vs SSL) and port conventions to prevent configuration errors",
+      "rationale": "Users frequently confuse STARTTLS (explicit TLS) with SSL (implicit TLS) and use incorrect port combinations. By explicitly stating which TLS mode corresponds to which port (587 for STARTTLS, 465 for SSL) and warning against enabling both simultaneously, we prevent common misconfigurations that cause email delivery failures.",
+      "alternatives_considered": [
+        "Leaving TLS configuration as implicit knowledge",
+        "Adding separate troubleshooting section for TLS issues",
+        "Creating a TLS configuration wizard in documentation"
+      ],
+      "files_affected": [
+        "website/docs/install-config/configuration/configuration.mdx",
+        "website/docs/install-config/email.mdx"
+      ]
+    },
+    {
+      "dimension": "content_organization",
+      "recommendation": "Restructured email.mdx with logical sections: 'Before you begin', 'Configure global email settings', 'When to use stage-specific settings', 'Test email delivery', and provider-specific examples",
+      "rationale": "The previous structure mixed configuration, testing, and provider-specific examples without clear separation. The new structure follows a natural workflow: preparation \u2192 configuration \u2192 testing \u2192 advanced scenarios. This helps users follow a step-by-step process and understand when to use different configuration options.",
+      "alternatives_considered": [
+        "Keeping the original structure with minor improvements",
+        "Creating separate pages for each email-related topic",
+        "Using tabs for different user personas instead of workflow stages"
+      ],
+      "files_affected": [
+        "website/docs/install-config/email.mdx"
+      ]
+    },
+    {
+      "dimension": "cross_reference_management",
+      "recommendation": "Updated cross-references from first-steps documentation to point to the new consolidated email documentation structure",
+      "rationale": "Maintaining backward compatibility for bookmarked links while ensuring navigation points to the most relevant content. The first-steps page now references the specific 'Configure global email settings' section rather than a generic email page, providing more precise guidance for new users.",
+      "alternatives_considered": [
+        "Keeping old references that might point to deprecated sections",
+        "Using redirects instead of updating references",
+        "Removing email references from first-steps entirely"
+      ],
+      "files_affected": [
+        "website/docs/install-config/first-steps/index.mdx"
+      ]
+    },
+    {
+      "dimension": "configuration_clarity",
+      "recommendation": "Enhanced configuration parameter descriptions with practical explanations and usage context",
+      "rationale": "Original configuration descriptions were minimal and technical. Adding explanations like 'SMTP server hostname or IP address', 'Common values are 25, 587 for STARTTLS, and 465 for implicit TLS', and 'Mutually exclusive with AUTHENTIK_EMAIL__USE_SSL' helps users understand not just what each parameter does, but how to use it correctly in real-world scenarios.",
+      "alternatives_considered": [
+        "Keeping minimal technical descriptions only",
+        "Creating a separate 'configuration guide' document",
+        "Adding tooltips or pop-up explanations instead of inline text"
+      ],
+      "files_affected": [
+        "website/docs/install-config/configuration/configuration.mdx"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Consolidate email configuration documentation",
+      "description": "Restructure email configuration content from scattered locations into a single, well-organized guide with clear workflow and practical examples",
+      "files_to_modify": [
+        "website/docs/install-config/configuration/configuration.mdx",
+        "website/docs/install-config/email.mdx"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-002",
+      "title": "Update cross-references and navigation",
+      "description": "Ensure all documentation references to email configuration point to the new consolidated structure and maintain accurate navigation",
+      "files_to_modify": [
+        "website/docs/install-config/first-steps/index.mdx"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The email configuration documentation restructuring focused on creating a single source of truth for email setup in authentik. The implementation moved detailed explanations, examples, and practical guidance from the general configuration reference (configuration.mdx) into a dedicated email guide (email.mdx), while keeping essential parameter definitions in the configuration reference for completeness.\n\nKey patterns used include: 1) Workflow-based organization that guides users from preparation through configuration to testing, 2) Clear differentiation between global settings and stage-specific settings, 3) Practical examples for common providers like Google Workspace, and 4) Explicit warnings about common pitfalls like TLS mode conflicts. The changes integrate with the existing codebase by maintaining all technical content while improving its organization and accessibility.\n\nThe restructured documentation now serves as a comprehensive guide rather than a collection of scattered references. Users can follow a logical progression from understanding requirements to implementing configuration to verifying functionality. This approach reduces support burden by preventing common configuration errors and helping users find information more efficiently. The updates maintain backward compatibility by keeping parameter names and core functionality unchanged while significantly improving the user experience.",
+  "source_pr": "https://github.com/goauthentik/authentik/pull/21130",
+  "before_sha": "2cd16202677f8e0091bca62c945ad5f707133dcc",
+  "after_sha": "f819775475f3add889b4ba7fc02443cdad26c9e8",
+  "diff_stats": {
+    "additions": 86,
+    "deletions": 35,
+    "files_changed": 3
+  }
+}

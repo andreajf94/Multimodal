@@ -1,0 +1,89 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "api_design",
+      "recommendation": "Added 'webhookId' as an optional field to the base webhook schema to support dual parameter naming conventions",
+      "rationale": "The base schema (webhookIdAndEventTypeIdSchema) needed to include both 'id' and 'webhookId' fields to provide a unified interface for all webhook operations. This ensures consistent validation across all endpoints and prevents schema mismatches between different operations.",
+      "alternatives_considered": [
+        "Creating separate schemas for different parameter conventions",
+        "Using union types for parameter variations"
+      ],
+      "files_affected": [
+        "packages/trpc/server/routers/viewer/webhook/types.ts"
+      ]
+    },
+    {
+      "dimension": "data_modeling",
+      "recommendation": "Modified webhook handlers to strip 'webhookId' field before database operations to prevent schema pollution",
+      "rationale": "The 'webhookId' field is only for API parameter resolution, not for database storage. By destructuring and excluding it (using '_webhookId' pattern), we ensure clean data flows to Prisma operations without unnecessary fields that could cause validation errors or schema violations.",
+      "alternatives_considered": [
+        "Adding 'webhookId' to the Prisma schema",
+        "Using transformation functions to map fields"
+      ],
+      "files_affected": [
+        "packages/trpc/server/routers/viewer/webhook/create.handler.ts",
+        "packages/trpc/server/routers/viewer/webhook/edit.handler.ts"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Implemented consistent ID resolution logic in middleware and handlers with clear priority (id || webhookId)",
+      "rationale": "By checking both 'id' and 'webhookId' parameters with 'id' taking precedence, we maintain backward compatibility while supporting the new parameter name. This prevents validation bypasses where endpoints might accept one parameter but not the other, ensuring all security checks apply regardless of which parameter name is used.",
+      "alternatives_considered": [
+        "Requiring clients to always use 'webhookId'",
+        "Creating separate endpoints for different parameter conventions"
+      ],
+      "files_affected": [
+        "packages/trpc/server/routers/viewer/webhook/get.handler.ts",
+        "packages/trpc/server/routers/viewer/webhook/util.ts"
+      ]
+    },
+    {
+      "dimension": "api_design",
+      "recommendation": "Simplified the get webhook schema by removing redundant field definitions and reusing the base schema",
+      "rationale": "The get schema was duplicating validation logic by extending the base schema and redefining 'webhookId'. By directly using the base schema (which now includes both fields), we reduce code duplication and ensure consistency between schema definitions, making maintenance easier.",
+      "alternatives_considered": [
+        "Keeping separate schemas for different operations",
+        "Creating a factory function for schema generation"
+      ],
+      "files_affected": [
+        "packages/trpc/server/routers/viewer/webhook/get.schema.ts"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Unify webhook parameter resolution across all endpoints",
+      "description": "Update all webhook-related schemas, handlers, and middleware to consistently handle both 'id' and 'webhookId' parameters, ensuring backward compatibility while preventing validation inconsistencies.",
+      "files_to_modify": [
+        "packages/trpc/server/routers/viewer/webhook/types.ts",
+        "packages/trpc/server/routers/viewer/webhook/get.schema.ts",
+        "packages/trpc/server/routers/viewer/webhook/get.handler.ts",
+        "packages/trpc/server/routers/viewer/webhook/util.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-002",
+      "title": "Prevent schema pollution in webhook mutations",
+      "description": "Modify create and edit handlers to properly exclude 'webhookId' parameter from database operations while maintaining the field in API schemas for parameter resolution.",
+      "files_to_modify": [
+        "packages/trpc/server/routers/viewer/webhook/create.handler.ts",
+        "packages/trpc/server/routers/viewer/webhook/edit.handler.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The changes implement a unified approach for webhook ID resolution across the tRPC webhook router. The core strategy involves updating the base schema in types.ts to include both 'id' and 'webhookId' as optional fields, then modifying all handlers and middleware to check both parameters with consistent priority (id || webhookId). This ensures backward compatibility while supporting the new parameter naming convention.\n\nKey patterns used include: 1) Schema-first validation where the base schema defines all possible parameters, 2) Destructuring with exclusion pattern (_webhookId) to prevent unwanted fields from reaching database operations, and 3) Consistent lookup logic across all endpoints to prevent security bypasses. The get.schema.ts was simplified by removing redundant field definitions and directly reusing the enhanced base schema.\n\nThe changes integrate seamlessly with the existing codebase by maintaining the existing 'id' parameter behavior while adding support for 'webhookId'. The middleware in util.ts now correctly resolves webhook lookups using either parameter, ensuring permission checks apply regardless of which parameter name clients use. This approach follows the codebase's existing patterns of type-safe tRPC procedures with Zod validation while addressing a specific inconsistency in parameter handling.",
+  "source_pr": "https://github.com/calcom/cal.com/pull/28701",
+  "before_sha": "2e5643e192ace2c59cf2b249807467cb4b24232a",
+  "after_sha": "9b3bbb9f72609e8a77e8e4cc4f0a8f5a39120305",
+  "diff_stats": {
+    "additions": 10,
+    "deletions": 9,
+    "files_changed": 6
+  }
+}

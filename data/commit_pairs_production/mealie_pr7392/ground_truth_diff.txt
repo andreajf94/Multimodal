@@ -1,0 +1,394 @@
+diff --git a/.github/workflows/build-package.yml b/.github/workflows/build-package.yml
+index ec25226cfe4..47845487666 100644
+--- a/.github/workflows/build-package.yml
++++ b/.github/workflows/build-package.yml
+@@ -17,12 +17,12 @@ jobs:
+ 
+     steps:
+       - name: Checkout 🛎
+-        uses: actions/checkout@v4
++        uses: actions/checkout@v6
+         with:
+           ref: ${{ inputs.ref || github.sha }}
+ 
+       - name: Setup node env 🏗
+-        uses: actions/setup-node@v4.0.0
++        uses: actions/setup-node@v6
+         with:
+           node-version: 22
+           check-latest: true
+@@ -32,7 +32,7 @@ jobs:
+         run: echo "dir=$(yarn cache dir)" >> $GITHUB_OUTPUT
+ 
+       - name: Cache node_modules 📦
+-        uses: actions/cache@v4
++        uses: actions/cache@v5
+         id: yarn-cache # use this to check for `cache-hit` (`steps.yarn-cache.outputs.cache-hit != 'true'`)
+         with:
+           path: ${{ steps.yarn-cache-dir-path.outputs.dir }}
+@@ -49,7 +49,7 @@ jobs:
+         working-directory: "frontend"
+ 
+       - name: Archive built frontend
+-        uses: actions/upload-artifact@v4
++        uses: actions/upload-artifact@v6
+         with:
+           name: frontend-dist
+           path: frontend/dist
+@@ -68,12 +68,12 @@ jobs:
+           repo-token: ${{ secrets.GITHUB_TOKEN }}
+ 
+       - name: Check out repository
+-        uses: actions/checkout@v4
++        uses: actions/checkout@v6
+         with:
+           ref: ${{ inputs.ref || github.sha }}
+ 
+       - name: Set up python
+-        uses: actions/setup-python@v5
++        uses: actions/setup-python@v6
+         with:
+           python-version: "3.12"
+ 
+@@ -81,7 +81,7 @@ jobs:
+         run: pip install uv
+ 
+       - name: Retrieve built frontend
+-        uses: actions/download-artifact@v4
++        uses: actions/download-artifact@v6
+         with:
+           name: frontend-dist
+           path: mealie/frontend
+@@ -97,7 +97,7 @@ jobs:
+           task py:package
+ 
+       - name: Archive built package
+-        uses: actions/upload-artifact@v4
++        uses: actions/upload-artifact@v6
+         with:
+           name: backend-dist
+           path: dist
+diff --git a/.github/workflows/codeql.yml b/.github/workflows/codeql.yml
+index 410512feae3..54cb8b24f8f 100644
+--- a/.github/workflows/codeql.yml
++++ b/.github/workflows/codeql.yml
+@@ -44,11 +44,11 @@ jobs:
+ 
+     steps:
+     - name: Checkout repository
+-      uses: actions/checkout@v4
++      uses: actions/checkout@v6
+ 
+     # Initializes the CodeQL tools for scanning.
+     - name: Initialize CodeQL
+-      uses: github/codeql-action/init@v3
++      uses: github/codeql-action/init@v4
+       with:
+         languages: ${{ matrix.language }}
+         # If you wish to specify custom queries, you can do so here or in a config file.
+@@ -62,7 +62,7 @@ jobs:
+     # Autobuild attempts to build any compiled languages (C/C++, C#, Go, Java, or Swift).
+     # If this step fails, then you should remove it and run the build manually (see below)
+     - name: Autobuild
+-      uses: github/codeql-action/autobuild@v3
++      uses: github/codeql-action/autobuild@v4
+ 
+     # ℹ️ Command-line programs to run using the OS shell.
+     # 📚 See https://docs.github.com/en/actions/using-workflows/workflow-syntax-for-github-actions#jobsjob_idstepsrun
+@@ -75,6 +75,6 @@ jobs:
+     #     ./location_of_script_within_repo/buildscript.sh
+ 
+     - name: Perform CodeQL Analysis
+-      uses: github/codeql-action/analyze@v3
++      uses: github/codeql-action/analyze@v4
+       with:
+         category: "/language:${{matrix.language}}"
+diff --git a/.github/workflows/docs.yml b/.github/workflows/docs.yml
+index 004a82cf87b..2f855157e1c 100644
+--- a/.github/workflows/docs.yml
++++ b/.github/workflows/docs.yml
+@@ -21,7 +21,7 @@ jobs:
+   build:
+     runs-on: ubuntu-latest
+     steps:
+-      - uses: actions/checkout@v4
++      - uses: actions/checkout@v6
+ 
+       - name: Install uv
+         uses: astral-sh/setup-uv@v4
+diff --git a/.github/workflows/e2e.yml b/.github/workflows/e2e.yml
+index b314adbff27..7271be5b3df 100644
+--- a/.github/workflows/e2e.yml
++++ b/.github/workflows/e2e.yml
+@@ -10,21 +10,21 @@ jobs:
+       run:
+         working-directory: ./tests/e2e
+     steps:
+-    - uses: actions/checkout@v4
+-    - uses: actions/setup-node@v4
++    - uses: actions/checkout@v6
++    - uses: actions/setup-node@v6
+       with:
+         node-version: 22
+         cache: 'yarn'
+         cache-dependency-path: ./tests/e2e/yarn.lock
+     - name: Set up Docker Buildx
+-      uses: docker/setup-buildx-action@v3
++      uses: docker/setup-buildx-action@v4
+     - name: Retrieve Python package
+-      uses: actions/download-artifact@v4
++      uses: actions/download-artifact@v6
+       with:
+         name: backend-dist
+         path: dist
+     - name: Build Image
+-      uses: docker/build-push-action@v5
++      uses: docker/build-push-action@v7
+       with:
+         file: ./docker/Dockerfile
+         context: .
+diff --git a/.github/workflows/locale-sync.yml b/.github/workflows/locale-sync.yml
+index 09e1054b63e..1fbd456525a 100644
+--- a/.github/workflows/locale-sync.yml
++++ b/.github/workflows/locale-sync.yml
+@@ -23,12 +23,12 @@ jobs:
+           private-key: ${{ secrets.COMMIT_BOT_APP_PRIVATE_KEY }}
+ 
+       - name: Checkout repository
+-        uses: actions/checkout@v4
++        uses: actions/checkout@v6
+         with:
+           token: ${{ steps.app-token.outputs.token }}
+ 
+       - name: Set up Python
+-        uses: actions/setup-python@v5
++        uses: actions/setup-python@v6
+         with:
+           python-version: "3.12"
+ 
+@@ -37,7 +37,7 @@ jobs:
+ 
+       - name: Load cached venv
+         id: cached-python-dependencies
+-        uses: actions/cache@v4
++        uses: actions/cache@v5
+         with:
+           path: .venv
+           key: venv-${{ runner.os }}-${{ hashFiles('**/uv.lock') }}
+diff --git a/.github/workflows/partial-trivy-container-scanning.yml b/.github/workflows/partial-trivy-container-scanning.yml
+index 630404b7b2c..197b1755a00 100644
+--- a/.github/workflows/partial-trivy-container-scanning.yml
++++ b/.github/workflows/partial-trivy-container-scanning.yml
+@@ -11,7 +11,7 @@ jobs:
+       fail-fast: true
+     steps:
+       - name: Checkout code
+-        uses: actions/checkout@v4
++        uses: actions/checkout@v6
+ 
+       - name: Build Dockerfile
+         run: |
+@@ -28,6 +28,6 @@ jobs:
+           TRIVY_DB_REPOSITORY: ghcr.io/aquasecurity/trivy-db,public.ecr.aws/aquasecurity/trivy-db
+ 
+       - name: Upload Trivy scan results to GitHub Security tab
+-        uses: github/codeql-action/upload-sarif@v3
++        uses: github/codeql-action/upload-sarif@v4
+         with:
+           sarif_file: "trivy-results.sarif"
+diff --git a/.github/workflows/publish.yml b/.github/workflows/publish.yml
+index 162fda4f4d9..2a57aebcaaa 100644
+--- a/.github/workflows/publish.yml
++++ b/.github/workflows/publish.yml
+@@ -23,19 +23,19 @@ jobs:
+     runs-on: ubuntu-latest
+     steps:
+       - name: Checkout repository
+-        uses: actions/checkout@v4
++        uses: actions/checkout@v6
+         with:
+           ref: ${{ inputs.ref || github.sha }}
+ 
+       - name: Log in to the Container registry (ghcr.io)
+-        uses: docker/login-action@v3
++        uses: docker/login-action@v4
+         with:
+           registry: ghcr.io
+           username: ${{ github.actor }}
+           password: ${{ secrets.GITHUB_TOKEN }}
+ 
+       - name: Log in to the Container registry (dockerhub)
+-        uses: docker/login-action@v3
++        uses: docker/login-action@v4
+         with:
+           username: ${{ secrets.DOCKERHUB_USERNAME }}
+           password: ${{ secrets.DOCKERHUB_TOKEN }}
+@@ -44,7 +44,7 @@ jobs:
+ 
+       - name: Generate Docker metadata
+         id: meta
+-        uses: docker/metadata-action@v5
++        uses: docker/metadata-action@v6
+         with:
+           images: |
+             hkotel/mealie
+@@ -55,7 +55,7 @@ jobs:
+             org.opencontainers.image.revision=${{ inputs.ref || github.sha }}
+ 
+       - name: Retrieve Python package
+-        uses: actions/download-artifact@v4
++        uses: actions/download-artifact@v6
+         with:
+           name: backend-dist
+           path: dist
+diff --git a/.github/workflows/pull-request-lint.yml b/.github/workflows/pull-request-lint.yml
+index 67d67e84337..98239c422c5 100644
+--- a/.github/workflows/pull-request-lint.yml
++++ b/.github/workflows/pull-request-lint.yml
+@@ -13,7 +13,7 @@ jobs:
+     runs-on: ubuntu-latest
+     steps:
+       # https://github.com/amannn/action-semantic-pull-request
+-      - uses: amannn/action-semantic-pull-request@v5
++      - uses: amannn/action-semantic-pull-request@v6
+         env:
+           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+         with:
+diff --git a/.github/workflows/release-drafter.yml b/.github/workflows/release-drafter.yml
+index 10fd8a7285e..78ce2247d92 100644
+--- a/.github/workflows/release-drafter.yml
++++ b/.github/workflows/release-drafter.yml
+@@ -14,17 +14,22 @@ on:
+   workflow_dispatch:
+ 
+ jobs:
+-  update_release_draft:
++  draft_release:
++    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
++    runs-on: ubuntu-latest
+     permissions:
+-      # write permission is required to create a github release
+       contents: write
+-      # write permission is required for autolabeler
+-      # otherwise, read permission is required at least
++    steps:
++      - uses: release-drafter/release-drafter@v7
++        env:
++          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
++
++  auto_label:
++    if: github.event_name == 'pull_request'
++    permissions:
+       pull-requests: write
+-    name: ✏️ Draft release
+     runs-on: ubuntu-latest
+     steps:
+-      - name: 🚀 Run Release Drafter
+-        uses: release-drafter/release-drafter@v6.0.0
++      - uses: release-drafter/release-drafter/autolabeler@v7
+         env:
+           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+diff --git a/.github/workflows/release.yml b/.github/workflows/release.yml
+index 0363166ab62..d7523e14eb8 100644
+--- a/.github/workflows/release.yml
++++ b/.github/workflows/release.yml
+@@ -21,7 +21,7 @@ jobs:
+           private-key: ${{ secrets.COMMIT_BOT_APP_PRIVATE_KEY }}
+ 
+       - name: Checkout 🛎
+-        uses: actions/checkout@v4
++        uses: actions/checkout@v6
+         with:
+           token: ${{ steps.app-token.outputs.token }}
+ 
+@@ -124,7 +124,7 @@ jobs:
+           private-key: ${{ secrets.COMMIT_BOT_APP_PRIVATE_KEY }}
+ 
+       - name: Checkout 🛎
+-        uses: actions/checkout@v4
++        uses: actions/checkout@v6
+         with:
+           token: ${{ steps.app-token.outputs.token }}
+           fetch-depth: 0
+diff --git a/.github/workflows/scheduled-checks.yml b/.github/workflows/scheduled-checks.yml
+index e9643e0e64a..efa7f46de5f 100644
+--- a/.github/workflows/scheduled-checks.yml
++++ b/.github/workflows/scheduled-checks.yml
+@@ -13,10 +13,10 @@ jobs:
+       pull-requests: write
+     steps:
+       - name: Checkout 🛎
+-        uses: actions/checkout@v4
++        uses: actions/checkout@v6
+ 
+       - name: Setup Python
+-        uses: actions/setup-python@v5
++        uses: actions/setup-python@v6
+         with:
+           python-version: "3.12"
+ 
+@@ -25,7 +25,7 @@ jobs:
+         run: echo "PY=$(python -VV | sha256sum | cut -d' ' -f1)" >> $GITHUB_ENV
+ 
+       - name: Cache
+-        uses: actions/cache@v4
++        uses: actions/cache@v5
+         with:
+           path: |
+             ~/.cache/pre-commit
+diff --git a/.github/workflows/test-backend.yml b/.github/workflows/test-backend.yml
+index 5856dbfdd69..64d1c524894 100644
+--- a/.github/workflows/test-backend.yml
++++ b/.github/workflows/test-backend.yml
+@@ -46,12 +46,12 @@ jobs:
+           repo-token: ${{ secrets.GITHUB_TOKEN }}
+ 
+       - name: Check out repository
+-        uses: actions/checkout@v4
++        uses: actions/checkout@v6
+         with:
+           ref: ${{ inputs.ref || github.sha }}
+ 
+       - name: Set up python
+-        uses: actions/setup-python@v5
++        uses: actions/setup-python@v6
+         with:
+           python-version: "3.12"
+ 
+@@ -60,7 +60,7 @@ jobs:
+ 
+       - name: Load cached venv
+         id: cached-python-dependencies
+-        uses: actions/cache@v4
++        uses: actions/cache@v5
+         with:
+           path: .venv
+           key: venv-${{ runner.os }}-${{ hashFiles('**/uv.lock') }}
+diff --git a/.github/workflows/test-frontend.yml b/.github/workflows/test-frontend.yml
+index 17dbde449b1..01b5244324f 100644
+--- a/.github/workflows/test-frontend.yml
++++ b/.github/workflows/test-frontend.yml
+@@ -13,12 +13,12 @@ jobs:
+ 
+     steps:
+       - name: Checkout 🛎
+-        uses: actions/checkout@v4
++        uses: actions/checkout@v6
+         with:
+           ref: ${{ inputs.ref || github.sha }}
+ 
+       - name: Setup node env 🏗
+-        uses: actions/setup-node@v4.0.0
++        uses: actions/setup-node@v6
+         with:
+           node-version: 22
+           check-latest: true
+@@ -28,7 +28,7 @@ jobs:
+         run: echo "dir=$(yarn cache dir)" >> $GITHUB_OUTPUT
+ 
+       - name: Cache node_modules 📦
+-        uses: actions/cache@v4
++        uses: actions/cache@v5
+         id: yarn-cache # use this to check for `cache-hit` (`steps.yarn-cache.outputs.cache-hit != 'true'`)
+         with:
+           path: ${{ steps.yarn-cache-dir-path.outputs.dir }}

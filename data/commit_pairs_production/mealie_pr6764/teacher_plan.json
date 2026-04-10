@@ -1,0 +1,166 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "api_design",
+      "recommendation": "Extended OpenAI configuration with new settings for transcription services and audio model selection",
+      "rationale": "The feature requires audio transcription capabilities which are distinct from existing image services. Adding OPENAI_ENABLE_TRANSCRIPTION_SERVICES and OPENAI_AUDIO_MODEL settings allows users to independently control these features and customize the audio model (defaulting to 'whisper-1'). This maintains backward compatibility while enabling the new functionality.",
+      "alternatives_considered": [
+        "Adding transcription as part of existing image services flag",
+        "Hardcoding the audio model without configuration"
+      ],
+      "files_affected": [
+        "mealie/core/settings/settings.py",
+        "docs/docs/documentation/getting-started/installation/backend-config.md",
+        "docs/docs/documentation/getting-started/installation/open-ai.md"
+      ]
+    },
+    {
+      "dimension": "data_modeling",
+      "recommendation": "Enhanced OpenAIAttachment abstraction to support both images and audio files",
+      "rationale": "The existing OpenAIImageBase only supported images. By creating a base OpenAIAttachment class and extending it with OpenAILocalAudio, the system can now handle multiple attachment types uniformly. This allows the get_response method to accept a generic list of attachments, making the API more extensible for future media types.",
+      "alternatives_considered": [
+        "Creating separate methods for audio and image processing",
+        "Modifying OpenAIImageBase to handle audio"
+      ],
+      "files_affected": [
+        "mealie/services/openai/openai.py"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Added domain-specific exceptions for video and OpenAI failures",
+      "rationale": "Video downloading and transcription can fail in multiple ways (rate limiting, download errors, transcription failures). Adding OpenAIServiceError, RateLimitError, and VideoDownloadError exceptions provides clearer error handling and allows callers to differentiate between different failure modes. This improves debugging and user feedback.",
+      "alternatives_considered": [
+        "Using generic exceptions",
+        "Adding error codes instead of exception types"
+      ],
+      "files_affected": [
+        "mealie/core/exceptions.py",
+        "mealie/services/scraper/scraper_strategies.py"
+      ]
+    },
+    {
+      "dimension": "integration_patterns",
+      "recommendation": "Implemented a chain-of-responsibility scraper strategy with can_scrape() checks",
+      "rationale": "The existing scraper system uses a sequential strategy pattern. Adding can_scrape() methods to each scraper allows the system to intelligently skip strategies that aren't applicable (e.g., skipping video transcription for non-video URLs). This prevents unnecessary processing and improves performance while maintaining the existing fallback behavior.",
+      "alternatives_considered": [
+        "Separate video import endpoint",
+        "Hardcoded URL pattern matching"
+      ],
+      "files_affected": [
+        "mealie/services/scraper/recipe_scraper.py",
+        "mealie/services/scraper/scraper_strategies.py"
+      ]
+    },
+    {
+      "dimension": "infrastructure",
+      "recommendation": "Added ffmpeg as a system dependency for audio processing",
+      "rationale": "Video downloading and audio extraction require ffmpeg for format conversion and processing. Adding it to both development and production Dockerfiles ensures consistent behavior across environments. This is a minimal dependency addition that enables the core video processing functionality.",
+      "alternatives_considered": [
+        "Using external audio processing services",
+        "Requiring users to install ffmpeg separately"
+      ],
+      "files_affected": [
+        ".devcontainer/Dockerfile",
+        "docker/Dockerfile"
+      ]
+    },
+    {
+      "dimension": "frontend_ux",
+      "recommendation": "Enhanced UI with conditional transcription hints and updated API types",
+      "rationale": "The frontend needed to inform users about video import capabilities without overwhelming them. Adding conditional display of transcription hints (only when enabled) and updating the API types to include enableOpenaiTranscriptionServices ensures users see relevant information. This maintains a clean UI while providing necessary guidance.",
+      "alternatives_considered": [
+        "Always showing video import instructions",
+        "Creating a separate video import page"
+      ],
+      "files_affected": [
+        "frontend/pages/g/[groupSlug]/r/create/url.vue",
+        "frontend/lang/messages/en-US.json",
+        "frontend/lib/api/types/admin.ts"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Core OpenAI Service Enhancement for Audio Transcription",
+      "description": "Extend the OpenAI service to support audio transcription with proper error handling and attachment abstraction",
+      "files_to_modify": [
+        "mealie/services/openai/openai.py",
+        "mealie/core/exceptions.py",
+        "mealie/services/recipe/recipe_service.py"
+      ],
+      "files_to_create": [
+        "mealie/services/openai/prompts/general/transcribe-audio.txt"
+      ],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-002",
+      "title": "Video Scraper Strategy Implementation",
+      "description": "Create a new scraper strategy that downloads video content, extracts audio, and transcribes it using OpenAI",
+      "files_to_modify": [
+        "mealie/services/scraper/scraper_strategies.py",
+        "mealie/services/scraper/recipe_scraper.py"
+      ],
+      "files_to_create": [
+        "mealie/services/openai/prompts/recipes/parse-recipe-video.txt"
+      ],
+      "estimated_effort": "large"
+    },
+    {
+      "id": "T-003",
+      "title": "Configuration and Infrastructure Updates",
+      "description": "Add new settings for transcription services and update system dependencies",
+      "files_to_modify": [
+        "mealie/core/settings/settings.py",
+        ".devcontainer/Dockerfile",
+        "docker/Dockerfile",
+        "pyproject.toml",
+        "uv.lock"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-004",
+      "title": "Frontend Integration and User Interface",
+      "description": "Update frontend components to support video import and display appropriate hints",
+      "files_to_modify": [
+        "frontend/pages/g/[groupSlug]/r/create/url.vue",
+        "frontend/lang/messages/en-US.json",
+        "frontend/lib/api/types/admin.ts",
+        "mealie/routes/admin/admin_about.py",
+        "mealie/routes/admin/admin_debug.py",
+        "mealie/routes/app/app_about.py",
+        "mealie/schema/admin/about.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-005",
+      "title": "Documentation and Testing",
+      "description": "Update documentation and add integration tests for the new feature",
+      "files_to_modify": [
+        "docs/docs/documentation/getting-started/features.md",
+        "docs/docs/documentation/getting-started/installation/backend-config.md",
+        "docs/docs/documentation/getting-started/installation/open-ai.md",
+        "tests/unit_tests/services_tests/test_openai_service.py"
+      ],
+      "files_to_create": [
+        "tests/integration_tests/user_recipe_tests/test_recipe_create_from_video.py"
+      ],
+      "estimated_effort": "medium"
+    }
+  ],
+  "implementation_summary": "The implementation adds social media video recipe import capability by extending Mealie's existing web import workflow. The core approach integrates video processing as a new scraper strategy in the existing chain-of-responsibility pattern, ensuring seamless fallback to other methods when video processing isn't applicable.\n\nKey architectural decisions include: 1) Extending the OpenAI service with audio transcription support using a new OpenAIAttachment abstraction that handles both images and audio uniformly; 2) Creating a RecipeScraperOpenAITranscription strategy that uses yt-dlp for video downloading and ffmpeg for audio extraction; 3) Adding proper error handling with domain-specific exceptions for video download failures and rate limiting; 4) Configuring the system with new settings (OPENAI_ENABLE_TRANSCRIPTION_SERVICES, OPENAI_AUDIO_MODEL) that allow users to control the feature.\n\nThe implementation cleverly reuses existing patterns: video processing becomes just another scraper strategy that checks can_scrape() before attempting to process URLs. The system prioritizes available subtitles for efficiency, falling back to OpenAI transcription only when needed. Frontend changes are minimal, adding conditional hints about video import capabilities while maintaining the existing URL import interface. This approach minimizes disruption to the existing codebase while adding significant new functionality.",
+  "source_pr": "https://github.com/mealie-recipes/mealie/pull/6764",
+  "before_sha": "5a223aa92d6c16f7450730e554655eeec3426c9a",
+  "after_sha": "1344f1674da452ef70a334bef8cadbe948104fed",
+  "diff_stats": {
+    "additions": 563,
+    "deletions": 45,
+    "files_changed": 25
+  }
+}

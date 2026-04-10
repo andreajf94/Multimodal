@@ -1,7 +1,7 @@
 """Convert RepoIR fields to Mermaid diagram strings.
 
-Pure functions — no I/O. Each returns a Mermaid string or None if there is
-nothing to render (empty input, all duplicates filtered, etc.).
+Pure functions — no I/O. Each returns a list of Mermaid strings (one per
+chunk), or an empty list if there is nothing to render.
 """
 
 from __future__ import annotations
@@ -20,18 +20,15 @@ _METHOD_COLORS = {
     "delete": "fill:#f93e3e,color:#fff",
     "patch":  "fill:#50e3c2,color:#fff",
 }
-_MAX_ROUTES = 20
+_MAX_ROUTES_PER_CHART = 12
 
 
-def api_routes_to_mermaid(routes: list[dict]) -> str | None:
-    """Convert a list of APIRoute dicts to a Mermaid LR flowchart string.
+def api_routes_to_mermaid(routes: list[dict]) -> list[str]:
+    """Convert a list of APIRoute dicts to Mermaid LR flowchart strings.
 
-    Deduplicates by (path, method) — keeps the first occurrence of each pair.
-    Groups routes into subgraphs by the first path segment.
-    Caps at MAX_ROUTES unique routes.
-    Returns None if there is nothing to render.
+    Deduplicates by (path, method). Chunks into groups of MAX_ROUTES_PER_CHART.
+    Returns a list of Mermaid strings (one per chart), or empty list.
     """
-    # Deduplicate by (path, method)
     seen: set[tuple[str, str]] = set()
     unique: list[dict] = []
     for r in routes:
@@ -41,13 +38,24 @@ def api_routes_to_mermaid(routes: list[dict]) -> str | None:
             unique.append(r)
 
     if not unique:
-        return None
+        return []
 
-    unique = unique[:_MAX_ROUTES]
+    # Chunk into groups
+    chunks = [unique[i:i + _MAX_ROUTES_PER_CHART]
+              for i in range(0, len(unique), _MAX_ROUTES_PER_CHART)]
 
-    # Group by first path segment
+    results = []
+    for chunk in chunks:
+        mmd = _render_route_chart(chunk)
+        if mmd:
+            results.append(mmd)
+    return results
+
+
+def _render_route_chart(routes: list[dict]) -> str:
+    """Render a single flowchart from a list of routes."""
     groups: dict[str, list[dict]] = {}
-    for r in unique:
+    for r in routes:
         path = r.get("path", "/")
         parts = path.strip("/").split("/")
         prefix = "/" + parts[0] if parts and parts[0] else "/"
@@ -66,7 +74,6 @@ def api_routes_to_mermaid(routes: list[dict]) -> str | None:
             filename = handler_file.split("/")[-1] if handler_file else ""
             handler_fn = r.get("handler_function") or ""
 
-            # Build two-line label: "METHOD /path<br/>file::fn"
             top = f"{method} {path}"
             bottom = filename + (f"::{handler_fn}" if handler_fn else "")
             label = f"{top}<br/>{bottom}" if bottom else top
@@ -76,7 +83,6 @@ def api_routes_to_mermaid(routes: list[dict]) -> str | None:
             lines.append(f'        {node_id}["{label}"]:::{css}')
         lines.append("    end")
 
-    # classDef declarations
     for method, style in _METHOD_COLORS.items():
         lines.append(f"    classDef {method} {style}")
     lines.append("    classDef other fill:#aaaaaa,color:#fff")
@@ -88,19 +94,14 @@ def api_routes_to_mermaid(routes: list[dict]) -> str | None:
 # Data Models → Mermaid ER diagram
 # ---------------------------------------------------------------------------
 
-_MAX_MODELS = 15
-_MAX_FIELDS_PER_MODEL = 12
+_MAX_MODELS_PER_CHART = 8
+_MAX_FIELDS_PER_MODEL = 10
 
-# Characters not valid in Mermaid ER field types / names
 _MERMAID_UNSAFE = re.compile(r"[^A-Za-z0-9_]")
 
 
 def _clean_type(raw: str) -> str:
-    """Sanitise a Prisma/SQLAlchemy type for Mermaid ER syntax.
-
-    Strips optional markers (?), array markers ([]), and anything else that
-    Mermaid would reject.  Falls back to 'string' if nothing remains.
-    """
+    """Sanitise a Prisma/SQLAlchemy type for Mermaid ER syntax."""
     t = raw.replace("?", "").replace("[]", "").strip()
     t = _MERMAID_UNSAFE.sub("_", t)
     return t or "string"
@@ -111,18 +112,116 @@ def _clean_name(raw: str) -> str:
     return _MERMAID_UNSAFE.sub("_", raw) or "field"
 
 
-def data_models_to_er(models: list[dict]) -> str | None:
-    """Convert a list of DataModel dicts to a Mermaid erDiagram string.
+def _build_fk_graph(by_name: dict[str, dict]) -> dict[str, set[str]]:
+    """Build a bidirectional FK adjacency map from model fields.
+
+    If model A has a field ``fooId`` and model ``Foo`` exists, both
+    ``A -> Foo`` and ``Foo -> A`` edges are recorded.
+    """
+    name_lower_map = {n.lower(): n for n in by_name}
+    graph: dict[str, set[str]] = {n: set() for n in by_name}
+
+    for name, m in by_name.items():
+        for f in m.get("fields", []):
+            fname = f.get("name", "")
+            ref_base: str | None = None
+            if fname.endswith("Id"):
+                ref_base = fname[:-2]
+            elif fname.endswith("_id"):
+                ref_base = fname[:-3]
+            if ref_base:
+                ref_key = ref_base.lower()
+                if ref_key in name_lower_map:
+                    target = name_lower_map[ref_key]
+                    if target != name:
+                        graph[name].add(target)
+                        graph[target].add(name)
+
+            # Also check if field type matches a model name (Prisma relation fields)
+            ftype = f.get("field_type", "").replace("?", "").replace("[]", "").strip()
+            ftype_key = ftype.lower()
+            if ftype_key in name_lower_map:
+                target = name_lower_map[ftype_key]
+                if target != name:
+                    graph[name].add(target)
+                    graph[target].add(name)
+
+    return graph
+
+
+def models_mentioned_in_diff(
+    all_models: list[dict],
+    diff_text: str,
+) -> list[dict]:
+    """Filter models to those mentioned in the diff, plus their FK neighbors.
+
+    1. Scan the diff for model name occurrences (word-boundary match).
+    2. For each matched model, pull in immediate FK neighbors (models linked
+       by ``fooId`` fields or typed relation fields).
+    3. Return the connected subgraph, capped at MAX_NEIGHBOR_EXPANSION total.
+
+    This ensures diagrams always show a connected cluster with relationship
+    lines, rather than isolated single-entity boxes.
+    """
+    if not diff_text or not all_models:
+        return []
+
+    # Deduplicate by name, prefer more fields
+    by_name: dict[str, dict] = {}
+    for m in all_models:
+        name = m.get("name", "").strip()
+        if not name or len(name) < 3:
+            continue
+        existing = by_name.get(name)
+        if existing is None or len(m.get("fields", [])) > len(existing.get("fields", [])):
+            by_name[name] = m
+
+    # Find models mentioned in the diff
+    mentions: dict[str, int] = {}
+    for name in by_name:
+        pattern = re.compile(r'\b' + re.escape(name) + r'\b')
+        count = len(pattern.findall(diff_text))
+        if count > 0:
+            mentions[name] = count
+
+    if not mentions:
+        return []
+
+    # Build FK adjacency graph and expand seeds to neighbors
+    fk_graph = _build_fk_graph(by_name)
+    seeds = sorted(mentions.keys(), key=lambda n: mentions[n], reverse=True)
+
+    selected: dict[str, int] = {}  # name -> priority (lower = more important)
+    for priority, name in enumerate(seeds):
+        if name not in selected:
+            selected[name] = priority
+
+    # Expand: add FK neighbors of seed models
+    for name in list(seeds):
+        for neighbor in fk_graph.get(name, set()):
+            if neighbor not in selected:
+                selected[neighbor] = len(selected)
+
+    # Cap total and filter to models with fields
+    ranked_names = sorted(selected.keys(), key=lambda n: selected[n])
+    ranked_names = ranked_names[:_MAX_NEIGHBOR_EXPANSION]
+    return [by_name[n] for n in ranked_names if by_name[n].get("fields")]
+
+
+_MAX_NEIGHBOR_EXPANSION = 16  # max models after FK expansion (2 charts × 8)
+
+
+def data_models_to_er(models: list[dict]) -> list[str]:
+    """Convert a list of DataModel dicts to Mermaid erDiagram strings.
 
     Deduplicates model names, preferring instances with more fields.
-    Infers relationships from fields whose name ends in 'Id' or '_id' and
-    whose prefix matches another model name.
-    Returns None if there is nothing to render.
+    Chunks into groups of MAX_MODELS_PER_CHART.
+    Returns a list of Mermaid strings (one per chart), or empty list.
     """
     if not models:
-        return None
+        return []
 
-    # Deduplicate by name — keep the version with the most fields
+    # Deduplicate by name
     by_name: dict[str, dict] = {}
     for m in models:
         name = m.get("name", "").strip()
@@ -132,28 +231,39 @@ def data_models_to_er(models: list[dict]) -> str | None:
         if existing is None or len(m.get("fields", [])) > len(existing.get("fields", [])):
             by_name[name] = m
 
-    if not by_name:
-        return None
-
-    # Drop models with no fields if any field-populated models exist; return
-    # None if there is nothing substantive to render.
     with_fields = [m for m in by_name.values() if m.get("fields")]
     if not with_fields:
-        return None
+        return []
 
     ranked = sorted(with_fields, key=lambda m: len(m.get("fields", [])), reverse=True)
-    ranked = ranked[:_MAX_MODELS]
 
-    # Build a lookup of clean model names for relationship inference
+    # Chunk into groups
+    chunks = [ranked[i:i + _MAX_MODELS_PER_CHART]
+              for i in range(0, len(ranked), _MAX_MODELS_PER_CHART)]
+
+    results = []
+    for chunk in chunks:
+        mmd = _render_er_chart(chunk)
+        if mmd:
+            results.append(mmd)
+    return results
+
+
+def _render_er_chart(models: list[dict]) -> str | None:
+    """Render a single ER diagram from a list of models.
+
+    Returns None if fewer than 2 models (single-entity diagrams are useless).
+    """
+    if len(models) < 2:
+        return None
     clean_model_names: dict[str, str] = {
-        m["name"].lower(): m["name"] for m in ranked
+        m["name"].lower(): m["name"] for m in models
     }
 
-    relationships: list[tuple[str, str]] = []  # (many_side, one_side)
-
+    relationships: list[tuple[str, str]] = []
     lines = ["erDiagram"]
 
-    for m in ranked:
+    for m in models:
         raw_name = m.get("name", "")
         entity = _clean_name(raw_name)
         fields = m.get("fields", [])[:_MAX_FIELDS_PER_MODEL]
@@ -164,7 +274,6 @@ def data_models_to_er(models: list[dict]) -> str | None:
             ftype = _clean_type(f.get("field_type", "string"))
             lines.append(f"        {ftype} {fname}")
 
-            # Infer FK relationship: fooId → Foo, foo_id → Foo
             ref_base: str | None = None
             if fname.endswith("Id"):
                 ref_base = fname[:-2]

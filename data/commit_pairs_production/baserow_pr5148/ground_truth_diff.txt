@@ -1,0 +1,44 @@
+diff --git a/changelog/entries/unreleased/bug/fix_link_row_checkbox.json b/changelog/entries/unreleased/bug/fix_link_row_checkbox.json
+new file mode 100644
+index 0000000000..aefdf76969
+--- /dev/null
++++ b/changelog/entries/unreleased/bug/fix_link_row_checkbox.json
+@@ -0,0 +1,9 @@
++{
++    "type": "bug",
++    "message": "Fix linked row modal checkbox",
++    "issue_origin": null,
++    "issue_number": null,
++    "domain": "database",
++    "bullet_points": [],
++    "created_at": "2026-04-08"
++}
+diff --git a/web-frontend/modules/database/components/row/SelectRowContent.vue b/web-frontend/modules/database/components/row/SelectRowContent.vue
+index bb786d89c4..de120462b7 100644
+--- a/web-frontend/modules/database/components/row/SelectRowContent.vue
++++ b/web-frontend/modules/database/components/row/SelectRowContent.vue
+@@ -147,7 +147,7 @@ export default {
+       default: '',
+     },
+   },
+-  emits: ['hide'],
++  emits: ['hide', 'unselected', 'selected'],
+   data() {
+     return {
+       // Indicates if we're loading new rows.
+diff --git a/web-frontend/modules/database/components/view/grid/SimpleGrid.vue b/web-frontend/modules/database/components/view/grid/SimpleGrid.vue
+index 7c7f37c514..a5af7d0dd7 100644
+--- a/web-frontend/modules/database/components/view/grid/SimpleGrid.vue
++++ b/web-frontend/modules/database/components/view/grid/SimpleGrid.vue
+@@ -69,7 +69,10 @@
+               "
+               class="simple-grid__cell-checkbox"
+             >
+-              <Checkbox :checked="selectedRows.includes(row.id)"></Checkbox>
++              <Checkbox
++                :checked="selectedRows.includes(row.id)"
++                @click.prevent
++              ></Checkbox>
+             </div>
+           </div>
+           <div

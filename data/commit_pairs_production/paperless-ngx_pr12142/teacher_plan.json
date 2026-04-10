@@ -1,0 +1,141 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "data_modeling",
+      "recommendation": "Migrated saved view visibility settings from SavedView model to UiSettings model to enable user-specific preferences and sharing functionality",
+      "rationale": "The previous design stored 'show_on_dashboard' and 'show_in_sidebar' as fields on the SavedView model, making them global properties. By moving these to UiSettings, each user can have their own preferences for which saved views appear in their dashboard/sidebar, enabling proper sharing functionality where different users can have different visibility settings for the same shared saved view.",
+      "alternatives_considered": [
+        "Keeping fields on SavedView model with additional user-specific override tables",
+        "Creating a separate UserSavedViewVisibility junction model",
+        "Using Django's permission system exclusively without separate visibility settings"
+      ],
+      "files_affected": [
+        "src/documents/migrations/0012_savedview_visibility_to_ui_settings.py",
+        "src/documents/tests/test_migration_saved_view_visibility.py"
+      ]
+    },
+    {
+      "dimension": "api_design",
+      "recommendation": "Bumped API version to 10 and updated API documentation to reflect the removal of saved view visibility fields",
+      "rationale": "Removing fields from the API is a breaking change that requires a version bump. This follows semantic versioning principles and ensures backward compatibility for clients using older API versions. The documentation update clearly communicates what changed and why.",
+      "alternatives_considered": [
+        "Keeping deprecated fields with warnings",
+        "Adding new fields without removing old ones",
+        "Using feature flags to control field availability"
+      ],
+      "files_affected": [
+        "docs/api.md"
+      ]
+    },
+    {
+      "dimension": "frontend_integration",
+      "recommendation": "Updated frontend components to handle saved view permissions and visibility through the new UiSettings structure",
+      "rationale": "The frontend needed to adapt to the new data structure where saved view visibility is now user-specific rather than saved view-specific. This required updating components that display saved views in the dashboard and sidebar to read from the new UiSettings fields rather than the removed SavedView fields.",
+      "alternatives_considered": [
+        "Creating a separate API endpoint for saved view visibility",
+        "Using localStorage for user preferences instead of server-side storage",
+        "Maintaining client-side caching of the old structure with transformation"
+      ],
+      "files_affected": [
+        "src-ui/src/app/components/app-frame/app-frame.component.html",
+        "src-ui/src/app/components/common/permissions-dialog/permissions-dialog.component.html",
+        "src-ui/src/app/components/common/permissions-dialog/permissions-dialog.component.ts",
+        "src-ui/src/app/components/document-list/document-list.component.html",
+        "src-ui/src/app/components/document-list/document-list.component.spec.ts",
+        "src-ui/src/app/components/document-list/document-list.component.ts"
+      ]
+    },
+    {
+      "dimension": "testing",
+      "recommendation": "Created comprehensive migration tests and updated end-to-end test data to validate the saved view visibility migration",
+      "rationale": "Data migrations are risky operations that require thorough testing. The migration test ensures that existing data is correctly transformed to the new structure. Updated e2e test data files reflect the new API response structure with the visibility settings now in UiSettings.",
+      "alternatives_considered": [
+        "Relying only on manual testing of the migration",
+        "Creating the migration without tests",
+        "Using Django's test framework without custom migration tests"
+      ],
+      "files_affected": [
+        "src-ui/e2e/dashboard/requests/api-dashboard1.har",
+        "src-ui/e2e/dashboard/requests/api-dashboard2.har",
+        "src-ui/e2e/dashboard/requests/api-dashboard3.har",
+        "src-ui/e2e/dashboard/requests/api-dashboard4.har",
+        "src/documents/tests/test_migration_saved_view_visibility.py"
+      ]
+    },
+    {
+      "dimension": "type_safety",
+      "recommendation": "Updated mypy baseline to account for new type annotations in migration and test files",
+      "rationale": "The codebase uses mypy for static type checking. When adding new migration and test files, type annotations need to be properly handled. The baseline update acknowledges the new files and their type checking characteristics, maintaining code quality standards.",
+      "alternatives_considered": [
+        "Adding full type annotations to all new files immediately",
+        "Disabling type checking for new files",
+        "Ignoring mypy errors for migration files"
+      ],
+      "files_affected": [
+        ".mypy-baseline.txt"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Saved View Data Model Migration",
+      "description": "Migrate saved view visibility settings from SavedView model to user-specific UiSettings to enable sharing functionality",
+      "files_to_modify": [
+        ".mypy-baseline.txt"
+      ],
+      "files_to_create": [
+        "src/documents/migrations/0012_savedview_visibility_to_ui_settings.py",
+        "src/documents/tests/test_migration_saved_view_visibility.py"
+      ],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-002",
+      "title": "API Version Update and Documentation",
+      "description": "Bump API version to 10 and document the breaking changes related to saved view visibility fields",
+      "files_to_modify": [
+        "docs/api.md"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-003",
+      "title": "Frontend Integration Updates",
+      "description": "Update frontend components to work with the new saved view visibility structure and add permission management UI",
+      "files_to_modify": [
+        "src-ui/src/app/components/app-frame/app-frame.component.html",
+        "src-ui/src/app/components/common/permissions-dialog/permissions-dialog.component.html",
+        "src-ui/src/app/components/common/permissions-dialog/permissions-dialog.component.ts",
+        "src-ui/src/app/components/document-list/document-list.component.html",
+        "src-ui/src/app/components/document-list/document-list.component.spec.ts",
+        "src-ui/src/app/components/document-list/document-list.component.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-004",
+      "title": "Test Data and E2E Updates",
+      "description": "Update test data files to reflect the new API response structure with saved view visibility in UiSettings",
+      "files_to_modify": [
+        "src-ui/e2e/dashboard/requests/api-dashboard1.har",
+        "src-ui/e2e/dashboard/requests/api-dashboard2.har",
+        "src-ui/e2e/dashboard/requests/api-dashboard3.har",
+        "src-ui/e2e/dashboard/requests/api-dashboard4.har"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation of saved view sharing required a fundamental architectural change to how saved view visibility is managed. Previously, the 'show_on_dashboard' and 'show_in_sidebar' fields were stored directly on the SavedView model, making them global properties that couldn't be user-specific. This prevented proper sharing functionality since all users would see the same visibility settings for a given saved view.\n\nThe solution involved migrating these visibility settings from the SavedView model to the UiSettings model, which is user-specific. This allows each user to have their own preferences for which saved views appear in their dashboard and sidebar, even when those saved views are shared between users. The migration was implemented as a Django data migration (0012_savedview_visibility_to_ui_settings.py) that transforms existing data to the new structure.\n\nKey patterns used include: 1) Data migration with proper rollback support, 2) API versioning to handle breaking changes gracefully, 3) Frontend component updates to read from the new data structure, and 4) Comprehensive testing including migration tests and updated e2e test data. The changes integrate well with the existing codebase by leveraging the existing UiSettings model and permission system, maintaining consistency with how other objects in the system handle sharing and user-specific preferences.",
+  "source_pr": "https://github.com/paperless-ngx/paperless-ngx/pull/12142",
+  "before_sha": "ae182c459bc41cece1860b61dc6610b6ef38cb2f",
+  "after_sha": "85a18e591102480e733004b6c427eb144a1f223e",
+  "diff_stats": {
+    "additions": 1179,
+    "deletions": 186,
+    "files_changed": 32
+  }
+}

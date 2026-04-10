@@ -1,0 +1,141 @@
+diff --git a/src/documents/serialisers.py b/src/documents/serialisers.py
+index e16ad76de7..88bc070a85 100644
+--- a/src/documents/serialisers.py
++++ b/src/documents/serialisers.py
+@@ -549,28 +549,6 @@ def to_representation(self, value):
+         return 1
+ 
+ 
+-class TagSerializerVersion1(MatchingModelSerializer, OwnedObjectSerializer):
+-    colour = ColorField(source="color", default="#a6cee3")
+-
+-    class Meta:
+-        model = Tag
+-        fields = (
+-            "id",
+-            "slug",
+-            "name",
+-            "colour",
+-            "match",
+-            "matching_algorithm",
+-            "is_insensitive",
+-            "is_inbox_tag",
+-            "document_count",
+-            "owner",
+-            "permissions",
+-            "user_can_change",
+-            "set_permissions",
+-        )
+-
+-
+ class TagSerializer(MatchingModelSerializer, OwnedObjectSerializer):
+     def get_text_color(self, obj) -> str:
+         try:
+diff --git a/src/documents/tests/test_api_documents.py b/src/documents/tests/test_api_documents.py
+index c362f96465..c96db6a521 100644
+--- a/src/documents/tests/test_api_documents.py
++++ b/src/documents/tests/test_api_documents.py
+@@ -2419,57 +2419,6 @@ def test_regex_no_algorithm(self) -> None:
+             )
+             self.assertEqual(response.status_code, status.HTTP_201_CREATED, endpoint)
+ 
+-    def test_tag_color_default(self) -> None:
+-        response = self.client.post("/api/tags/", {"name": "tag"}, format="json")
+-        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+-        self.assertEqual(Tag.objects.get(id=response.data["id"]).color, "#a6cee3")
+-        self.assertEqual(
+-            self.client.get(
+-                f"/api/tags/{response.data['id']}/",
+-                headers={"Accept": "application/json; version=1"},
+-                format="json",
+-            ).data["colour"],
+-            1,
+-        )
+-
+-    def test_tag_color(self) -> None:
+-        response = self.client.post(
+-            "/api/tags/",
+-            data={"name": "tag", "colour": 3},
+-            headers={"Accept": "application/json; version=1"},
+-            format="json",
+-        )
+-        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+-        self.assertEqual(Tag.objects.get(id=response.data["id"]).color, "#b2df8a")
+-        self.assertEqual(
+-            self.client.get(
+-                f"/api/tags/{response.data['id']}/",
+-                headers={"Accept": "application/json; version=1"},
+-                format="json",
+-            ).data["colour"],
+-            3,
+-        )
+-
+-    def test_tag_color_invalid(self) -> None:
+-        response = self.client.post(
+-            "/api/tags/",
+-            data={"name": "tag", "colour": 34},
+-            headers={"Accept": "application/json; version=1"},
+-            format="json",
+-        )
+-        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+-
+-    def test_tag_color_custom(self) -> None:
+-        tag = Tag.objects.create(name="test", color="#abcdef")
+-        self.assertEqual(
+-            self.client.get(
+-                f"/api/tags/{tag.id}/",
+-                headers={"Accept": "application/json; version=1"},
+-                format="json",
+-            ).data["colour"],
+-            1,
+-        )
+-
+     def test_get_existing_notes(self) -> None:
+         """
+         GIVEN:
+diff --git a/src/documents/views.py b/src/documents/views.py
+index b2fd118e55..5d0ed7e840 100644
+--- a/src/documents/views.py
++++ b/src/documents/views.py
+@@ -181,7 +181,6 @@
+ from documents.serialisers import StoragePathSerializer
+ from documents.serialisers import StoragePathTestSerializer
+ from documents.serialisers import TagSerializer
+-from documents.serialisers import TagSerializerVersion1
+ from documents.serialisers import TasksViewSerializer
+ from documents.serialisers import TrashSerializer
+ from documents.serialisers import UiSettingsViewSerializer
+@@ -472,6 +471,7 @@ def retrieve(self, request, *args, **kwargs):
+ @extend_schema_view(**generate_object_with_permissions_schema(TagSerializer))
+ class TagViewSet(PermissionsAwareDocumentCountMixin, ModelViewSet):
+     model = Tag
++    serializer_class = TagSerializer
+     document_count_through = Document.tags.through
+     document_count_source_field = "tag_id"
+ 
+@@ -479,12 +479,6 @@ class TagViewSet(PermissionsAwareDocumentCountMixin, ModelViewSet):
+         Lower("name"),
+     )
+ 
+-    def get_serializer_class(self, *args, **kwargs):
+-        if int(self.request.version) == 1:
+-            return TagSerializerVersion1
+-        else:
+-            return TagSerializer
+-
+     pagination_class = StandardPagination
+     permission_classes = (IsAuthenticated, PaperlessObjectPermissions)
+     filter_backends = (
+diff --git a/src/paperless/settings.py b/src/paperless/settings.py
+index 910d206c1f..bee406fa2b 100644
+--- a/src/paperless/settings.py
++++ b/src/paperless/settings.py
+@@ -377,7 +377,7 @@ def _parse_beat_schedule() -> dict:
+     "DEFAULT_VERSION": "9",  # match src-ui/src/environments/environment.prod.ts
+     # Make sure these are ordered and that the most recent version appears
+     # last. See api.md#api-versioning when adding new versions.
+-    "ALLOWED_VERSIONS": ["1", "2", "3", "4", "5", "6", "7", "8", "9"],
++    "ALLOWED_VERSIONS": ["2", "3", "4", "5", "6", "7", "8", "9"],
+     # DRF Spectacular default schema
+     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
+ }

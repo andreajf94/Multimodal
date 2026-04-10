@@ -1,0 +1,906 @@
+diff --git a/packages/survey-ui/src/components/elements/multi-select.tsx b/packages/survey-ui/src/components/elements/multi-select.tsx
+index 57359c39c3ee..f47ff5bcc627 100644
+--- a/packages/survey-ui/src/components/elements/multi-select.tsx
++++ b/packages/survey-ui/src/components/elements/multi-select.tsx
+@@ -8,6 +8,11 @@ import {
+   DropdownMenuContent,
+   DropdownMenuTrigger,
+ } from "@/components/general/dropdown-menu";
++import {
++  DropdownSearchInput,
++  SEARCH_THRESHOLD,
++  useDropdownSearch,
++} from "@/components/general/dropdown-search";
+ import { ElementError } from "@/components/general/element-error";
+ import { ElementHeader } from "@/components/general/element-header";
+ import { Input } from "@/components/general/input";
+@@ -73,6 +78,10 @@ interface MultiSelectProps {
+   imageUrl?: string;
+   /** Video URL to display above the headline */
+   videoUrl?: string;
++  /** Placeholder text for the search input in dropdown mode */
++  searchPlaceholder?: string;
++  /** Message shown when search yields no results */
++  searchNoResultsText?: string;
+ }
+ 
+ // Shared className for option labels
+@@ -109,6 +118,8 @@ interface DropdownVariantProps {
+   dir: TextDirection;
+   otherInputRef: React.RefObject<HTMLInputElement | null>;
+   required: boolean;
++  searchPlaceholder: string;
++  searchNoResultsText: string;
+ }
+ 
+ function DropdownVariant({
+@@ -131,6 +142,8 @@ function DropdownVariant({
+   dir,
+   otherInputRef,
+   required,
++  searchPlaceholder,
++  searchNoResultsText,
+ }: Readonly<DropdownVariantProps>): React.JSX.Element {
+   const handleOptionToggle = (optionId: string) => {
+     if (selectedValues.includes(optionId)) {
+@@ -140,10 +153,33 @@ function DropdownVariant({
+     }
+   };
+ 
++  // Search + side-locking
++  const allDropdownOptionCount = options.length + (hasOtherOption ? 1 : 0);
++  const showSearch = allDropdownOptionCount > SEARCH_THRESHOLD;
++
++  const {
++    searchQuery,
++    setSearchQuery,
++    searchInputRef,
++    lockedSide,
++    contentRef,
++    noneOption,
++    noneMatchesSearch,
++    filteredRegularOptions,
++    otherMatchesSearch,
++    hasNoResults,
++    handleDropdownOpen,
++    handleDropdownClose,
++  } = useDropdownSearch({ options, hasOtherOption, otherOptionLabel, isSearchEnabled: showSearch });
++
+   return (
+     <div>
+       <ElementError errorMessage={errorMessage} dir={dir} />
+-      <DropdownMenu>
++      <DropdownMenu
++        onOpenChange={(open) => {
++          if (open) handleDropdownOpen();
++          else handleDropdownClose();
++        }}>
+         <DropdownMenuTrigger asChild>
+           <Button
+             variant="outline"
+@@ -156,53 +192,22 @@ function DropdownVariant({
+           </Button>
+         </DropdownMenuTrigger>
+         <DropdownMenuContent
+-          className="bg-option-bg max-h-[300px] w-[var(--radix-dropdown-menu-trigger-width)] overflow-y-auto"
++          ref={contentRef}
++          side={lockedSide}
++          avoidCollisions={lockedSide === undefined}
++          className="bg-option-bg border-input-border w-(--radix-dropdown-menu-trigger-width) overflow-hidden"
+           align="start">
+-          {options
+-            .filter((option) => option.id !== "none")
+-            .map((option) => {
+-              const isChecked = selectedValues.includes(option.id);
+-              const optionId = `${inputId}-${option.id}`;
+-
+-              return (
+-                <DropdownMenuCheckboxItem
+-                  key={option.id}
+-                  id={optionId}
+-                  dir={dir}
+-                  checked={isChecked}
+-                  onCheckedChange={() => {
+-                    handleOptionToggle(option.id);
+-                  }}
+-                  onSelect={(e) => {
+-                    e.preventDefault();
+-                  }}
+-                  disabled={disabled}>
+-                  <span className="font-input font-input-weight text-input-text">{option.label}</span>
+-                </DropdownMenuCheckboxItem>
+-              );
+-            })}
+-          {hasOtherOption && otherOptionId ? (
+-            <DropdownMenuCheckboxItem
+-              id={`${inputId}-${otherOptionId}`}
++          {showSearch ? (
++            <DropdownSearchInput
++              searchQuery={searchQuery}
++              setSearchQuery={setSearchQuery}
++              searchInputRef={searchInputRef}
++              placeholder={searchPlaceholder}
+               dir={dir}
+-              checked={isOtherSelected}
+-              onCheckedChange={() => {
+-                if (isOtherSelected) {
+-                  handleOptionRemove(otherOptionId);
+-                } else {
+-                  handleOptionAdd(otherOptionId);
+-                }
+-              }}
+-              onSelect={(e) => {
+-                e.preventDefault();
+-              }}
+-              disabled={disabled}>
+-              <span className="font-input font-input-weight text-input-text">{otherOptionLabel}</span>
+-            </DropdownMenuCheckboxItem>
++            />
+           ) : null}
+-          {options
+-            .filter((option) => option.id === "none")
+-            .map((option) => {
++          <div className="max-h-[260px] overflow-y-auto">
++            {filteredRegularOptions.map((option) => {
+               const isChecked = selectedValues.includes(option.id);
+               const optionId = `${inputId}-${option.id}`;
+ 
+@@ -223,6 +228,47 @@ function DropdownVariant({
+                 </DropdownMenuCheckboxItem>
+               );
+             })}
++            {otherMatchesSearch && otherOptionId ? (
++              <DropdownMenuCheckboxItem
++                id={`${inputId}-${otherOptionId}`}
++                dir={dir}
++                checked={isOtherSelected}
++                onCheckedChange={() => {
++                  if (isOtherSelected) {
++                    handleOptionRemove(otherOptionId);
++                  } else {
++                    handleOptionAdd(otherOptionId);
++                  }
++                }}
++                onSelect={(e) => {
++                  e.preventDefault();
++                }}
++                disabled={disabled}>
++                <span className="font-input font-input-weight text-input-text">{otherOptionLabel}</span>
++              </DropdownMenuCheckboxItem>
++            ) : null}
++            {noneOption && noneMatchesSearch ? (
++              <DropdownMenuCheckboxItem
++                key={noneOption.id}
++                id={`${inputId}-${noneOption.id}`}
++                dir={dir}
++                checked={selectedValues.includes(noneOption.id)}
++                onCheckedChange={() => {
++                  handleOptionToggle(noneOption.id);
++                }}
++                onSelect={(e) => {
++                  e.preventDefault();
++                }}
++                disabled={disabled}>
++                <span className="font-input font-input-weight text-input-text">{noneOption.label}</span>
++              </DropdownMenuCheckboxItem>
++            ) : null}
++            {hasNoResults ? (
++              <div className="text-input-placeholder px-2 py-4 text-center text-sm">
++                {searchNoResultsText}
++              </div>
++            ) : null}
++          </div>
+         </DropdownMenuContent>
+       </DropdownMenu>
+       {isOtherSelected ? (
+@@ -423,6 +469,8 @@ function MultiSelect({
+   exclusiveOptionIds = [],
+   imageUrl,
+   videoUrl,
++  searchPlaceholder = "Search...",
++  searchNoResultsText = "No results found",
+ }: Readonly<MultiSelectProps>): React.JSX.Element {
+   // Ensure value is always an array
+   const selectedValues = Array.isArray(value) ? value : [];
+@@ -514,6 +562,8 @@ function MultiSelect({
+             dir={dir}
+             otherInputRef={otherInputRef}
+             required={required}
++            searchPlaceholder={searchPlaceholder}
++            searchNoResultsText={searchNoResultsText}
+           />
+         ) : (
+           <ListVariant
+diff --git a/packages/survey-ui/src/components/elements/single-select.tsx b/packages/survey-ui/src/components/elements/single-select.tsx
+index 30dc4e280c09..108eef594971 100644
+--- a/packages/survey-ui/src/components/elements/single-select.tsx
++++ b/packages/survey-ui/src/components/elements/single-select.tsx
+@@ -8,6 +8,11 @@ import {
+   DropdownMenuRadioItem,
+   DropdownMenuTrigger,
+ } from "@/components/general/dropdown-menu";
++import {
++  DropdownSearchInput,
++  SEARCH_THRESHOLD,
++  useDropdownSearch,
++} from "@/components/general/dropdown-search";
+ import { ElementError } from "@/components/general/element-error";
+ import { ElementHeader } from "@/components/general/element-header";
+ import { Input } from "@/components/general/input";
+@@ -45,7 +50,7 @@ interface SingleSelectProps {
+   requiredLabel?: string;
+   /** Error message to display below the options */
+   errorMessage?: string;
+-  /** Text direction: 'ltr' (left-to-right), 'rtl' (right-to-left), or 'auto' (auto-detect from content) */
++  /** Text direction: 'ltr' (left-to-right), 'rtl' (right-to-right), or 'auto' (auto-detect from content) */
+   dir?: "ltr" | "rtl" | "auto";
+   /** Whether the options are disabled */
+   disabled?: boolean;
+@@ -67,6 +72,10 @@ interface SingleSelectProps {
+   imageUrl?: string;
+   /** Video URL to display above the headline */
+   videoUrl?: string;
++  /** Placeholder text for the search input in dropdown mode */
++  searchPlaceholder?: string;
++  /** Message shown when search yields no results */
++  searchNoResultsText?: string;
+ }
+ 
+ function SingleSelect({
+@@ -91,6 +100,8 @@ function SingleSelect({
+   onOtherValueChange,
+   imageUrl,
+   videoUrl,
++  searchPlaceholder = "Search...",
++  searchNoResultsText = "No results found",
+ }: Readonly<SingleSelectProps>): React.JSX.Element {
+   // Ensure value is always a string or undefined
+   const selectedValue = value ?? undefined;
+@@ -98,6 +109,25 @@ function SingleSelect({
+   const isOtherSelected = hasOtherOption && selectedValue === otherOptionId;
+   const otherInputRef = React.useRef<HTMLInputElement>(null);
+ 
++  // Search + side-locking for the dropdown variant
++  const allDropdownOptionCount = options.length + (hasOtherOption ? 1 : 0);
++  const showSearch = variant === "dropdown" && allDropdownOptionCount > SEARCH_THRESHOLD;
++
++  const {
++    searchQuery,
++    setSearchQuery,
++    searchInputRef,
++    lockedSide,
++    contentRef,
++    noneOption,
++    noneMatchesSearch,
++    filteredRegularOptions,
++    otherMatchesSearch,
++    hasNoResults,
++    handleDropdownOpen,
++    handleDropdownClose,
++  } = useDropdownSearch({ options, hasOtherOption, otherOptionLabel, isSearchEnabled: showSearch });
++
+   React.useEffect(() => {
+     if (!isOtherSelected || disabled) return;
+ 
+@@ -155,7 +185,11 @@ function SingleSelect({
+         {variant === "dropdown" ? (
+           <>
+             <ElementError errorMessage={errorMessage} dir={dir} />
+-            <DropdownMenu>
++            <DropdownMenu
++              onOpenChange={(open) => {
++                if (open) handleDropdownOpen();
++                else handleDropdownClose();
++              }}>
+               <DropdownMenuTrigger asChild>
+                 <Button
+                   variant="outline"
+@@ -168,39 +202,23 @@ function SingleSelect({
+                 </Button>
+               </DropdownMenuTrigger>
+               <DropdownMenuContent
+-                className="bg-option-bg max-h-[300px] w-[var(--radix-dropdown-menu-trigger-width)] overflow-y-auto"
++                ref={contentRef}
++                side={lockedSide}
++                avoidCollisions={lockedSide === undefined}
++                className="bg-option-bg border-input-border w-(--radix-dropdown-menu-trigger-width) overflow-hidden"
+                 align="start">
+-                <DropdownMenuRadioGroup value={selectedValue} onValueChange={onChange}>
+-                  {options
+-                    .filter((option) => option.id !== "none")
+-                    .map((option) => {
+-                      const optionId = `${inputId}-${option.id}`;
+-
+-                      return (
+-                        <DropdownMenuRadioItem
+-                          key={option.id}
+-                          value={option.id}
+-                          id={optionId}
+-                          dir={dir}
+-                          disabled={disabled}>
+-                          <span className="font-input font-input-weight text-input-text">{option.label}</span>
+-                        </DropdownMenuRadioItem>
+-                      );
+-                    })}
+-                  {hasOtherOption && otherOptionId ? (
+-                    <DropdownMenuRadioItem
+-                      value={otherOptionId}
+-                      id={`${inputId}-${otherOptionId}`}
+-                      dir={dir}
+-                      disabled={disabled}>
+-                      <span className="font-input font-input-weight text-input-text">
+-                        {otherValue || otherOptionLabel}
+-                      </span>
+-                    </DropdownMenuRadioItem>
+-                  ) : null}
+-                  {options
+-                    .filter((option) => option.id === "none")
+-                    .map((option) => {
++                {showSearch ? (
++                  <DropdownSearchInput
++                    searchQuery={searchQuery}
++                    setSearchQuery={setSearchQuery}
++                    searchInputRef={searchInputRef}
++                    placeholder={searchPlaceholder}
++                    dir={dir}
++                  />
++                ) : null}
++                <div className="max-h-[260px] overflow-y-auto">
++                  <DropdownMenuRadioGroup value={selectedValue} onValueChange={onChange}>
++                    {filteredRegularOptions.map((option) => {
+                       const optionId = `${inputId}-${option.id}`;
+ 
+                       return (
+@@ -214,7 +232,36 @@ function SingleSelect({
+                         </DropdownMenuRadioItem>
+                       );
+                     })}
+-                </DropdownMenuRadioGroup>
++                    {otherMatchesSearch && otherOptionId ? (
++                      <DropdownMenuRadioItem
++                        value={otherOptionId}
++                        id={`${inputId}-${otherOptionId}`}
++                        dir={dir}
++                        disabled={disabled}>
++                        <span className="font-input font-input-weight text-input-text">
++                          {otherValue || otherOptionLabel}
++                        </span>
++                      </DropdownMenuRadioItem>
++                    ) : null}
++                    {noneOption && noneMatchesSearch ? (
++                      <DropdownMenuRadioItem
++                        key={noneOption.id}
++                        value={noneOption.id}
++                        id={`${inputId}-${noneOption.id}`}
++                        dir={dir}
++                        disabled={disabled}>
++                        <span className="font-input font-input-weight text-input-text">
++                          {noneOption.label}
++                        </span>
++                      </DropdownMenuRadioItem>
++                    ) : null}
++                    {hasNoResults ? (
++                      <div className="text-input-placeholder px-2 py-4 text-center text-sm">
++                        {searchNoResultsText}
++                      </div>
++                    ) : null}
++                  </DropdownMenuRadioGroup>
++                </div>
+               </DropdownMenuContent>
+             </DropdownMenu>
+             {isOtherSelected ? (
+diff --git a/packages/survey-ui/src/components/general/dropdown-search.tsx b/packages/survey-ui/src/components/general/dropdown-search.tsx
+new file mode 100644
+index 000000000000..78b5d97fd85c
+--- /dev/null
++++ b/packages/survey-ui/src/components/general/dropdown-search.tsx
+@@ -0,0 +1,143 @@
++import { Search } from "lucide-react";
++import * as React from "react";
++
++/** Number of options above which the search input is shown inside the dropdown */
++export const SEARCH_THRESHOLD = 3;
++
++interface UseDropdownSearchOptions<T extends { id: string; label: string }> {
++  options: T[];
++  hasOtherOption: boolean;
++  otherOptionLabel: string;
++  isSearchEnabled: boolean;
++}
++
++/**
++ * Shared hook that encapsulates search filtering, "none"-option separation,
++ * and side-locking logic used by both single-select and multi-select dropdowns.
++ */
++export function useDropdownSearch<T extends { id: string; label: string }>({
++  options,
++  hasOtherOption,
++  otherOptionLabel,
++  isSearchEnabled,
++}: UseDropdownSearchOptions<T>) {
++  const [searchQuery, setSearchQuery] = React.useState("");
++  const searchInputRef = React.useRef<HTMLInputElement>(null);
++
++  // Lock the dropdown side (top/bottom) so it doesn't jump when search filters shrink the content
++  const [lockedSide, setLockedSide] = React.useState<"top" | "bottom" | undefined>(undefined);
++  const contentRef = React.useRef<HTMLDivElement>(null);
++
++  // Separate "none" option from regular options so it renders at the bottom of the list
++  const noneOption = React.useMemo(() => options.find((opt) => opt.id === "none"), [options]);
++  const regularOptions = React.useMemo(() => options.filter((opt) => opt.id !== "none"), [options]);
++
++  // Filtered regular options based on the search query
++  const filteredRegularOptions = React.useMemo(() => {
++    if (!isSearchEnabled || !searchQuery) return regularOptions;
++    const lowerQuery = searchQuery.toLowerCase();
++    return regularOptions.filter((opt) => opt.label.toLowerCase().includes(lowerQuery));
++  }, [isSearchEnabled, searchQuery, regularOptions]);
++
++  // Whether the "other" option matches the search
++  const otherMatchesSearch = React.useMemo(() => {
++    if (!hasOtherOption) return false;
++    if (!isSearchEnabled || !searchQuery) return true;
++    return otherOptionLabel.toLowerCase().includes(searchQuery.toLowerCase());
++  }, [isSearchEnabled, searchQuery, hasOtherOption, otherOptionLabel]);
++
++  // Whether the "none" option matches the search
++  const noneMatchesSearch = React.useMemo(() => {
++    if (!noneOption) return false;
++    if (!isSearchEnabled || !searchQuery) return true;
++    return noneOption.label.toLowerCase().includes(searchQuery.toLowerCase());
++  }, [isSearchEnabled, searchQuery, noneOption]);
++
++  const hasNoResults =
++    isSearchEnabled && filteredRegularOptions.length === 0 && !otherMatchesSearch && !noneMatchesSearch;
++
++  const focusSearchAndLockSide = (): void => {
++    searchInputRef.current?.focus();
++    const side = contentRef.current?.dataset.side;
++    if (side === "top" || side === "bottom") setLockedSide(side);
++  };
++
++  const handleDropdownOpen = (): void => {
++    if (isSearchEnabled) {
++      // Double-defer to win against Radix focus management
++      globalThis.setTimeout(() => {
++        globalThis.requestAnimationFrame(focusSearchAndLockSide);
++      }, 0);
++    }
++  };
++
++  const handleDropdownClose = (): void => {
++    setSearchQuery("");
++    setLockedSide(undefined);
++  };
++
++  return {
++    searchQuery,
++    setSearchQuery,
++    searchInputRef,
++    lockedSide,
++    contentRef,
++    noneOption,
++    noneMatchesSearch,
++    filteredRegularOptions,
++    otherMatchesSearch,
++    hasNoResults,
++    handleDropdownOpen,
++    handleDropdownClose,
++  };
++}
++
++interface DropdownSearchInputProps {
++  searchQuery: string;
++  setSearchQuery: (query: string) => void;
++  searchInputRef: React.RefObject<HTMLInputElement | null>;
++  placeholder: string;
++  dir?: string;
++}
++
++/**
++ * Search input rendered at the top of a searchable dropdown.
++ */
++export function DropdownSearchInput({
++  searchQuery,
++  setSearchQuery,
++  searchInputRef,
++  placeholder,
++  dir,
++}: Readonly<DropdownSearchInputProps>): React.JSX.Element {
++  return (
++    <div className="border-option-border border-b pb-0.5" role="search">
++      <div className="relative flex items-center">
++        <Search className="text-input-text pointer-events-none absolute left-1.5 h-4 w-4 shrink-0" />
++        <input
++          ref={searchInputRef}
++          type="text"
++          value={searchQuery}
++          onChange={(e) => {
++            setSearchQuery(e.target.value);
++          }}
++          placeholder={placeholder}
++          dir={dir}
++          onKeyDown={(e) => {
++            if (e.key === "Escape") {
++              if (searchQuery) {
++                e.stopPropagation();
++                setSearchQuery("");
++              }
++            } else if (e.key !== "ArrowDown" && e.key !== "ArrowUp") {
++              e.stopPropagation();
++            }
++          }}
++          className="bg-input-bg text-input-text placeholder:text-input-placeholder font-input font-input-weight h-9 w-full rounded-sm pr-3 pl-8 text-sm outline-none"
++          aria-label={placeholder}
++          autoComplete="off"
++        />
++      </div>
++    </div>
++  );
++}
+diff --git a/packages/surveys/locales/ar.json b/packages/surveys/locales/ar.json
+index d0e29cf94c87..6e8ba0b28951 100644
+--- a/packages/surveys/locales/ar.json
++++ b/packages/surveys/locales/ar.json
+@@ -9,6 +9,7 @@
+     "finish": "إنهاء",
+     "language_switch": "تبديل اللغة",
+     "next": "التالي",
++    "no_results_found": "لم يتم العثور على نتائج",
+     "open_in_new_tab": "فتح في علامة تبويب جديدة",
+     "people_responded": "{count, plural, one {شخص واحد استجاب} two {شخصان استجابا} few {{count} أشخاص استجابوا} many {{count} شخصًا استجابوا} other {{count} شخص استجابوا}}",
+     "please_retry_now_or_try_again_later": "يرجى إعادة المحاولة الآن أو المحاولة مرة أخرى لاحقًا.",
+@@ -21,6 +22,7 @@
+     "respondents_will_not_see_this_card": "لن يرى المستجيبون هذه البطاقة",
+     "retry": "إعادة المحاولة",
+     "retrying": "إعادة المحاولة...",
++    "search": "بحث...",
+     "select_option": "اختر خيارًا",
+     "select_options": "اختر الخيارات",
+     "sending_responses": "جارٍ إرسال الردود...",
+diff --git a/packages/surveys/locales/da.json b/packages/surveys/locales/da.json
+index 465eeb8a94de..fa8c7c4c257d 100644
+--- a/packages/surveys/locales/da.json
++++ b/packages/surveys/locales/da.json
+@@ -9,6 +9,7 @@
+     "finish": "Afslut",
+     "language_switch": "Sprogskift",
+     "next": "Næste",
++    "no_results_found": "Ingen resultater fundet",
+     "open_in_new_tab": "Åbn i ny fane",
+     "people_responded": "{count, plural, one {1 person har svaret} other {{count} personer har svaret}}",
+     "please_retry_now_or_try_again_later": "Prøv igen nu eller prøv senere.",
+@@ -21,6 +22,7 @@
+     "respondents_will_not_see_this_card": "Respondenter vil ikke se dette kort",
+     "retry": "Prøv igen",
+     "retrying": "Prøver igen…",
++    "search": "Søg...",
+     "select_option": "Vælg en mulighed",
+     "select_options": "Vælg muligheder",
+     "sending_responses": "Sender svar…",
+diff --git a/packages/surveys/locales/de.json b/packages/surveys/locales/de.json
+index 80b798a331f1..69139cc751ea 100644
+--- a/packages/surveys/locales/de.json
++++ b/packages/surveys/locales/de.json
+@@ -9,6 +9,7 @@
+     "finish": "Fertig",
+     "language_switch": "Sprachwechsel",
+     "next": "Weiter",
++    "no_results_found": "Keine Ergebnisse gefunden",
+     "open_in_new_tab": "In neuem Tab öffnen",
+     "people_responded": "{count, plural, one {1 Person hat geantwortet} other {{count} Personen haben geantwortet}}",
+     "please_retry_now_or_try_again_later": "Bitte versuchen Sie es jetzt erneut oder später noch einmal.",
+@@ -21,6 +22,7 @@
+     "respondents_will_not_see_this_card": "Befragte werden diese Karte nicht sehen",
+     "retry": "Wiederholen",
+     "retrying": "Erneuter Versuch...",
++    "search": "Suchen...",
+     "select_option": "Wähle eine Option",
+     "select_options": "Wähle Optionen",
+     "sending_responses": "Antworten werden gesendet...",
+diff --git a/packages/surveys/locales/en.json b/packages/surveys/locales/en.json
+index 2e7e33934070..79ffb9347d21 100644
+--- a/packages/surveys/locales/en.json
++++ b/packages/surveys/locales/en.json
+@@ -9,6 +9,7 @@
+     "finish": "Finish",
+     "language_switch": "Language switch",
+     "next": "Next",
++    "no_results_found": "No results found",
+     "open_in_new_tab": "Open in new tab",
+     "people_responded": "{count, plural, one {1 person responded} other {{count} people responded}}",
+     "please_retry_now_or_try_again_later": "Please retry now or try again later.",
+@@ -21,6 +22,7 @@
+     "respondents_will_not_see_this_card": "Respondents will not see this card",
+     "retry": "Retry",
+     "retrying": "Retrying…",
++    "search": "Search...",
+     "select_option": "Select an option",
+     "select_options": "Select options",
+     "sending_responses": "Sending responses…",
+diff --git a/packages/surveys/locales/es.json b/packages/surveys/locales/es.json
+index 18d0269a92d4..1e54c4c4ee3e 100644
+--- a/packages/surveys/locales/es.json
++++ b/packages/surveys/locales/es.json
+@@ -9,6 +9,7 @@
+     "finish": "Finalizar",
+     "language_switch": "Cambio de idioma",
+     "next": "Siguiente",
++    "no_results_found": "No se encontraron resultados",
+     "open_in_new_tab": "Abrir en nueva pestaña",
+     "people_responded": "{count, plural, one {1 persona respondió} other {{count} personas respondieron}}",
+     "please_retry_now_or_try_again_later": "Por favor, inténtalo ahora o prueba más tarde.",
+@@ -21,6 +22,7 @@
+     "respondents_will_not_see_this_card": "Los encuestados no verán esta tarjeta",
+     "retry": "Reintentar",
+     "retrying": "Reintentando...",
++    "search": "Buscar...",
+     "select_option": "Selecciona una opción",
+     "select_options": "Selecciona opciones",
+     "sending_responses": "Enviando respuestas...",
+diff --git a/packages/surveys/locales/fr.json b/packages/surveys/locales/fr.json
+index 8b8e0244ead1..0c681f40783d 100644
+--- a/packages/surveys/locales/fr.json
++++ b/packages/surveys/locales/fr.json
+@@ -9,6 +9,7 @@
+     "finish": "Terminer",
+     "language_switch": "Changement de langue",
+     "next": "Suivant",
++    "no_results_found": "Aucun résultat trouvé",
+     "open_in_new_tab": "Ouvrir dans un nouvel onglet",
+     "people_responded": "{count, plural, one {1 personne a répondu} other {{count} personnes ont répondu}}",
+     "please_retry_now_or_try_again_later": "Veuillez réessayer maintenant ou réessayer plus tard.",
+@@ -21,6 +22,7 @@
+     "respondents_will_not_see_this_card": "Les répondants ne verront pas cette carte",
+     "retry": "Réessayer",
+     "retrying": "Nouvelle tentative...",
++    "search": "Rechercher...",
+     "select_option": "Sélectionner une option",
+     "select_options": "Sélectionner des options",
+     "sending_responses": "Envoi des réponses...",
+diff --git a/packages/surveys/locales/hi.json b/packages/surveys/locales/hi.json
+index 7ab8a7d208d6..eb949c79b886 100644
+--- a/packages/surveys/locales/hi.json
++++ b/packages/surveys/locales/hi.json
+@@ -9,6 +9,7 @@
+     "finish": "समाप्त करें",
+     "language_switch": "भाषा बदलें",
+     "next": "अगला",
++    "no_results_found": "कोई परिणाम नहीं मिला",
+     "open_in_new_tab": "नए टैब में खोलें",
+     "people_responded": "{count, plural, one {1 व्यक्ति ने जवाब दिया} other {{count} लोगों ने जवाब दिया}}",
+     "please_retry_now_or_try_again_later": "कृपया अभी पुनः प्रयास करें या बाद में फिर से प्रयास करें।",
+@@ -21,6 +22,7 @@
+     "respondents_will_not_see_this_card": "उत्तरदाता इस कार्ड को नहीं देखेंगे",
+     "retry": "पुनः प्रयास करें",
+     "retrying": "पुनः प्रयास कर रहे हैं...",
++    "search": "खोजें...",
+     "select_option": "एक विकल्प चुनें",
+     "select_options": "विकल्प चुनें",
+     "sending_responses": "प्रतिक्रियाएँ भेज रहे हैं...",
+diff --git a/packages/surveys/locales/hu.json b/packages/surveys/locales/hu.json
+index 33299ce28f7a..ada74eb88165 100644
+--- a/packages/surveys/locales/hu.json
++++ b/packages/surveys/locales/hu.json
+@@ -9,6 +9,7 @@
+     "finish": "Befejezés",
+     "language_switch": "Nyelvválasztó",
+     "next": "Következő",
++    "no_results_found": "Nincs találat",
+     "open_in_new_tab": "Megnyitás új lapon",
+     "people_responded": "{count, plural, one {1 személy válaszolt} other {{count} személy válaszolt}}",
+     "please_retry_now_or_try_again_later": "Próbálkozzon újra most, vagy próbálja meg később újra.",
+@@ -21,6 +22,7 @@
+     "respondents_will_not_see_this_card": "A válaszadók nem fogják látni ezt a kártyát",
+     "retry": "Újrapróbálkozás",
+     "retrying": "Újrapróbálkozás…",
++    "search": "Keresés...",
+     "select_option": "Lehetőség kiválasztása",
+     "select_options": "Lehetőségek kiválasztása",
+     "sending_responses": "Válaszok küldése…",
+diff --git a/packages/surveys/locales/it.json b/packages/surveys/locales/it.json
+index b098df7cd4e3..08030e82452b 100644
+--- a/packages/surveys/locales/it.json
++++ b/packages/surveys/locales/it.json
+@@ -9,6 +9,7 @@
+     "finish": "Fine",
+     "language_switch": "Cambio lingua",
+     "next": "Avanti",
++    "no_results_found": "Nessun risultato trovato",
+     "open_in_new_tab": "Apri in una nuova scheda",
+     "people_responded": "{count, plural, one {1 persona ha risposto} other {{count} persone hanno risposto}}",
+     "please_retry_now_or_try_again_later": "Riprova ora o più tardi.",
+@@ -21,6 +22,7 @@
+     "respondents_will_not_see_this_card": "I rispondenti non vedranno questa scheda",
+     "retry": "Riprova",
+     "retrying": "Riprovando...",
++    "search": "Cerca...",
+     "select_option": "Seleziona un'opzione",
+     "select_options": "Seleziona opzioni",
+     "sending_responses": "Invio risposte in corso...",
+diff --git a/packages/surveys/locales/ja.json b/packages/surveys/locales/ja.json
+index 363e50d67a70..b963dd0fc77b 100644
+--- a/packages/surveys/locales/ja.json
++++ b/packages/surveys/locales/ja.json
+@@ -9,6 +9,7 @@
+     "finish": "完了",
+     "language_switch": "言語切替",
+     "next": "次へ",
++    "no_results_found": "結果が見つかりません",
+     "open_in_new_tab": "新しいタブで開く",
+     "people_responded": "{count, plural, other {{count}人が回答しました}}",
+     "please_retry_now_or_try_again_later": "今すぐ再試行するか、後でもう一度お試しください。",
+@@ -21,6 +22,7 @@
+     "respondents_will_not_see_this_card": "回答者はこのカードを見ることができません",
+     "retry": "再試行",
+     "retrying": "再試行中...",
++    "search": "検索...",
+     "select_option": "オプションを選択",
+     "select_options": "オプションを選択",
+     "sending_responses": "回答を送信中...",
+diff --git a/packages/surveys/locales/nl.json b/packages/surveys/locales/nl.json
+index 9835e016521c..d529a1dcca56 100644
+--- a/packages/surveys/locales/nl.json
++++ b/packages/surveys/locales/nl.json
+@@ -9,6 +9,7 @@
+     "finish": "Voltooien",
+     "language_switch": "Taalschakelaar",
+     "next": "Volgende",
++    "no_results_found": "Geen resultaten gevonden",
+     "open_in_new_tab": "Openen in nieuw tabblad",
+     "people_responded": "{count, plural, one {1 persoon heeft gereageerd} other {{count} mensen hebben gereageerd}}",
+     "please_retry_now_or_try_again_later": "Probeer het nu opnieuw of probeer het later opnieuw.",
+@@ -21,6 +22,7 @@
+     "respondents_will_not_see_this_card": "Respondenten zien deze kaart niet",
+     "retry": "Opnieuw proberen",
+     "retrying": "Opnieuw proberen...",
++    "search": "Zoeken...",
+     "select_option": "Selecteer een optie",
+     "select_options": "Selecteer opties",
+     "sending_responses": "Reacties verzenden...",
+diff --git a/packages/surveys/locales/pt.json b/packages/surveys/locales/pt.json
+index f6d79ad8d627..0b50630e05b8 100644
+--- a/packages/surveys/locales/pt.json
++++ b/packages/surveys/locales/pt.json
+@@ -9,6 +9,7 @@
+     "finish": "Finalizar",
+     "language_switch": "Alternar idioma",
+     "next": "Próximo",
++    "no_results_found": "Nenhum resultado encontrado",
+     "open_in_new_tab": "Abrir em nova aba",
+     "people_responded": "{count, plural, one {1 pessoa respondeu} other {{count} pessoas responderam}}",
+     "please_retry_now_or_try_again_later": "Por favor, tente novamente agora ou mais tarde.",
+@@ -21,6 +22,7 @@
+     "respondents_will_not_see_this_card": "Os respondentes não verão este cartão",
+     "retry": "Tentar novamente",
+     "retrying": "Tentando novamente...",
++    "search": "Pesquisar...",
+     "select_option": "Selecione uma opção",
+     "select_options": "Selecione opções",
+     "sending_responses": "Enviando respostas...",
+diff --git a/packages/surveys/locales/ro.json b/packages/surveys/locales/ro.json
+index 532a10a08667..4748c6fd2378 100644
+--- a/packages/surveys/locales/ro.json
++++ b/packages/surveys/locales/ro.json
+@@ -9,6 +9,7 @@
+     "finish": "Finalizează",
+     "language_switch": "Schimbare limbă",
+     "next": "Următorul",
++    "no_results_found": "Nu s-au găsit rezultate",
+     "open_in_new_tab": "Deschide într-o filă nouă",
+     "people_responded": "{count, plural, one {1 persoană a răspuns} other {{count} persoane au răspuns}}",
+     "please_retry_now_or_try_again_later": "Te rugăm să încerci din nou acum sau mai târziu.",
+@@ -21,6 +22,7 @@
+     "respondents_will_not_see_this_card": "Respondenții nu vor vedea acest card",
+     "retry": "Reîncearcă",
+     "retrying": "Se reîncearcă...",
++    "search": "Căutare...",
+     "select_option": "Selectează o opțiune",
+     "select_options": "Selectează opțiuni",
+     "sending_responses": "Trimiterea răspunsurilor...",
+diff --git a/packages/surveys/locales/ru.json b/packages/surveys/locales/ru.json
+index b434dcaeeb00..ce74709ee2ae 100644
+--- a/packages/surveys/locales/ru.json
++++ b/packages/surveys/locales/ru.json
+@@ -9,6 +9,7 @@
+     "finish": "Завершить",
+     "language_switch": "Переключение языка",
+     "next": "Далее",
++    "no_results_found": "Результатов не найдено",
+     "open_in_new_tab": "Открыть в новой вкладке",
+     "people_responded": "{count, plural, one {1 человек ответил} other {{count} человека ответили}}",
+     "please_retry_now_or_try_again_later": "Пожалуйста, повторите попытку сейчас или попробуйте позже.",
+@@ -21,6 +22,7 @@
+     "respondents_will_not_see_this_card": "Респонденты не увидят эту карточку",
+     "retry": "Повторить",
+     "retrying": "Повторная попытка...",
++    "search": "Поиск...",
+     "select_option": "Выбери вариант",
+     "select_options": "Выбери варианты",
+     "sending_responses": "Отправка ответов...",
+diff --git a/packages/surveys/locales/sv.json b/packages/surveys/locales/sv.json
+index dc40380eda06..238b6f7af3c3 100644
+--- a/packages/surveys/locales/sv.json
++++ b/packages/surveys/locales/sv.json
+@@ -9,6 +9,7 @@
+     "finish": "Slutför",
+     "language_switch": "Språkväxlare",
+     "next": "Nästa",
++    "no_results_found": "Inga resultat hittades",
+     "open_in_new_tab": "Öppna i ny flik",
+     "people_responded": "{count, plural, one {1 person har svarat} other {{count} personer har svarat}}",
+     "please_retry_now_or_try_again_later": "Försök igen nu eller försök igen senare.",
+@@ -21,6 +22,7 @@
+     "respondents_will_not_see_this_card": "Respondenter kommer inte att se detta kort",
+     "retry": "Försök igen",
+     "retrying": "Försöker igen...",
++    "search": "Sök...",
+     "select_option": "Välj ett alternativ",
+     "select_options": "Välj alternativ",
+     "sending_responses": "Skickar svar...",
+diff --git a/packages/surveys/locales/uz.json b/packages/surveys/locales/uz.json
+index a158faeeff89..942812e780d2 100644
+--- a/packages/surveys/locales/uz.json
++++ b/packages/surveys/locales/uz.json
+@@ -9,6 +9,7 @@
+     "finish": "Tugatish",
+     "language_switch": "Tilni almashtirish",
+     "next": "Keyingisi",
++    "no_results_found": "Natijalar topilmadi",
+     "open_in_new_tab": "Yangi oynada ochish",
+     "people_responded": "{count, plural, one {1 kishi javob berdi} other {{count} kishi javob berdi}}",
+     "please_retry_now_or_try_again_later": "Iltimos, hozir qayta urinib ko‘ring yoki keyinroq urinib ko‘ring.",
+@@ -21,6 +22,7 @@
+     "respondents_will_not_see_this_card": "Javob beruvchilar ushbu kartani ko'rmaydi",
+     "retry": "Qayta urinib ko'ring",
+     "retrying": "Qayta urinilmoqda...",
++    "search": "Qidirish...",
+     "select_option": "Variantni tanla",
+     "select_options": "Variantlarni tanla",
+     "sending_responses": "Javoblar yuborilmoqda...",
+diff --git a/packages/surveys/locales/zh-Hans.json b/packages/surveys/locales/zh-Hans.json
+index fa87ff6ce304..f603d2495477 100644
+--- a/packages/surveys/locales/zh-Hans.json
++++ b/packages/surveys/locales/zh-Hans.json
+@@ -9,6 +9,7 @@
+     "finish": "完成",
+     "language_switch": "语言切换",
+     "next": "下一步",
++    "no_results_found": "未找到结果",
+     "open_in_new_tab": "在新标签页中打开",
+     "people_responded": "{count, plural, one {1 人已回应} other {{count} 人已回应}}",
+     "please_retry_now_or_try_again_later": "请立即重试或稍后再试。",
+@@ -21,6 +22,7 @@
+     "respondents_will_not_see_this_card": "受访者将不会看到此卡片",
+     "retry": "重试",
+     "retrying": "重试中...",
++    "search": "搜索...",
+     "select_option": "请选择一个选项",
+     "select_options": "请选择多个选项",
+     "sending_responses": "正在发送响应...",
+diff --git a/packages/surveys/src/components/elements/multiple-choice-multi-element.tsx b/packages/surveys/src/components/elements/multiple-choice-multi-element.tsx
+index f2fce0e78906..2d67dbdb903f 100644
+--- a/packages/surveys/src/components/elements/multiple-choice-multi-element.tsx
++++ b/packages/surveys/src/components/elements/multiple-choice-multi-element.tsx
+@@ -268,6 +268,8 @@ export function MultipleChoiceMultiElement({
+         exclusiveOptionIds={noneOption ? [noneOption.id] : []}
+         imageUrl={element.imageUrl}
+         videoUrl={element.videoUrl}
++        searchPlaceholder={t("common.search")}
++        searchNoResultsText={t("common.no_results_found")}
+       />
+     </form>
+   );
+diff --git a/packages/surveys/src/components/elements/multiple-choice-single-element.tsx b/packages/surveys/src/components/elements/multiple-choice-single-element.tsx
+index 16b8577ebf94..c8c28e58b305 100644
+--- a/packages/surveys/src/components/elements/multiple-choice-single-element.tsx
++++ b/packages/surveys/src/components/elements/multiple-choice-single-element.tsx
+@@ -187,6 +187,8 @@ export function MultipleChoiceSingleElement({
+         onOtherValueChange={handleOtherValueChange}
+         imageUrl={element.imageUrl}
+         videoUrl={element.videoUrl}
++        searchPlaceholder={t("common.search")}
++        searchNoResultsText={t("common.no_results_found")}
+       />
+     </form>
+   );

@@ -1,0 +1,113 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "state_management",
+      "recommendation": "Used in-memory Maps to store scroll positions and page numbers instead of Vuex/Pinia store or localStorage",
+      "rationale": "Scroll position restoration is a transient UI state that doesn't need persistence across browser sessions. Using Maps provides fast O(1) lookups and avoids serialization overhead. This keeps the solution lightweight and scoped to the current browsing session.",
+      "alternatives_considered": [
+        "Vuex/Pinia store for centralized state",
+        "localStorage for persistence across sessions",
+        "sessionStorage for tab-scoped persistence"
+      ],
+      "files_affected": [
+        "frontend/composables/use-scroll-position.ts"
+      ]
+    },
+    {
+      "dimension": "timing_and_synchronization",
+      "recommendation": "Implemented a dual timeout system with MutationObserver for reliable scroll restoration after DOM updates",
+      "rationale": "Recipe pages load data asynchronously and may have dynamic content. The MutationObserver watches for DOM changes, while the fallback timeout ensures restoration even if no mutations occur. The 100ms/500ms timeouts balance responsiveness with DOM stability.",
+      "alternatives_considered": [
+        "Single setTimeout with fixed delay",
+        "Waiting for specific Vue lifecycle hooks",
+        "Using requestAnimationFrame loops"
+      ],
+      "files_affected": [
+        "frontend/composables/use-scroll-position.ts"
+      ]
+    },
+    {
+      "dimension": "api_design",
+      "recommendation": "Created a composable with three focused functions: savePosition, getSavedPage, and restorePosition",
+      "rationale": "This separation of concerns makes the API intuitive: save when scrolling, get page for data loading, restore for UI positioning. The composable pattern follows Vue 3 conventions and enables reuse across different recipe views.",
+      "alternatives_considered": [
+        "Single monolithic function",
+        "Integration into existing recipe composables",
+        "Global mixin approach"
+      ],
+      "files_affected": [
+        "frontend/composables/use-scroll-position.ts"
+      ]
+    },
+    {
+      "dimension": "data_loading_optimization",
+      "recommendation": "Modified recipe fetching to load saved pages before showing content, preventing layout shifts",
+      "rationale": "When returning to a scrolled position, we need the corresponding recipe data loaded. By fetching saved pages upfront (before setting ready=true), we ensure recipes are available when scroll restoration occurs, avoiding empty sections.",
+      "alternatives_considered": [
+        "Loading all pages sequentially",
+        "Loading visible recipes only",
+        "Using virtual scrolling with windowing"
+      ],
+      "files_affected": [
+        "frontend/components/Domain/Recipe/RecipeCardSection.vue"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Added cleanup for observers and timeouts in onUnmounted hook to prevent memory leaks",
+      "rationale": "MutationObservers and setTimeout references must be cleaned up when components unmount. The onUnmounted hook ensures proper disposal, preventing memory leaks and unexpected behavior in long-running SPA sessions.",
+      "alternatives_considered": [
+        "Relying on garbage collection",
+        "Using WeakRefs",
+        "Global cleanup registry"
+      ],
+      "files_affected": [
+        "frontend/composables/use-scroll-position.ts"
+      ]
+    },
+    {
+      "dimension": "ui_ux",
+      "recommendation": "Moved AppLoader outside the main container and kept it visible during scroll restoration",
+      "rationale": "The loader needs to remain visible while fetching saved pages and restoring position. Moving it outside prevents layout conflicts and ensures users see loading feedback during the restoration process.",
+      "alternatives_considered": [
+        "Keeping loader inside with conditional rendering",
+        "Using skeleton screens",
+        "No loading indicator during restoration"
+      ],
+      "files_affected": [
+        "frontend/components/Domain/Recipe/RecipeCardSection.vue"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Create scroll position management composable",
+      "description": "Implement a reusable composable to save, retrieve, and restore scroll positions with proper timing and cleanup",
+      "files_to_modify": [],
+      "files_to_create": [
+        "frontend/composables/use-scroll-position.ts"
+      ],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-002",
+      "title": "Integrate scroll restoration into recipe card section",
+      "description": "Modify RecipeCardSection to use the scroll position composable, handle saved page loading, and restore positions on navigation",
+      "files_to_modify": [
+        "frontend/components/Domain/Recipe/RecipeCardSection.vue"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    }
+  ],
+  "implementation_summary": "The implementation addresses persistent scroll position through a two-part solution: a reusable composable for scroll management and integration into the recipe card component. The useScrollPosition composable uses in-memory Maps to store scroll positions and page numbers, providing fast access without persistence overhead. It employs a sophisticated timing system with MutationObserver and dual timeouts to ensure reliable restoration after DOM updates.\n\nIn RecipeCardSection.vue, the component now checks for saved positions on mount, loads the appropriate recipe pages before displaying content, and restores the scroll position. The loader positioning was adjusted to remain visible during this process. The solution captures scroll positions both during infinite scroll events and via router beforeEach hooks, ensuring positions are saved before navigation.\n\nKey patterns include: the composable pattern for reusable logic, separation of data loading (pages) from UI positioning (scroll), and defensive cleanup to prevent memory leaks. The implementation integrates smoothly with existing recipe fetching logic while maintaining the infinite scroll behavior. Trade-offs include using in-memory storage (lost on page refresh) versus more persistent solutions, which was deemed acceptable for this navigation-focused feature.",
+  "source_pr": "https://github.com/mealie-recipes/mealie/pull/7370",
+  "before_sha": "94cf825a28dfff2c6a6d2c7797f45884895a5058",
+  "after_sha": "058dbdc9d6543421b9652e47bdc67aeb8a804309",
+  "diff_stats": {
+    "additions": 97,
+    "deletions": 8,
+    "files_changed": 2
+  }
+}

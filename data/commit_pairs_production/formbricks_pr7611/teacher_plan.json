@@ -1,0 +1,185 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "api_design",
+      "recommendation": "Created a centralized AI service layer with provider-agnostic abstraction using @formbricks/ai package",
+      "rationale": "The implementation abstracts away provider-specific details (AWS Bedrock, Google Vertex AI, Azure OpenAI) through a shared package, allowing DevOps teams to configure providers via environment variables without changing application code. This follows the dependency inversion principle where high-level modules don't depend on low-level provider implementations.",
+      "alternatives_considered": [
+        "Direct integration with each provider SDK",
+        "Creating separate service modules per provider",
+        "Using a third-party abstraction library"
+      ],
+      "files_affected": [
+        "apps/web/lib/ai/service.ts",
+        "apps/web/lib/ai/service.test.ts"
+      ]
+    },
+    {
+      "dimension": "data_modeling",
+      "recommendation": "Extended organization model with AI capability flags (isAISmartToolsEnabled, isAIDataAnalysisEnabled) while keeping instance-level configuration separate",
+      "rationale": "Separated organization-level feature toggles from instance-level provider configuration. Organizations can enable/disable AI features while DevOps controls which provider and model are used at the instance level. This maintains clear separation of concerns between business logic (organization settings) and infrastructure configuration (provider setup).",
+      "alternatives_considered": [
+        "Storing provider configuration in organization model",
+        "Creating a separate AI configuration table",
+        "Using feature flags instead of database fields"
+      ],
+      "files_affected": [
+        "apps/web/app/(app)/environments/[environmentId]/settings/(organization)/general/actions.ts",
+        "apps/web/app/(app)/environments/[environmentId]/settings/(organization)/general/schemas.ts"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Implemented comprehensive validation with clear error messages and graceful degradation in UI",
+      "rationale": "Added validation at multiple levels: environment variable validation in env.ts, organization entitlement checks in service.ts, and UI state management in utils.ts. Errors are localized and provide actionable feedback. The UI shows toggles as disabled with warnings when instance AI is not configured, preventing user confusion.",
+      "alternatives_considered": [
+        "Silent failures",
+        "Generic error messages",
+        "Allowing UI to show enabled state when backend would reject"
+      ],
+      "files_affected": [
+        "apps/web/lib/env.ts",
+        "apps/web/lib/ai/utils.ts",
+        "apps/web/app/(app)/environments/[environmentId]/settings/(organization)/general/components/AISettingsToggle.tsx"
+      ]
+    },
+    {
+      "dimension": "security",
+      "recommendation": "Enforced role-based access control (owner/manager only) for AI settings with audit logging",
+      "rationale": "AI settings are sensitive as they control data processing and potential costs. The implementation requires owner or manager roles to modify AI settings, integrates with existing authorization middleware, and includes audit logging for compliance and troubleshooting.",
+      "alternatives_considered": [
+        "Allowing all organization members",
+        "Separate AI-specific permissions",
+        "No audit logging"
+      ],
+      "files_affected": [
+        "apps/web/app/(app)/environments/[environmentId]/settings/(organization)/general/actions.ts",
+        "apps/web/app/(app)/environments/[environmentId]/settings/(organization)/general/actions.test.ts"
+      ]
+    },
+    {
+      "dimension": "configuration_management",
+      "recommendation": "Used environment variables for provider configuration with Zod validation and provider-specific validation rules",
+      "rationale": "Environment variables allow DevOps teams to configure AI providers without code changes. Zod validation ensures required variables are present for the selected provider, with clear error messages. The validation is provider-aware (AWS requires region/credentials, GCP requires project/location, etc.).",
+      "alternatives_considered": [
+        "Configuration files",
+        "Database-stored configuration",
+        "Hardcoded provider defaults"
+      ],
+      "files_affected": [
+        ".env.example",
+        "apps/web/lib/env.ts"
+      ]
+    },
+    {
+      "dimension": "testing",
+      "recommendation": "Created comprehensive unit tests for AI service layer, utility functions, and action handlers",
+      "rationale": "Tests cover critical paths: instance configuration detection, organization entitlement checks, error handling, and UI state calculations. Mocked external dependencies (AI package, organization service) to ensure tests are fast and reliable. Tests validate both happy paths and edge cases like missing configurations.",
+      "alternatives_considered": [
+        "Only integration tests",
+        "No tests for utility functions",
+        "Testing actual AI provider calls"
+      ],
+      "files_affected": [
+        "apps/web/lib/ai/service.test.ts",
+        "apps/web/lib/ai/utils.test.ts",
+        "apps/web/app/(app)/environments/[environmentId]/settings/(organization)/general/actions.test.ts"
+      ]
+    },
+    {
+      "dimension": "internationalization",
+      "recommendation": "Integrated localization for all user-facing error messages and UI labels",
+      "rationale": "All error messages and UI text are localized using the existing i18n system. The getTranslate function is used consistently across server-side code, ensuring users see messages in their preferred language. This maintains consistency with the rest of the application.",
+      "alternatives_considered": [
+        "Hardcoded English messages",
+        "Separate AI-specific translation files",
+        "No localization for error messages"
+      ],
+      "files_affected": [
+        "apps/web/app/(app)/environments/[environmentId]/settings/(organization)/general/actions.ts",
+        "apps/web/locales/de-DE.json",
+        "apps/web/locales/en-US.json",
+        "apps/web/locales/es-ES.json",
+        "apps/web/locales/fr-FR.json",
+        "apps/web/locales/hu-HU.json",
+        "apps/web/locales/ja-JP.json"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "AI Foundation Service Layer",
+      "description": "Create core AI service abstraction with provider configuration, organization entitlement checks, and text generation capabilities",
+      "files_to_modify": [],
+      "files_to_create": [
+        "apps/web/lib/ai/service.ts",
+        "apps/web/lib/ai/service.test.ts"
+      ],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-002",
+      "title": "AI Configuration and Environment Validation",
+      "description": "Add environment variable support for multi-provider AI configuration with comprehensive validation",
+      "files_to_modify": [
+        ".env.example",
+        "apps/web/lib/env.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-003",
+      "title": "Organization AI Settings Management",
+      "description": "Implement organization-level AI toggle management with authorization, validation, and audit logging",
+      "files_to_modify": [
+        "apps/web/app/(app)/environments/[environmentId]/settings/(organization)/general/actions.ts",
+        "apps/web/lib/organization/service.ts"
+      ],
+      "files_to_create": [
+        "apps/web/app/(app)/environments/[environmentId]/settings/(organization)/general/schemas.ts",
+        "apps/web/app/(app)/environments/[environmentId]/settings/(organization)/general/actions.test.ts"
+      ],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-004",
+      "title": "AI Settings UI Components",
+      "description": "Create responsive UI components for AI settings with proper state management and user feedback",
+      "files_to_modify": [
+        "apps/web/app/(app)/environments/[environmentId]/settings/(organization)/general/components/AISettingsToggle.tsx",
+        "apps/web/app/(app)/environments/[environmentId]/settings/(organization)/general/page.tsx"
+      ],
+      "files_to_create": [
+        "apps/web/lib/ai/utils.ts",
+        "apps/web/lib/ai/utils.test.ts"
+      ],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-005",
+      "title": "Internationalization Support",
+      "description": "Add localized strings for AI settings across all supported languages",
+      "files_to_modify": [
+        "apps/web/locales/de-DE.json",
+        "apps/web/locales/en-US.json",
+        "apps/web/locales/es-ES.json",
+        "apps/web/locales/fr-FR.json",
+        "apps/web/locales/hu-HU.json",
+        "apps/web/locales/ja-JP.json"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation creates a multi-provider AI foundation that cleanly separates infrastructure configuration from business logic. At the core is a service abstraction layer (apps/web/lib/ai/service.ts) that uses the @formbricks/ai package to provide a unified interface for AI operations. This layer handles provider resolution, model selection, and organization entitlement checks while abstracting away provider-specific details.\n\nConfiguration is managed through environment variables (AI_PROVIDER, AI_MODEL, and provider-specific credentials) with comprehensive validation in apps/web/lib/env.ts. The validation is provider-aware, ensuring required variables are present based on the selected provider. DevOps teams can switch between AWS Bedrock, Google Vertex AI, and Azure OpenAI by changing environment variables without code modifications.\n\nOrganization-level AI capabilities are controlled through two toggles (Smart Tools and Data Analysis) stored in the organization model. The UI components in AISettingsToggle.tsx show these toggles with proper state management - they appear disabled with warnings when the instance AI is not configured, preventing user confusion. Authorization is enforced at the action level, requiring owner or manager roles to modify AI settings, with audit logging for compliance.\n\nThe implementation integrates seamlessly with the existing codebase patterns: using Zod for validation, the existing i18n system for localization, and the established action client pattern for server actions. Error handling is comprehensive, with clear localized messages and graceful degradation in the UI. Testing covers critical paths including configuration validation, entitlement checks, and error scenarios.",
+  "source_pr": "https://github.com/formbricks/formbricks/pull/7611",
+  "before_sha": "b5eaa4c7fd59740c8f50426e12d472e64457f9f5",
+  "after_sha": "87bcad2b201b81a0baaf3b6f7ca409c426ee963c",
+  "diff_stats": {
+    "additions": 3774,
+    "deletions": 564,
+    "files_changed": 48
+  }
+}

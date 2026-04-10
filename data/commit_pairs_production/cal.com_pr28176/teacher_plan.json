@@ -1,0 +1,148 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "dependency_injection",
+      "recommendation": "Added BookingEventHandlerService and FeaturesRepository as dependencies to InstantBookingCreateService via DI container configuration",
+      "rationale": "Following the repository pattern and dependency injection guidelines in the codebase (patterns-dependency-injection.md, data-repository-pattern.md). This ensures loose coupling and makes the service testable by allowing mock dependencies. The existing DI module system was extended rather than creating new patterns.",
+      "alternatives_considered": [
+        "Directly importing services",
+        "Using global singletons",
+        "Creating new DI containers"
+      ],
+      "files_affected": [
+        "packages/features/bookings/di/InstantBookingCreateService.module.ts"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Wrapped audit logging in try/catch blocks to ensure audit failures never prevent successful bookings",
+      "rationale": "The requirement explicitly states audit logging should be fire-and-forget and never interfere with booking creation. This defensive programming approach ensures the core booking functionality remains reliable even if audit systems fail. The existing logger.error pattern is maintained for observability.",
+      "alternatives_considered": [
+        "Letting audit exceptions bubble up",
+        "Using separate error queues",
+        "Synchronous error handling"
+      ],
+      "files_affected": [
+        "packages/features/bookings/lib/service/InstantBookingCreateService.ts",
+        "packages/trpc/server/routers/loggedInViewer/connectAndJoin.handler.ts"
+      ]
+    },
+    {
+      "dimension": "feature_flags",
+      "recommendation": "Added feature flag check for 'booking-audit' before emitting audit events",
+      "rationale": "Consistent with the existing audit pattern in RegularBookingService and RecurringBookingService. The FeaturesRepository abstraction follows the repository pattern and allows organization-level feature toggling. This prevents unnecessary audit processing for organizations without the feature enabled.",
+      "alternatives_considered": [
+        "Global configuration flag",
+        "Environment variable check",
+        "Hard-coded enablement"
+      ],
+      "files_affected": [
+        "packages/features/bookings/lib/service/InstantBookingCreateService.ts",
+        "packages/trpc/server/routers/loggedInViewer/connectAndJoin.handler.ts"
+      ]
+    },
+    {
+      "dimension": "api_design",
+      "recommendation": "Extended InstantBookingCreateService.createBooking() signature to accept bookingMeta parameter for user context",
+      "rationale": "The instant booking API endpoint needed to pass user UUID and impersonation context to the service layer. This maintains backward compatibility while adding the necessary audit metadata. The existing CreateBookingMeta type was reused for consistency.",
+      "alternatives_considered": [
+        "Modifying the bookingData structure",
+        "Adding separate method",
+        "Using request context"
+      ],
+      "files_affected": [
+        "apps/web/pages/api/book/instant-event.ts",
+        "packages/features/bookings/lib/service/InstantBookingCreateService.ts"
+      ]
+    },
+    {
+      "dimension": "testing",
+      "recommendation": "Added comprehensive tests for audit logging in both creation and acceptance flows",
+      "rationale": "Following testing-coverage-requirements.md and testing-incremental.md guidelines. Tests verify: 1) audit events fire with correct data when feature enabled, 2) failures don't affect booking flow, 3) feature flag properly gates audit events. Mocking patterns align with testing-mocking.md rules.",
+      "alternatives_considered": [
+        "No new tests",
+        "Only unit tests",
+        "Only integration tests"
+      ],
+      "files_affected": [
+        "packages/features/bookings/lib/service/InstantBookingCreateService.test.ts",
+        "packages/trpc/server/routers/loggedInViewer/connectAndJoin.handler.test.ts"
+      ]
+    },
+    {
+      "dimension": "internationalization",
+      "recommendation": "Added new translation key 'booking_audit_action.created_awaiting_host' for AWAITING_HOST status",
+      "rationale": "Instant bookings start in AWAITING_HOST status before host acceptance, requiring a distinct audit message from regular bookings. This follows the existing translation pattern and ensures consistent user experience across locales.",
+      "alternatives_considered": [
+        "Reusing existing translation key",
+        "Hard-coded English text",
+        "Status-based conditional logic in UI"
+      ],
+      "files_affected": [
+        "packages/features/booking-audit/lib/actions/CreatedAuditActionService.ts",
+        "packages/i18n/locales/en/common.json"
+      ]
+    },
+    {
+      "dimension": "data_modeling",
+      "recommendation": "Reused existing BookingAudit table and audit event patterns without schema changes",
+      "rationale": "The booking audit system was already designed to handle multiple booking types. By using the same BookingEventHandlerService.onBookingCreated() and onBookingAccepted() methods, instant bookings integrate seamlessly with the existing audit infrastructure. No new database tables or migrations were needed.",
+      "alternatives_considered": [
+        "Creating separate audit table for instant bookings",
+        "Custom audit logging logic",
+        "Different audit event structure"
+      ],
+      "files_affected": [
+        "packages/features/bookings/lib/service/InstantBookingCreateService.ts",
+        "packages/trpc/server/routers/loggedInViewer/connectAndJoin.handler.ts"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Add audit logging to instant booking creation flow",
+      "description": "Integrate BookingEventHandlerService into InstantBookingCreateService to emit audit events when instant bookings are created, with feature flag protection and error isolation",
+      "files_to_modify": [
+        "packages/features/bookings/di/InstantBookingCreateService.module.ts",
+        "packages/features/bookings/lib/service/InstantBookingCreateService.ts",
+        "apps/web/pages/api/book/instant-event.ts",
+        "packages/features/booking-audit/lib/actions/CreatedAuditActionService.ts",
+        "packages/i18n/locales/en/common.json"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-002",
+      "title": "Add audit logging to instant booking acceptance flow",
+      "description": "Implement audit event emission when hosts accept instant meeting invitations via connectAndJoin endpoint",
+      "files_to_modify": [
+        "packages/trpc/server/routers/loggedInViewer/connectAndJoin.handler.ts"
+      ],
+      "files_to_create": [
+        "packages/trpc/server/routers/loggedInViewer/connectAndJoin.handler.test.ts"
+      ],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-003",
+      "title": "Test instant booking audit integration",
+      "description": "Create comprehensive tests verifying audit events fire correctly, feature flags work, and failures don't break booking flows",
+      "files_to_modify": [
+        "packages/features/bookings/lib/service/InstantBookingCreateService.test.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation adds audit logging to the instant booking flow by integrating with the existing BookingEventHandlerService used by regular and recurring bookings. The approach follows established patterns in the codebase: dependency injection for service dependencies, feature flag checks via FeaturesRepository, and defensive error handling to ensure audit failures never impact booking success.\n\nKey design decisions include extending the InstantBookingCreateService's DI configuration to inject BookingEventHandlerService and FeaturesRepository, adding a fireBookingEvents helper function that wraps audit calls in try/catch blocks, and reusing existing audit infrastructure (buildBookingCreatedAuditData, getAuditActionSource, getBookingAuditActorForNewBooking) for consistency. The API endpoint was updated to pass user context via bookingMeta parameter, maintaining backward compatibility.\n\nFor the booking acceptance flow, a similar pattern was implemented in the connectAndJoin handler, with a separate fireBookingAcceptedAuditEvent function that checks the feature flag and calls onBookingAccepted. Comprehensive tests were added for both flows, verifying correct audit data, feature flag behavior, and error isolation. The implementation required minimal changes to existing audit infrastructure, demonstrating the extensibility of the current design.",
+  "source_pr": "https://github.com/calcom/cal.com/pull/28176",
+  "before_sha": "c7ee77ee20f8350a9311add27f8dd80994a3b9f8",
+  "after_sha": "25857c07e11bd9681a18f1551276884ba633f2fb",
+  "diff_stats": {
+    "additions": 557,
+    "deletions": 18,
+    "files_changed": 8
+  }
+}

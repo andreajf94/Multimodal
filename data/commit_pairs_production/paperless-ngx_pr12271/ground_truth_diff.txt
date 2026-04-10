@@ -1,0 +1,59 @@
+diff --git a/src-ui/src/app/components/common/confirm-dialog/merge-confirm-dialog/merge-confirm-dialog.component.html b/src-ui/src/app/components/common/confirm-dialog/merge-confirm-dialog/merge-confirm-dialog.component.html
+index da57feca71..90f5558906 100644
+--- a/src-ui/src/app/components/common/confirm-dialog/merge-confirm-dialog/merge-confirm-dialog.component.html
++++ b/src-ui/src/app/components/common/confirm-dialog/merge-confirm-dialog/merge-confirm-dialog.component.html
+@@ -10,10 +10,22 @@ <h4 class="modal-title" id="modal-basic-title">{{title}}</h4>
+         <ul class="list-group"
+             cdkDropList
+             (cdkDropListDropped)="onDrop($event)">
+-            @for (documentID of documentIDs; track documentID) {
+-                <li class="list-group-item" cdkDrag>
++            @for (document of documents; track document.id) {
++                <li class="list-group-item d-flex align-items-center" cdkDrag>
+                     <i-bs name="grip-vertical" class="me-2"></i-bs>
+-                    {{getDocument(documentID)?.title}}
++                    <div class="d-flex flex-column">
++                        <div>
++                          @if (document.correspondent) {
++                            <b>{{document.correspondent | correspondentName | async}}: </b>
++                          }{{document.title}}
++                        </div>
++                        <small class="text-muted">
++                          {{document.created | customDate:'mediumDate'}}
++                          @if (document.page_count) {
++                            | {document.page_count, plural, =1 {One page} other {{{document.page_count}} pages}}
++                          }
++                        </small>
++                    </div>
+                 </li>
+             }
+         </ul>
+diff --git a/src-ui/src/app/components/common/confirm-dialog/merge-confirm-dialog/merge-confirm-dialog.component.ts b/src-ui/src/app/components/common/confirm-dialog/merge-confirm-dialog/merge-confirm-dialog.component.ts
+index 309db8e9e4..dbf269a237 100644
+--- a/src-ui/src/app/components/common/confirm-dialog/merge-confirm-dialog/merge-confirm-dialog.component.ts
++++ b/src-ui/src/app/components/common/confirm-dialog/merge-confirm-dialog/merge-confirm-dialog.component.ts
+@@ -3,11 +3,14 @@ import {
+   DragDropModule,
+   moveItemInArray,
+ } from '@angular/cdk/drag-drop'
++import { AsyncPipe } from '@angular/common'
+ import { Component, OnInit, inject } from '@angular/core'
+ import { FormsModule, ReactiveFormsModule } from '@angular/forms'
+ import { NgxBootstrapIconsModule } from 'ngx-bootstrap-icons'
+ import { takeUntil } from 'rxjs'
+ import { Document } from 'src/app/data/document'
++import { CorrespondentNamePipe } from 'src/app/pipes/correspondent-name.pipe'
++import { CustomDatePipe } from 'src/app/pipes/custom-date.pipe'
+ import { PermissionsService } from 'src/app/services/permissions.service'
+ import { DocumentService } from 'src/app/services/rest/document.service'
+ import { ConfirmDialogComponent } from '../confirm-dialog.component'
+@@ -17,6 +20,9 @@ import { ConfirmDialogComponent } from '../confirm-dialog.component'
+   templateUrl: './merge-confirm-dialog.component.html',
+   styleUrl: './merge-confirm-dialog.component.scss',
+   imports: [
++    AsyncPipe,
++    CorrespondentNamePipe,
++    CustomDatePipe,
+     DragDropModule,
+     FormsModule,
+     ReactiveFormsModule,

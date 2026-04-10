@@ -1,0 +1,14 @@
+{
+  "feature_name": "Streaming Manifest Writer for Document Exporter",
+  "description": "Implement a streaming manifest writer that replaces the current in-memory manifest accumulation with incremental I/O operations to significantly reduce peak memory usage during large document exports. The solution should write manifest records to a temporary file and perform atomic replacement upon successful completion while maintaining existing functionality like JSON comparison and proper error handling.",
+  "functional_requirements": [
+    "Create a new StreamingManifestWriter class that writes manifest.json records incrementally to a temporary file instead of accumulating them in memory",
+    "Implement atomic file replacement by renaming the temporary file to the final manifest.json only upon successful completion of the export process",
+    "Maintain support for the --compare-json option using BLAKE2b hash comparison for file integrity verification",
+    "Ensure proper error handling that discards temporary files on exceptions while preserving the original manifest file with its modification time unchanged",
+    "Integrate the new streaming writer into the existing document export command architecture without breaking existing export functionality",
+    "Include comprehensive tests to verify memory usage improvements and maintain backward compatibility with existing export workflows"
+  ],
+  "project_name": "paperless-ngx",
+  "source_pr": "https://github.com/paperless-ngx/paperless-ngx/pull/12273"
+}

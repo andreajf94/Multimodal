@@ -1,0 +1,84 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "api_design",
+      "recommendation": "Added explicit event emissions for row selection/deselection in SelectRowContent.vue to improve component communication clarity",
+      "rationale": "The component was previously only emitting a 'hide' event, but needed to communicate row selection state changes to parent components. Adding explicit 'selected' and 'unselected' events makes the component's API more declarative and easier to understand for developers using it.",
+      "alternatives_considered": [
+        "Using a single event with payload indicating selection state",
+        "Using Vuex store mutations directly from child component",
+        "Keeping implicit state changes without explicit events"
+      ],
+      "files_affected": [
+        "web-frontend/modules/database/components/row/SelectRowContent.vue"
+      ]
+    },
+    {
+      "dimension": "ui_ux",
+      "recommendation": "Added @click.prevent to checkbox in SimpleGrid.vue to prevent default browser checkbox behavior and allow custom selection logic",
+      "rationale": "The checkbox was likely triggering both the custom selection logic AND the default browser checkbox toggle, causing race conditions or inconsistent state. Using preventDefault ensures only the custom Vue.js selection logic runs, giving full control over the selection state management.",
+      "alternatives_considered": [
+        "Handling the race condition in selection logic",
+        "Using CSS to hide native checkbox and create custom checkbox",
+        "Moving all selection logic to checkbox component itself"
+      ],
+      "files_affected": [
+        "web-frontend/modules/database/components/view/grid/SimpleGrid.vue"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Created changelog entry to document the bug fix for future reference and release tracking",
+      "rationale": "Maintaining a structured changelog helps with debugging, release management, and communicating changes to users. The JSON format allows for automated processing and integration with release tools.",
+      "alternatives_considered": [
+        "Adding comments in code only",
+        "Creating GitHub issue instead of changelog entry",
+        "Documenting in README or separate documentation"
+      ],
+      "files_affected": [
+        "changelog/entries/unreleased/bug/fix_link_row_checkbox.json"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Fix Linked Row Modal Checkbox Event Handling",
+      "description": "Improve component communication by adding explicit selection events to SelectRowContent component",
+      "files_to_modify": [
+        "web-frontend/modules/database/components/row/SelectRowContent.vue"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-002",
+      "title": "Prevent Default Checkbox Behavior in Grid",
+      "description": "Add click prevention to grid checkboxes to avoid conflicts between custom and native checkbox behavior",
+      "files_to_modify": [
+        "web-frontend/modules/database/components/view/grid/SimpleGrid.vue"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-003",
+      "title": "Document Bug Fix in Changelog",
+      "description": "Create structured changelog entry for the linked row checkbox fix",
+      "files_to_modify": [],
+      "files_to_create": [
+        "changelog/entries/unreleased/bug/fix_link_row_checkbox.json"
+      ],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The changes address a bug in the linked row modal checkbox functionality through two complementary fixes. First, in SelectRowContent.vue, explicit 'selected' and 'unselected' events were added to the component's emits declaration. This improves the component's API by making row selection state changes explicit and declarative, allowing parent components to properly handle these events rather than relying on implicit state changes or direct store mutations.\n\nSecond, in SimpleGrid.vue, a @click.prevent modifier was added to the checkbox element. This prevents the default browser checkbox behavior that was likely interfering with the custom Vue.js selection logic. Without this prevention, both the custom selection logic and the native checkbox toggle could fire, causing race conditions and inconsistent visual states between the checkbox appearance and the actual selectedRows array.\n\nThe changes follow Vue.js best practices by using explicit event communication between components and preventing default browser behavior when custom logic is required. The minimal approach focuses on fixing the specific bug without over-engineering, while the changelog entry ensures proper documentation for future reference. This maintains consistency with the existing codebase patterns while solving the immediate issue of checkbox state mismatches in linked row selection.",
+  "source_pr": "https://github.com/baserow/baserow/pull/5148",
+  "before_sha": "56a1e3bad52d6fa8324c3c82f6bc4477ac804cb9",
+  "after_sha": "47e71b193a0feb35ee43b14434567767a7c3bf85",
+  "diff_stats": {
+    "additions": 14,
+    "deletions": 2,
+    "files_changed": 3
+  }
+}

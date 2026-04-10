@@ -1,0 +1,125 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "responsive_design",
+      "recommendation": "Used Tailwind CSS responsive breakpoints (lg:, md:) to conditionally show/hide elements and adjust layouts for mobile devices",
+      "rationale": "Tailwind's mobile-first breakpoint system provides a consistent, maintainable way to implement responsive behavior without custom CSS. The 'lg:' prefix targets large screens (\u22651024px), allowing mobile styles to be the default and desktop enhancements to be layered on top.",
+      "alternatives_considered": [
+        "Custom CSS media queries",
+        "Separate mobile components",
+        "CSS-in-JS solutions"
+      ],
+      "files_affected": [
+        "apps/webapp/app/components/BackgroundWrapper.tsx",
+        "apps/webapp/app/components/LoginPageLayout.tsx",
+        "apps/webapp/app/components/layout/AppLayout.tsx"
+      ]
+    },
+    {
+      "dimension": "layout_strategy",
+      "recommendation": "Added a 'variant' prop to MainCenteredContainer to differentiate between default and onboarding layouts, with different mobile behaviors",
+      "rationale": "Onboarding screens need different spacing and positioning on mobile (centered with padding) versus desktop (top-aligned with margins). The variant prop allows reuse of the same container component while customizing its responsive behavior based on context.",
+      "alternatives_considered": [
+        "Creating separate components for each layout type",
+        "Using CSS classes only without prop-based customization",
+        "Conditional rendering based on screen size detection"
+      ],
+      "files_affected": [
+        "apps/webapp/app/components/layout/AppLayout.tsx",
+        "apps/webapp/app/routes/_app.orgs.$organizationSlug_.projects.new/route.tsx",
+        "apps/webapp/app/routes/_app.orgs.new/route.tsx",
+        "apps/webapp/app/routes/confirm-basic-details.tsx",
+        "apps/webapp/app/routes/invites.tsx",
+        "apps/webapp/app/routes/vercel.onboarding.tsx"
+      ]
+    },
+    {
+      "dimension": "visual_hierarchy",
+      "recommendation": "Simplified BackgroundWrapper on mobile by hiding decorative background images and using solid background colors instead",
+      "rationale": "Complex background images consume screen real estate and processing power on mobile devices. Replacing them with solid colors (bg-background-dimmed) improves performance and readability while maintaining visual separation. The decorative elements are preserved for desktop users where screen space is abundant.",
+      "alternatives_considered": [
+        "Scaling down background images",
+        "Using simpler SVG backgrounds",
+        "Removing backgrounds entirely on mobile"
+      ],
+      "files_affected": [
+        "apps/webapp/app/components/BackgroundWrapper.tsx"
+      ]
+    },
+    {
+      "dimension": "component_behavior",
+      "recommendation": "Enhanced PopoverMenuItem to support 'danger' styling for destructive actions like logout",
+      "rationale": "The logout action in the side menu needed visual distinction to prevent accidental clicks. Adding a 'danger' prop with hover effects (red text and background) provides clear affordance while maintaining the existing component structure.",
+      "alternatives_considered": [
+        "Creating a separate DangerMenuItem component",
+        "Using CSS classes only",
+        "Placing logout in a separate menu section"
+      ],
+      "files_affected": [
+        "apps/webapp/app/components/primitives/Popover.tsx",
+        "apps/webapp/app/components/navigation/SideMenu.tsx"
+      ]
+    },
+    {
+      "dimension": "content_prioritization",
+      "recommendation": "Reorganized LoginPageLayout to prioritize form content on mobile by hiding secondary elements and adjusting grid layouts",
+      "rationale": "On mobile screens, the login form should be the primary focus. The logo and quote panel are hidden (lg:flex) to maximize space for the form. The layout switches from a two-column grid on desktop to a single column on mobile, with adjusted padding and centering.",
+      "alternatives_considered": [
+        "Stacking all elements vertically",
+        "Using a mobile-specific layout component",
+        "Implementing a drawer/slide-out for secondary content"
+      ],
+      "files_affected": [
+        "apps/webapp/app/components/LoginPageLayout.tsx"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Responsive Background and Layout Components",
+      "description": "Update BackgroundWrapper and MainCenteredContainer to support mobile-responsive behaviors, including hiding decorative elements on small screens and adjusting container positioning",
+      "files_to_modify": [
+        "apps/webapp/app/components/BackgroundWrapper.tsx",
+        "apps/webapp/app/components/layout/AppLayout.tsx"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-002",
+      "title": "Mobile-Friendly Login and Onboarding Screens",
+      "description": "Apply responsive breakpoints to login page and all onboarding screens (organization creation, project creation, invite acceptance, etc.) to ensure proper display on mobile devices",
+      "files_to_modify": [
+        "apps/webapp/app/components/LoginPageLayout.tsx",
+        "apps/webapp/app/routes/_app.orgs.$organizationSlug_.projects.new/route.tsx",
+        "apps/webapp/app/routes/_app.orgs.new/route.tsx",
+        "apps/webapp/app/routes/confirm-basic-details.tsx",
+        "apps/webapp/app/routes/invites.tsx",
+        "apps/webapp/app/routes/vercel.onboarding.tsx"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-003",
+      "title": "Enhanced Navigation Component Styling",
+      "description": "Add danger styling to logout menu item in side navigation and ensure popover components support destructive action visual cues",
+      "files_to_modify": [
+        "apps/webapp/app/components/navigation/SideMenu.tsx",
+        "apps/webapp/app/components/primitives/Popover.tsx"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation focused on making the onboarding and login screens mobile-responsive through systematic application of Tailwind CSS breakpoints and component enhancements. The approach centered on three key patterns: conditional visibility (using 'lg:' prefix to hide decorative elements on mobile), layout adaptation (switching from grid to flex layouts based on screen size), and component customization (adding a 'variant' prop to MainCenteredContainer for context-specific mobile behavior).\n\nA mobile-first strategy was employed where mobile styles are the default and desktop enhancements are layered with 'lg:' breakpoints. This ensures that mobile users get a simplified, focused experience while desktop users retain the full visual richness. The BackgroundWrapper component was significantly simplified on mobile by replacing complex background images with solid colors, improving performance and readability on smaller screens.\n\nThe changes integrate seamlessly with the existing codebase by extending rather than rewriting components. The 'variant' prop addition to MainCenteredContainer demonstrates a thoughtful extension pattern that maintains backward compatibility while adding new functionality. All modifications leverage the existing Tailwind design system, ensuring consistency with the rest of the application's styling approach. The logout button enhancement in the side menu shows attention to detail in making destructive actions visually distinct across all screen sizes.",
+  "source_pr": "https://github.com/triggerdotdev/trigger.dev/pull/3318",
+  "before_sha": "f1f1d02f1dbb7916fcdbdeab5708f1e1a8c98634",
+  "after_sha": "e31b03eac203d3680b15744fb375353ef26d3a3b",
+  "diff_stats": {
+    "additions": 41,
+    "deletions": 25,
+    "files_changed": 10
+  }
+}

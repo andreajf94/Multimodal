@@ -1,0 +1,14 @@
+{
+  "feature_name": "Dev Environment Workspace Promotion",
+  "description": "Create a data migration that identifies development environments containing user data (Surveys, Contacts, or Webhooks) and promotes each into its own standalone workspace. The new workspace should inherit all settings and configurations from the original workspace while maintaining data integrity through proper foreign key remapping. Include verification steps to ensure complete data transfer and rollback capability on failure.",
+  "functional_requirements": [
+    "Identify all development environments that contain Surveys, Contacts, or Webhooks and create a new standalone workspace for each",
+    "Copy all workspace settings (styling, configuration, branding, placement) and team assignments from the original workspace to the new workspace",
+    "Migrate all data from 9 resource tables (Survey, Contact, ActionClass, ContactAttributeKey, Webhook, Tag, Segment, Integration, ApiKeyEnvironment) to the new workspace with proper foreign key remapping for Language/SurveyLanguage references",
+    "Implement verification that ensures zero rows remain in the original development environment after migration, with detailed logging of resource counts for auditability",
+    "Handle naming collisions when creating new workspaces (e.g., when 'Workspace (Dev)' already exists)",
+    "Make the migration idempotent with early return when no development environments contain data"
+  ],
+  "project_name": "formbricks",
+  "source_pr": "https://github.com/formbricks/formbricks/pull/7668"
+}

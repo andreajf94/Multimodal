@@ -1,0 +1,12 @@
+{
+  "feature_name": "Webhook Private Host Bypass",
+  "description": "Implement an environment variable configuration that allows specific hostnames or IP addresses to bypass SSRF protection checks when used as webhook targets. This enables self-hosted instances to send webhooks to private network destinations while maintaining security for all other webhook URLs.",
+  "functional_requirements": [
+    "Parse NEXT_PRIVATE_WEBHOOK_SSRF_BYPASS_HOSTS environment variable into an immutable Set of unique, lowercased hostnames/IPs at module initialization",
+    "Add a bypass check at the beginning of the webhook URL validation function that skips all private IP checks if the URL's hostname matches an entry in the whitelist",
+    "Maintain existing strict SSRF protection behavior when the environment variable is empty, unset, or when hostnames don't match the whitelist",
+    "Update environment configuration documentation to include the new variable with usage examples"
+  ],
+  "project_name": "documenso",
+  "source_pr": "https://github.com/documenso/documenso/pull/2654"
+}

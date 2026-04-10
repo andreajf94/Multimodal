@@ -1,0 +1,189 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "api_design",
+      "recommendation": "Created a new v2 packets API endpoint that returns storage paths with protocol prefixes, while maintaining backward compatibility with v1",
+      "rationale": "The v1 API couldn't return protocol-prefixed storage paths because it was designed for a single provider. The v2 API enables multi-provider support by returning canonical storage paths that include protocol information, which is essential for proper routing during downloads. This follows API versioning best practices without breaking existing clients.",
+      "alternatives_considered": [
+        "Modifying the v1 API to return protocol-prefixed paths (would break existing clients)",
+        "Using content negotiation headers instead of separate endpoints (more complex for SDK integration)",
+        "Adding protocol information in response headers instead of the body (less discoverable)"
+      ],
+      "files_affected": [
+        "apps/webapp/app/routes/api.v2.packets.$.ts",
+        "apps/webapp/app/routes/api.v1.packets.$.ts"
+      ]
+    },
+    {
+      "dimension": "data_modeling",
+      "recommendation": "Implemented protocol-prefixed storage URIs (e.g., 's3://path/to/file') to distinguish between different object storage providers",
+      "rationale": "The protocol prefix allows the system to route storage operations to the correct provider without requiring a separate metadata table or database column. This is a lightweight solution that works with existing IOPacket data structures and enables zero-downtime migrations by preserving protocol information in the storage path itself.",
+      "alternatives_considered": [
+        "Adding a database column to track storage provider per object (requires schema migration)",
+        "Using a separate metadata service to map paths to providers (adds complexity)",
+        "Encoding provider information in the path without explicit protocol prefix (less readable)"
+      ],
+      "files_affected": [
+        "apps/webapp/app/v3/objectStore.server.ts"
+      ]
+    },
+    {
+      "dimension": "configuration_management",
+      "recommendation": "Used environment variable prefixes (OBJECT_STORE_{PROTOCOL}_*) for multi-provider configuration with a default protocol fallback",
+      "rationale": "Environment variables provide a deployment-friendly configuration mechanism that works across different hosting environments (Docker, Kubernetes, bare metal). The prefix-based approach allows adding new providers without code changes, and the OBJECT_STORE_DEFAULT_PROTOCOL enables seamless migration by routing new uploads to a different provider while existing data remains accessible.",
+      "alternatives_considered": [
+        "Configuration files (less flexible for containerized deployments)",
+        "Database-stored configuration (requires database access for initialization)",
+        "Command-line arguments (doesn't work well with container orchestration)"
+      ],
+      "files_affected": [
+        ".env.example",
+        "apps/webapp/app/env.server.ts",
+        "apps/webapp/app/v3/objectStore.server.ts"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Maintained backward compatibility by preserving the ability to read unprefixed storage paths from the legacy object store",
+      "rationale": "Existing runs with offloaded payloads must continue working without modification. The system handles unprefixed paths by using the default (legacy) object store configuration for GET operations, ensuring that historical data remains accessible even after migrating to a new default provider.",
+      "alternatives_considered": [
+        "Forcing migration of all existing data (would cause downtime)",
+        "Adding a migration tool to rewrite storage paths (complex and error-prone)",
+        "Using a separate compatibility layer (adds unnecessary complexity)"
+      ],
+      "files_affected": [
+        "apps/webapp/app/v3/objectStore.server.ts",
+        "apps/webapp/app/routes/api.v1.packets.$.ts"
+      ]
+    },
+    {
+      "dimension": "authentication_authorization",
+      "recommendation": "Implemented dual authentication strategies: static credentials (access key/secret) and IAM role-based authentication",
+      "rationale": "Different deployment scenarios require different authentication methods. Cloud environments (AWS ECS, Kubernetes with IAM roles) benefit from IAM authentication, while self-hosted deployments or multi-cloud scenarios need static credentials. The ObjectStoreClient factory pattern automatically selects the appropriate implementation based on configuration.",
+      "alternatives_considered": [
+        "Supporting only static credentials (limits cloud deployment options)",
+        "Supporting only IAM authentication (breaks self-hosted deployments)",
+        "Requiring users to choose authentication method explicitly (poor developer experience)"
+      ],
+      "files_affected": [
+        "apps/webapp/app/v3/objectStoreClient.server.ts"
+      ]
+    },
+    {
+      "dimension": "code_organization",
+      "recommendation": "Extracted object storage logic from r2.server.ts into a generic objectStore.server.ts with a client abstraction layer",
+      "rationale": "The previous implementation was R2-specific and tightly coupled to Cloudflare. The new architecture separates concerns: objectStore.server.ts handles protocol routing and high-level operations, while objectStoreClient.server.ts provides provider-specific implementations. This makes it easy to add new providers without modifying core business logic.",
+      "alternatives_considered": [
+        "Keeping provider-specific logic in separate files (would duplicate common logic)",
+        "Using inheritance instead of composition for client implementations (less flexible)",
+        "Implementing all providers in a single large file (hard to maintain)"
+      ],
+      "files_affected": [
+        "apps/webapp/app/v3/objectStore.server.ts",
+        "apps/webapp/app/v3/objectStoreClient.server.ts",
+        "apps/webapp/app/v3/r2.server.ts"
+      ]
+    },
+    {
+      "dimension": "testing",
+      "recommendation": "Created comprehensive test file for object storage functionality",
+      "rationale": "Multi-provider object storage is a critical infrastructure component that requires thorough testing. The test file ensures that protocol parsing, configuration resolution, and client selection work correctly across different scenarios, reducing the risk of production issues during migration.",
+      "alternatives_considered": [
+        "Relying on existing integration tests only (might miss edge cases)",
+        "Testing each provider separately (duplicates test logic)",
+        "Skipping tests due to complexity (risky for core infrastructure)"
+      ],
+      "files_affected": [
+        "apps/webapp/test/objectStore.test.ts"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Core Multi-Provider Object Storage Infrastructure",
+      "description": "Implement the foundational object storage abstraction layer with protocol-based routing and dual authentication support",
+      "files_to_modify": [],
+      "files_to_create": [
+        "apps/webapp/app/v3/objectStore.server.ts",
+        "apps/webapp/app/v3/objectStoreClient.server.ts",
+        "apps/webapp/test/objectStore.test.ts"
+      ],
+      "estimated_effort": "large"
+    },
+    {
+      "id": "T-002",
+      "title": "Configuration and Environment Setup",
+      "description": "Update environment configuration to support multiple object storage providers with protocol-prefixed environment variables",
+      "files_to_modify": [
+        ".env.example",
+        "apps/webapp/app/env.server.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-003",
+      "title": "API Endpoint Updates for Multi-Provider Support",
+      "description": "Create new v2 packets API and update existing endpoints to use the new object storage abstraction",
+      "files_to_modify": [
+        "apps/webapp/app/presenters/v3/ApiRetrieveRunPresenter.server.ts",
+        "apps/webapp/app/routes/api.v1.packets.$.ts",
+        "apps/webapp/app/routes/resources.packets.$environmentId.$.ts"
+      ],
+      "files_to_create": [
+        "apps/webapp/app/routes/api.v2.packets.$.ts"
+      ],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-004",
+      "title": "Waitpoint Completion Packet Processing",
+      "description": "Extract waitpoint completion packet offloading logic into a reusable concern that uses the new object storage system",
+      "files_to_modify": [
+        "apps/webapp/app/routes/api.v1.waitpoints.tokens.$waitpointFriendlyId.callback.$hash.ts",
+        "apps/webapp/app/routes/api.v1.waitpoints.tokens.$waitpointFriendlyId.complete.ts",
+        "apps/webapp/app/routes/resources.orgs.$organizationSlug.projects.$projectParam.env.$envParam.waitpoints.$waitpointFriendlyId.complete/route.tsx"
+      ],
+      "files_to_create": [
+        "apps/webapp/app/runEngine/concerns/waitpointCompletionPacket.server.ts"
+      ],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-005",
+      "title": "Payload Processing Integration",
+      "description": "Update all payload processing components to use the new object storage system with protocol support",
+      "files_to_modify": [
+        "apps/webapp/app/runEngine/concerns/batchPayloads.server.ts",
+        "apps/webapp/app/runEngine/concerns/payloads.server.ts",
+        "apps/webapp/app/runEngine/services/batchTrigger.server.ts",
+        "apps/webapp/app/v3/services/batchTriggerV3.server.ts",
+        "apps/webapp/app/v3/services/triggerTaskV1.server.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "large"
+    },
+    {
+      "id": "T-006",
+      "title": "Documentation and Change Tracking",
+      "description": "Add documentation for the multi-provider object storage feature and track changes for release management",
+      "files_to_modify": [],
+      "files_to_create": [
+        ".changeset/packet-v2-packets-api.md",
+        ".server-changes/multi-provider-object-storage.md",
+        ".server-changes/object-store-iam-auth.md"
+      ],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The multi-provider object storage implementation follows a strategic architecture that enables zero-downtime migration between storage providers while maintaining full backward compatibility. The core innovation is the protocol-prefixed storage URI system (e.g., 's3://path/to/file'), which embeds provider information directly in the storage path, eliminating the need for a separate metadata layer.\n\nKey patterns used include: 1) A factory pattern for ObjectStoreClient that automatically selects between static credential (aws4fetch) and IAM role-based (AWS SDK) authentication; 2) A singleton registry for object store clients to avoid redundant initialization; 3) Environment variable-based configuration with protocol prefixes (OBJECT_STORE_{PROTOCOL}_*) for flexible provider setup; and 4) API versioning with v2 endpoints that return canonical storage paths while v1 maintains backward compatibility.\n\nThe changes integrate seamlessly with the existing codebase by replacing direct R2 references with the new abstraction layer. All payload processing components (batch triggers, waitpoint completions, task triggers) now use the generic object storage interface, which routes operations based on protocol prefixes. The system intelligently handles legacy unprefixed paths by using the default configuration for reads, ensuring existing data remains accessible. This design allows organizations to migrate from one provider to another by simply changing OBJECT_STORE_DEFAULT_PROTOCOL, with new uploads going to the new provider while existing data continues to work from the old provider.",
+  "source_pr": "https://github.com/triggerdotdev/trigger.dev/pull/3275",
+  "before_sha": "2637e47195838a854e9b62eb1bedaf20b644b118",
+  "after_sha": "68e88d0d71a191f6e3fc26c43c39449bc4171192",
+  "diff_stats": {
+    "additions": 1915,
+    "deletions": 437,
+    "files_changed": 32
+  }
+}

@@ -1,0 +1,151 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "api_design",
+      "recommendation": "Added a 10KB threshold for inlining small text files directly in prompts instead of using the Files API upload flow",
+      "rationale": "Small text files were being ignored because the previous implementation only used the Files API upload path, which has overhead and may not handle very small files efficiently. By inlining files \u226410KB, we reduce API calls and latency while ensuring small text files are processed.",
+      "alternatives_considered": [
+        "Increasing the file size limit for all uploads",
+        "Creating a separate API endpoint for small files",
+        "Always embedding text files regardless of size"
+      ],
+      "files_affected": [
+        "backend/src/baserow/core/generative_ai/generative_ai_model_types.py"
+      ]
+    },
+    {
+      "dimension": "data_modeling",
+      "recommendation": "Enhanced AIFile metadata handling to use user-visible filenames (visible_name) instead of storage names",
+      "rationale": "The AI model should reference files by names users recognize, not internal storage identifiers. This improves the user experience and makes the AI's responses more meaningful when referencing file content.",
+      "alternatives_considered": [
+        "Keeping the storage name as the primary identifier",
+        "Adding a separate display_name field",
+        "Storing both names in the AIFile model"
+      ],
+      "files_affected": [
+        "premium/backend/src/baserow_premium/fields/handler.py"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Added explicit feedback when files cannot be processed and improved exception logging with specific error messages",
+      "rationale": "Users need visibility into why their files weren't processed. The previous implementation silently skipped files, leaving users confused. Now, skipped files are listed in the prompt with a clear explanation.",
+      "alternatives_considered": [
+        "Silently dropping files as before",
+        "Throwing exceptions that stop processing",
+        "Creating a separate error response structure"
+      ],
+      "files_affected": [
+        "backend/src/baserow/core/generative_ai/generative_ai_model_types.py",
+        "premium/backend/src/baserow_premium/fields/handler.py"
+      ]
+    },
+    {
+      "dimension": "code_organization",
+      "recommendation": "Refactored file preparation logic into modular helper methods (_embed, _inline_text, _upload, _can_embed)",
+      "rationale": "The prepare_files method was becoming complex with multiple conditional paths. Breaking it into focused methods improves readability, testability, and maintainability while adhering to the Single Responsibility Principle.",
+      "alternatives_considered": [
+        "Keeping all logic in one method",
+        "Creating a separate class for file processing",
+        "Using strategy pattern for different file types"
+      ],
+      "files_affected": [
+        "backend/src/baserow/core/generative_ai/generative_ai_model_types.py"
+      ]
+    },
+    {
+      "dimension": "dependency_management",
+      "recommendation": "Updated pydantic-ai-slim from 1.66.0 to 1.77.0 to support new text content embedding functionality",
+      "rationale": "The new TextContent feature in pydantic-ai 1.77.0 enables proper inlining of text files in prompts. This dependency update was necessary to implement the small file handling feature correctly.",
+      "alternatives_considered": [
+        "Implementing custom text embedding logic",
+        "Staying on the older version and using workarounds",
+        "Switching to a different AI library"
+      ],
+      "files_affected": [
+        "backend/pyproject.toml",
+        "backend/uv.lock"
+      ]
+    },
+    {
+      "dimension": "testing",
+      "recommendation": "Added comprehensive unit tests covering small file inlining, binary fallback, upload scenarios, and edge cases",
+      "rationale": "The new file handling logic has multiple conditional paths (inline text, embed binary, upload large files). Comprehensive tests ensure all scenarios work correctly and prevent regressions in this critical AI feature.",
+      "alternatives_considered": [
+        "Only testing happy paths",
+        "Relying on integration tests only",
+        "Skipping tests for edge cases"
+      ],
+      "files_affected": [
+        "backend/tests/baserow/core/generative_ai/test_generative_ai_model_types.py"
+      ]
+    },
+    {
+      "dimension": "user_experience",
+      "recommendation": "Updated prompt wording from 'attached files' to 'file contents are provided for context' to better reflect how files are processed",
+      "rationale": "The previous wording implied files were physically attached, which could be misleading. The new wording accurately describes that file contents are embedded in the prompt context.",
+      "alternatives_considered": [
+        "Keeping the original wording",
+        "Removing the explanatory text entirely",
+        "Making the wording configurable"
+      ],
+      "files_affected": [
+        "backend/src/baserow/core/generative_ai/registries.py"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Implement small text file inlining for AI fields",
+      "description": "Add logic to inline small text files (\u226410KB) directly in AI prompts instead of uploading them via the Files API. This ensures small text files are properly processed and not ignored.",
+      "files_to_modify": [
+        "backend/src/baserow/core/generative_ai/generative_ai_model_types.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-002",
+      "title": "Improve file metadata and error feedback",
+      "description": "Use user-visible filenames in AI prompts and provide clear feedback when files cannot be processed due to format, size, or other limitations.",
+      "files_to_modify": [
+        "premium/backend/src/baserow_premium/fields/handler.py",
+        "backend/src/baserow/core/generative_ai/registries.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-003",
+      "title": "Update AI dependencies and add comprehensive tests",
+      "description": "Update pydantic-ai-slim to version 1.77.0 to support TextContent feature and add unit tests covering all file handling scenarios.",
+      "files_to_modify": [
+        "backend/pyproject.toml",
+        "backend/uv.lock",
+        "backend/tests/baserow/core/generative_ai/test_generative_ai_model_types.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-004",
+      "title": "Create changelog entry for the bug fix",
+      "description": "Document the fix for AI field small text file handling in the changelog for release tracking.",
+      "files_to_modify": [],
+      "files_to_create": [
+        "changelog/entries/unreleased/bug/5082_fix_ai_field_small_text_files.json"
+      ],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation addresses the issue where small text files were being ignored by AI fields by introducing a multi-strategy file handling approach. Instead of relying solely on the Files API upload flow, files are now processed based on their size and type: small text files (\u226410KB) are inlined directly in prompts as TextContent, small non-UTF-8 files fall back to BinaryContent embedding, and larger files use the existing upload path.\n\nKey architectural decisions include the introduction of a 10KB threshold constant (_INLINE_UPLOAD_THRESHOLD_BYTES) to determine when to inline files, refactoring the complex prepare_files method into modular helper functions for better maintainability, and updating the pydantic-ai dependency to version 1.77.0 to leverage the new TextContent feature. The implementation also improves user experience by using visible filenames instead of storage names and providing clear feedback when files cannot be processed.\n\nThe changes integrate seamlessly with the existing AI field infrastructure by extending the OpenAIGenerativeAIModelType class while maintaining backward compatibility. The file processing logic respects existing limits (_MAX_EMBED_PAYLOAD_BYTES, _MAX_EMBEDS_PER_REQUEST) and gracefully falls back to upload when embedding limits are exceeded. Comprehensive unit tests ensure all scenarios are covered, including edge cases like non-UTF-8 files and size limit enforcement.",
+  "source_pr": "https://github.com/baserow/baserow/pull/5150",
+  "before_sha": "adcfdacc7a2cc80e334aeff7d4db77209e5de2af",
+  "after_sha": "7e03df615bf19d16784d2eb083a2434da07766e7",
+  "diff_stats": {
+    "additions": 238,
+    "deletions": 41,
+    "files_changed": 7
+  }
+}

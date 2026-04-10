@@ -1,0 +1,129 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "data_modeling",
+      "recommendation": "Extended organisation session data to include team email addresses by modifying the getOrganisationSession tRPC procedure to fetch teamEmail with email field",
+      "rationale": "Team email addresses needed to be accessible on the client side for recipient matching. The organisation session is the primary source of team-related data for the current user, making it the logical place to include team email information. This ensures the data flows through the existing tRPC infrastructure consistently.",
+      "alternatives_considered": [
+        "Creating a separate API endpoint for team email lookup",
+        "Fetching team email data directly from Prisma in each component",
+        "Storing team emails in local storage or cookies"
+      ],
+      "files_affected": [
+        "packages/trpc/server/organisation-router/get-organisation-session.ts",
+        "packages/trpc/server/organisation-router/get-organisation-session.types.ts"
+      ]
+    },
+    {
+      "dimension": "api_design",
+      "recommendation": "Created a reusable utility function findRecipientByEmail that handles both personal and team email matching, then refactored all recipient lookup logic to use this function",
+      "rationale": "Centralizing the recipient matching logic prevents code duplication and ensures consistent behavior across all components. The function accepts both userEmail and teamEmail parameters, allowing flexible matching without requiring callers to understand the business logic. This follows the DRY principle and makes future changes easier.",
+      "alternatives_considered": [
+        "Inline logic in each component",
+        "Creating a React hook for recipient matching",
+        "Extending the Recipient model with helper methods"
+      ],
+      "files_affected": [
+        "packages/lib/utils/recipients.ts"
+      ]
+    },
+    {
+      "dimension": "ui_architecture",
+      "recommendation": "Updated all documents table components to use the new findRecipientByEmail utility and pass team email data through component props where needed",
+      "rationale": "The documents table has multiple related components (action button, dropdown, title, main table) that all need consistent recipient matching. By updating each component to use the centralized utility, we ensure uniform behavior. The teamEmail is passed down through props in the main table to child components, maintaining the React data flow pattern.",
+      "alternatives_considered": [
+        "Using React context for team email",
+        "Creating a wrapper component that injects recipient matching logic",
+        "Using a custom hook in each component"
+      ],
+      "files_affected": [
+        "apps/remix/app/components/tables/documents-table-action-button.tsx",
+        "apps/remix/app/components/tables/documents-table-action-dropdown.tsx",
+        "apps/remix/app/components/tables/documents-table-title.tsx",
+        "apps/remix/app/components/tables/documents-table.tsx"
+      ]
+    },
+    {
+      "dimension": "type_safety",
+      "recommendation": "Updated TypeScript types to include the new teamEmail field in organisation session response and component props",
+      "rationale": "Maintaining type safety is crucial in a TypeScript codebase. The types were updated in the tRPC response schema and component props to ensure compile-time checking of the new teamEmail field. This prevents runtime errors and provides better developer experience with IDE autocompletion.",
+      "alternatives_considered": [
+        "Using type assertions (as any)",
+        "Creating loose interfaces that allow any additional properties",
+        "Not updating types and relying on runtime checks"
+      ],
+      "files_affected": [
+        "packages/trpc/server/organisation-router/get-organisation-session.types.ts",
+        "apps/remix/app/components/tables/documents-table.tsx"
+      ]
+    },
+    {
+      "dimension": "testing_and_qa",
+      "recommendation": "Updated the embed authoring layout mock data to include teamEmail field for consistency",
+      "rationale": "The embed authoring layout uses mock data for development/testing purposes. Adding the teamEmail field ensures that the mock data structure matches the real data structure, preventing issues during development and testing. This maintains consistency across the application.",
+      "alternatives_considered": [
+        "Leaving mock data unchanged",
+        "Creating separate mock data structures",
+        "Using conditional logic to handle missing fields"
+      ],
+      "files_affected": [
+        "apps/remix/app/routes/embed+/v2+/authoring+/_layout.tsx"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Add team email to organisation session data",
+      "description": "Extend the getOrganisationSession tRPC procedure to fetch team email addresses and include them in the session response for client-side access",
+      "files_to_modify": [
+        "packages/trpc/server/organisation-router/get-organisation-session.ts",
+        "packages/trpc/server/organisation-router/get-organisation-session.types.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-002",
+      "title": "Create centralized recipient matching utility",
+      "description": "Implement findRecipientByEmail function that checks both user email and team email when matching recipients, replacing scattered inline logic",
+      "files_to_modify": [
+        "packages/lib/utils/recipients.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-003",
+      "title": "Update documents table components for team email support",
+      "description": "Refactor all documents table components (action button, dropdown, title, main table) to use the new recipient matching utility and properly handle team email addresses",
+      "files_to_modify": [
+        "apps/remix/app/components/tables/documents-table-action-button.tsx",
+        "apps/remix/app/components/tables/documents-table-action-dropdown.tsx",
+        "apps/remix/app/components/tables/documents-table-title.tsx",
+        "apps/remix/app/components/tables/documents-table.tsx"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-004",
+      "title": "Update mock data for consistency",
+      "description": "Add teamEmail field to embed authoring layout mock data to match updated data structures",
+      "files_to_modify": [
+        "apps/remix/app/routes/embed+/v2+/authoring+/_layout.tsx"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation addresses the team email recipient support issue through a systematic, layered approach. First, the data layer was extended by modifying the getOrganisationSession tRPC procedure to include team email addresses in the organisation session data. This ensures team emails are available on the client side through the existing data flow patterns.\n\nSecond, a centralized utility function findRecipientByEmail was created in the shared packages directory. This function encapsulates the business logic of checking both user email and team email when matching recipients, replacing the previous inline logic that only checked user email. This follows the DRY principle and ensures consistent behavior across the application.\n\nThird, all documents table components were updated to use this new utility function. The changes were applied to the action button, dropdown, title component, and main table - ensuring that action buttons and title links properly appear for users receiving documents through team emails. The team email is passed through component props where needed, maintaining React's unidirectional data flow.\n\nFinally, TypeScript types were updated to maintain type safety, and mock data was adjusted for consistency. The implementation leverages the existing monorepo structure, with shared utilities in packages/ and component updates in apps/remix/. This approach minimizes code duplication, maintains consistency with existing patterns, and ensures the feature works seamlessly across all parts of the documents table interface.",
+  "source_pr": "https://github.com/documenso/documenso/pull/2578",
+  "before_sha": "229cd2f7e9b01db0899c7fa4946abef571ed706b",
+  "after_sha": "9bfaa08d3829364c5073ad9a590983e6e7bc6442",
+  "diff_stats": {
+    "additions": 50,
+    "deletions": 6,
+    "files_changed": 8
+  }
+}

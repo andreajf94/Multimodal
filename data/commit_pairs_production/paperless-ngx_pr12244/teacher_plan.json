@@ -1,0 +1,79 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "api_design",
+      "recommendation": "Created a MatchingModelContext class to wrap related document objects in template contexts, providing both string coercion and attribute access",
+      "rationale": "The existing implementation exposed related objects as dictionaries with 'name' and 'id' keys. This required templates to use {{ document.correspondent.name }} syntax. The new approach maintains backward compatibility by automatically coercing to string (the name) when used directly in templates, while still allowing explicit attribute access for more complex use cases. This follows the principle of least surprise for template authors.",
+      "alternatives_considered": [
+        "Modifying the Django model __str__ methods directly",
+        "Creating custom Jinja filters for string conversion",
+        "Leaving as dictionaries and requiring explicit .name access in all templates"
+      ],
+      "files_affected": [
+        "src/documents/templating/filepath.py"
+      ]
+    },
+    {
+      "dimension": "backward_compatibility",
+      "recommendation": "Maintained legacy string coercion behavior while adding explicit attribute access",
+      "rationale": "Existing templates that use {{ document.correspondent }} expecting a string output will continue to work without modification. The __str__ method ensures the object automatically converts to its name when used in string context. This prevents breaking changes for users who have configured filepath templates.",
+      "alternatives_considered": [
+        "Breaking change requiring template updates",
+        "Deprecation period with warnings",
+        "Configuration flag to choose behavior"
+      ],
+      "files_affected": [
+        "src/documents/templating/filepath.py",
+        "src/documents/tests/test_file_handling.py"
+      ]
+    },
+    {
+      "dimension": "testing",
+      "recommendation": "Added comprehensive test to verify string coercion works correctly for all related objects in templates",
+      "rationale": "The test validates that related objects (correspondent, document_type, storage_path) properly coerce to their string representations when used directly in templates, while also testing that the new attribute access works. It covers the specific use case mentioned in the feature request and ensures regressions won't occur.",
+      "alternatives_considered": [
+        "Separate tests for each object type",
+        "No new tests (relying on existing coverage)",
+        "Integration tests only"
+      ],
+      "files_affected": [
+        "src/documents/tests/test_file_handling.py"
+      ]
+    },
+    {
+      "dimension": "data_modeling",
+      "recommendation": "Used a consistent wrapper class for all related document objects in template contexts",
+      "rationale": "Creating a single MatchingModelContext class ensures uniform behavior across correspondent, document_type, and storage_path objects. The class exposes id, name, and optionally path attributes while providing consistent string coercion. This simplifies the template context generation logic and makes it easier to extend to other related objects in the future.",
+      "alternatives_considered": [
+        "Different wrapper classes for each object type",
+        "Modifying the template engine directly",
+        "Using Django's natural_key or similar mechanisms"
+      ],
+      "files_affected": [
+        "src/documents/templating/filepath.py"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Implement string coercion for filepath template objects",
+      "description": "Update the filepath template system to automatically convert document-related objects to their string representation when used in Jinja templates, maintaining backward compatibility while adding explicit attribute access",
+      "files_to_modify": [
+        "src/documents/templating/filepath.py",
+        "src/documents/tests/test_file_handling.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation addresses the need for automatic string coercion of document-related objects in filepath templates by introducing a MatchingModelContext wrapper class. This class provides both string coercion (via __str__ returning the name) and explicit attribute access (id, name, path), maintaining backward compatibility with existing templates while enabling cleaner template syntax.\n\nThe key change replaces dictionary representations of correspondent, document_type, and storage_path objects with instances of MatchingModelContext. This allows templates to use {{ document.correspondent }} directly (which coerces to the name string) while still supporting {{ document.correspondent.id }} for explicit attribute access. The approach is consistent across all related object types, ensuring uniform behavior.\n\nA comprehensive test was added to verify the string coercion works correctly with real template usage, including string manipulation filters (lower, replace). This ensures that the legacy behavior is preserved while the new attribute access capabilities are available. The solution integrates seamlessly with the existing Jinja template environment and doesn't require changes to the template parsing or rendering logic.",
+  "source_pr": "https://github.com/paperless-ngx/paperless-ngx/pull/12244",
+  "before_sha": "5b809122b5a543923c668061d4da75828905ba52",
+  "after_sha": "615f27e6fb9f68fe38c7fc481454df708344a923",
+  "diff_stats": {
+    "additions": 65,
+    "deletions": 6,
+    "files_changed": 2
+  }
+}

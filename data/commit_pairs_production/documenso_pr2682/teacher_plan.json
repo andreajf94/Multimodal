@@ -1,0 +1,66 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "data_modeling",
+      "recommendation": "Changed the DocumentAuditLog.envelopeId field from required to optional (nullable) and updated the foreign key constraint from CASCADE to SET NULL on delete",
+      "rationale": "This allows audit logs to persist independently of their associated documents. When a document (envelope) is deleted, the audit log records now retain their historical value with a null reference instead of being deleted. This preserves audit trail integrity even when documents are removed from the system.",
+      "alternatives_considered": [
+        "Soft delete for documents (keeping them in the database but marking as deleted)",
+        "Separate archive table for deleted document audit logs",
+        "Maintaining cascade delete but implementing a pre-deletion backup process"
+      ],
+      "files_affected": [
+        "packages/prisma/schema.prisma"
+      ]
+    },
+    {
+      "dimension": "database_migrations",
+      "recommendation": "Created a migration file with explicit SQL statements to safely apply the schema changes in the correct order",
+      "rationale": "The migration follows a safe sequence: 1) Drop the existing foreign key constraint, 2) Alter the column to allow nulls, 3) Re-add the foreign key with SET NULL behavior. This ensures data integrity during the migration and prevents constraint violations when modifying the column type.",
+      "alternatives_considered": [
+        "Using Prisma's automatic migration generation without manual SQL",
+        "Creating multiple smaller migrations for each change",
+        "Using database triggers to handle the constraint change"
+      ],
+      "files_affected": [
+        "packages/prisma/migrations/20260408052212_add_set_null_for_audit_log_foreign_key/migration.sql"
+      ]
+    },
+    {
+      "dimension": "audit_trail_design",
+      "recommendation": "Maintained the envelopeId field in DocumentAuditLog as nullable rather than removing it entirely",
+      "rationale": "Keeping the envelopeId field (even as nullable) preserves the ability to query audit logs by document when the document still exists, while allowing the logs to exist independently when documents are deleted. This maintains backward compatibility for existing queries that filter by envelopeId.",
+      "alternatives_considered": [
+        "Removing the envelopeId field entirely and storing document references in the JSON data field",
+        "Creating a separate DocumentAuditLogArchive table for logs of deleted documents",
+        "Using a composite key or document hash instead of foreign key relationship"
+      ],
+      "files_affected": [
+        "packages/prisma/schema.prisma"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Update Document Audit Log Foreign Key Constraint",
+      "description": "Modify the database schema to allow document audit logs to persist when their associated documents are deleted by changing the foreign key constraint from CASCADE to SET NULL and making the envelopeId field nullable",
+      "files_to_modify": [
+        "packages/prisma/schema.prisma"
+      ],
+      "files_to_create": [
+        "packages/prisma/migrations/20260408052212_add_set_null_for_audit_log_foreign_key/migration.sql"
+      ],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation addresses the requirement for document audit logs to persist independently of their associated documents through a focused database schema change. The approach modifies the Prisma schema to make the envelopeId field in the DocumentAuditLog model nullable and updates the foreign key constraint from CASCADE to SET NULL on delete. This ensures that when a document (envelope) is deleted, the audit logs remain in the system with a null reference to the deleted document, preserving the audit trail for compliance and historical purposes.\n\nA corresponding database migration file was created with explicit SQL statements that follow a safe sequence: first dropping the existing foreign key constraint, then altering the column to allow null values, and finally re-adding the foreign key with the new SET NULL behavior. This prevents constraint violations during the migration process. The implementation maintains backward compatibility by keeping the envelopeId field (now optional) rather than removing it, allowing existing queries that filter by envelopeId to continue working for documents that still exist.\n\nThis change integrates seamlessly with the existing codebase as it only affects the database layer. The Prisma ORM will now generate TypeScript types that reflect the nullable relationship, and existing application code that creates or queries audit logs will need to handle the possibility of null envelopeId values. The approach balances data integrity requirements with the need to preserve audit history, following regulatory compliance best practices where audit trails must remain intact even when associated records are deleted.",
+  "source_pr": "https://github.com/documenso/documenso/pull/2682",
+  "before_sha": "4c69cb9c661bb91296dff08829bfcd28d6f0d06d",
+  "after_sha": "7cb64c3d04b0fc6a03293ae9c534ba3f04337606",
+  "diff_stats": {
+    "additions": 10,
+    "deletions": 2,
+    "files_changed": 2
+  }
+}

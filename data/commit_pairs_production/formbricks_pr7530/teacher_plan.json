@@ -1,0 +1,180 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "component_design",
+      "recommendation": "Created a reusable dropdown-search component with a custom hook to encapsulate search logic, filtering, and side-locking behavior",
+      "rationale": "Both single-select and multi-select components needed identical search functionality. Extracting this into a shared component/hook prevents code duplication, ensures consistent behavior, and makes future maintenance easier. The hook approach allows state management and filtering logic to be shared while keeping UI rendering flexible.",
+      "alternatives_considered": [
+        "Adding search logic directly in each component",
+        "Creating separate search implementations for single vs multi-select",
+        "Using an existing third-party dropdown library with search"
+      ],
+      "files_affected": [
+        "packages/survey-ui/src/components/general/dropdown-search.tsx"
+      ]
+    },
+    {
+      "dimension": "performance_optimization",
+      "recommendation": "Implemented conditional search display with SEARCH_THRESHOLD (3 options) to only show search when needed",
+      "rationale": "Search functionality adds visual complexity and DOM elements. For dropdowns with few options (\u22643), search is unnecessary overhead. The threshold ensures search only appears when it provides real value, improving UX for small lists while maintaining functionality for large ones.",
+      "alternatives_considered": [
+        "Always showing search",
+        "Making threshold configurable per component",
+        "Using a higher threshold (e.g., 5 or 10)"
+      ],
+      "files_affected": [
+        "packages/survey-ui/src/components/elements/multi-select.tsx",
+        "packages/survey-ui/src/components/elements/single-select.tsx",
+        "packages/survey-ui/src/components/general/dropdown-search.tsx"
+      ]
+    },
+    {
+      "dimension": "ux_behavior",
+      "recommendation": "Added side-locking mechanism to prevent dropdown repositioning during search filtering",
+      "rationale": "When users type in the search box and options filter, the dropdown content height changes. Without side-locking, Radix dropdown would reposition (flip from bottom to top or vice versa), causing visual jumps and disrupting user focus. Locking the side after initial opening provides a stable interaction experience.",
+      "alternatives_considered": [
+        "Letting Radix handle all positioning",
+        "Disabling collision detection entirely",
+        "Implementing a custom dropdown instead of Radix"
+      ],
+      "files_affected": [
+        "packages/survey-ui/src/components/general/dropdown-search.tsx"
+      ]
+    },
+    {
+      "dimension": "accessibility_internationalization",
+      "recommendation": "Added searchPlaceholder and searchNoResultsText props with internationalization support across 18 languages",
+      "rationale": "The survey system supports multiple languages, so all UI text must be translatable. Adding these as props allows parent components to pass translated strings from the i18n system. The placeholder and no-results messages are common UI patterns that need localization.",
+      "alternatives_considered": [
+        "Hardcoding English text",
+        "Using a separate translation hook in the dropdown components",
+        "Making search text configurable via context"
+      ],
+      "files_affected": [
+        "packages/survey-ui/src/components/elements/multi-select.tsx",
+        "packages/survey-ui/src/components/elements/single-select.tsx",
+        "packages/surveys/locales/ar.json",
+        "packages/surveys/locales/da.json",
+        "packages/surveys/locales/de.json",
+        "packages/surveys/locales/en.json",
+        "packages/surveys/locales/es.json",
+        "packages/surveys/locales/fr.json",
+        "packages/surveys/locales/hi.json",
+        "packages/surveys/locales/hu.json",
+        "packages/surveys/locales/it.json",
+        "packages/surveys/locales/ja.json",
+        "packages/surveys/locales/nl.json",
+        "packages/surveys/locales/pt.json",
+        "packages/surveys/locales/ro.json",
+        "packages/surveys/locales/ru.json",
+        "packages/surveys/locales/sv.json",
+        "packages/surveys/locales/uz.json",
+        "packages/surveys/locales/zh-Hans.json"
+      ]
+    },
+    {
+      "dimension": "keyboard_navigation",
+      "recommendation": "Implemented proper keyboard event handling in search input (Escape clears search, Arrow keys navigate options)",
+      "rationale": "Users expect standard keyboard interactions in searchable dropdowns. The Escape key should clear search (not close dropdown), while Arrow keys should navigate options. Stopping propagation for other keys prevents interference with Radix's dropdown keyboard navigation while allowing text input.",
+      "alternatives_considered": [
+        "Letting all keyboard events bubble up",
+        "Implementing custom arrow key navigation",
+        "Using native select element with datalist"
+      ],
+      "files_affected": [
+        "packages/survey-ui/src/components/general/dropdown-search.tsx"
+      ]
+    },
+    {
+      "dimension": "special_option_handling",
+      "recommendation": "Separated 'none' option and 'other' option from regular options for proper search filtering and positioning",
+      "rationale": "Survey questions often have special options like 'None of the above' or 'Other (please specify)'. These need to be treated differently: 'none' should always appear at the bottom, and 'other' should be searchable by its label. Separating them allows proper filtering logic and maintains their special semantic meaning.",
+      "alternatives_considered": [
+        "Treating all options uniformly",
+        "Using a flag property on options",
+        "Creating separate components for special options"
+      ],
+      "files_affected": [
+        "packages/survey-ui/src/components/general/dropdown-search.tsx"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Create reusable dropdown search component and hook",
+      "description": "Implement core search functionality with filtering, side-locking, and focus management as a shared component that can be used by both single-select and multi-select dropdowns",
+      "files_to_modify": [],
+      "files_to_create": [
+        "packages/survey-ui/src/components/general/dropdown-search.tsx"
+      ],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-002",
+      "title": "Integrate search into multi-select dropdown component",
+      "description": "Add search functionality to the multi-select dropdown variant, including search input display, option filtering, and integration with the shared search hook",
+      "files_to_modify": [
+        "packages/survey-ui/src/components/elements/multi-select.tsx"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-003",
+      "title": "Integrate search into single-select dropdown component",
+      "description": "Add search functionality to the single-select dropdown variant, ensuring consistent behavior with multi-select while handling radio selection differences",
+      "files_to_modify": [
+        "packages/survey-ui/src/components/elements/single-select.tsx"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-004",
+      "title": "Add internationalization for search text",
+      "description": "Update all locale files with search-related translations and wire them through the survey components to the dropdown search",
+      "files_to_modify": [
+        "packages/surveys/locales/ar.json",
+        "packages/surveys/locales/da.json",
+        "packages/surveys/locales/de.json",
+        "packages/surveys/locales/en.json",
+        "packages/surveys/locales/es.json",
+        "packages/surveys/locales/fr.json",
+        "packages/surveys/locales/hi.json",
+        "packages/surveys/locales/hu.json",
+        "packages/surveys/locales/it.json",
+        "packages/surveys/locales/ja.json",
+        "packages/surveys/locales/nl.json",
+        "packages/surveys/locales/pt.json",
+        "packages/surveys/locales/ro.json",
+        "packages/surveys/locales/ru.json",
+        "packages/surveys/locales/sv.json",
+        "packages/surveys/locales/uz.json",
+        "packages/surveys/locales/zh-Hans.json"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-005",
+      "title": "Connect survey components to searchable dropdowns",
+      "description": "Update the multiple-choice survey elements to pass translated search text to the underlying select components",
+      "files_to_modify": [
+        "packages/surveys/src/components/elements/multiple-choice-multi-element.tsx",
+        "packages/surveys/src/components/elements/multiple-choice-single-element.tsx"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation adds search functionality to dropdown menus in single-select and multi-select survey questions through a well-architected, reusable approach. A new `dropdown-search.tsx` component was created with a custom `useDropdownSearch` hook that encapsulates all search logic: filtering options based on query, handling special 'none' and 'other' options, managing focus, and implementing side-locking to prevent visual jumps during filtering.\n\nBoth `multi-select.tsx` and `single-select.tsx` components were modified to integrate this search functionality conditionally, only showing the search input when there are more than 3 options (configurable via `SEARCH_THRESHOLD`). The components pass new `searchPlaceholder` and `searchNoResultsText` props that are populated from the internationalization system, with translations added to 18 locale files. The search input includes proper keyboard navigation handling and accessibility attributes.\n\nThe design follows the existing component patterns in the codebase, leveraging Radix UI dropdown primitives while adding the search layer on top. Special attention was given to maintaining all existing functionality (selection, accessibility, internationalization) while adding the new search capability. The implementation is modular, with the search logic cleanly separated from the UI rendering, making it easy to maintain and extend in the future.",
+  "source_pr": "https://github.com/formbricks/formbricks/pull/7530",
+  "before_sha": "0d8a338965050a95f1680fdcf41006aa8d3dbcbf",
+  "after_sha": "0b5418a03a3d98eb3db385f0234c8670d03a3b76",
+  "diff_stats": {
+    "additions": 358,
+    "deletions": 80,
+    "files_changed": 22
+  }
+}

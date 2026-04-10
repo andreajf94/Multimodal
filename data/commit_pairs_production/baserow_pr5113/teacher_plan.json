@@ -1,0 +1,97 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "security",
+      "recommendation": "Removed expert mode (advanced formula) for HTML body types to prevent formula injection vulnerabilities",
+      "rationale": "HTML body types in email services are vulnerable to formula injection attacks when advanced formulas are allowed. By restricting expert mode to only 'raw' and 'simple' modes for HTML content, we prevent potentially malicious formula execution while maintaining functionality for JSON and plain text body types.",
+      "alternatives_considered": [
+        "HTML sanitization before formula evaluation",
+        "Adding a separate validation layer for HTML content",
+        "Completely disabling formulas for HTML body types"
+      ],
+      "files_affected": [
+        "web-frontend/modules/integrations/core/components/services/CoreSMTPEmailServiceForm.vue"
+      ]
+    },
+    {
+      "dimension": "api_design",
+      "recommendation": "Simplified HTTP request service by removing formula mode restrictions for JSON body types",
+      "rationale": "JSON body content should support advanced formulas since JSON is a structured format that doesn't pose the same injection risks as HTML. The previous restriction limiting JSON to only 'raw' and 'simple' modes was unnecessary and reduced functionality for legitimate use cases.",
+      "alternatives_considered": [
+        "Keeping the restriction but adding JSON-specific validation",
+        "Creating separate JSON-specific formula modes",
+        "Adding a configuration option for JSON formula support"
+      ],
+      "files_affected": [
+        "web-frontend/modules/integrations/core/components/services/CoreHTTPRequestServiceForm.vue"
+      ]
+    },
+    {
+      "dimension": "ui_ux",
+      "recommendation": "Implemented conditional expert mode availability based on body type with clear UI indicators",
+      "rationale": "The UI should intuitively communicate which body types support expert mode. By computing enabled modes dynamically based on body_type, users get immediate visual feedback about available functionality without needing to understand the underlying security rationale.",
+      "alternatives_considered": [
+        "Hiding the expert mode toggle completely for restricted types",
+        "Showing tooltips explaining why expert mode is disabled",
+        "Using different component variants for different body types"
+      ],
+      "files_affected": [
+        "web-frontend/modules/integrations/core/components/services/CoreSMTPEmailServiceForm.vue"
+      ]
+    },
+    {
+      "dimension": "maintenance",
+      "recommendation": "Created changelog entry to document the security fix and functionality improvement",
+      "rationale": "Proper documentation ensures the security rationale is preserved for future developers and helps with debugging. The changelog entry clearly links the change to the original issue (#5002) and categorizes it appropriately as a bug fix in the integration domain.",
+      "alternatives_considered": [
+        "Adding inline comments only",
+        "Creating a separate security documentation file",
+        "Relying on commit messages only"
+      ],
+      "files_affected": [
+        "changelog/entries/unreleased/bug/5002_allow_advanced_formula_for_json_body_content_of_http_request.json"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Fix formula injection vulnerability in HTML email body",
+      "description": "Disable expert mode (advanced formulas) for HTML body types in email services to prevent formula injection attacks while maintaining functionality for other body types",
+      "files_to_modify": [
+        "web-frontend/modules/integrations/core/components/services/CoreSMTPEmailServiceForm.vue"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-002",
+      "title": "Enable advanced formulas for JSON body content in HTTP requests",
+      "description": "Remove unnecessary restrictions on expert mode for JSON body types in HTTP request services, allowing full formula functionality for structured JSON content",
+      "files_to_modify": [
+        "web-frontend/modules/integrations/core/components/services/CoreHTTPRequestServiceForm.vue"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-003",
+      "title": "Document security fix and functionality improvement",
+      "description": "Create changelog entry to record the security vulnerability fix for HTML body types and the functionality improvement for JSON body types",
+      "files_to_modify": [],
+      "files_to_create": [
+        "changelog/entries/unreleased/bug/5002_allow_advanced_formula_for_json_body_content_of_http_request.json"
+      ],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation addresses a security vulnerability while improving functionality through targeted changes to two service form components. For the SMTP email service, we introduced conditional expert mode availability by computing `bodyFormulaMode` based on the selected body type. When the body type is 'html', expert mode is disabled (only 'raw' and 'simple' formula modes are allowed), preventing formula injection vulnerabilities. For other body types, full formula functionality remains available.\n\nFor the HTTP request service, we simplified the implementation by removing unnecessary restrictions on JSON body types. The previous code limited JSON to only 'raw' and 'simple' formula modes, but this restriction was unnecessary since JSON is a structured format that doesn't pose the same injection risks as HTML. By removing the `:enabled-modes` binding entirely, JSON body content now supports all formula modes, improving functionality for legitimate use cases.\n\nThe approach demonstrates a security-first mindset while maintaining usability. Rather than applying blanket restrictions, we analyzed each body type's security characteristics and applied appropriate controls. The UI naturally guides users toward secure choices without requiring them to understand the underlying security implications. The changelog entry ensures proper documentation of both the security fix and functionality improvement for future reference.",
+  "source_pr": "https://github.com/baserow/baserow/pull/5113",
+  "before_sha": "47e71b193a0feb35ee43b14434567767a7c3bf85",
+  "after_sha": "5ae6ac62f7f869c941a6bc70fe11520811c0a085",
+  "diff_stats": {
+    "additions": 14,
+    "deletions": 16,
+    "files_changed": 3
+  }
+}

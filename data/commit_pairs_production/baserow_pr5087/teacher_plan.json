@@ -1,0 +1,66 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "error_handling",
+      "recommendation": "Added defensive timezone validation in the UserDataProviderType to handle unknown/invalid timezone identifiers from the browser's Intl API",
+      "rationale": "The browser's Intl.DateTimeFormat().resolvedOptions().timeZone can return values like 'Etc/Unknown' or empty strings in certain edge cases (e.g., when the browser cannot determine the timezone). These unsupported values were causing backend validation errors when dispatched to data sources. By validating and defaulting to UTC, we ensure graceful degradation and prevent data source dispatch failures.",
+      "alternatives_considered": [
+        "Backend validation with custom error messages",
+        "Creating a list of known valid timezones to check against",
+        "Silently dropping the timezone field entirely"
+      ],
+      "files_affected": [
+        "web-frontend/modules/builder/dataProviderTypes.js"
+      ]
+    },
+    {
+      "dimension": "api_design",
+      "recommendation": "Used a simple heuristic check (presence and 'unknown' substring) rather than a comprehensive timezone validation",
+      "rationale": "The Intl API is generally reliable, and edge cases are rare. A lightweight check for empty/null values and the substring 'unknown' covers the reported issue without introducing complex timezone validation logic or external dependencies. This keeps the fix minimal and maintainable.",
+      "alternatives_considered": [
+        "Using a full timezone validation library like moment-timezone",
+        "Fetching a list of valid IANA timezones from the backend",
+        "Implementing a regex pattern for valid timezone identifiers"
+      ],
+      "files_affected": [
+        "web-frontend/modules/builder/dataProviderTypes.js"
+      ]
+    },
+    {
+      "dimension": "testing",
+      "recommendation": "Added a changelog entry to document the bug fix for tracking and release notes",
+      "rationale": "The changelog entry follows the project's established pattern for documenting bug fixes. It provides traceability to the issue domain (builder) and allows the fix to be included in release notes. The entry is placed in the 'unreleased' directory, which is a common pattern for tracking changes before they're batched into a release.",
+      "alternatives_considered": [
+        "Adding inline code comments only",
+        "Creating a separate documentation file",
+        "Not documenting the change at all"
+      ],
+      "files_affected": [
+        "changelog/entries/unreleased/bug/fixed_a_bug_where_an_unknown_timezone_could_cause_a_data_sou.json"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Fix unknown timezone handling in user data provider",
+      "description": "Add validation to handle cases where the browser returns unknown or invalid timezone identifiers, defaulting to UTC to prevent backend validation errors",
+      "files_to_modify": [
+        "web-frontend/modules/builder/dataProviderTypes.js"
+      ],
+      "files_to_create": [
+        "changelog/entries/unreleased/bug/fixed_a_bug_where_an_unknown_timezone_could_cause_a_data_sou.json"
+      ],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The change addresses a specific edge case in the user data provider where the browser's Intl API can return unsupported timezone values like 'Etc/Unknown'. This was causing backend validation failures when the timezone data was dispatched to data sources.\n\nThe implementation follows a defensive programming approach by adding a simple validation check in the UserDataProviderType class. Instead of directly using the timezone from Intl.DateTimeFormat().resolvedOptions().timeZone, the code now checks if the value is falsy or contains the substring 'unknown' (case-insensitive). When either condition is met, it defaults to 'UTC'. This lightweight solution avoids introducing complex timezone validation logic while ensuring the system remains robust against browser inconsistencies.\n\nThe change integrates seamlessly with the existing codebase by modifying only the specific data provider type that was affected. The fix is minimal and focused, changing just a few lines of code while solving the reported issue. The accompanying changelog entry follows the project's established documentation practices, ensuring the fix is properly tracked and can be included in release notes. This approach maintains the existing architecture while adding resilience to an edge case that wasn't previously handled.",
+  "source_pr": "https://github.com/baserow/baserow/pull/5087",
+  "before_sha": "00baecec3da698e8e703975da2761b76d52c4958",
+  "after_sha": "dc47caf0e4e2a37d11fcf7aff67a701f1b182e2b",
+  "diff_stats": {
+    "additions": 13,
+    "deletions": 1,
+    "files_changed": 2
+  }
+}

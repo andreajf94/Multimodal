@@ -1,0 +1,981 @@
+diff --git a/apps/web/app/(app)/(onboarding)/organizations/[organizationId]/landing/page.tsx b/apps/web/app/(app)/(onboarding)/organizations/[organizationId]/landing/page.tsx
+index e5d294652275..b12339c824a5 100644
+--- a/apps/web/app/(app)/(onboarding)/organizations/[organizationId]/landing/page.tsx
++++ b/apps/web/app/(app)/(onboarding)/organizations/[organizationId]/landing/page.tsx
+@@ -26,7 +26,8 @@ const Page = async (props: { params: Promise<{ organizationId: string }> }) => {
+   const isMultiOrgEnabled = await getIsMultiOrgEnabled();
+ 
+   const membership = await getMembershipByUserIdOrganizationId(session.user.id, organization.id);
+-  const { isMember } = getAccessFlags(membership?.role);
++  const { isMember, isBilling } = getAccessFlags(membership?.role);
++  const isMembershipPending = membership?.role === undefined;
+ 
+   return (
+     <div className="flex min-h-full min-w-full flex-row">
+@@ -45,6 +46,8 @@ const Page = async (props: { params: Promise<{ organizationId: string }> }) => {
+               isOwnerOrManager={false}
+               isAccessControlAllowed={false}
+               isMember={isMember}
++              isBilling={isBilling}
++              isMembershipPending={isMembershipPending}
+               environments={[]}
+             />
+           </div>
+diff --git a/apps/web/app/(app)/environments/[environmentId]/components/MainNavigation.tsx b/apps/web/app/(app)/environments/[environmentId]/components/MainNavigation.tsx
+index 58766ad488c1..707eb20f9c79 100644
+--- a/apps/web/app/(app)/environments/[environmentId]/components/MainNavigation.tsx
++++ b/apps/web/app/(app)/environments/[environmentId]/components/MainNavigation.tsx
+@@ -34,6 +34,7 @@ import { NavigationLink } from "@/app/(app)/environments/[environmentId]/compone
+ import { isNewerVersion } from "@/app/(app)/environments/[environmentId]/lib/utils";
+ import FBLogo from "@/images/formbricks-wordmark.svg";
+ import { cn } from "@/lib/cn";
++import { getBillingFallbackPath } from "@/lib/membership/navigation";
+ import { getAccessFlags } from "@/lib/membership/utils";
+ import { getFormattedErrorMessage } from "@/lib/utils/helper";
+ import { useSignOut } from "@/modules/auth/hooks/use-sign-out";
+@@ -114,6 +115,10 @@ export const MainNavigation = ({
+ 
+   const [isPending, startTransition] = useTransition();
+   const { isManager, isOwner, isBilling, isMember } = getAccessFlags(membershipRole);
++  const isMembershipPending = membershipRole === undefined;
++  const disabledNavigationMessage = isMembershipPending
++    ? t("common.loading")
++    : t("common.you_are_not_authorized_to_perform_this_action");
+ 
+   const isOwnerOrManager = isManager || isOwner;
+ 
+@@ -150,6 +155,7 @@ export const MainNavigation = ({
+         icon: MessageCircle,
+         isActive: pathname?.includes("/surveys"),
+         isHidden: false,
++        disabled: isMembershipPending || isBilling,
+       },
+       {
+         href: `/environments/${environment.id}/contacts`,
+@@ -159,15 +165,17 @@ export const MainNavigation = ({
+           pathname?.includes("/contacts") ||
+           pathname?.includes("/segments") ||
+           pathname?.includes("/attributes"),
++        disabled: isMembershipPending || isBilling,
+       },
+       {
+         name: t("common.configuration"),
+         href: `/environments/${environment.id}/workspace/general`,
+         icon: Cog,
+         isActive: pathname?.includes("/workspace"),
++        disabled: isMembershipPending || isBilling,
+       },
+     ],
+-    [t, environment.id, pathname]
++    [t, environment.id, pathname, isMembershipPending, isBilling]
+   );
+ 
+   const dropdownNavigation = [
+@@ -396,7 +404,9 @@ export const MainNavigation = ({
+     organization.billing?.stripe?.trialEnd,
+   ]);
+ 
+-  const mainNavigationLink = `/environments/${environment.id}/${isBilling ? "settings/billing/" : "surveys/"}`;
++  const mainNavigationLink = isBilling
++    ? getBillingFallbackPath(environment.id, isFormbricksCloud)
++    : `/environments/${environment.id}/surveys/`;
+ 
+   const handleProjectChange = (projectId: string) => {
+     if (projectId === project.id) return;
+@@ -506,24 +516,24 @@ export const MainNavigation = ({
+             </div>
+ 
+             {/* Main Nav Switch */}
+-            {!isBilling && (
+-              <ul>
+-                {mainNavigation.map(
+-                  (item) =>
+-                    !item.isHidden && (
+-                      <NavigationLink
+-                        key={item.name}
+-                        href={item.href}
+-                        isActive={item.isActive}
+-                        isCollapsed={isCollapsed}
+-                        isTextVisible={isTextVisible}
+-                        linkText={item.name}>
+-                        <item.icon strokeWidth={1.5} />
+-                      </NavigationLink>
+-                    )
+-                )}
+-              </ul>
+-            )}
++            <ul>
++              {mainNavigation.map(
++                (item) =>
++                  !item.isHidden && (
++                    <NavigationLink
++                      key={item.name}
++                      href={item.href}
++                      isActive={item.isActive}
++                      isCollapsed={isCollapsed}
++                      isTextVisible={isTextVisible}
++                      disabled={item.disabled}
++                      disabledMessage={item.disabled ? disabledNavigationMessage : undefined}
++                      linkText={item.name}>
++                      <item.icon strokeWidth={1.5} />
++                    </NavigationLink>
++                  )
++              )}
++            </ul>
+           </div>
+ 
+           <div>
+diff --git a/apps/web/app/(app)/environments/[environmentId]/components/NavigationLink.tsx b/apps/web/app/(app)/environments/[environmentId]/components/NavigationLink.tsx
+index 9254c7822a48..b8f4f4ef16d4 100644
+--- a/apps/web/app/(app)/environments/[environmentId]/components/NavigationLink.tsx
++++ b/apps/web/app/(app)/environments/[environmentId]/components/NavigationLink.tsx
+@@ -1,6 +1,7 @@
+ import Link from "next/link";
+ import React from "react";
+ import { cn } from "@/lib/cn";
++import { Popover, PopoverContent, PopoverTrigger } from "@/modules/ui/components/popover";
+ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/modules/ui/components/tooltip";
+ 
+ interface NavigationLinkProps {
+@@ -10,6 +11,8 @@ interface NavigationLinkProps {
+   children: React.ReactNode;
+   linkText: string;
+   isTextVisible: boolean;
++  disabled?: boolean;
++  disabledMessage?: string;
+ }
+ 
+ export const NavigationLink = ({
+@@ -19,10 +22,34 @@ export const NavigationLink = ({
+   children,
+   linkText,
+   isTextVisible = true,
++  disabled = false,
++  disabledMessage,
+ }: NavigationLinkProps) => {
++  const tooltipText = disabled ? disabledMessage || linkText : linkText;
+   const activeClass = "bg-slate-50 border-r-4 border-brand-dark font-semibold text-slate-900";
+   const inactiveClass =
+     "hover:bg-slate-50 border-r-4 border-transparent hover:border-slate-300 transition-all duration-150 ease-in-out";
++  const disabledClass = "cursor-not-allowed border-r-4 border-transparent text-slate-400";
++  const getColorClass = (baseClass: string) => {
++    if (disabled) {
++      return disabledClass;
++    }
++
++    return cn(baseClass, isActive ? activeClass : inactiveClass);
++  };
++
++  const collapsedColorClass = getColorClass("text-slate-700 hover:text-slate-900");
++  const expandedColorClass = getColorClass("text-slate-600 hover:text-slate-900");
++
++  const label = (
++    <span
++      className={cn(
++        "ml-2 flex transition-opacity duration-100",
++        isTextVisible ? "opacity-0" : "opacity-100"
++      )}>
++      {linkText}
++    </span>
++  );
+ 
+   return (
+     <>
+@@ -30,35 +57,37 @@ export const NavigationLink = ({
+         <TooltipProvider delayDuration={0}>
+           <Tooltip>
+             <TooltipTrigger asChild>
+-              <li
+-                className={cn(
+-                  "mb-1 ml-2 rounded-l-md py-2 pl-2 text-sm text-slate-700 hover:text-slate-900",
+-                  isActive ? activeClass : inactiveClass
+-                )}>
+-                <Link href={href} className="flex items-center">
+-                  {children}
+-                </Link>
++              <li className={cn("mb-1 ml-2 rounded-l-md py-2 pl-2 text-sm", collapsedColorClass)}>
++                {disabled ? (
++                  <div className="flex items-center">{children}</div>
++                ) : (
++                  <Link href={href}>{children}</Link>
++                )}
+               </li>
+             </TooltipTrigger>
+-            <TooltipContent side="right">{linkText}</TooltipContent>
++            <TooltipContent side="right">{tooltipText}</TooltipContent>
+           </Tooltip>
+         </TooltipProvider>
+       ) : (
+-        <li
+-          className={cn(
+-            "mb-1 rounded-l-md py-2 pl-5 text-sm text-slate-600 hover:text-slate-900",
+-            isActive ? activeClass : inactiveClass
+-          )}>
+-          <Link href={href} className="flex items-center">
+-            {children}
+-            <span
+-              className={cn(
+-                "ml-2 flex transition-opacity duration-100",
+-                isTextVisible ? "opacity-0" : "opacity-100"
+-              )}>
+-              {linkText}
+-            </span>
+-          </Link>
++        <li className={cn("mb-1 rounded-l-md py-2 pl-5 text-sm", expandedColorClass)}>
++          {disabled ? (
++            <Popover>
++              <PopoverTrigger asChild>
++                <div className="flex items-center">
++                  {children}
++                  {label}
++                </div>
++              </PopoverTrigger>
++              <PopoverContent className="w-fit max-w-72 px-3 py-2 text-sm text-slate-700">
++                {disabledMessage || linkText}
++              </PopoverContent>
++            </Popover>
++          ) : (
++            <Link href={href} className="flex items-center">
++              {children}
++              {label}
++            </Link>
++          )}
+         </li>
+       )}
+     </>
+diff --git a/apps/web/app/(app)/environments/[environmentId]/components/TopControlBar.tsx b/apps/web/app/(app)/environments/[environmentId]/components/TopControlBar.tsx
+index 85c1f083db4f..2c50c24f85be 100644
+--- a/apps/web/app/(app)/environments/[environmentId]/components/TopControlBar.tsx
++++ b/apps/web/app/(app)/environments/[environmentId]/components/TopControlBar.tsx
+@@ -31,7 +31,8 @@ export const TopControlBar = ({
+   isAccessControlAllowed,
+   membershipRole,
+ }: TopControlBarProps) => {
+-  const { isMember } = getAccessFlags(membershipRole);
++  const { isMember, isBilling } = getAccessFlags(membershipRole);
++  const isMembershipPending = membershipRole === undefined;
+   const { environment } = useEnvironment();
+ 
+   return (
+@@ -49,6 +50,8 @@ export const TopControlBar = ({
+         isLicenseActive={isLicenseActive}
+         isOwnerOrManager={isOwnerOrManager}
+         isMember={isMember}
++        isBilling={isBilling}
++        isMembershipPending={isMembershipPending}
+         isAccessControlAllowed={isAccessControlAllowed}
+       />
+     </div>
+diff --git a/apps/web/app/(app)/environments/[environmentId]/components/organization-breadcrumb.tsx b/apps/web/app/(app)/environments/[environmentId]/components/organization-breadcrumb.tsx
+index 6d697a0ddb0a..49f4f8aaa418 100644
+--- a/apps/web/app/(app)/environments/[environmentId]/components/organization-breadcrumb.tsx
++++ b/apps/web/app/(app)/environments/[environmentId]/components/organization-breadcrumb.tsx
+@@ -25,6 +25,7 @@ import {
+   DropdownMenuSeparator,
+   DropdownMenuTrigger,
+ } from "@/modules/ui/components/dropdown-menu";
++import { Popover, PopoverContent, PopoverTrigger } from "@/modules/ui/components/popover";
+ import { useOrganization } from "../context/environment-context";
+ 
+ interface OrganizationBreadcrumbProps {
+@@ -35,6 +36,7 @@ interface OrganizationBreadcrumbProps {
+   isFormbricksCloud: boolean;
+   isMember: boolean;
+   isOwnerOrManager: boolean;
++  isMembershipPending: boolean;
+ }
+ 
+ const isActiveOrganizationSetting = (pathname: string, settingId: string): boolean => {
+@@ -56,6 +58,7 @@ export const OrganizationBreadcrumb = ({
+   isFormbricksCloud,
+   isMember,
+   isOwnerOrManager,
++  isMembershipPending,
+ }: OrganizationBreadcrumbProps) => {
+   const { t } = useTranslation();
+   const [isOrganizationDropdownOpen, setIsOrganizationDropdownOpen] = useState(false);
+@@ -142,7 +145,10 @@ export const OrganizationBreadcrumb = ({
+       id: "api-keys",
+       label: t("common.api_keys"),
+       href: `/environments/${currentEnvironmentId}/settings/api-keys`,
+-      hidden: !isOwnerOrManager,
++      disabled: isMembershipPending || !isOwnerOrManager,
++      disabledMessage: isMembershipPending
++        ? t("common.loading")
++        : t("common.you_are_not_authorized_to_perform_this_action"),
+     },
+     {
+       id: "domain",
+@@ -160,7 +166,11 @@ export const OrganizationBreadcrumb = ({
+       id: "enterprise",
+       label: t("common.enterprise_license"),
+       href: `/environments/${currentEnvironmentId}/settings/enterprise`,
+-      hidden: isFormbricksCloud || isMember,
++      hidden: isFormbricksCloud,
++      disabled: isMembershipPending || isMember,
++      disabledMessage: isMembershipPending
++        ? t("common.loading")
++        : t("common.you_are_not_authorized_to_perform_this_action"),
+     },
+   ];
+ 
+@@ -242,14 +252,30 @@ export const OrganizationBreadcrumb = ({
+ 
+               {organizationSettings.map((setting) => {
+                 return setting.hidden ? null : (
+-                  <DropdownMenuCheckboxItem
+-                    key={setting.id}
+-                    checked={isActiveOrganizationSetting(pathname, setting.id)}
+-                    hidden={setting.hidden}
+-                    onClick={() => handleSettingChange(setting.href)}
+-                    className="cursor-pointer">
+-                    {setting.label}
+-                  </DropdownMenuCheckboxItem>
++                  <div key={setting.id}>
++                    {setting.disabled ? (
++                      <Popover>
++                        <PopoverTrigger asChild>
++                          <button
++                            type="button"
++                            aria-disabled="true"
++                            className="relative flex w-full cursor-not-allowed select-none items-center rounded-lg py-1.5 pl-8 pr-2 text-sm font-medium text-slate-400">
++                            {setting.label}
++                          </button>
++                        </PopoverTrigger>
++                        <PopoverContent className="w-fit max-w-72 px-3 py-2 text-sm text-slate-700">
++                          {setting.disabledMessage}
++                        </PopoverContent>
++                      </Popover>
++                    ) : (
++                      <DropdownMenuCheckboxItem
++                        checked={isActiveOrganizationSetting(pathname, setting.id)}
++                        onClick={() => handleSettingChange(setting.href)}
++                        className="cursor-pointer">
++                        {setting.label}
++                      </DropdownMenuCheckboxItem>
++                    )}
++                  </div>
+                 );
+               })}
+             </div>
+diff --git a/apps/web/app/(app)/environments/[environmentId]/components/project-and-org-switch.tsx b/apps/web/app/(app)/environments/[environmentId]/components/project-and-org-switch.tsx
+index 7bad5faedd00..54bcd052121f 100644
+--- a/apps/web/app/(app)/environments/[environmentId]/components/project-and-org-switch.tsx
++++ b/apps/web/app/(app)/environments/[environmentId]/components/project-and-org-switch.tsx
+@@ -18,6 +18,8 @@ interface ProjectAndOrgSwitchProps {
+   isLicenseActive: boolean;
+   isOwnerOrManager: boolean;
+   isMember: boolean;
++  isBilling: boolean;
++  isMembershipPending: boolean;
+   isAccessControlAllowed: boolean;
+ }
+ 
+@@ -35,6 +37,8 @@ export const ProjectAndOrgSwitch = ({
+   isOwnerOrManager,
+   isAccessControlAllowed,
+   isMember,
++  isBilling,
++  isMembershipPending,
+ }: ProjectAndOrgSwitchProps) => {
+   const currentEnvironment = environments.find((env) => env.id === currentEnvironmentId);
+   const showEnvironmentBreadcrumb = currentEnvironment?.type === "development";
+@@ -50,6 +54,7 @@ export const ProjectAndOrgSwitch = ({
+           isFormbricksCloud={isFormbricksCloud}
+           isMember={isMember}
+           isOwnerOrManager={isOwnerOrManager}
++          isMembershipPending={isMembershipPending}
+         />
+         {currentProjectId && currentEnvironmentId && (
+           <ProjectBreadcrumb
+@@ -63,6 +68,8 @@ export const ProjectAndOrgSwitch = ({
+             isLicenseActive={isLicenseActive}
+             isAccessControlAllowed={isAccessControlAllowed}
+             isEnvironmentBreadcrumbVisible={showEnvironmentBreadcrumb}
++            isBilling={isBilling}
++            isMembershipPending={isMembershipPending}
+           />
+         )}
+         {showEnvironmentBreadcrumb && (
+diff --git a/apps/web/app/(app)/environments/[environmentId]/components/project-breadcrumb.tsx b/apps/web/app/(app)/environments/[environmentId]/components/project-breadcrumb.tsx
+index ab423470aac5..b360f600e769 100644
+--- a/apps/web/app/(app)/environments/[environmentId]/components/project-breadcrumb.tsx
++++ b/apps/web/app/(app)/environments/[environmentId]/components/project-breadcrumb.tsx
+@@ -19,6 +19,7 @@ import {
+   DropdownMenuSeparator,
+   DropdownMenuTrigger,
+ } from "@/modules/ui/components/dropdown-menu";
++import { Popover, PopoverContent, PopoverTrigger } from "@/modules/ui/components/popover";
+ import { ModalButton } from "@/modules/ui/components/upgrade-prompt";
+ import { useProject } from "../context/environment-context";
+ 
+@@ -33,6 +34,8 @@ interface ProjectBreadcrumbProps {
+   currentEnvironmentId: string;
+   isAccessControlAllowed: boolean;
+   isEnvironmentBreadcrumbVisible: boolean;
++  isBilling: boolean;
++  isMembershipPending: boolean;
+ }
+ 
+ const isActiveProjectSetting = (pathname: string, settingId: string): boolean => {
+@@ -56,6 +59,8 @@ export const ProjectBreadcrumb = ({
+   currentEnvironmentId,
+   isAccessControlAllowed,
+   isEnvironmentBreadcrumbVisible,
++  isBilling,
++  isMembershipPending,
+ }: ProjectBreadcrumbProps) => {
+   const { t } = useTranslation();
+   const [isProjectDropdownOpen, setIsProjectDropdownOpen] = useState(false);
+@@ -134,6 +139,10 @@ export const ProjectBreadcrumb = ({
+       href: `/environments/${currentEnvironmentId}/workspace/tags`,
+     },
+   ];
++  const areProjectSettingsDisabled = isMembershipPending || isBilling;
++  const projectSettingsDisabledMessage = isMembershipPending
++    ? t("common.loading")
++    : t("common.you_are_not_authorized_to_perform_this_action");
+ 
+   if (!currentProject) {
+     const errorMessage = `Workspace not found for workspace id: ${currentProjectId}`;
+@@ -247,7 +256,24 @@ export const ProjectBreadcrumb = ({
+                   </DropdownMenuCheckboxItem>
+                 ))}
+               </DropdownMenuGroup>
+-              {isOwnerOrManager && (
++              {isMembershipPending || !isOwnerOrManager ? (
++                <Popover>
++                  <PopoverTrigger asChild>
++                    <button
++                      type="button"
++                      aria-disabled="true"
++                      className="relative flex w-full cursor-not-allowed select-none items-center justify-between rounded-lg py-1.5 pl-8 pr-2 text-sm font-medium text-slate-400">
++                      <span>{t("common.add_new_workspace")}</span>
++                      <PlusIcon className="ml-2 h-4 w-4" strokeWidth={1.5} />
++                    </button>
++                  </PopoverTrigger>
++                  <PopoverContent className="w-fit max-w-72 px-3 py-2 text-sm text-slate-700">
++                    {isMembershipPending
++                      ? t("common.loading")
++                      : t("common.you_are_not_authorized_to_perform_this_action")}
++                  </PopoverContent>
++                </Popover>
++              ) : (
+                 <DropdownMenuCheckboxItem
+                   onClick={handleAddProject}
+                   className="w-full cursor-pointer justify-between">
+@@ -264,13 +290,30 @@ export const ProjectBreadcrumb = ({
+               {t("common.workspace_configuration")}
+             </div>
+             {projectSettings.map((setting) => (
+-              <DropdownMenuCheckboxItem
+-                key={setting.id}
+-                checked={isActiveProjectSetting(pathname, setting.id)}
+-                onClick={() => handleProjectSettingsNavigation(setting.id)}
+-                className="cursor-pointer">
+-                {setting.label}
+-              </DropdownMenuCheckboxItem>
++              <div key={setting.id}>
++                {areProjectSettingsDisabled ? (
++                  <Popover>
++                    <PopoverTrigger asChild>
++                      <button
++                        type="button"
++                        aria-disabled="true"
++                        className="relative flex w-full cursor-not-allowed select-none items-center rounded-lg py-1.5 pl-8 pr-2 text-sm font-medium text-slate-400">
++                        {setting.label}
++                      </button>
++                    </PopoverTrigger>
++                    <PopoverContent className="w-fit max-w-72 px-3 py-2 text-sm text-slate-700">
++                      {projectSettingsDisabledMessage}
++                    </PopoverContent>
++                  </Popover>
++                ) : (
++                  <DropdownMenuCheckboxItem
++                    checked={isActiveProjectSetting(pathname, setting.id)}
++                    onClick={() => handleProjectSettingsNavigation(setting.id)}
++                    className="cursor-pointer">
++                    {setting.label}
++                  </DropdownMenuCheckboxItem>
++                )}
++              </div>
+             ))}
+           </DropdownMenuGroup>
+         </DropdownMenuContent>
+diff --git a/apps/web/app/(app)/environments/[environmentId]/page.tsx b/apps/web/app/(app)/environments/[environmentId]/page.tsx
+index 8e72c09b6111..a8d304c35234 100644
+--- a/apps/web/app/(app)/environments/[environmentId]/page.tsx
++++ b/apps/web/app/(app)/environments/[environmentId]/page.tsx
+@@ -1,5 +1,6 @@
+ import { redirect } from "next/navigation";
+ import { IS_FORMBRICKS_CLOUD } from "@/lib/constants";
++import { getBillingFallbackPath } from "@/lib/membership/navigation";
+ import { getMembershipByUserIdOrganizationId } from "@/lib/membership/service";
+ import { getAccessFlags } from "@/lib/membership/utils";
+ import { getEnvironmentAuth } from "@/modules/environments/lib/utils";
+@@ -12,11 +13,7 @@ const EnvironmentPage = async (props: { params: Promise<{ environmentId: string
+   const { isBilling } = getAccessFlags(currentUserMembership?.role);
+ 
+   if (isBilling) {
+-    if (IS_FORMBRICKS_CLOUD) {
+-      return redirect(`/environments/${params.environmentId}/settings/billing`);
+-    } else {
+-      return redirect(`/environments/${params.environmentId}/settings/enterprise`);
+-    }
++    return redirect(getBillingFallbackPath(params.environmentId, IS_FORMBRICKS_CLOUD));
+   }
+ 
+   return redirect(`/environments/${params.environmentId}/surveys`);
+diff --git a/apps/web/app/(app)/environments/[environmentId]/settings/(organization)/components/OrganizationSettingsNavbar.tsx b/apps/web/app/(app)/environments/[environmentId]/settings/(organization)/components/OrganizationSettingsNavbar.tsx
+index 10390b0bc9f8..62215b36a3f3 100644
+--- a/apps/web/app/(app)/environments/[environmentId]/settings/(organization)/components/OrganizationSettingsNavbar.tsx
++++ b/apps/web/app/(app)/environments/[environmentId]/settings/(organization)/components/OrganizationSettingsNavbar.tsx
+@@ -22,8 +22,9 @@ export const OrganizationSettingsNavbar = ({
+   loading,
+ }: OrganizationSettingsNavbarProps) => {
+   const pathname = usePathname();
+-  const { isMember, isOwner } = getAccessFlags(membershipRole);
+-  const isPricingDisabled = isMember;
++  const { isMember, isOwner, isManager } = getAccessFlags(membershipRole);
++  const isOwnerOrManager = isOwner || isManager;
++  const isMembershipPending = membershipRole === undefined || loading;
+   const { t } = useTranslation();
+ 
+   const navigation = [
+@@ -45,7 +46,10 @@ export const OrganizationSettingsNavbar = ({
+       label: t("common.api_keys"),
+       href: `/environments/${environmentId}/settings/api-keys`,
+       current: pathname?.includes("/api-keys"),
+-      hidden: !isOwner,
++      disabled: isMembershipPending || !isOwnerOrManager,
++      disabledMessage: isMembershipPending
++        ? t("common.loading")
++        : t("common.you_are_not_authorized_to_perform_this_action"),
+     },
+     {
+       id: "domain",
+@@ -58,14 +62,18 @@ export const OrganizationSettingsNavbar = ({
+       id: "billing",
+       label: t("common.billing"),
+       href: `/environments/${environmentId}/settings/billing`,
+-      hidden: !isFormbricksCloud || loading,
++      hidden: !isFormbricksCloud,
+       current: pathname?.includes("/billing"),
+     },
+     {
+       id: "enterprise",
+       label: t("common.enterprise_license"),
+       href: `/environments/${environmentId}/settings/enterprise`,
+-      hidden: isFormbricksCloud || isPricingDisabled,
++      hidden: isFormbricksCloud,
++      disabled: isMembershipPending || isMember,
++      disabledMessage: isMembershipPending
++        ? t("common.loading")
++        : t("common.you_are_not_authorized_to_perform_this_action"),
+       current: pathname?.includes("/enterprise"),
+     },
+   ];
+diff --git a/apps/web/app/(app)/environments/[environmentId]/workspace/integrations/page.tsx b/apps/web/app/(app)/environments/[environmentId]/workspace/integrations/page.tsx
+index f908124411b2..c4d648b2443e 100644
+--- a/apps/web/app/(app)/environments/[environmentId]/workspace/integrations/page.tsx
++++ b/apps/web/app/(app)/environments/[environmentId]/workspace/integrations/page.tsx
+@@ -13,7 +13,9 @@ import notionLogo from "@/images/notion.png";
+ import SlackLogo from "@/images/slacklogo.png";
+ import WebhookLogo from "@/images/webhook.png";
+ import ZapierLogo from "@/images/zapier-small.png";
++import { IS_FORMBRICKS_CLOUD } from "@/lib/constants";
+ import { getIntegrations } from "@/lib/integration/service";
++import { getBillingFallbackPath } from "@/lib/membership/navigation";
+ import { getTranslate } from "@/lingodotdev/server";
+ import { getEnvironmentAuth } from "@/modules/environments/lib/utils";
+ import { ProjectConfigNavigation } from "@/modules/projects/settings/components/project-config-navigation";
+@@ -53,7 +55,7 @@ const Page = async (props: { params: Promise<{ environmentId: string }> }) => {
+     integrations.some((integration) => integration.type === type);
+ 
+   if (isBilling) {
+-    return redirect(`/environments/${params.environmentId}/settings/billing`);
++    return redirect(getBillingFallbackPath(params.environmentId, IS_FORMBRICKS_CLOUD));
+   }
+ 
+   const isGoogleSheetsIntegrationConnected = isIntegrationConnected("googleSheets");
+diff --git a/apps/web/lib/membership/navigation.test.ts b/apps/web/lib/membership/navigation.test.ts
+new file mode 100644
+index 000000000000..3ccc3ca8cfbd
+--- /dev/null
++++ b/apps/web/lib/membership/navigation.test.ts
+@@ -0,0 +1,14 @@
++import { describe, expect, test } from "vitest";
++import { getBillingFallbackPath } from "./navigation";
++
++describe("getBillingFallbackPath", () => {
++  test("returns billing settings path for cloud", () => {
++    const path = getBillingFallbackPath("env_123", true);
++    expect(path).toBe("/environments/env_123/settings/billing");
++  });
++
++  test("returns enterprise settings path for self-hosted", () => {
++    const path = getBillingFallbackPath("env_123", false);
++    expect(path).toBe("/environments/env_123/settings/enterprise");
++  });
++});
+diff --git a/apps/web/lib/membership/navigation.ts b/apps/web/lib/membership/navigation.ts
+new file mode 100644
+index 000000000000..f49595a69104
+--- /dev/null
++++ b/apps/web/lib/membership/navigation.ts
+@@ -0,0 +1,4 @@
++export const getBillingFallbackPath = (environmentId: string, isFormbricksCloud: boolean): string => {
++  const settingsPath = isFormbricksCloud ? "billing" : "enterprise";
++  return `/environments/${environmentId}/settings/${settingsPath}`;
++};
+diff --git a/apps/web/modules/ee/contacts/layout.tsx b/apps/web/modules/ee/contacts/layout.tsx
+index 40349df2b888..734cd6da1249 100644
+--- a/apps/web/modules/ee/contacts/layout.tsx
++++ b/apps/web/modules/ee/contacts/layout.tsx
+@@ -1,7 +1,9 @@
+ import { getServerSession } from "next-auth";
+ import { redirect } from "next/navigation";
+ import { AuthenticationError, AuthorizationError, ResourceNotFoundError } from "@formbricks/types/errors";
++import { IS_FORMBRICKS_CLOUD } from "@/lib/constants";
+ import { hasUserEnvironmentAccess } from "@/lib/environment/auth";
++import { getBillingFallbackPath } from "@/lib/membership/navigation";
+ import { getMembershipByUserIdOrganizationId } from "@/lib/membership/service";
+ import { getAccessFlags } from "@/lib/membership/utils";
+ import { getOrganizationByEnvironmentId } from "@/lib/organization/service";
+@@ -40,7 +42,7 @@ const ConfigLayout = async (props: {
+   const { isBilling } = getAccessFlags(currentUserMembership?.role);
+ 
+   if (isBilling) {
+-    return redirect(`/environments/${params.environmentId}/settings/billing`);
++    return redirect(getBillingFallbackPath(params.environmentId, IS_FORMBRICKS_CLOUD));
+   }
+ 
+   const project = await getProjectByEnvironmentId(params.environmentId);
+diff --git a/apps/web/modules/organization/settings/api-keys/actions.ts b/apps/web/modules/organization/settings/api-keys/actions.ts
+index 0401406e2913..9f0bb2bb0e9d 100644
+--- a/apps/web/modules/organization/settings/api-keys/actions.ts
++++ b/apps/web/modules/organization/settings/api-keys/actions.ts
+@@ -26,7 +26,7 @@ export const deleteApiKeyAction = authenticatedActionClient.inputSchema(ZDeleteA
+       access: [
+         {
+           type: "organization",
+-          roles: ["owner"],
++          roles: ["owner", "manager"],
+         },
+       ],
+     });
+@@ -53,7 +53,7 @@ export const createApiKeyAction = authenticatedActionClient.inputSchema(ZCreateA
+       access: [
+         {
+           type: "organization",
+-          roles: ["owner"],
++          roles: ["owner", "manager"],
+         },
+       ],
+     });
+@@ -81,7 +81,7 @@ export const updateApiKeyAction = authenticatedActionClient.inputSchema(ZUpdateA
+       access: [
+         {
+           type: "organization",
+-          roles: ["owner"],
++          roles: ["owner", "manager"],
+         },
+       ],
+     });
+diff --git a/apps/web/modules/projects/settings/layout.tsx b/apps/web/modules/projects/settings/layout.tsx
+index 5565f360a03a..0d3ed435ae3b 100644
+--- a/apps/web/modules/projects/settings/layout.tsx
++++ b/apps/web/modules/projects/settings/layout.tsx
+@@ -1,5 +1,7 @@
+ import { Metadata } from "next";
+ import { redirect } from "next/navigation";
++import { IS_FORMBRICKS_CLOUD } from "@/lib/constants";
++import { getBillingFallbackPath } from "@/lib/membership/navigation";
+ import { getEnvironmentAuth } from "@/modules/environments/lib/utils";
+ 
+ export const metadata: Metadata = {
+@@ -13,18 +15,13 @@ export const ProjectSettingsLayout = async (props: {
+   const params = await props.params;
+   const { children } = props;
+ 
+-  try {
+-    // Use the new utility to get all required data with authorization checks
+-    const { isBilling } = await getEnvironmentAuth(params.environmentId);
++  // Use the new utility to get all required data with authorization checks
++  const { isBilling } = await getEnvironmentAuth(params.environmentId);
+ 
+-    // Redirect billing users
+-    if (isBilling) {
+-      return redirect(`/environments/${params.environmentId}/settings/billing`);
+-    }
+-
+-    return children;
+-  } catch (error) {
+-    // The error boundary will catch this
+-    throw error;
++  // Redirect billing users
++  if (isBilling) {
++    return redirect(getBillingFallbackPath(params.environmentId, IS_FORMBRICKS_CLOUD));
+   }
++
++  return children;
+ };
+diff --git a/apps/web/modules/survey/list/page.tsx b/apps/web/modules/survey/list/page.tsx
+index 1297959d4a1d..9869febe4efa 100644
+--- a/apps/web/modules/survey/list/page.tsx
++++ b/apps/web/modules/survey/list/page.tsx
+@@ -3,8 +3,9 @@ import { Metadata } from "next";
+ import Link from "next/link";
+ import { redirect } from "next/navigation";
+ import { ResourceNotFoundError } from "@formbricks/types/errors";
+-import { DEFAULT_LOCALE, SURVEYS_PER_PAGE } from "@/lib/constants";
++import { DEFAULT_LOCALE, IS_FORMBRICKS_CLOUD, SURVEYS_PER_PAGE } from "@/lib/constants";
+ import { getPublicDomain } from "@/lib/getPublicUrl";
++import { getBillingFallbackPath } from "@/lib/membership/navigation";
+ import { getUserLocale } from "@/lib/user/service";
+ import { getTranslate } from "@/lingodotdev/server";
+ import { getEnvironmentAuth } from "@/modules/environments/lib/utils";
+@@ -40,23 +41,21 @@ export const SurveysPage = async ({ params: paramsProps }: SurveyTemplateProps)
+   const { session, isBilling, environment, isReadOnly } = await getEnvironmentAuth(params.environmentId);
+ 
+   if (isBilling) {
+-    return redirect(`/environments/${params.environmentId}/settings/billing`);
++    return redirect(getBillingFallbackPath(params.environmentId, IS_FORMBRICKS_CLOUD));
+   }
+ 
+   const surveyCount = await getSurveyCount(params.environmentId);
+ 
+   const currentProjectChannel = project.config.channel ?? null;
+   const locale = (await getUserLocale(session.user.id)) ?? DEFAULT_LOCALE;
+-  const CreateSurveyButton = () => {
+-    return (
+-      <Button size="sm" asChild>
+-        <Link href={`/environments/${environment.id}/surveys/templates`}>
+-          {t("environments.surveys.new_survey")}
+-          <PlusIcon />
+-        </Link>
+-      </Button>
+-    );
+-  };
++  const createSurveyButton = (
++    <Button size="sm" asChild>
++      <Link href={`/environments/${environment.id}/surveys/templates`}>
++        {t("environments.surveys.new_survey")}
++        <PlusIcon />
++      </Link>
++    </Button>
++  );
+ 
+   const projectWithRequiredProps = {
+     ...project,
+@@ -79,7 +78,7 @@ export const SurveysPage = async ({ params: paramsProps }: SurveyTemplateProps)
+   if (surveyCount > 0) {
+     content = (
+       <>
+-        <PageHeader pageTitle={t("common.surveys")} cta={isReadOnly ? <></> : <CreateSurveyButton />} />
++        <PageHeader pageTitle={t("common.surveys")} cta={isReadOnly ? <></> : createSurveyButton} />
+         <SurveysList
+           environmentId={environment.id}
+           isReadOnly={isReadOnly}
+diff --git a/apps/web/modules/ui/components/secondary-navigation/index.tsx b/apps/web/modules/ui/components/secondary-navigation/index.tsx
+index b76eed0ab4bd..834160fd714e 100644
+--- a/apps/web/modules/ui/components/secondary-navigation/index.tsx
++++ b/apps/web/modules/ui/components/secondary-navigation/index.tsx
+@@ -1,31 +1,112 @@
+ import Link from "next/link";
+ import { cn } from "@/lib/cn";
++import { Popover, PopoverContent, PopoverTrigger } from "@/modules/ui/components/popover";
++
++interface TSecondaryNavItem {
++  id: string;
++  label: string;
++  href?: string;
++  onClick?: (event: React.MouseEvent<HTMLElement>) => void;
++  hidden?: boolean;
++  disabled?: boolean;
++  disabledMessage?: string;
++}
+ 
+ interface SecondaryNavbarProps {
+-  navigation: {
+-    id: string;
+-    label: string;
+-    href?: string;
+-    onClick?: (event: React.MouseEvent<HTMLElement>) => void;
+-    hidden?: boolean;
+-  }[];
++  navigation: TSecondaryNavItem[];
+   activeId: string;
+   loading?: boolean;
+ }
+ 
++const getTabTextClassName = (isActive: boolean) =>
++  cn(
++    isActive ? "font-semibold text-slate-900" : "text-slate-500 hover:text-slate-700",
++    "flex h-full items-center px-3 text-sm font-medium"
++  );
++
++const getTabIndicatorClassName = ({
++  isActive,
++  isDisabled,
++  isLoading,
++}: {
++  isActive: boolean;
++  isDisabled?: boolean;
++  isLoading?: boolean;
++}) => {
++  if (isDisabled) {
++    return "bg-transparent";
++  }
++
++  if (isActive) {
++    return isLoading ? "bg-slate-300" : "bg-brand-dark";
++  }
++
++  return "bg-transparent group-hover:bg-slate-300";
++};
++
++const renderDisabledNavItem = (navElem: TSecondaryNavItem) =>
++  navElem.disabledMessage ? (
++    <Popover>
++      <PopoverTrigger asChild>
++        <button
++          type="button"
++          aria-disabled="true"
++          className="flex h-full cursor-not-allowed items-center px-3 text-sm font-medium text-slate-400">
++          {navElem.label}
++        </button>
++      </PopoverTrigger>
++      <PopoverContent className="w-fit max-w-72 px-3 py-2 text-sm text-slate-700">
++        {navElem.disabledMessage}
++      </PopoverContent>
++    </Popover>
++  ) : (
++    <button
++      type="button"
++      aria-disabled="true"
++      className="flex h-full cursor-not-allowed items-center px-3 text-sm font-medium text-slate-400">
++      {navElem.label}
++    </button>
++  );
++
++const renderInteractiveNavItem = (navElem: TSecondaryNavItem, activeId: string) => {
++  const textClassName = getTabTextClassName(navElem.id === activeId);
++
++  if (navElem.href) {
++    return (
++      <Link
++        href={navElem.href}
++        {...(navElem.onClick ? { onClick: navElem.onClick } : {})}
++        className={textClassName}
++        aria-current={navElem.id === activeId ? "page" : undefined}>
++        {navElem.label}
++      </Link>
++    );
++  }
++
++  return (
++    <button
++      {...(navElem.onClick ? { onClick: navElem.onClick } : {})}
++      className={cn(textClassName, "grow transition-all duration-150 ease-in-out")}
++      aria-current={navElem.id === activeId ? "page" : undefined}>
++      {navElem.label}
++    </button>
++  );
++};
++
+ export const SecondaryNavigation = ({ navigation, activeId, loading, ...props }: SecondaryNavbarProps) => {
++  const visibleNavigation = navigation.filter((navElem) => !navElem.hidden);
++
+   return (
+     <div {...props}>
+       <nav className="flex h-10 w-full items-center space-x-4" aria-label="Tabs">
+         {loading
+-          ? navigation.map((navElem) => (
++          ? visibleNavigation.map((navElem) => (
+               <div className="group flex h-full flex-col truncate" key={navElem.id}>
+                 <div
+                   aria-disabled="true"
+                   className={cn(
+                     navElem.id === activeId ? "font-semibold text-slate-900" : "text-slate-500",
+-                    "flex h-full items-center truncate px-3 text-sm font-medium",
+-                    navElem.hidden && "hidden"
++                    "flex h-full items-center truncate px-3 text-sm font-medium"
+                   )}
+                   aria-current={navElem.id === activeId ? "page" : undefined}>
+                   {navElem.label}
+@@ -33,54 +114,30 @@ export const SecondaryNavigation = ({ navigation, activeId, loading, ...props }:
+                 <div
+                   className={cn(
+                     "bottom-0 mt-auto h-[2px] w-full rounded-t-lg transition-all duration-150 ease-in-out",
+-                    navElem.id === activeId ? "bg-slate-300" : "bg-transparent group-hover:bg-slate-300",
+-                    navElem.hidden && "hidden"
++                    getTabIndicatorClassName({
++                      isActive: navElem.id === activeId,
++                      isLoading: true,
++                    })
+                   )}
+                 />
+               </div>
+             ))
+-          : navigation.map(
+-              (navElem) =>
+-                !navElem.hidden && (
+-                  <div className="group flex h-full flex-col truncate" key={navElem.id}>
+-                    {navElem.href ? (
+-                      <Link
+-                        href={navElem.href}
+-                        {...(navElem.onClick ? { onClick: navElem.onClick } : {})}
+-                        className={cn(
+-                          navElem.id === activeId
+-                            ? "font-semibold text-slate-900"
+-                            : "text-slate-500 hover:text-slate-700",
+-                          "flex h-full items-center px-3 text-sm font-medium",
+-                          navElem.hidden && "hidden"
+-                        )}
+-                        aria-current={navElem.id === activeId ? "page" : undefined}>
+-                        {navElem.label}
+-                      </Link>
+-                    ) : (
+-                      <button
+-                        {...(navElem.onClick ? { onClick: navElem.onClick } : {})}
+-                        className={cn(
+-                          navElem.id === activeId
+-                            ? "font-semibold text-slate-900"
+-                            : "text-slate-500 hover:text-slate-700",
+-                          "grow items-center px-3 text-sm font-medium transition-all duration-150 ease-in-out",
+-                          navElem.hidden && "hidden"
+-                        )}
+-                        aria-current={navElem.id === activeId ? "page" : undefined}>
+-                        {navElem.label}
+-                      </button>
+-                    )}
+-                    <div
+-                      className={cn(
+-                        "bottom-0 mt-auto h-[2px] w-full rounded-t-lg transition-all duration-150 ease-in-out",
+-                        navElem.id === activeId ? "bg-brand-dark" : "bg-transparent group-hover:bg-slate-300",
+-                        navElem.hidden && "hidden"
+-                      )}
+-                    />
+-                  </div>
+-                )
+-            )}
++          : visibleNavigation.map((navElem) => (
++              <div className="group flex h-full flex-col truncate" key={navElem.id}>
++                {navElem.disabled
++                  ? renderDisabledNavItem(navElem)
++                  : renderInteractiveNavItem(navElem, activeId)}
++                <div
++                  className={cn(
++                    "bottom-0 mt-auto h-[2px] w-full rounded-t-lg transition-all duration-150 ease-in-out",
++                    getTabIndicatorClassName({
++                      isActive: navElem.id === activeId,
++                      isDisabled: navElem.disabled,
++                    })
++                  )}
++                />
++              </div>
++            ))}
+       </nav>
+     </div>
+   );

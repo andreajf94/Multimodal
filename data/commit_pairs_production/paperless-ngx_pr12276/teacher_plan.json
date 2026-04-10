@@ -1,0 +1,150 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "dependency_management",
+      "recommendation": "Added ijson>=3.2 as a new dependency to enable streaming JSON parsing",
+      "rationale": "The ijson library provides incremental JSON parsing capabilities that allow processing large JSON files without loading the entire file into memory. This is essential for the memory optimization goal. The library is mature, well-maintained, and supports streaming parsing of JSON arrays, which matches the manifest file structure.",
+      "alternatives_considered": [
+        "Custom JSON streaming parser",
+        "json.JSONDecoder with custom object_hook",
+        "Other streaming JSON libraries like yajl-py"
+      ],
+      "files_affected": [
+        "pyproject.toml",
+        "uv.lock"
+      ]
+    },
+    {
+      "dimension": "memory_optimization",
+      "recommendation": "Replaced monolithic json.load() calls with streaming ijson.items() generator",
+      "rationale": "The original approach loaded entire manifest files (potentially gigabytes) into memory as Python lists/dicts. By using ijson.items(f, 'item'), we process JSON array items one at a time, significantly reducing peak memory usage. This is critical for large imports where manifest files can contain thousands of document records.",
+      "alternatives_considered": [
+        "Chunked loading with json.JSONDecoder",
+        "Memory-mapped file reading",
+        "Database-backed intermediate storage"
+      ],
+      "files_affected": [
+        "src/documents/management/commands/document_importer.py"
+      ]
+    },
+    {
+      "dimension": "api_design",
+      "recommendation": "Created iter_manifest_records() generator function to abstract streaming JSON parsing",
+      "rationale": "Encapsulating the ijson streaming logic in a dedicated generator function provides a clean interface for iterating over manifest records. This abstraction hides implementation details, makes the code more readable, and centralizes error handling for JSON parsing issues. The function yields records one at a time, enabling memory-efficient processing.",
+      "alternatives_considered": [
+        "Inline ijson calls throughout the code",
+        "Custom iterator class",
+        "Context manager approach"
+      ],
+      "files_affected": [
+        "src/documents/management/commands/document_importer.py"
+      ]
+    },
+    {
+      "dimension": "data_processing",
+      "recommendation": "Changed from pre-loaded manifest list to on-demand streaming from manifest_paths",
+      "rationale": "Instead of storing all manifest records in self.manifest list, we now store only file paths in self.manifest_paths and process records on-demand. This eliminates the large in-memory data structure. The approach maintains support for multiple manifest files (main manifest + split manifests) while processing them sequentially.",
+      "alternatives_considered": [
+        "Memory-mapped JSON files",
+        "SQLite intermediate storage",
+        "Chunked processing with temporary files"
+      ],
+      "files_affected": [
+        "src/documents/management/commands/document_importer.py"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Updated error handling to use CommandError for JSON parsing failures and maintain test compatibility",
+      "rationale": "Replaced json.decoder.JSONDecodeError with CommandError in the main parsing logic to maintain consistent error reporting. Updated tests to expect CommandError instead of JSONDecodeError. This ensures users get meaningful error messages while maintaining backward compatibility with existing error handling patterns.",
+      "alternatives_considered": [
+        "Preserving original JSONDecodeError",
+        "Custom exception hierarchy",
+        "Logging with re-raising"
+      ],
+      "files_affected": [
+        "src/documents/management/commands/document_importer.py",
+        "src/documents/tests/test_management_importer.py"
+      ]
+    },
+    {
+      "dimension": "resource_management",
+      "recommendation": "Implemented temporary file handling for decrypted manifests and proper cleanup",
+      "rationale": "For encrypted imports, we now write decrypted records to temporary files (.decrypted.json) instead of modifying the original manifest in-place. This allows streaming decryption while maintaining the ability to process records sequentially. Added cleanup logic to delete temporary files after import completion.",
+      "alternatives_considered": [
+        "In-memory decryption with streaming",
+        "Database-backed decryption",
+        "Chunked decryption without temporary files"
+      ],
+      "files_affected": [
+        "src/documents/management/commands/document_importer.py"
+      ]
+    },
+    {
+      "dimension": "backward_compatibility",
+      "recommendation": "Maintained existing manifest file format and import workflow while changing internal processing",
+      "rationale": "The external interface remains unchanged - manifest files still use the same JSON array format. All existing validation, decryption, and file copying logic works with the streaming approach. This ensures users can upgrade without changing their export/import processes.",
+      "alternatives_considered": [
+        "New manifest format",
+        "Binary manifest format",
+        "Database dump format"
+      ],
+      "files_affected": [
+        "src/documents/management/commands/document_importer.py"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Add streaming JSON dependency and core parsing logic",
+      "description": "Add ijson library dependency and implement iter_manifest_records() generator function for streaming JSON parsing",
+      "files_to_modify": [
+        "pyproject.toml",
+        "uv.lock",
+        "src/documents/management/commands/document_importer.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-002",
+      "title": "Refactor manifest processing to use streaming",
+      "description": "Replace self.manifest list with streaming processing from manifest_paths, update all record iteration logic",
+      "files_to_modify": [
+        "src/documents/management/commands/document_importer.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-003",
+      "title": "Implement streaming decryption with temporary files",
+      "description": "Rewrite decrypt_secret_fields() to use streaming decryption with temporary .decrypted.json files",
+      "files_to_modify": [
+        "src/documents/management/commands/document_importer.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-004",
+      "title": "Update tests for streaming error handling",
+      "description": "Modify tests to expect CommandError instead of JSONDecodeError and update test setup for new manifest processing",
+      "files_to_modify": [
+        "src/documents/tests/test_management_importer.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation transforms the document importer from a memory-intensive batch processor to a memory-efficient streaming processor. The key change is replacing json.load() with ijson.items() to parse JSON arrays incrementally. This eliminates the need to load entire manifest files (which can be gigabytes for large exports) into memory.\n\nThe approach maintains backward compatibility by keeping the same manifest file format and external API. A new iter_manifest_records() generator function abstracts the streaming logic, yielding records one at a time. For encrypted imports, the solution writes decrypted records to temporary files to enable streaming decryption while preserving the ability to process records sequentially.\n\nThe changes integrate seamlessly with the existing Django management command structure. All validation, file copying, and database loading logic now operates on streaming records rather than pre-loaded lists. Error handling was updated to use CommandError consistently, and tests were modified to reflect the new error propagation. The memory optimization is achieved without sacrificing functionality or requiring changes to export formats or user workflows.",
+  "source_pr": "https://github.com/paperless-ngx/paperless-ngx/pull/12276",
+  "before_sha": "e18b1fd99d6e359d74e4fcd1984ddd2f4cc91bd7",
+  "after_sha": "bcc2f1115222533daf515e62921f288b4d4db0c2",
+  "diff_stats": {
+    "additions": 157,
+    "deletions": 54,
+    "files_changed": 4
+  }
+}

@@ -1,0 +1,108 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "dependency_management",
+      "recommendation": "Updated all Docusaurus-related packages from version 3.9.2 to 3.10.0 to maintain compatibility with the latest Docusaurus release",
+      "rationale": "Docusaurus 3.10 introduces breaking changes and new features that require package updates. The configuration package must stay in sync with the core Docusaurus version to ensure proper functionality and avoid version conflicts.",
+      "alternatives_considered": [
+        "Maintaining multiple version support",
+        "Using version ranges instead of exact versions"
+      ],
+      "files_affected": [
+        "packages/docusaurus-config/package.json",
+        "packages/docusaurus-config/package-lock.json"
+      ]
+    },
+    {
+      "dimension": "api_design",
+      "recommendation": "Changed the experimental_faster configuration option to faster in the common.js configuration module",
+      "rationale": "Docusaurus 3.10 promoted the experimental_faster feature to a stable API, renaming it to faster. This change follows Docusaurus's API evolution and ensures the configuration uses the correct property name for the new version.",
+      "alternatives_considered": [
+        "Keeping backward compatibility with conditional logic",
+        "Creating a version-specific configuration"
+      ],
+      "files_affected": [
+        "packages/docusaurus-config/lib/common.js"
+      ]
+    },
+    {
+      "dimension": "dependency_optimization",
+      "recommendation": "Removed @babel/runtime-corejs3 dependency as it's no longer needed in Docusaurus 3.10",
+      "rationale": "Docusaurus 3.10 streamlined its Babel dependencies, eliminating the need for @babel/runtime-corejs3. Removing this reduces the dependency tree and potential conflicts while maintaining functionality.",
+      "alternatives_considered": [
+        "Keeping the dependency for backward compatibility",
+        "Adding conditional imports"
+      ],
+      "files_affected": [
+        "packages/docusaurus-config/package-lock.json"
+      ]
+    },
+    {
+      "dimension": "versioning_strategy",
+      "recommendation": "Bumped the package version from 2.6.0 to 2.7.0 following semantic versioning",
+      "rationale": "Since this update includes dependency changes that could affect downstream projects (breaking API change from experimental_faster to faster), a minor version bump is appropriate. This signals to consumers that there are potentially breaking changes.",
+      "alternatives_considered": [
+        "Patch version bump",
+        "Major version bump"
+      ],
+      "files_affected": [
+        "packages/docusaurus-config/package.json",
+        "packages/docusaurus-config/package-lock.json"
+      ]
+    },
+    {
+      "dimension": "peer_dependency_management",
+      "recommendation": "Updated @docusaurus/core to include @docusaurus/faster as an optional peer dependency",
+      "rationale": "Docusaurus 3.10 introduced @docusaurus/faster as an optional package for enhanced performance features. Making it an optional peer dependency allows projects to opt into the faster features without requiring them for all users.",
+      "alternatives_considered": [
+        "Making it a required dependency",
+        "Not including it at all"
+      ],
+      "files_affected": [
+        "packages/docusaurus-config/package-lock.json"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Update Docusaurus dependencies to version 3.10.0",
+      "description": "Update all Docusaurus-related packages from 3.9.2 to 3.10.0 to maintain compatibility with the latest Docusaurus release and leverage new features",
+      "files_to_modify": [
+        "packages/docusaurus-config/package.json",
+        "packages/docusaurus-config/package-lock.json"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-002",
+      "title": "Update configuration API for Docusaurus 3.10 compatibility",
+      "description": "Modify the common.js configuration module to use the new faster API (previously experimental_faster) and ensure configuration works with Docusaurus 3.10",
+      "files_to_modify": [
+        "packages/docusaurus-config/lib/common.js"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-003",
+      "title": "Clean up and optimize dependencies",
+      "description": "Remove unnecessary dependencies (@babel/runtime-corejs3) and update transitive dependencies to their latest compatible versions",
+      "files_to_modify": [
+        "packages/docusaurus-config/package-lock.json"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation updates the @goauthentik/docusaurus-config package to be compatible with Docusaurus 3.10. The approach follows a systematic dependency upgrade pattern: first updating all Docusaurus-related packages from 3.9.2 to 3.10.0, then modifying the configuration API to match breaking changes in Docusaurus, and finally cleaning up dependencies that are no longer needed.\n\nThe key change is in the configuration module where experimental_faster is renamed to faster, reflecting Docusaurus's promotion of this feature from experimental to stable. This breaking API change necessitated a minor version bump from 2.6.0 to 2.7.0 in the package.json. The dependency updates also include transitive dependencies like @types/node and various build tools that received minor updates for compatibility.\n\nThe changes integrate well with the existing codebase by maintaining the same configuration structure and API surface while updating underlying dependencies. The package-lock.json shows extensive updates to the dependency tree, ensuring all packages are compatible with Docusaurus 3.10. This approach ensures backward compatibility for existing projects while enabling them to leverage Docusaurus 3.10 features when they upgrade their own dependencies.",
+  "source_pr": "https://github.com/goauthentik/authentik/pull/21471",
+  "before_sha": "5b3caa598f94df256fe586d3c2db25c868081241",
+  "after_sha": "5dc2f2e2b4fc0b7161ff28ba02a90e7a0ee632dd",
+  "diff_stats": {
+    "additions": 129,
+    "deletions": 148,
+    "files_changed": 3
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "feature_name": "Stabilize Column Layout E2E Test",
+  "description": "Make the 'Book on column layout' E2E test reliable by eliminating a race condition that occurs when switching months in the column view. The test currently fails intermittently because it tries to select time slots before the new month's schedule data has fully loaded, causing the booking confirmation button to become permanently disabled.",
+  "functional_requirements": [
+    "Modify the test utility functions to wait for the initial schedule data to load before attempting to change months",
+    "Implement a response listener that specifically captures the schedule data refresh that occurs after clicking the month increment button",
+    "Ensure the time slot selection logic only executes after confirming the new month's schedule data is available",
+    "Add fallback behavior for test environments where the response waiting mechanism is not available"
+  ],
+  "project_name": "cal.com",
+  "source_pr": "https://github.com/calcom/cal.com/pull/28682"
+}

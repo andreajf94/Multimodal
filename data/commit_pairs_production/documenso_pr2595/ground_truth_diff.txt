@@ -1,0 +1,421 @@
+diff --git a/apps/remix/app/components/dialogs/envelope-rename-dialog.tsx b/apps/remix/app/components/dialogs/envelope-rename-dialog.tsx
+new file mode 100644
+index 0000000000..71c69d3c56
+--- /dev/null
++++ b/apps/remix/app/components/dialogs/envelope-rename-dialog.tsx
+@@ -0,0 +1,130 @@
++import { useEffect, useState } from 'react';
++
++import { Trans, useLingui } from '@lingui/react/macro';
++
++import { trpc as trpcReact } from '@documenso/trpc/react';
++import { DOCUMENT_TITLE_MAX_LENGTH } from '@documenso/trpc/server/document-router/schema';
++import { Button } from '@documenso/ui/primitives/button';
++import {
++  Dialog,
++  DialogContent,
++  DialogFooter,
++  DialogHeader,
++  DialogTitle,
++} from '@documenso/ui/primitives/dialog';
++import { Input } from '@documenso/ui/primitives/input';
++import { Label } from '@documenso/ui/primitives/label';
++import { useToast } from '@documenso/ui/primitives/use-toast';
++
++export type EnvelopeRenameDialogProps = {
++  id: string;
++  initialTitle: string;
++  open: boolean;
++  onOpenChange: (_open: boolean) => void;
++  onSuccess?: () => Promise<void>;
++  envelopeType?: 'document' | 'template';
++};
++
++export const EnvelopeRenameDialog = ({
++  id,
++  initialTitle,
++  open,
++  onOpenChange,
++  onSuccess,
++  envelopeType = 'document',
++}: EnvelopeRenameDialogProps) => {
++  const { toast } = useToast();
++  const { t } = useLingui();
++
++  const [title, setTitle] = useState(initialTitle);
++
++  useEffect(() => {
++    if (open) {
++      setTitle(initialTitle);
++    }
++  }, [open, initialTitle]);
++
++  const isTemplate = envelopeType === 'template';
++
++  const { mutate: updateEnvelope, isPending } = trpcReact.envelope.update.useMutation({
++    onSuccess: async () => {
++      await onSuccess?.();
++
++      toast({
++        title: isTemplate ? t`Template Renamed` : t`Document Renamed`,
++        description: isTemplate
++          ? t`Your template has been successfully renamed.`
++          : t`Your document has been successfully renamed.`,
++        duration: 5000,
++      });
++
++      onOpenChange(false);
++    },
++    onError: () => {
++      toast({
++        description: t`Something went wrong. Please try again.`,
++        variant: 'destructive',
++        duration: 7500,
++      });
++    },
++  });
++
++  const trimmedTitle = title.trim();
++
++  const onRename = () => {
++    if (!trimmedTitle || trimmedTitle === initialTitle) {
++      onOpenChange(false);
++      return;
++    }
++
++    updateEnvelope({
++      envelopeId: id,
++      data: {
++        title: trimmedTitle,
++      },
++    });
++  };
++
++  return (
++    <Dialog open={open} onOpenChange={(value) => !isPending && onOpenChange(value)}>
++      <DialogContent>
++        <DialogHeader>
++          <DialogTitle>
++            {isTemplate ? <Trans>Rename Template</Trans> : <Trans>Rename Document</Trans>}
++          </DialogTitle>
++        </DialogHeader>
++
++        <div className="py-2">
++          <Label htmlFor="title" className="sr-only">
++            <Trans>Title</Trans>
++          </Label>
++          <Input
++            id="title"
++            value={title}
++            placeholder={t`Enter a new title`}
++            onChange={(e) => setTitle(e.target.value)}
++            disabled={isPending}
++            maxLength={DOCUMENT_TITLE_MAX_LENGTH}
++            className="w-full"
++            autoFocus
++          />
++        </div>
++
++        <DialogFooter>
++          <Button type="button" variant="secondary" onClick={() => onOpenChange(false)}>
++            <Trans>Cancel</Trans>
++          </Button>
++
++          <Button
++            type="button"
++            disabled={isPending || !trimmedTitle || trimmedTitle === initialTitle}
++            loading={isPending}
++            onClick={() => void onRename()}
++          >
++            <Trans>Rename</Trans>
++          </Button>
++        </DialogFooter>
++      </DialogContent>
++    </Dialog>
++  );
++};
+diff --git a/apps/remix/app/components/embed/embed-direct-template-client-page.tsx b/apps/remix/app/components/embed/embed-direct-template-client-page.tsx
+index f625d7a95b..b3d70829f5 100644
+--- a/apps/remix/app/components/embed/embed-direct-template-client-page.tsx
++++ b/apps/remix/app/components/embed/embed-direct-template-client-page.tsx
+@@ -14,7 +14,6 @@ import {
+ import { LucideChevronDown, LucideChevronUp } from 'lucide-react';
+ import { DateTime } from 'luxon';
+ import { useSearchParams } from 'react-router';
+-import { z } from 'zod';
+ 
+ import { useThrottleFn } from '@documenso/lib/client-only/hooks/use-throttle-fn';
+ import { DEFAULT_DOCUMENT_DATE_FORMAT } from '@documenso/lib/constants/date-formats';
+diff --git a/apps/remix/app/components/general/document/document-page-view-dropdown.tsx b/apps/remix/app/components/general/document/document-page-view-dropdown.tsx
+index 7393c28351..69d85148b7 100644
+--- a/apps/remix/app/components/general/document/document-page-view-dropdown.tsx
++++ b/apps/remix/app/components/general/document/document-page-view-dropdown.tsx
+@@ -9,6 +9,7 @@ import {
+   FileOutputIcon,
+   Loader,
+   MoreHorizontal,
++  Pencil,
+   ScrollTextIcon,
+   Share,
+   Trash2,
+@@ -18,8 +19,12 @@ import { Link, useNavigate } from 'react-router';
+ import { useSession } from '@documenso/lib/client-only/providers/session';
+ import type { TEnvelope } from '@documenso/lib/types/envelope';
+ import { isDocumentCompleted } from '@documenso/lib/utils/document';
+-import { mapSecondaryIdToDocumentId } from '@documenso/lib/utils/envelope';
++import {
++  getEnvelopeItemPermissions,
++  mapSecondaryIdToDocumentId,
++} from '@documenso/lib/utils/envelope';
+ import { formatDocumentsPath } from '@documenso/lib/utils/teams';
++import { trpc as trpcReact } from '@documenso/trpc/react';
+ import { DocumentShareButton } from '@documenso/ui/components/document/document-share-button';
+ import {
+   DropdownMenu,
+@@ -33,6 +38,7 @@ import { DocumentDeleteDialog } from '~/components/dialogs/document-delete-dialo
+ import { DocumentDuplicateDialog } from '~/components/dialogs/document-duplicate-dialog';
+ import { DocumentResendDialog } from '~/components/dialogs/document-resend-dialog';
+ import { EnvelopeDownloadDialog } from '~/components/dialogs/envelope-download-dialog';
++import { EnvelopeRenameDialog } from '~/components/dialogs/envelope-rename-dialog';
+ import { EnvelopeSaveAsTemplateDialog } from '~/components/dialogs/envelope-save-as-template-dialog';
+ import { DocumentRecipientLinkCopyDialog } from '~/components/general/document/document-recipient-link-copy-dialog';
+ import { useCurrentTeam } from '~/providers/team';
+@@ -47,8 +53,11 @@ export const DocumentPageViewDropdown = ({ envelope }: DocumentPageViewDropdownP
+   const navigate = useNavigate();
+   const team = useCurrentTeam();
+ 
++  const trpcUtils = trpcReact.useUtils();
++
+   const [isDeleteDialogOpen, setDeleteDialogOpen] = useState(false);
+   const [isDuplicateDialogOpen, setDuplicateDialogOpen] = useState(false);
++  const [isRenameDialogOpen, setRenameDialogOpen] = useState(false);
+ 
+   const recipient = envelope.recipients.find((recipient) => recipient.email === user.email);
+ 
+@@ -60,6 +69,8 @@ export const DocumentPageViewDropdown = ({ envelope }: DocumentPageViewDropdownP
+   const isCurrentTeamDocument = team && envelope.teamId === team.id;
+   const canManageDocument = Boolean(isOwner || isCurrentTeamDocument);
+ 
++  const { canTitleBeChanged } = getEnvelopeItemPermissions(envelope, []);
++
+   const documentsPath = formatDocumentsPath(team.url);
+ 
+   const nonSignedRecipients = envelope.recipients.filter((item) => item.signingStatus !== 'SIGNED');
+@@ -84,6 +95,13 @@ export const DocumentPageViewDropdown = ({ envelope }: DocumentPageViewDropdownP
+           </DropdownMenuItem>
+         )}
+ 
++        {canManageDocument && canTitleBeChanged && (
++          <DropdownMenuItem onClick={() => setRenameDialogOpen(true)}>
++            <Pencil className="mr-2 h-4 w-4" />
++            <Trans>Rename</Trans>
++          </DropdownMenuItem>
++        )}
++
+         <EnvelopeDownloadDialog
+           envelopeId={envelope.id}
+           envelopeStatus={envelope.status}
+@@ -189,6 +207,16 @@ export const DocumentPageViewDropdown = ({ envelope }: DocumentPageViewDropdownP
+           onOpenChange={setDuplicateDialogOpen}
+         />
+       )}
++
++      <EnvelopeRenameDialog
++        id={envelope.id}
++        initialTitle={envelope.title}
++        open={isRenameDialogOpen}
++        onOpenChange={setRenameDialogOpen}
++        onSuccess={async () => {
++          await trpcUtils.envelope.get.invalidate();
++        }}
++      />
+     </DropdownMenu>
+   );
+ };
+diff --git a/apps/remix/app/components/tables/documents-table-action-dropdown.tsx b/apps/remix/app/components/tables/documents-table-action-dropdown.tsx
+index 536d6b8b62..da500a6156 100644
+--- a/apps/remix/app/components/tables/documents-table-action-dropdown.tsx
++++ b/apps/remix/app/components/tables/documents-table-action-dropdown.tsx
+@@ -3,7 +3,7 @@ import { useState } from 'react';
+ import { msg } from '@lingui/core/macro';
+ import { useLingui } from '@lingui/react';
+ import { Trans } from '@lingui/react/macro';
+-import { DocumentStatus, RecipientRole } from '@prisma/client';
++import { DocumentStatus, EnvelopeType, RecipientRole } from '@prisma/client';
+ import {
+   CheckCircle,
+   Copy,
+@@ -23,7 +23,9 @@ import { Link } from 'react-router';
+ import { useSession } from '@documenso/lib/client-only/providers/session';
+ import type { TDocumentMany as TDocumentRow } from '@documenso/lib/types/document';
+ import { isDocumentCompleted } from '@documenso/lib/utils/document';
++import { getEnvelopeItemPermissions } from '@documenso/lib/utils/envelope';
+ import { formatDocumentsPath } from '@documenso/lib/utils/teams';
++import { trpc as trpcReact } from '@documenso/trpc/react';
+ import { DocumentShareButton } from '@documenso/ui/components/document/document-share-button';
+ import {
+   DropdownMenu,
+@@ -41,6 +43,7 @@ import { DocumentRecipientLinkCopyDialog } from '~/components/general/document/d
+ import { useCurrentTeam } from '~/providers/team';
+ 
+ import { EnvelopeDownloadDialog } from '../dialogs/envelope-download-dialog';
++import { EnvelopeRenameDialog } from '../dialogs/envelope-rename-dialog';
+ 
+ export type DocumentsTableActionDropdownProps = {
+   row: TDocumentRow;
+@@ -55,9 +58,11 @@ export const DocumentsTableActionDropdown = ({
+   const team = useCurrentTeam();
+ 
+   const { _ } = useLingui();
++  const trpcUtils = trpcReact.useUtils();
+ 
+   const [isDeleteDialogOpen, setDeleteDialogOpen] = useState(false);
+   const [isDuplicateDialogOpen, setDuplicateDialogOpen] = useState(false);
++  const [isRenameDialogOpen, setRenameDialogOpen] = useState(false);
+ 
+   const recipient = row.recipients.find((recipient) => recipient.email === user.email);
+ 
+@@ -70,6 +75,16 @@ export const DocumentsTableActionDropdown = ({
+   const isCurrentTeamDocument = team && row.team?.url === team.url;
+   const canManageDocument = Boolean(isOwner || isCurrentTeamDocument);
+ 
++  const { canTitleBeChanged } = getEnvelopeItemPermissions(
++    {
++      completedAt: row.completedAt,
++      deletedAt: row.deletedAt,
++      type: EnvelopeType.DOCUMENT,
++      status: row.status,
++    },
++    [],
++  );
++
+   const documentsPath = formatDocumentsPath(team.url);
+   const formatPath = `${documentsPath}/${row.envelopeId}/edit`;
+ 
+@@ -123,6 +138,13 @@ export const DocumentsTableActionDropdown = ({
+           </Link>
+         </DropdownMenuItem>
+ 
++        {canManageDocument && canTitleBeChanged && (
++          <DropdownMenuItem onClick={() => setRenameDialogOpen(true)}>
++            <Pencil className="mr-2 h-4 w-4" />
++            <Trans>Rename</Trans>
++          </DropdownMenuItem>
++        )}
++
+         <EnvelopeDownloadDialog
+           envelopeId={row.envelopeId}
+           envelopeStatus={row.status}
+@@ -221,6 +243,16 @@ export const DocumentsTableActionDropdown = ({
+         open={isDuplicateDialogOpen}
+         onOpenChange={setDuplicateDialogOpen}
+       />
++
++      <EnvelopeRenameDialog
++        id={row.envelopeId}
++        initialTitle={row.title}
++        open={isRenameDialogOpen}
++        onOpenChange={setRenameDialogOpen}
++        onSuccess={async () => {
++          await trpcUtils.document.findDocumentsInternal.invalidate();
++        }}
++      />
+     </DropdownMenu>
+   );
+ };
+diff --git a/apps/remix/app/components/tables/templates-table-action-dropdown.tsx b/apps/remix/app/components/tables/templates-table-action-dropdown.tsx
+index 4464f4caf5..327b2854ab 100644
+--- a/apps/remix/app/components/tables/templates-table-action-dropdown.tsx
++++ b/apps/remix/app/components/tables/templates-table-action-dropdown.tsx
+@@ -2,9 +2,19 @@ import { useState } from 'react';
+ 
+ import { Trans } from '@lingui/react/macro';
+ import type { Recipient, TemplateDirectLink } from '@prisma/client';
+-import { Copy, Edit, FolderIcon, MoreHorizontal, Share2Icon, Trash2, Upload } from 'lucide-react';
++import {
++  Copy,
++  Edit,
++  FolderIcon,
++  MoreHorizontal,
++  Pencil,
++  Share2Icon,
++  Trash2,
++  Upload,
++} from 'lucide-react';
+ import { Link } from 'react-router';
+ 
++import { trpc as trpcReact } from '@documenso/trpc/react';
+ import {
+   DropdownMenu,
+   DropdownMenuContent,
+@@ -13,6 +23,7 @@ import {
+   DropdownMenuTrigger,
+ } from '@documenso/ui/primitives/dropdown-menu';
+ 
++import { EnvelopeRenameDialog } from '../dialogs/envelope-rename-dialog';
+ import { TemplateBulkSendDialog } from '../dialogs/template-bulk-send-dialog';
+ import { TemplateDeleteDialog } from '../dialogs/template-delete-dialog';
+ import { TemplateDirectLinkDialog } from '../dialogs/template-direct-link-dialog';
+@@ -41,8 +52,11 @@ export const TemplatesTableActionDropdown = ({
+   teamId,
+   onDelete,
+ }: TemplatesTableActionDropdownProps) => {
++  const trpcUtils = trpcReact.useUtils();
++
+   const [isDeleteDialogOpen, setDeleteDialogOpen] = useState(false);
+   const [isDuplicateDialogOpen, setDuplicateDialogOpen] = useState(false);
++  const [isRenameDialogOpen, setRenameDialogOpen] = useState(false);
+   const [isMoveToFolderDialogOpen, setMoveToFolderDialogOpen] = useState(false);
+ 
+   const isTeamTemplate = row.teamId === teamId;
+@@ -66,6 +80,13 @@ export const TemplatesTableActionDropdown = ({
+           </Link>
+         </DropdownMenuItem>
+ 
++        {canMutate && (
++          <DropdownMenuItem onClick={() => setRenameDialogOpen(true)}>
++            <Pencil className="mr-2 h-4 w-4" />
++            <Trans>Rename</Trans>
++          </DropdownMenuItem>
++        )}
++
+         <DropdownMenuItem disabled={!canMutate} onClick={() => setDuplicateDialogOpen(true)}>
+           <Copy className="mr-2 h-4 w-4" />
+           <Trans>Duplicate</Trans>
+@@ -132,6 +153,17 @@ export const TemplatesTableActionDropdown = ({
+         onOpenChange={setMoveToFolderDialogOpen}
+         currentFolderId={row.folderId}
+       />
++
++      <EnvelopeRenameDialog
++        id={row.envelopeId}
++        initialTitle={row.title}
++        open={isRenameDialogOpen}
++        onOpenChange={setRenameDialogOpen}
++        envelopeType="template"
++        onSuccess={async () => {
++          await trpcUtils.template.findTemplates.invalidate();
++        }}
++      />
+     </DropdownMenu>
+   );
+ };
+diff --git a/packages/trpc/server/document-router/schema.ts b/packages/trpc/server/document-router/schema.ts
+index f7cfd93b8b..22f5c705dd 100644
+--- a/packages/trpc/server/document-router/schema.ts
++++ b/packages/trpc/server/document-router/schema.ts
+@@ -1,11 +1,13 @@
+ import { DocumentVisibility } from '@prisma/client';
+ import { z } from 'zod';
+ 
++export const DOCUMENT_TITLE_MAX_LENGTH = 255;
++
+ export const ZDocumentTitleSchema = z
+   .string()
+   .trim()
+   .min(1)
+-  .max(255)
++  .max(DOCUMENT_TITLE_MAX_LENGTH)
+   .describe('The title of the document.');
+ 
+ export const ZDocumentExternalIdSchema = z

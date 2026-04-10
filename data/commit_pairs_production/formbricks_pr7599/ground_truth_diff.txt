@@ -1,0 +1,1137 @@
+diff --git a/apps/web/app/(app)/environments/[environmentId]/components/EnvironmentLayout.tsx b/apps/web/app/(app)/environments/[environmentId]/components/EnvironmentLayout.tsx
+index 2ec7e86a0dca..a0ed469a8fbd 100644
+--- a/apps/web/app/(app)/environments/[environmentId]/components/EnvironmentLayout.tsx
++++ b/apps/web/app/(app)/environments/[environmentId]/components/EnvironmentLayout.tsx
+@@ -75,6 +75,10 @@ export const EnvironmentLayout = async ({ layoutData, children }: EnvironmentLay
+           isDevelopment={IS_DEVELOPMENT}
+           membershipRole={membership.role}
+           publicDomain={publicDomain}
++          isMultiOrgEnabled={isMultiOrgEnabled}
++          organizationProjectsLimit={organizationProjectsLimit}
++          isLicenseActive={active}
++          isAccessControlAllowed={isAccessControlAllowed}
+         />
+         <div id="mainContent" className="flex flex-1 flex-col overflow-hidden bg-slate-50">
+           <TopControlBar
+diff --git a/apps/web/app/(app)/environments/[environmentId]/components/MainNavigation.tsx b/apps/web/app/(app)/environments/[environmentId]/components/MainNavigation.tsx
+index 9a7b3bc36d30..58766ad488c1 100644
+--- a/apps/web/app/(app)/environments/[environmentId]/components/MainNavigation.tsx
++++ b/apps/web/app/(app)/environments/[environmentId]/components/MainNavigation.tsx
+@@ -2,41 +2,58 @@
+ 
+ import {
+   ArrowUpRightIcon,
++  Building2Icon,
+   ChevronRightIcon,
+   Cog,
++  FoldersIcon,
++  Loader2,
+   LogOutIcon,
+   MessageCircle,
+   PanelLeftCloseIcon,
+   PanelLeftOpenIcon,
++  PlusIcon,
+   RocketIcon,
++  SettingsIcon,
+   UserCircleIcon,
+   UserIcon,
+ } from "lucide-react";
+ import Image from "next/image";
+ import Link from "next/link";
+ import { usePathname, useRouter } from "next/navigation";
+-import { useEffect, useMemo, useState } from "react";
++import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
+ import { useTranslation } from "react-i18next";
+ import { TEnvironment } from "@formbricks/types/environment";
+ import { TOrganizationRole } from "@formbricks/types/memberships";
+ import { TOrganization } from "@formbricks/types/organizations";
+ import { TUser } from "@formbricks/types/user";
++import {
++  getOrganizationsForSwitcherAction,
++  getProjectsForSwitcherAction,
++} from "@/app/(app)/environments/[environmentId]/actions";
+ import { NavigationLink } from "@/app/(app)/environments/[environmentId]/components/NavigationLink";
+ import { isNewerVersion } from "@/app/(app)/environments/[environmentId]/lib/utils";
+ import FBLogo from "@/images/formbricks-wordmark.svg";
+ import { cn } from "@/lib/cn";
+ import { getAccessFlags } from "@/lib/membership/utils";
++import { getFormattedErrorMessage } from "@/lib/utils/helper";
+ import { useSignOut } from "@/modules/auth/hooks/use-sign-out";
+ import { TrialAlert } from "@/modules/ee/billing/components/trial-alert";
++import { CreateOrganizationModal } from "@/modules/organization/components/CreateOrganizationModal";
++import { CreateProjectModal } from "@/modules/projects/components/create-project-modal";
++import { ProjectLimitModal } from "@/modules/projects/components/project-limit-modal";
+ import { getLatestStableFbReleaseAction } from "@/modules/projects/settings/(setup)/app-connection/actions";
+ import { ProfileAvatar } from "@/modules/ui/components/avatars";
+ import { Button } from "@/modules/ui/components/button";
+ import {
+   DropdownMenu,
++  DropdownMenuCheckboxItem,
+   DropdownMenuContent,
++  DropdownMenuGroup,
+   DropdownMenuItem,
++  DropdownMenuSeparator,
+   DropdownMenuTrigger,
+ } from "@/modules/ui/components/dropdown-menu";
++import { ModalButton } from "@/modules/ui/components/upgrade-prompt";
+ import packageJson from "../../../../../package.json";
+ 
+ interface NavigationProps {
+@@ -48,8 +65,31 @@ interface NavigationProps {
+   isDevelopment: boolean;
+   membershipRole?: TOrganizationRole;
+   publicDomain: string;
++  isMultiOrgEnabled: boolean;
++  organizationProjectsLimit: number;
++  isLicenseActive: boolean;
++  isAccessControlAllowed: boolean;
+ }
+ 
++const isActiveProjectSetting = (pathname: string, settingId: string): boolean => {
++  if (pathname.includes("/settings/")) {
++    return false;
++  }
++
++  const pattern = new RegExp(`/workspace/${settingId}(?:/|$)`);
++  return pattern.test(pathname);
++};
++
++const isActiveOrganizationSetting = (pathname: string, settingId: string): boolean => {
++  const accountSettingsPattern = /\/settings\/(profile|account|notifications|security|appearance)(?:\/|$)/;
++  if (accountSettingsPattern.test(pathname)) {
++    return false;
++  }
++
++  const pattern = new RegExp(`/settings/${settingId}(?:/|$)`);
++  return pattern.test(pathname);
++};
++
+ export const MainNavigation = ({
+   environment,
+   organization,
+@@ -59,6 +99,10 @@ export const MainNavigation = ({
+   isFormbricksCloud,
+   isDevelopment,
+   publicDomain,
++  isMultiOrgEnabled,
++  organizationProjectsLimit,
++  isLicenseActive,
++  isAccessControlAllowed,
+ }: NavigationProps) => {
+   const router = useRouter();
+   const pathname = usePathname();
+@@ -68,7 +112,8 @@ export const MainNavigation = ({
+   const [latestVersion, setLatestVersion] = useState("");
+   const { signOut: signOutWithAudit } = useSignOut({ id: user.id, email: user.email });
+ 
+-  const { isManager, isOwner, isBilling } = getAccessFlags(membershipRole);
++  const [isPending, startTransition] = useTransition();
++  const { isManager, isOwner, isBilling, isMember } = getAccessFlags(membershipRole);
+ 
+   const isOwnerOrManager = isManager || isOwner;
+ 
+@@ -145,6 +190,183 @@ export const MainNavigation = ({
+     },
+   ];
+ 
++  const [isWorkspaceDropdownOpen, setIsWorkspaceDropdownOpen] = useState(false);
++  const [isOrganizationDropdownOpen, setIsOrganizationDropdownOpen] = useState(false);
++  const [projects, setProjects] = useState<{ id: string; name: string }[]>([]);
++  const [organizations, setOrganizations] = useState<{ id: string; name: string }[]>([]);
++  const [isLoadingProjects, setIsLoadingProjects] = useState(false);
++  const [hasInitializedProjects, setHasInitializedProjects] = useState(false);
++  const [isLoadingOrganizations, setIsLoadingOrganizations] = useState(false);
++  const [workspaceLoadError, setWorkspaceLoadError] = useState<string | null>(null);
++  const [organizationLoadError, setOrganizationLoadError] = useState<string | null>(null);
++  const [openCreateProjectModal, setOpenCreateProjectModal] = useState(false);
++  const [openCreateOrganizationModal, setOpenCreateOrganizationModal] = useState(false);
++  const [openProjectLimitModal, setOpenProjectLimitModal] = useState(false);
++
++  const renderSwitcherError = (error: string, onRetry: () => void, retryLabel: string) => (
++    <div className="px-2 py-4">
++      <p className="mb-2 text-sm text-red-600">{error}</p>
++      <button onClick={onRetry} className="text-xs text-slate-600 underline hover:text-slate-800">
++        {retryLabel}
++      </button>
++    </div>
++  );
++
++  const projectSettings = [
++    {
++      id: "general",
++      label: t("common.general"),
++      href: `/environments/${environment.id}/workspace/general`,
++    },
++    {
++      id: "look",
++      label: t("common.look_and_feel"),
++      href: `/environments/${environment.id}/workspace/look`,
++    },
++    {
++      id: "app-connection",
++      label: t("common.website_and_app_connection"),
++      href: `/environments/${environment.id}/workspace/app-connection`,
++    },
++    {
++      id: "integrations",
++      label: t("common.integrations"),
++      href: `/environments/${environment.id}/workspace/integrations`,
++    },
++    {
++      id: "teams",
++      label: t("common.team_access"),
++      href: `/environments/${environment.id}/workspace/teams`,
++    },
++    {
++      id: "languages",
++      label: t("common.survey_languages"),
++      href: `/environments/${environment.id}/workspace/languages`,
++    },
++    {
++      id: "tags",
++      label: t("common.tags"),
++      href: `/environments/${environment.id}/workspace/tags`,
++    },
++  ];
++
++  const organizationSettings = [
++    {
++      id: "general",
++      label: t("common.general"),
++      href: `/environments/${environment.id}/settings/general`,
++    },
++    {
++      id: "teams",
++      label: t("common.members_and_teams"),
++      href: `/environments/${environment.id}/settings/teams`,
++    },
++    {
++      id: "api-keys",
++      label: t("common.api_keys"),
++      href: `/environments/${environment.id}/settings/api-keys`,
++      hidden: !isOwnerOrManager,
++    },
++    {
++      id: "domain",
++      label: t("common.domain"),
++      href: `/environments/${environment.id}/settings/domain`,
++      hidden: isFormbricksCloud,
++    },
++    {
++      id: "billing",
++      label: t("common.billing"),
++      href: `/environments/${environment.id}/settings/billing`,
++      hidden: !isFormbricksCloud,
++    },
++    {
++      id: "enterprise",
++      label: t("common.enterprise_license"),
++      href: `/environments/${environment.id}/settings/enterprise`,
++      hidden: isFormbricksCloud || isMember,
++    },
++  ];
++
++  const loadProjects = useCallback(async () => {
++    setIsLoadingProjects(true);
++    setWorkspaceLoadError(null);
++
++    try {
++      const result = await getProjectsForSwitcherAction({ organizationId: organization.id });
++      if (result?.data) {
++        const sorted = [...result.data].sort((a, b) => a.name.localeCompare(b.name));
++        setProjects(sorted);
++      } else {
++        setWorkspaceLoadError(getFormattedErrorMessage(result) || t("common.failed_to_load_workspaces"));
++      }
++    } catch (error) {
++      const formattedError =
++        typeof error === "object" && error !== null
++          ? getFormattedErrorMessage(error as { serverError?: string; validationErrors?: unknown })
++          : "";
++      setWorkspaceLoadError(
++        formattedError || (error instanceof Error ? error.message : t("common.failed_to_load_workspaces"))
++      );
++    } finally {
++      setIsLoadingProjects(false);
++      setHasInitializedProjects(true);
++    }
++  }, [organization.id, t]);
++
++  useEffect(() => {
++    if (!isWorkspaceDropdownOpen || projects.length > 0 || isLoadingProjects || workspaceLoadError) {
++      return;
++    }
++
++    loadProjects();
++  }, [isWorkspaceDropdownOpen, projects.length, isLoadingProjects, workspaceLoadError, loadProjects]);
++
++  const loadOrganizations = useCallback(async () => {
++    setIsLoadingOrganizations(true);
++    setOrganizationLoadError(null);
++
++    try {
++      const result = await getOrganizationsForSwitcherAction({ organizationId: organization.id });
++      if (result?.data) {
++        const sorted = [...result.data].sort((a, b) => a.name.localeCompare(b.name));
++        setOrganizations(sorted);
++      } else {
++        setOrganizationLoadError(
++          getFormattedErrorMessage(result) || t("common.failed_to_load_organizations")
++        );
++      }
++    } catch (error) {
++      const formattedError =
++        typeof error === "object" && error !== null
++          ? getFormattedErrorMessage(error as { serverError?: string; validationErrors?: unknown })
++          : "";
++      setOrganizationLoadError(
++        formattedError || (error instanceof Error ? error.message : t("common.failed_to_load_organizations"))
++      );
++    } finally {
++      setIsLoadingOrganizations(false);
++    }
++  }, [organization.id, t]);
++
++  useEffect(() => {
++    if (
++      !isOrganizationDropdownOpen ||
++      organizations.length > 0 ||
++      isLoadingOrganizations ||
++      organizationLoadError
++    ) {
++      return;
++    }
++
++    loadOrganizations();
++  }, [
++    isOrganizationDropdownOpen,
++    organizations.length,
++    isLoadingOrganizations,
++    organizationLoadError,
++    loadOrganizations,
++  ]);
++
+   useEffect(() => {
+     async function loadReleases() {
+       const res = await getLatestStableFbReleaseAction();
+@@ -176,6 +398,76 @@ export const MainNavigation = ({
+ 
+   const mainNavigationLink = `/environments/${environment.id}/${isBilling ? "settings/billing/" : "surveys/"}`;
+ 
++  const handleProjectChange = (projectId: string) => {
++    if (projectId === project.id) return;
++    startTransition(() => {
++      router.push(`/workspaces/${projectId}/`);
++    });
++  };
++
++  const handleOrganizationChange = (organizationId: string) => {
++    if (organizationId === organization.id) return;
++    startTransition(() => {
++      router.push(`/organizations/${organizationId}/`);
++    });
++  };
++
++  const handleSettingNavigation = (href: string) => {
++    startTransition(() => {
++      router.push(href);
++    });
++  };
++
++  const handleProjectCreate = () => {
++    if (!hasInitializedProjects || isLoadingProjects) {
++      return;
++    }
++
++    if (projects.length >= organizationProjectsLimit) {
++      setOpenProjectLimitModal(true);
++      return;
++    }
++
++    setOpenCreateProjectModal(true);
++  };
++
++  const projectLimitModalButtons = (): [ModalButton, ModalButton] => {
++    if (isFormbricksCloud) {
++      return [
++        {
++          text: t("environments.settings.billing.upgrade"),
++          href: `/environments/${environment.id}/settings/billing`,
++        },
++        {
++          text: t("common.cancel"),
++          onClick: () => setOpenProjectLimitModal(false),
++        },
++      ];
++    }
++
++    return [
++      {
++        text: t("environments.settings.billing.upgrade"),
++        href: isLicenseActive
++          ? `/environments/${environment.id}/settings/enterprise`
++          : "https://formbricks.com/upgrade-self-hosted-license",
++      },
++      {
++        text: t("common.cancel"),
++        onClick: () => setOpenProjectLimitModal(false),
++      },
++    ];
++  };
++
++  const switcherTriggerClasses = cn(
++    "w-full border-t px-3 py-3 text-left transition-colors duration-200 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500 focus-visible:ring-inset",
++    isCollapsed ? "flex items-center justify-center" : ""
++  );
++
++  const switcherIconClasses =
++    "flex h-9 w-9 items-center justify-center rounded-full bg-slate-100 text-slate-600";
++  const isInitialProjectsLoading = isWorkspaceDropdownOpen && !hasInitializedProjects && !workspaceLoadError;
++
+   return (
+     <>
+       {project && (
+@@ -255,38 +547,210 @@ export const MainNavigation = ({
+               </Link>
+             )}
+ 
+-            {/* User Switch */}
+-            <div className="flex items-center">
++            <div className="flex flex-col">
++              <DropdownMenu onOpenChange={setIsWorkspaceDropdownOpen}>
++                <DropdownMenuTrigger asChild id="workspaceDropdownTrigger" className={switcherTriggerClasses}>
++                  <button
++                    type="button"
++                    aria-label={isCollapsed ? t("common.change_workspace") : undefined}
++                    className={cn("flex w-full items-center gap-3", isCollapsed && "justify-center")}>
++                    <span className={switcherIconClasses}>
++                      <FoldersIcon className="h-4 w-4" strokeWidth={1.5} />
++                    </span>
++                    {!isCollapsed && !isTextVisible && (
++                      <>
++                        <div className="grow overflow-hidden">
++                          <p className="truncate text-sm font-bold text-slate-700">{project.name}</p>
++                          <p className="text-sm text-slate-500">{t("common.workspace")}</p>
++                        </div>
++                        {isPending && (
++                          <Loader2 className="h-4 w-4 animate-spin text-slate-600" strokeWidth={1.5} />
++                        )}
++                        <ChevronRightIcon className="h-4 w-4 shrink-0 text-slate-600" strokeWidth={1.5} />
++                      </>
++                    )}
++                  </button>
++                </DropdownMenuTrigger>
++                <DropdownMenuContent side="right" sideOffset={10} alignOffset={5} align="end">
++                  <div className="px-2 py-1.5 text-sm font-medium text-slate-500">
++                    <FoldersIcon className="mr-2 inline h-4 w-4" strokeWidth={1.5} />
++                    {t("common.change_workspace")}
++                  </div>
++                  {(isLoadingProjects || isInitialProjectsLoading) && (
++                    <div className="flex items-center justify-center py-2">
++                      <Loader2 className="h-4 w-4 animate-spin" />
++                    </div>
++                  )}
++                  {!isLoadingProjects &&
++                    !isInitialProjectsLoading &&
++                    workspaceLoadError &&
++                    renderSwitcherError(
++                      workspaceLoadError,
++                      () => {
++                        setWorkspaceLoadError(null);
++                        setProjects([]);
++                      },
++                      t("common.try_again")
++                    )}
++                  {!isLoadingProjects && !isInitialProjectsLoading && !workspaceLoadError && (
++                    <>
++                      <DropdownMenuGroup className="max-h-[300px] overflow-y-auto">
++                        {projects.map((proj) => (
++                          <DropdownMenuCheckboxItem
++                            key={proj.id}
++                            checked={proj.id === project.id}
++                            onClick={() => handleProjectChange(proj.id)}
++                            className="cursor-pointer">
++                            {proj.name}
++                          </DropdownMenuCheckboxItem>
++                        ))}
++                      </DropdownMenuGroup>
++                      {isOwnerOrManager && (
++                        <DropdownMenuCheckboxItem
++                          onClick={handleProjectCreate}
++                          className="w-full cursor-pointer justify-between">
++                          <span>{t("common.add_new_workspace")}</span>
++                          <PlusIcon className="ml-2 h-4 w-4" strokeWidth={1.5} />
++                        </DropdownMenuCheckboxItem>
++                      )}
++                    </>
++                  )}
++                  <DropdownMenuSeparator />
++                  <DropdownMenuGroup>
++                    <div className="px-2 py-1.5 text-sm font-medium text-slate-500">
++                      <Cog className="mr-2 inline h-4 w-4" strokeWidth={1.5} />
++                      {t("common.workspace_configuration")}
++                    </div>
++                    {projectSettings.map((setting) => (
++                      <DropdownMenuCheckboxItem
++                        key={setting.id}
++                        checked={isActiveProjectSetting(pathname, setting.id)}
++                        onClick={() => handleSettingNavigation(setting.href)}
++                        className="cursor-pointer">
++                        {setting.label}
++                      </DropdownMenuCheckboxItem>
++                    ))}
++                  </DropdownMenuGroup>
++                </DropdownMenuContent>
++              </DropdownMenu>
++
++              <DropdownMenu onOpenChange={setIsOrganizationDropdownOpen}>
++                <DropdownMenuTrigger
++                  asChild
++                  id="organizationDropdownTriggerSidebar"
++                  className={switcherTriggerClasses}>
++                  <button
++                    type="button"
++                    aria-label={isCollapsed ? t("common.change_organization") : undefined}
++                    className={cn("flex w-full items-center gap-3", isCollapsed && "justify-center")}>
++                    <span className={switcherIconClasses}>
++                      <Building2Icon className="h-4 w-4" strokeWidth={1.5} />
++                    </span>
++                    {!isCollapsed && !isTextVisible && (
++                      <>
++                        <div className="grow overflow-hidden">
++                          <p className="truncate text-sm font-bold text-slate-700">{organization.name}</p>
++                          <p className="text-sm text-slate-500">{t("common.organization")}</p>
++                        </div>
++                        {isPending && (
++                          <Loader2 className="h-4 w-4 animate-spin text-slate-600" strokeWidth={1.5} />
++                        )}
++                        <ChevronRightIcon className="h-4 w-4 shrink-0 text-slate-600" strokeWidth={1.5} />
++                      </>
++                    )}
++                  </button>
++                </DropdownMenuTrigger>
++                <DropdownMenuContent side="right" sideOffset={10} alignOffset={5} align="end">
++                  <div className="px-2 py-1.5 text-sm font-medium text-slate-500">
++                    <Building2Icon className="mr-2 inline h-4 w-4" strokeWidth={1.5} />
++                    {t("common.change_organization")}
++                  </div>
++                  {isLoadingOrganizations && (
++                    <div className="flex items-center justify-center py-2">
++                      <Loader2 className="h-4 w-4 animate-spin" />
++                    </div>
++                  )}
++                  {!isLoadingOrganizations &&
++                    organizationLoadError &&
++                    renderSwitcherError(
++                      organizationLoadError,
++                      () => {
++                        setOrganizationLoadError(null);
++                        setOrganizations([]);
++                      },
++                      t("common.try_again")
++                    )}
++                  {!isLoadingOrganizations && !organizationLoadError && (
++                    <>
++                      <DropdownMenuGroup className="max-h-[300px] overflow-y-auto">
++                        {organizations.map((org) => (
++                          <DropdownMenuCheckboxItem
++                            key={org.id}
++                            checked={org.id === organization.id}
++                            onClick={() => handleOrganizationChange(org.id)}
++                            className="cursor-pointer">
++                            {org.name}
++                          </DropdownMenuCheckboxItem>
++                        ))}
++                      </DropdownMenuGroup>
++                      {isMultiOrgEnabled && (
++                        <DropdownMenuCheckboxItem
++                          onClick={() => setOpenCreateOrganizationModal(true)}
++                          className="w-full cursor-pointer justify-between">
++                          <span>{t("common.create_new_organization")}</span>
++                          <PlusIcon className="ml-2 h-4 w-4" strokeWidth={1.5} />
++                        </DropdownMenuCheckboxItem>
++                      )}
++                    </>
++                  )}
++                  <DropdownMenuSeparator />
++                  <DropdownMenuGroup>
++                    <div className="px-2 py-1.5 text-sm font-medium text-slate-500">
++                      <SettingsIcon className="mr-2 inline h-4 w-4" strokeWidth={1.5} />
++                      {t("common.organization_settings")}
++                    </div>
++                    {organizationSettings.map((setting) => {
++                      if (setting.hidden) return null;
++                      return (
++                        <DropdownMenuCheckboxItem
++                          key={setting.id}
++                          checked={isActiveOrganizationSetting(pathname, setting.id)}
++                          onClick={() => handleSettingNavigation(setting.href)}
++                          className="cursor-pointer">
++                          {setting.label}
++                        </DropdownMenuCheckboxItem>
++                      );
++                    })}
++                  </DropdownMenuGroup>
++                </DropdownMenuContent>
++              </DropdownMenu>
++
+               <DropdownMenu>
+                 <DropdownMenuTrigger
+                   asChild
+                   id="userDropdownTrigger"
+-                  className="w-full rounded-br-xl border-t py-4 transition-colors duration-200 hover:bg-slate-50 focus:outline-none">
+-                  <div
+-                    className={cn(
+-                      "flex cursor-pointer flex-row items-center gap-3",
+-                      isCollapsed ? "justify-center px-2" : "px-4"
+-                    )}>
+-                    <ProfileAvatar userId={user.id} />
++                  className={cn(switcherTriggerClasses, "rounded-br-xl")}>
++                  <button
++                    type="button"
++                    aria-label={isCollapsed ? t("common.account_settings") : undefined}
++                    className={cn("flex w-full items-center gap-3", isCollapsed && "justify-center")}>
++                    <span className={switcherIconClasses}>
++                      <ProfileAvatar userId={user.id} />
++                    </span>
+                     {!isCollapsed && !isTextVisible && (
+                       <>
+-                        <div
+-                          className={cn(isTextVisible ? "opacity-0" : "opacity-100", "grow overflow-hidden")}>
++                        <div className="grow overflow-hidden">
+                           <p
+                             title={user?.email}
+-                            className={cn(
+-                              "ph-no-capture ph-no-capture -mb-0.5 truncate text-sm font-bold text-slate-700"
+-                            )}>
++                            className="ph-no-capture ph-no-capture -mb-0.5 truncate text-sm font-bold text-slate-700">
+                             {user?.name ? <span>{user?.name}</span> : <span>{user?.email}</span>}
+                           </p>
+-                          <p className="text-sm text-slate-700">{t("common.account")}</p>
++                          <p className="text-sm text-slate-500">{t("common.account")}</p>
+                         </div>
+-                        <ChevronRightIcon
+-                          className={cn("h-5 w-5 shrink-0 text-slate-700 hover:text-slate-500")}
+-                        />
++                        <ChevronRightIcon className="h-4 w-4 shrink-0 text-slate-600" strokeWidth={1.5} />
+                       </>
+                     )}
+-                  </div>
++                  </button>
+                 </DropdownMenuTrigger>
+ 
+                 <DropdownMenuContent
+@@ -295,8 +759,6 @@ export const MainNavigation = ({
+                   sideOffset={10}
+                   alignOffset={5}
+                   align="end">
+-                  {/* Dropdown Items */}
+-
+                   {dropdownNavigation.map((link) => (
+                     <Link
+                       href={link.href}
+@@ -310,7 +772,6 @@ export const MainNavigation = ({
+                       </DropdownMenuItem>
+                     </Link>
+                   ))}
+-                  {/* Logout */}
+                   <DropdownMenuItem
+                     onClick={async () => {
+                       const loginUrl = `${publicDomain}/auth/login`;
+@@ -333,6 +794,28 @@ export const MainNavigation = ({
+           </div>
+         </aside>
+       )}
++      {openProjectLimitModal && (
++        <ProjectLimitModal
++          open={openProjectLimitModal}
++          setOpen={setOpenProjectLimitModal}
++          buttons={projectLimitModalButtons()}
++          projectLimit={organizationProjectsLimit}
++        />
++      )}
++      {openCreateProjectModal && (
++        <CreateProjectModal
++          open={openCreateProjectModal}
++          setOpen={setOpenCreateProjectModal}
++          organizationId={organization.id}
++          isAccessControlAllowed={isAccessControlAllowed}
++        />
++      )}
++      {openCreateOrganizationModal && (
++        <CreateOrganizationModal
++          open={openCreateOrganizationModal}
++          setOpen={setOpenCreateOrganizationModal}
++        />
++      )}
+     </>
+   );
+ };
+diff --git a/apps/web/app/(app)/environments/[environmentId]/components/project-breadcrumb.tsx b/apps/web/app/(app)/environments/[environmentId]/components/project-breadcrumb.tsx
+index d0a91f847621..ab423470aac5 100644
+--- a/apps/web/app/(app)/environments/[environmentId]/components/project-breadcrumb.tsx
++++ b/apps/web/app/(app)/environments/[environmentId]/components/project-breadcrumb.tsx
+@@ -1,7 +1,7 @@
+ "use client";
+ 
+ import * as Sentry from "@sentry/nextjs";
+-import { ChevronDownIcon, ChevronRightIcon, CogIcon, HotelIcon, Loader2, PlusIcon } from "lucide-react";
++import { ChevronDownIcon, ChevronRightIcon, CogIcon, FoldersIcon, Loader2, PlusIcon } from "lucide-react";
+ import { usePathname, useRouter } from "next/navigation";
+ import { useEffect, useState, useTransition } from "react";
+ import { useTranslation } from "react-i18next";
+@@ -198,7 +198,7 @@ export const ProjectBreadcrumb = ({
+           id="projectDropdownTrigger"
+           asChild>
+           <div className="flex items-center gap-1">
+-            <HotelIcon className="h-3 w-3" strokeWidth={1.5} />
++            <FoldersIcon className="h-3 w-3" strokeWidth={1.5} />
+             <span>{projectName}</span>
+             {isPending && <Loader2 className="h-3 w-3 animate-spin" strokeWidth={1.5} />}
+             {isEnvironmentBreadcrumbVisible && !isProjectDropdownOpen ? (
+@@ -211,7 +211,7 @@ export const ProjectBreadcrumb = ({
+ 
+         <DropdownMenuContent align="start" className="mt-2">
+           <div className="px-2 py-1.5 text-sm font-medium text-slate-500">
+-            <HotelIcon className="mr-2 inline h-4 w-4" strokeWidth={1.5} />
++            <FoldersIcon className="mr-2 inline h-4 w-4" strokeWidth={1.5} />
+             {t("common.choose_workspace")}
+           </div>
+           {isLoadingProjects && (
+diff --git a/apps/web/i18n.lock b/apps/web/i18n.lock
+index d12095ad0e21..83d7466943de 100644
+--- a/apps/web/i18n.lock
++++ b/apps/web/i18n.lock
+@@ -121,6 +121,8 @@ checksums:
+     common/bottom_right: aaef9a70ef795affc806c6d1853d8373
+     common/cancel: 2e2a849c2223911717de8caa2c71bade
+     common/centered_modal: 982ff411cb7e91e30300c2ed56b7e507
++    common/change_organization: 3b2c873962509445ff2cb8cde5ad913b
++    common/change_workspace: 489cbcf7eef9b9b960e426fbf4da318f
+     common/choices: 8a7a77a71ec6eebc363c5dc0f8490a4d
+     common/choose_environment: 5762cd499529815fc3e6a7feea39f90b
+     common/choose_organization: a8f5db68012323bfbb1a0ad0fb194603
+@@ -476,7 +478,7 @@ checksums:
+     emails/forgot_password_email_change_password: fe6d4ba303b82f4833b3293f0c4e88c0
+     emails/forgot_password_email_did_not_request: 79d35c3800e23e9d4c95bf33f250104f
+     emails/forgot_password_email_heading: fe6d4ba303b82f4833b3293f0c4e88c0
+-    emails/forgot_password_email_link_valid_for_24_hours: 1616714e6bf36e4379b9868e98e82957
++    emails/forgot_password_email_link_valid_for_24_hours: 962358a7f9674f13f49278afa15d14d3
+     emails/forgot_password_email_subject: bd7a2b22e7b480c29f512532fd2b7e2b
+     emails/forgot_password_email_text: 5100fa2fe2180ded9cb2d89b4f77d2e0
+     emails/hidden_field: 3ed5c58d0ed359e558cdf7bd33606d2d
+@@ -2464,8 +2466,8 @@ checksums:
+     templates/csat_question_1_headline: bd4894e95695ce5bc9fc5d326c79bc90
+     templates/csat_question_1_lower_label: 54d464343c0bc17231fd51aa2d73623f
+     templates/csat_question_1_upper_label: 9f000f63949d875ae628fc354a2a7f6a
+-    templates/csat_question_2_choice_1: 0cb1260dd25e94f56c2da7ab21b0e0ae
+-    templates/csat_question_2_choice_2: f12ed9d98c7965ab949efcc25f8ca85e
++    templates/csat_question_2_choice_1: a3a49eb9cc86972bce6dc41a107f472d
++    templates/csat_question_2_choice_2: a0cf57bc571c95c43924a3c641d1355e
+     templates/csat_question_2_choice_3: a7c58d9b8afdaefadeb1f5fdf4d5ad3f
+     templates/csat_question_2_choice_4: d09723c4bc1d85d99c2a9248ed0d4578
+     templates/csat_question_2_choice_5: a89ca2602a3322e89adf17b3349e03ab
+diff --git a/apps/web/locales/de-DE.json b/apps/web/locales/de-DE.json
+index fc685f6da004..9c020ac9b5ed 100644
+--- a/apps/web/locales/de-DE.json
++++ b/apps/web/locales/de-DE.json
+@@ -148,6 +148,8 @@
+     "bottom_right": "Unten rechts",
+     "cancel": "Abbrechen",
+     "centered_modal": "Zentriertes Modalfenster",
++    "change_organization": "Organisation wechseln",
++    "change_workspace": "Workspace wechseln",
+     "choices": "Entscheidungen",
+     "choose_environment": "Umgebung auswählen",
+     "choose_organization": "Organisation auswählen",
+@@ -2624,7 +2626,7 @@
+     "csat_question_1_headline": "Wie wahrscheinlich ist es, dass Du dieses $[projectName] einem Freund oder Kollegen empfehlen würdest?",
+     "csat_question_1_lower_label": "Nicht wahrscheinlich",
+     "csat_question_1_upper_label": "Sehr wahrscheinlich",
+-    "csat_question_2_choice_1": "Etwas zufrieden",
++    "csat_question_2_choice_1": "Einigermaßen zufrieden",
+     "csat_question_2_choice_2": "Sehr zufrieden",
+     "csat_question_2_choice_3": "Weder zufrieden noch unzufrieden",
+     "csat_question_2_choice_4": "Etwas unzufrieden",
+diff --git a/apps/web/locales/en-US.json b/apps/web/locales/en-US.json
+index b2be09f9192c..014fea87de89 100644
+--- a/apps/web/locales/en-US.json
++++ b/apps/web/locales/en-US.json
+@@ -148,6 +148,8 @@
+     "bottom_right": "Bottom Right",
+     "cancel": "Cancel",
+     "centered_modal": "Centered Modal",
++    "change_organization": "Change organization",
++    "change_workspace": "Change workspace",
+     "choices": "Choices",
+     "choose_environment": "Choose environment",
+     "choose_organization": "Choose organization",
+diff --git a/apps/web/locales/es-ES.json b/apps/web/locales/es-ES.json
+index 00f82a70c652..ff0179995ce2 100644
+--- a/apps/web/locales/es-ES.json
++++ b/apps/web/locales/es-ES.json
+@@ -148,6 +148,8 @@
+     "bottom_right": "Inferior derecha",
+     "cancel": "Cancelar",
+     "centered_modal": "Modal centrado",
++    "change_organization": "Cambiar organización",
++    "change_workspace": "Cambiar espacio de trabajo",
+     "choices": "Opciones",
+     "choose_environment": "Elegir entorno",
+     "choose_organization": "Elegir organización",
+diff --git a/apps/web/locales/fr-FR.json b/apps/web/locales/fr-FR.json
+index 93cea584e168..0821d44062f0 100644
+--- a/apps/web/locales/fr-FR.json
++++ b/apps/web/locales/fr-FR.json
+@@ -148,6 +148,8 @@
+     "bottom_right": "En bas à droite",
+     "cancel": "Annuler",
+     "centered_modal": "Au centre",
++    "change_organization": "Changer d'organisation",
++    "change_workspace": "Changer d'espace de travail",
+     "choices": "Choix",
+     "choose_environment": "Choisir l'environnement",
+     "choose_organization": "Choisir l'organisation",
+@@ -505,7 +507,7 @@
+     "forgot_password_email_change_password": "Changer le mot de passe",
+     "forgot_password_email_did_not_request": "Si vous n'avez pas demandé cela, veuillez ignorer cet e-mail.",
+     "forgot_password_email_heading": "Changer le mot de passe",
+-    "forgot_password_email_link_valid_for_24_hours": "Le lien est valable pendant {minutes} minutes.",
++    "forgot_password_email_link_valid_for_24_hours": "Le lien est valide pendant {minutes} minutes.",
+     "forgot_password_email_subject": "Réinitialise ton mot de passe Formbricks",
+     "forgot_password_email_text": "Vous avez demandé un lien pour changer votre mot de passe. Vous pouvez le faire en cliquant sur le lien ci-dessous :",
+     "hidden_field": "Champ caché",
+@@ -2624,7 +2626,7 @@
+     "csat_question_1_headline": "Quelle est la probabilité que vous recommandiez ce $[projectName] à un ami ou un collègue ?",
+     "csat_question_1_lower_label": "Peu probable",
+     "csat_question_1_upper_label": "Très probable",
+-    "csat_question_2_choice_1": "Un peu satisfait",
++    "csat_question_2_choice_1": "Plutôt satisfait",
+     "csat_question_2_choice_2": "Très satisfait",
+     "csat_question_2_choice_3": "Ni satisfait ni insatisfait",
+     "csat_question_2_choice_4": "Un peu insatisfait",
+diff --git a/apps/web/locales/hu-HU.json b/apps/web/locales/hu-HU.json
+index 1192338ca001..beaf50d2c67b 100644
+--- a/apps/web/locales/hu-HU.json
++++ b/apps/web/locales/hu-HU.json
+@@ -148,6 +148,8 @@
+     "bottom_right": "Jobbra lent",
+     "cancel": "Mégse",
+     "centered_modal": "Középre helyezett kizárólagos",
++    "change_organization": "Szervezet módosítása",
++    "change_workspace": "Munkaterület módosítása",
+     "choices": "Választási lehetőségek",
+     "choose_environment": "Környezet kiválasztása",
+     "choose_organization": "Szervezet kiválasztása",
+diff --git a/apps/web/locales/ja-JP.json b/apps/web/locales/ja-JP.json
+index a5c8b825ff78..7e6bd1365eb1 100644
+--- a/apps/web/locales/ja-JP.json
++++ b/apps/web/locales/ja-JP.json
+@@ -148,6 +148,8 @@
+     "bottom_right": "右下",
+     "cancel": "キャンセル",
+     "centered_modal": "中央モーダル",
++    "change_organization": "組織を変更",
++    "change_workspace": "ワークスペースを変更",
+     "choices": "選択肢",
+     "choose_environment": "環境を選択",
+     "choose_organization": "組織を選択",
+@@ -505,7 +507,7 @@
+     "forgot_password_email_change_password": "パスワードを変更",
+     "forgot_password_email_did_not_request": "このリクエストに心当たりのない場合は、このメールを無視してください。",
+     "forgot_password_email_heading": "パスワードを変更",
+-    "forgot_password_email_link_valid_for_24_hours": "このリンクは{minutes}分間有効です。",
++    "forgot_password_email_link_valid_for_24_hours": "リンクの有効期限は{minutes}分です。",
+     "forgot_password_email_subject": "Formbricksのパスワードをリセットしてください",
+     "forgot_password_email_text": "パスワード変更のリンクがリクエストされました。以下のリンクをクリックして変更できます。",
+     "hidden_field": "非表示フィールド",
+diff --git a/apps/web/locales/nl-NL.json b/apps/web/locales/nl-NL.json
+index 21d75c167fce..21bf847297e8 100644
+--- a/apps/web/locales/nl-NL.json
++++ b/apps/web/locales/nl-NL.json
+@@ -148,6 +148,8 @@
+     "bottom_right": "Rechtsonder",
+     "cancel": "Annuleren",
+     "centered_modal": "Gecentreerd modaal",
++    "change_organization": "Organisatie wijzigen",
++    "change_workspace": "Werkruimte wijzigen",
+     "choices": "Keuzes",
+     "choose_environment": "Kies omgeving",
+     "choose_organization": "Kies organisatie",
+diff --git a/apps/web/locales/pt-BR.json b/apps/web/locales/pt-BR.json
+index bdc6878f87d1..c2516222eaf4 100644
+--- a/apps/web/locales/pt-BR.json
++++ b/apps/web/locales/pt-BR.json
+@@ -148,6 +148,8 @@
+     "bottom_right": "Canto Inferior Direito",
+     "cancel": "Cancelar",
+     "centered_modal": "Modal Centralizado",
++    "change_organization": "Alterar organização",
++    "change_workspace": "Alterar espaço de trabalho",
+     "choices": "Escolhas",
+     "choose_environment": "Escolher ambiente",
+     "choose_organization": "Escolher organização",
+@@ -2624,7 +2626,7 @@
+     "csat_question_1_headline": "Qual a probabilidade de você recomendar este $[projectName] para um amigo ou colega?",
+     "csat_question_1_lower_label": "Pouco provável",
+     "csat_question_1_upper_label": "Muito provável",
+-    "csat_question_2_choice_1": "Meio satisfeito",
++    "csat_question_2_choice_1": "Parcialmente satisfeito",
+     "csat_question_2_choice_2": "Muito satisfeito",
+     "csat_question_2_choice_3": "Nem satisfeito nem insatisfeito",
+     "csat_question_2_choice_4": "Um pouco insatisfeito",
+diff --git a/apps/web/locales/pt-PT.json b/apps/web/locales/pt-PT.json
+index 7eeb88ae2399..cfa631c7316d 100644
+--- a/apps/web/locales/pt-PT.json
++++ b/apps/web/locales/pt-PT.json
+@@ -148,6 +148,8 @@
+     "bottom_right": "Inferior Direito",
+     "cancel": "Cancelar",
+     "centered_modal": "Modal Centralizado",
++    "change_organization": "Alterar organização",
++    "change_workspace": "Alterar espaço de trabalho",
+     "choices": "Escolhas",
+     "choose_environment": "Escolha o ambiente",
+     "choose_organization": "Escolher organização",
+@@ -505,7 +507,7 @@
+     "forgot_password_email_change_password": "Alterar palavra-passe",
+     "forgot_password_email_did_not_request": "Se não solicitou isto, por favor ignore este email.",
+     "forgot_password_email_heading": "Alterar palavra-passe",
+-    "forgot_password_email_link_valid_for_24_hours": "O link é válido por {minutes} minutos.",
++    "forgot_password_email_link_valid_for_24_hours": "A ligação é válida durante {minutes} minutos.",
+     "forgot_password_email_subject": "Redefina a sua palavra-passe do Formbricks",
+     "forgot_password_email_text": "Solicitou um link para alterar a sua palavra-passe. Pode fazê-lo clicando no link abaixo:",
+     "hidden_field": "Campo oculto",
+diff --git a/apps/web/locales/ro-RO.json b/apps/web/locales/ro-RO.json
+index 60e3e610ed85..b2d7b722b370 100644
+--- a/apps/web/locales/ro-RO.json
++++ b/apps/web/locales/ro-RO.json
+@@ -148,6 +148,8 @@
+     "bottom_right": "Dreapta Jos",
+     "cancel": "Anulare",
+     "centered_modal": "Modală centralizată",
++    "change_organization": "Schimbă organizația",
++    "change_workspace": "Schimbă spațiul de lucru",
+     "choices": "Alegeri",
+     "choose_environment": "Alege mediul",
+     "choose_organization": "Alege organizația",
+@@ -505,7 +507,7 @@
+     "forgot_password_email_change_password": "Schimbați parola",
+     "forgot_password_email_did_not_request": "Dacă nu ați solicitat acest lucru, vă rugăm să ignorați acest email.",
+     "forgot_password_email_heading": "Schimbați parola",
+-    "forgot_password_email_link_valid_for_24_hours": "Linkul este valabil timp de {minutes} minute.",
++    "forgot_password_email_link_valid_for_24_hours": "Linkul este valabil {minutes} minute.",
+     "forgot_password_email_subject": "Resetați parola dumneavoastră Formbricks",
+     "forgot_password_email_text": "Ați solicitat un link pentru a vă schimba parola. Puteți face acest lucru făcând clic pe linkul de mai jos:",
+     "hidden_field": "Câmp ascuns",
+@@ -2624,7 +2626,7 @@
+     "csat_question_1_headline": "Cât de probabil este ca să recomandați acest $[projectName] unui prieten sau coleg?",
+     "csat_question_1_lower_label": "Puțin probabil",
+     "csat_question_1_upper_label": "Foarte probabil",
+-    "csat_question_2_choice_1": "Puțin mulțumit",
++    "csat_question_2_choice_1": "Destul de mulțumit",
+     "csat_question_2_choice_2": "Foarte mulțumit",
+     "csat_question_2_choice_3": "Nici mulțumit, nici nemulțumit",
+     "csat_question_2_choice_4": "Ușor nemulțumit",
+diff --git a/apps/web/locales/ru-RU.json b/apps/web/locales/ru-RU.json
+index ac5246700285..41056f54472c 100644
+--- a/apps/web/locales/ru-RU.json
++++ b/apps/web/locales/ru-RU.json
+@@ -148,6 +148,8 @@
+     "bottom_right": "Внизу справа",
+     "cancel": "Отмена",
+     "centered_modal": "Центрированное модальное окно",
++    "change_organization": "Сменить организацию",
++    "change_workspace": "Сменить рабочее пространство",
+     "choices": "Варианты",
+     "choose_environment": "Выберите среду",
+     "choose_organization": "Выберите организацию",
+diff --git a/apps/web/locales/sv-SE.json b/apps/web/locales/sv-SE.json
+index 3bd50f43ad85..f78136729059 100644
+--- a/apps/web/locales/sv-SE.json
++++ b/apps/web/locales/sv-SE.json
+@@ -148,6 +148,8 @@
+     "bottom_right": "Nedre höger",
+     "cancel": "Avbryt",
+     "centered_modal": "Centrerad modal",
++    "change_organization": "Byt organisation",
++    "change_workspace": "Byt arbetsyta",
+     "choices": "Val",
+     "choose_environment": "Välj miljö",
+     "choose_organization": "Välj organisation",
+diff --git a/apps/web/locales/zh-Hans-CN.json b/apps/web/locales/zh-Hans-CN.json
+index 048096b4cd02..5fdd1980b4bb 100644
+--- a/apps/web/locales/zh-Hans-CN.json
++++ b/apps/web/locales/zh-Hans-CN.json
+@@ -148,6 +148,8 @@
+     "bottom_right": "右下",
+     "cancel": "取消",
+     "centered_modal": "居中 模态",
++    "change_organization": "切换组织",
++    "change_workspace": "切换工作区",
+     "choices": "选项",
+     "choose_environment": "选择 环境",
+     "choose_organization": "选择 组织",
+@@ -505,7 +507,7 @@
+     "forgot_password_email_change_password": "更改 密码",
+     "forgot_password_email_did_not_request": "如果您 未 请求此 项 ，请 忽略 此邮件 。",
+     "forgot_password_email_heading": "更改 密码",
+-    "forgot_password_email_link_valid_for_24_hours": "链接在{minutes}分钟内有效。",
++    "forgot_password_email_link_valid_for_24_hours": "该链接有效期为 {minutes} 分钟。",
+     "forgot_password_email_subject": "重置您的 Formbricks 密码",
+     "forgot_password_email_text": "您 已 请求 一个 链接 来 更改 您的 密码。 您 可以 点击 下方 链接 完成 这个 操作：",
+     "hidden_field": "隐藏字段",
+@@ -2624,8 +2626,8 @@
+     "csat_question_1_headline": "您有多大可能向朋友或同事推荐这款 $[projectName] ？",
+     "csat_question_1_lower_label": "不可能",
+     "csat_question_1_upper_label": "非常 可能",
+-    "csat_question_2_choice_1": "有点 满意",
+-    "csat_question_2_choice_2": "非常 满意",
++    "csat_question_2_choice_1": "比较满意",
++    "csat_question_2_choice_2": "非常满意",
+     "csat_question_2_choice_3": "既不 满意 也 不 不满意",
+     "csat_question_2_choice_4": "有点 不满意",
+     "csat_question_2_choice_5": "非常 不 满意",
+diff --git a/apps/web/locales/zh-Hant-TW.json b/apps/web/locales/zh-Hant-TW.json
+index 0b1397a29f18..a9260b72fd65 100644
+--- a/apps/web/locales/zh-Hant-TW.json
++++ b/apps/web/locales/zh-Hant-TW.json
+@@ -148,6 +148,8 @@
+     "bottom_right": "右下",
+     "cancel": "取消",
+     "centered_modal": "置中彈窗",
++    "change_organization": "變更組織",
++    "change_workspace": "變更工作區",
+     "choices": "選項",
+     "choose_environment": "選擇環境",
+     "choose_organization": "選擇 組織",
+@@ -505,7 +507,7 @@
+     "forgot_password_email_change_password": "變更密碼",
+     "forgot_password_email_did_not_request": "如果您沒有要求此操作，請忽略此電子郵件。",
+     "forgot_password_email_heading": "變更密碼",
+-    "forgot_password_email_link_valid_for_24_hours": "此連結有效期為 {minutes} 分鐘。",
++    "forgot_password_email_link_valid_for_24_hours": "此連結有效期限為 {minutes} 分鐘。",
+     "forgot_password_email_subject": "重設您的 Formbricks 密碼",
+     "forgot_password_email_text": "您已請求變更密碼的連結。您可以點擊以下連結來執行此操作：",
+     "hidden_field": "隱藏欄位",
+diff --git a/apps/web/playwright/action.spec.ts b/apps/web/playwright/action.spec.ts
+index 5cffeb8c5133..e6472eb7ed6b 100644
+--- a/apps/web/playwright/action.spec.ts
++++ b/apps/web/playwright/action.spec.ts
+@@ -14,7 +14,7 @@ const createNoCodeClickAction = async ({
+   selector: string;
+ }) => {
+   await page.goto("/");
+-  await page.getByText("My Workspace").click();
++  await page.locator("#workspaceDropdownTrigger").click();
+   await page.getByRole("menuitemcheckbox", { name: "Website & App Connection" }).click();
+   await page.waitForURL(/\/environments\/[^/]+\/workspace\/app-connection/);
+ 
+@@ -62,7 +62,7 @@ const createNoCodePageViewAction = async ({
+   noCodeType: string;
+ }) => {
+   await page.goto("/");
+-  await page.getByText("My Workspace").click();
++  await page.locator("#workspaceDropdownTrigger").click();
+   await page.getByRole("menuitemcheckbox", { name: "Website & App Connection" }).click();
+   await page.waitForURL(/\/environments\/[^/]+\/workspace\/app-connection/);
+ 
+@@ -111,7 +111,7 @@ const createNoCodeAction = async ({
+   noCodeType: string;
+ }) => {
+   await page.goto("/");
+-  await page.getByText("My Workspace").click();
++  await page.locator("#workspaceDropdownTrigger").click();
+   await page.getByRole("menuitemcheckbox", { name: "Website & App Connection" }).click();
+   await page.waitForURL(/\/environments\/[^/]+\/workspace\/app-connection/);
+ 
+@@ -149,7 +149,7 @@ const createCodeAction = async ({
+   description: string;
+   key: string;
+ }) => {
+-  await page.getByText("My Workspace").click();
++  await page.locator("#workspaceDropdownTrigger").click();
+   await page.getByRole("menuitemcheckbox", { name: "Website & App Connection" }).click();
+   await page.waitForURL(/\/environments\/[^/]+\/workspace\/app-connection/);
+ 
+@@ -189,7 +189,7 @@ test.describe("Create and Edit No Code Click Action", async () => {
+     const user = await users.create();
+     await user.login();
+ 
+-    await page.getByText("My Workspace").click();
++    await page.locator("#workspaceDropdownTrigger").click();
+     await page.getByRole("menuitemcheckbox", { name: "Website & App Connection" }).click();
+     await page.waitForURL(/\/environments\/[^/]+\/workspace\/app-connection/);
+   });
+@@ -247,7 +247,7 @@ test.describe("Create and Edit No Code Page view Action", async () => {
+     });
+ 
+     await test.step("Edit No Code Page view Action", async () => {
+-      await page.getByText("My Workspace").click();
++      await page.locator("#workspaceDropdownTrigger").click();
+       await page.getByRole("menuitemcheckbox", { name: "Website & App Connection" }).click();
+       await page.waitForURL(/\/environments\/[^/]+\/workspace\/app-connection/);
+ 
+@@ -300,7 +300,7 @@ test.describe("Create and Edit No Code Exit Intent Action", async () => {
+     });
+ 
+     await test.step("Edit No Code Exit Intent Action", async () => {
+-      await page.getByText("My Workspace").click();
++      await page.locator("#workspaceDropdownTrigger").click();
+       await page.getByRole("menuitemcheckbox", { name: "Website & App Connection" }).click();
+       await page.waitForURL(/\/environments\/[^/]+\/workspace\/app-connection/);
+ 
+@@ -326,7 +326,7 @@ test.describe("Create and Edit No Code 50% scroll Action", async () => {
+     const user = await users.create();
+     await user.login();
+ 
+-    await page.getByText("My Workspace").click();
++    await page.locator("#workspaceDropdownTrigger").click();
+     await page.getByRole("menuitemcheckbox", { name: "Website & App Connection" }).click();
+     await page.waitForURL(/\/environments\/[^/]+\/workspace\/app-connection/);
+   });
+@@ -342,7 +342,7 @@ test.describe("Create and Edit No Code 50% scroll Action", async () => {
+     });
+ 
+     await test.step("Edit No Code 50% scroll Action", async () => {
+-      await page.getByText("My Workspace").click();
++      await page.locator("#workspaceDropdownTrigger").click();
+       await page.getByRole("menuitemcheckbox", { name: "Website & App Connection" }).click();
+       await page.waitForURL(/\/environments\/[^/]+\/workspace\/app-connection/);
+ 
+@@ -368,7 +368,7 @@ test.describe("Create and Edit Code Action", async () => {
+     const user = await users.create();
+     await user.login();
+ 
+-    await page.getByText("My Workspace").click();
++    await page.locator("#workspaceDropdownTrigger").click();
+     await page.getByRole("menuitemcheckbox", { name: "Website & App Connection" }).click();
+     await page.waitForURL(/\/environments\/[^/]+\/workspace\/app-connection/);
+   });
+@@ -384,7 +384,7 @@ test.describe("Create and Edit Code Action", async () => {
+     });
+ 
+     await test.step("Edit Code Action", async () => {
+-      await page.getByText("My Workspace").click();
++      await page.locator("#workspaceDropdownTrigger").click();
+       await page.getByRole("menuitemcheckbox", { name: "Website & App Connection" }).click();
+       await page.waitForURL(/\/environments\/[^/]+\/workspace\/app-connection/);
+ 
+@@ -407,7 +407,7 @@ test.describe("Create and Delete Action", async () => {
+     const user = await users.create();
+     await user.login();
+ 
+-    await page.getByText("My Workspace").click();
++    await page.locator("#workspaceDropdownTrigger").click();
+     await page.getByRole("menuitemcheckbox", { name: "Website & App Connection" }).click();
+     await page.waitForURL(/\/environments\/[^/]+\/workspace\/app-connection/);
+   });
+@@ -423,7 +423,7 @@ test.describe("Create and Delete Action", async () => {
+     });
+ 
+     await test.step("Delete Action", async () => {
+-      await page.getByText("My Workspace").click();
++      await page.locator("#workspaceDropdownTrigger").click();
+       await page.getByRole("menuitemcheckbox", { name: "Website & App Connection" }).click();
+       await page.waitForURL(/\/environments\/[^/]+\/workspace\/app-connection/);
+ 

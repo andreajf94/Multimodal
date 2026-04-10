@@ -1,0 +1,145 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "api_design",
+      "recommendation": "Created a Scheme extractor that implements axum's FromRequestParts trait, allowing handlers to access request scheme information via dependency injection. This follows the same pattern as existing extractors like client_ip and trusted_proxy.",
+      "rationale": "Using axum's extractor pattern provides a type-safe, ergonomic API for handlers. Developers can simply add `Scheme` as a parameter to their handler functions to get the request scheme. This integrates seamlessly with axum's existing middleware and routing infrastructure.",
+      "alternatives_considered": [
+        "Parsing scheme manually in each handler",
+        "Creating a custom request extension without proper extractor pattern",
+        "Using a global configuration instead of per-request extraction"
+      ],
+      "files_affected": [
+        "packages/ak-axum/src/extract/scheme.rs",
+        "packages/ak-axum/src/extract/mod.rs"
+      ]
+    },
+    {
+      "dimension": "security",
+      "recommendation": "Implemented a trust-based scheme extraction system that only honors forwarded headers (X-Forwarded-Proto, X-Forwarded-Scheme, Forwarded) when the request comes from a trusted proxy. This prevents header injection attacks from untrusted sources.",
+      "rationale": "In production deployments with reverse proxies, the actual scheme information needs to come from proxy headers. However, accepting these headers from any source would allow clients to spoof the scheme. The TrustedProxy extractor (already in the codebase) provides the trust boundary.",
+      "alternatives_considered": [
+        "Always trusting forwarded headers",
+        "Using configuration-based trust lists",
+        "Requiring explicit scheme configuration per endpoint"
+      ],
+      "files_affected": [
+        "packages/ak-axum/src/extract/scheme.rs"
+      ]
+    },
+    {
+      "dimension": "data_modeling",
+      "recommendation": "Used http::uri::Scheme type from the http crate instead of creating a custom enum. This ensures compatibility with other parts of the HTTP ecosystem and provides proper serialization/deserialization support.",
+      "rationale": "The http crate's Scheme type is standard across the Rust HTTP ecosystem. It provides proper parsing, validation, and conversion methods. Using a custom type would require additional conversion logic and reduce interoperability.",
+      "alternatives_considered": [
+        "Creating a custom Scheme enum",
+        "Using a simple string",
+        "Using a boolean (is_https)"
+      ],
+      "files_affected": [
+        "packages/ak-axum/src/extract/scheme.rs"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Implemented fallback logic with clear priority order: X-Forwarded-Proto \u2192 X-Forwarded-Scheme \u2192 Forwarded header \u2192 ProxyProtocol \u2192 TLS state \u2192 default HTTP. Each step includes proper error handling with try_into conversions and pattern matching.",
+      "rationale": "Different proxies and load balancers use different headers. Supporting multiple standards ensures compatibility with various deployment scenarios. The priority order follows common proxy conventions where X-Forwarded-Proto is most widely supported.",
+      "alternatives_considered": [
+        "Supporting only one header type",
+        "Failing on malformed headers instead of falling through",
+        "Using configuration to specify which headers to check"
+      ],
+      "files_affected": [
+        "packages/ak-axum/src/extract/scheme.rs"
+      ]
+    },
+    {
+      "dimension": "observability",
+      "recommendation": "Added scheme to tracing spans in both the scheme middleware and the span middleware. This ensures the scheme is captured in distributed traces for debugging and monitoring.",
+      "rationale": "Knowing whether requests are HTTP or HTTPS is crucial for security auditing and debugging TLS-related issues. By adding it to the span, it becomes part of the structured logging and tracing output without requiring manual logging in each handler.",
+      "alternatives_considered": [
+        "Logging scheme separately from traces",
+        "Making handlers manually log scheme",
+        "Only logging scheme in debug mode"
+      ],
+      "files_affected": [
+        "packages/ak-axum/src/extract/scheme.rs",
+        "packages/ak-axum/src/tracing.rs"
+      ]
+    },
+    {
+      "dimension": "testing",
+      "recommendation": "Created comprehensive unit tests covering all extraction scenarios: trusted/untrusted proxies, different header types, TLS state, priority ordering, and edge cases like case sensitivity and multiple forwarded stanzas.",
+      "rationale": "Scheme extraction has security implications and needs to work correctly in various deployment scenarios. The tests verify that the trust boundary is respected, priority order is correct, and edge cases are handled properly.",
+      "alternatives_considered": [
+        "Only testing happy paths",
+        "Relying on integration tests only",
+        "Skipping tests for proxy protocol scenarios"
+      ],
+      "files_affected": [
+        "packages/ak-axum/src/extract/scheme.rs"
+      ]
+    },
+    {
+      "dimension": "dependency_management",
+      "recommendation": "Added the forwarded-header-value crate as a workspace dependency to properly parse the standardized Forwarded header (RFC 7239). This provides robust parsing of the complex Forwarded header format.",
+      "rationale": "The Forwarded header can contain multiple stanzas with various parameters. Using a dedicated parsing library ensures correct handling of the specification, including proper handling of quoted strings, multiple values, and different parameter orders.",
+      "alternatives_considered": [
+        "Implementing custom Forwarded header parsing",
+        "Only supporting X-Forwarded-* headers",
+        "Using a more general HTTP header parsing library"
+      ],
+      "files_affected": [
+        "Cargo.lock",
+        "Cargo.toml",
+        "packages/ak-axum/Cargo.toml"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Implement Scheme extractor with middleware integration",
+      "description": "Create the core Scheme extractor struct with FromRequestParts implementation and the scheme_middleware that extracts scheme information and adds it to request extensions. This enables handlers to access request scheme via dependency injection.",
+      "files_to_modify": [
+        "packages/ak-axum/src/extract/mod.rs",
+        "packages/ak-axum/src/router.rs"
+      ],
+      "files_to_create": [
+        "packages/ak-axum/src/extract/scheme.rs"
+      ],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-002",
+      "title": "Add scheme to tracing infrastructure",
+      "description": "Update the tracing middleware to include scheme field in spans and ensure the scheme middleware records the scheme in the current span. This provides observability into request schemes across the application.",
+      "files_to_modify": [
+        "packages/ak-axum/src/tracing.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-003",
+      "title": "Add dependency and update module exports",
+      "description": "Add forwarded-header-value crate as a workspace dependency and update Cargo files. Also export the new scheme module from the extract module to make it available to consumers of the ak-axum package.",
+      "files_to_modify": [
+        "Cargo.lock",
+        "Cargo.toml",
+        "packages/ak-axum/Cargo.toml"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation adds HTTP scheme extraction capabilities to the ak-axum package by creating a new Scheme extractor that follows axum's established patterns. The core design centers around a middleware that extracts scheme information from various sources (proxy headers, TLS state, proxy protocol) and stores it in request extensions, making it available to handlers via the Scheme extractor.\n\nKey design decisions include: 1) Security-first approach that only honors forwarded headers from trusted proxies, preventing header injection attacks; 2) Comprehensive support for multiple header standards (X-Forwarded-Proto, X-Forwarded-Scheme, and RFC 7239 Forwarded header) to ensure compatibility with various proxy configurations; 3) Clear priority ordering that matches common proxy deployment patterns; 4) Integration with existing tracing infrastructure to provide observability into request schemes.\n\nThe implementation integrates seamlessly with the existing ak-axum architecture by following the same extractor/middleware pattern used for client IP and trusted proxy functionality. The scheme middleware is added to the router wrapping chain alongside other middleware, ensuring consistent application across all routes. The use of the forwarded-header-value crate provides robust parsing of the standardized Forwarded header without requiring custom parsing logic.",
+  "source_pr": "https://github.com/goauthentik/authentik/pull/21322",
+  "before_sha": "2b8313ee918ceaba3e33bf5eddd509bafe2eb48c",
+  "after_sha": "d4e651d893629dbd30c2f0f2c9d27a14b64fd642",
+  "diff_stats": {
+    "additions": 263,
+    "deletions": 2,
+    "files_changed": 7
+  }
+}

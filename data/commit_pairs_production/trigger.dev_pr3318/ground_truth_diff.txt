@@ -1,0 +1,247 @@
+diff --git a/apps/webapp/app/components/BackgroundWrapper.tsx b/apps/webapp/app/components/BackgroundWrapper.tsx
+index ecff3af6dd4..aaf06d56aaf 100644
+--- a/apps/webapp/app/components/BackgroundWrapper.tsx
++++ b/apps/webapp/app/components/BackgroundWrapper.tsx
+@@ -5,10 +5,9 @@ import blurredDashboardBackgroundTable from "~/assets/images/blurred-dashboard-b
+ 
+ export function BackgroundWrapper({ children }: { children: ReactNode }) {
+   return (
+-    <div className="relative h-full w-full overflow-hidden">
+-      {/* Left menu top background - fixed width 260px, maintains aspect ratio */}
++    <div className="relative h-full w-full overflow-hidden bg-background-dimmed lg:bg-transparent">
+       <div
+-        className="absolute left-0 top-0 w-[260px] bg-contain bg-left-top bg-no-repeat"
++        className="absolute left-0 top-0 hidden w-[260px] bg-contain bg-left-top bg-no-repeat lg:block"
+         style={{
+           backgroundImage: `url(${blurredDashboardBackgroundMenuTop})`,
+           aspectRatio: "auto",
+@@ -17,9 +16,8 @@ export function BackgroundWrapper({ children }: { children: ReactNode }) {
+         }}
+       />
+ 
+-      {/* Left menu bottom background - fixed width 260px, maintains aspect ratio */}
+       <div
+-        className="absolute bottom-0 left-0 w-[260px] bg-contain bg-left-bottom bg-no-repeat"
++        className="absolute bottom-0 left-0 hidden w-[260px] bg-contain bg-left-bottom bg-no-repeat lg:block"
+         style={{
+           backgroundImage: `url(${blurredDashboardBackgroundMenuBottom})`,
+           aspectRatio: "auto",
+@@ -28,9 +26,8 @@ export function BackgroundWrapper({ children }: { children: ReactNode }) {
+         }}
+       />
+ 
+-      {/* Right table background - fixed width 2000px, positioned next to menu */}
+       <div
+-        className="absolute top-0 bg-left-top bg-no-repeat"
++        className="absolute top-0 hidden bg-left-top bg-no-repeat lg:block"
+         style={{
+           left: "260px",
+           backgroundImage: `url(${blurredDashboardBackgroundTable})`,
+@@ -41,7 +38,6 @@ export function BackgroundWrapper({ children }: { children: ReactNode }) {
+         }}
+       />
+ 
+-      {/* Content layer */}
+       <div className="relative z-10 h-full w-full">{children}</div>
+     </div>
+   );
+diff --git a/apps/webapp/app/components/LoginPageLayout.tsx b/apps/webapp/app/components/LoginPageLayout.tsx
+index d9ac7ceb4d7..3e42cd6894f 100644
+--- a/apps/webapp/app/components/LoginPageLayout.tsx
++++ b/apps/webapp/app/components/LoginPageLayout.tsx
+@@ -46,10 +46,10 @@ export function LoginPageLayout({ children }: { children: React.ReactNode }) {
+   }, []);
+ 
+   return (
+-    <main className="grid h-full grid-cols-1 md:grid-cols-2">
+-      <div className="border-r border-grid-bright bg-background-bright">
+-        <div className="flex h-full flex-col items-center justify-between p-6">
+-          <div className="flex w-full items-center justify-between">
++    <main className="grid h-full grid-cols-1 lg:grid-cols-2">
++      <div className="bg-background-dimmed lg:border-r lg:border-grid-bright lg:bg-background-bright">
++        <div className="flex h-full flex-col items-center justify-center p-6 lg:justify-between">
++          <div className="hidden w-full items-center justify-between lg:flex">
+             <a href="https://trigger.dev">
+               <LogoType className="w-36" />
+             </a>
+@@ -63,12 +63,12 @@ export function LoginPageLayout({ children }: { children: React.ReactNode }) {
+           </div>
+           <div className="flex h-full max-w-sm items-center justify-center">{children}</div>
+           <Paragraph variant="small" className="text-center">
+-            Having login issues? <TextLink href="https://@trigger.dev/contact">Email us</TextLink>{" "}
++            Having login issues? <TextLink href="https://trigger.dev/contact">Email us</TextLink>{" "}
+             or <TextLink href="https://trigger.dev/discord">ask us in Discord</TextLink>
+           </Paragraph>
+         </div>
+       </div>
+-      <div className="hidden grid-rows-[1fr_auto] pb-6 md:grid">
++      <div className="hidden grid-rows-[1fr_auto] pb-6 lg:grid">
+         <div className="flex h-full flex-col items-center justify-center px-16">
+           <Header3 className="relative text-center text-2xl font-normal leading-8 text-text-dimmed transition before:relative before:right-1 before:top-0 before:text-6xl before:text-charcoal-750 before:content-['❝'] lg-height:text-xl md-height:text-lg">
+             {randomQuote?.quote}
+diff --git a/apps/webapp/app/components/layout/AppLayout.tsx b/apps/webapp/app/components/layout/AppLayout.tsx
+index 635489400ac..3da2bfbb5a5 100644
+--- a/apps/webapp/app/components/layout/AppLayout.tsx
++++ b/apps/webapp/app/components/layout/AppLayout.tsx
+@@ -60,13 +60,26 @@ export function PageBody({
+ export function MainCenteredContainer({
+   children,
+   className,
++  variant = "default",
+ }: {
+   children: React.ReactNode;
+   className?: string;
++  variant?: "default" | "onboarding";
+ }) {
+   return (
+-    <div className="h-full w-full overflow-y-auto scrollbar-thin scrollbar-track-transparent scrollbar-thumb-charcoal-600">
+-      <div className={cn("mx-auto mt-6 max-w-xs overflow-y-auto p-1 md:mt-[22vh]", className)}>
++    <div
++      className={cn(
++        "h-full w-full overflow-y-auto scrollbar-thin scrollbar-track-transparent scrollbar-thumb-charcoal-600",
++        variant === "onboarding" && "flex flex-col p-4 lg:p-0"
++      )}
++    >
++      <div
++        className={cn(
++          "mx-auto max-w-xs p-1",
++          variant === "onboarding" ? "m-auto lg:mx-auto lg:mb-0 lg:mt-[22vh]" : "mt-6 md:mt-[22vh]",
++          className
++        )}
++      >
+         {children}
+       </div>
+     </div>
+diff --git a/apps/webapp/app/components/navigation/SideMenu.tsx b/apps/webapp/app/components/navigation/SideMenu.tsx
+index 14b3c56495b..0693a2418b1 100644
+--- a/apps/webapp/app/components/navigation/SideMenu.tsx
++++ b/apps/webapp/app/components/navigation/SideMenu.tsx
+@@ -1003,6 +1003,7 @@ function ProjectSelector({
+             title="Logout"
+             icon={ArrowRightOnRectangleIcon}
+             leadingIconClassName="text-text-dimmed"
++            danger
+           />
+         </div>
+       </PopoverContent>
+diff --git a/apps/webapp/app/components/primitives/Popover.tsx b/apps/webapp/app/components/primitives/Popover.tsx
+index bd84005d95e..623adbc4bb9 100644
+--- a/apps/webapp/app/components/primitives/Popover.tsx
++++ b/apps/webapp/app/components/primitives/Popover.tsx
+@@ -69,6 +69,7 @@ const PopoverMenuItem = React.forwardRef<
+     name?: string;
+     value?: string;
+     type?: React.ComponentProps<"button">["type"];
++    danger?: boolean;
+   }
+ >(
+   (
+@@ -86,18 +87,23 @@ const PopoverMenuItem = React.forwardRef<
+       name,
+       value,
+       type,
++      danger = false,
+     },
+     ref
+   ) => {
+     const contentProps = {
+       variant: variant.variant,
+       LeadingIcon: icon,
+-      leadingIconClassName,
++      leadingIconClassName: danger
++        ? cn(leadingIconClassName, "transition-colors group-hover/button:text-error")
++        : leadingIconClassName,
+       fullWidth: true,
+       textAlignLeft: true,
+       TrailingIcon: isSelected ? CheckIcon : undefined,
+       className: cn(
+-        "group-hover:bg-charcoal-700",
++        danger
++          ? "transition-colors group-hover/button:bg-error/10 group-hover/button:text-error [&_span]:transition-colors [&_span]:group-hover/button:text-error"
++          : "group-hover:bg-charcoal-700",
+         isSelected ? "bg-charcoal-750 group-hover:bg-charcoal-600/50" : undefined,
+         className
+       ),
+diff --git a/apps/webapp/app/routes/_app.orgs.$organizationSlug_.projects.new/route.tsx b/apps/webapp/app/routes/_app.orgs.$organizationSlug_.projects.new/route.tsx
+index abe6da43f1d..39cde0cf2d0 100644
+--- a/apps/webapp/app/routes/_app.orgs.$organizationSlug_.projects.new/route.tsx
++++ b/apps/webapp/app/routes/_app.orgs.$organizationSlug_.projects.new/route.tsx
+@@ -361,7 +361,7 @@ export default function Page() {
+   return (
+     <AppContainer className="bg-charcoal-900">
+       <BackgroundWrapper>
+-        <MainCenteredContainer className="max-w-[29rem] rounded-lg border border-grid-bright bg-background-dimmed p-5 shadow-lg">
++        <MainCenteredContainer variant="onboarding" className="max-w-[29rem] rounded-lg border border-grid-bright bg-background-dimmed p-5 shadow-lg">
+           <div>
+             <FormTitle
+               LeadingIcon={<FolderIcon className="size-7 text-indigo-500" />}
+diff --git a/apps/webapp/app/routes/_app.orgs.new/route.tsx b/apps/webapp/app/routes/_app.orgs.new/route.tsx
+index fb072518c54..f4f7f995bf9 100644
+--- a/apps/webapp/app/routes/_app.orgs.new/route.tsx
++++ b/apps/webapp/app/routes/_app.orgs.new/route.tsx
+@@ -143,7 +143,7 @@ export default function NewOrganizationPage() {
+   return (
+     <AppContainer className="bg-charcoal-900">
+       <BackgroundWrapper>
+-        <MainCenteredContainer className="max-w-[26rem] rounded-lg border border-grid-bright bg-background-dimmed p-5 shadow-lg">
++        <MainCenteredContainer variant="onboarding" className="max-w-[26rem] rounded-lg border border-grid-bright bg-background-dimmed p-5 shadow-lg">
+           <FormTitle
+             LeadingIcon={<BuildingOffice2Icon className="size-6 text-fuchsia-600" />}
+             title="Create an Organization"
+diff --git a/apps/webapp/app/routes/confirm-basic-details.tsx b/apps/webapp/app/routes/confirm-basic-details.tsx
+index ed868186552..2c6209b74f0 100644
+--- a/apps/webapp/app/routes/confirm-basic-details.tsx
++++ b/apps/webapp/app/routes/confirm-basic-details.tsx
+@@ -241,7 +241,7 @@ export default function Page() {
+   return (
+     <AppContainer className="bg-charcoal-900">
+       <BackgroundWrapper>
+-        <MainCenteredContainer className="max-w-[29rem] rounded-lg border border-grid-bright bg-background-dimmed p-5 shadow-lg">
++        <MainCenteredContainer variant="onboarding" className="max-w-[29rem] rounded-lg border border-grid-bright bg-background-dimmed p-5 shadow-lg">
+           <Form method="post" {...form.props}>
+             <FormTitle
+               title="Welcome to Trigger.dev"
+diff --git a/apps/webapp/app/routes/invites.tsx b/apps/webapp/app/routes/invites.tsx
+index 11998a4676a..7b234d4129b 100644
+--- a/apps/webapp/app/routes/invites.tsx
++++ b/apps/webapp/app/routes/invites.tsx
+@@ -101,7 +101,7 @@ export default function Page() {
+   return (
+     <AppContainer className="bg-charcoal-900">
+       <BackgroundWrapper>
+-        <MainCenteredContainer className="max-w-[26rem] rounded-lg border border-grid-bright bg-background-dimmed p-5 shadow-lg">
++        <MainCenteredContainer variant="onboarding" className="max-w-[26rem] rounded-lg border border-grid-bright bg-background-dimmed p-5 shadow-lg">
+           <div>
+             <FormTitle
+               LeadingIcon={<EnvelopeIcon className="size-6 text-cyan-500" />}
+diff --git a/apps/webapp/app/routes/vercel.onboarding.tsx b/apps/webapp/app/routes/vercel.onboarding.tsx
+index bdd1c1d05ca..1cf351532e9 100644
+--- a/apps/webapp/app/routes/vercel.onboarding.tsx
++++ b/apps/webapp/app/routes/vercel.onboarding.tsx
+@@ -293,7 +293,7 @@ export default function VercelOnboardingPage() {
+     return (
+       <AppContainer className="bg-charcoal-900">
+         <BackgroundWrapper>
+-          <MainCenteredContainer className="max-w-[26rem] rounded-lg border border-grid-bright bg-background-dimmed p-5 shadow-lg">
++          <MainCenteredContainer variant="onboarding" className="max-w-[26rem] rounded-lg border border-grid-bright bg-background-dimmed p-5 shadow-lg">
+             <FormTitle title="Installation Expired" description={data.error} />
+             <Button
+               variant="primary/medium"
+@@ -325,7 +325,7 @@ export default function VercelOnboardingPage() {
+     return (
+       <AppContainer className="bg-charcoal-900">
+         <BackgroundWrapper>
+-          <MainCenteredContainer className="max-w-[26rem] rounded-lg border border-grid-bright bg-background-dimmed p-5 shadow-lg">
++          <MainCenteredContainer variant="onboarding" className="max-w-[26rem] rounded-lg border border-grid-bright bg-background-dimmed p-5 shadow-lg">
+             <FormTitle
+               LeadingIcon={<BuildingOfficeIcon className="size-7 text-indigo-500" />}
+               title="Select Organization"
+@@ -401,7 +401,7 @@ export default function VercelOnboardingPage() {
+   return (
+     <AppContainer className="bg-charcoal-900">
+       <BackgroundWrapper>
+-        <MainCenteredContainer className="max-w-[26rem] rounded-lg border border-grid-bright bg-background-dimmed p-5 shadow-lg">
++        <MainCenteredContainer variant="onboarding" className="max-w-[26rem] rounded-lg border border-grid-bright bg-background-dimmed p-5 shadow-lg">
+           <FormTitle
+             LeadingIcon={<FolderIcon className="size-7 text-indigo-500" />}
+             title="Select Project"

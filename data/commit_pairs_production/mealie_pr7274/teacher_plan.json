@@ -1,0 +1,66 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "ci_cd_workflow",
+      "recommendation": "Added a 'ref' parameter to the checkout action in build-package.yml to allow specifying which commit to build from",
+      "rationale": "The release workflow was building from the wrong commit (github.sha) instead of the version bump commit that triggered the release. By adding the 'ref' parameter with fallback logic (${{ inputs.ref || github.sha }}), we ensure the build uses the correct commit when triggered by the release workflow, while maintaining backward compatibility for other triggers.",
+      "alternatives_considered": [
+        "Hard-coding a specific commit reference (too rigid)",
+        "Creating a separate workflow for releases (duplicates logic)",
+        "Using git tags instead of commit references (requires additional tagging steps)"
+      ],
+      "files_affected": [
+        ".github/workflows/build-package.yml"
+      ]
+    },
+    {
+      "dimension": "ci_cd_workflow",
+      "recommendation": "Updated the COMMIT build argument in publish.yml to use the same ref logic as build-package.yml",
+      "rationale": "Consistency between workflows is crucial. The publish.yml workflow builds the Docker image and needs to reference the same commit that was checked out in build-package.yml. Using the same ${{ inputs.ref || github.sha }} pattern ensures both workflows operate on identical code states.",
+      "alternatives_considered": [
+        "Keeping different commit references in different workflows (causes inconsistency)",
+        "Using environment variables to pass commit references (more complex)",
+        "Creating a shared workflow configuration (would require major refactor)"
+      ],
+      "files_affected": [
+        ".github/workflows/publish.yml"
+      ]
+    },
+    {
+      "dimension": "backward_compatibility",
+      "recommendation": "Used a fallback pattern (${{ inputs.ref || github.sha }}) to maintain compatibility with existing workflow triggers",
+      "rationale": "The workflows are triggered from multiple sources (manual runs, PRs, releases). The fallback pattern ensures that when no 'ref' input is provided (e.g., in manual runs), the workflow defaults to github.sha, preserving existing behavior for all non-release triggers.",
+      "alternatives_considered": [
+        "Requiring the 'ref' parameter for all runs (breaks existing workflows)",
+        "Creating separate workflow files for releases and non-releases (maintenance overhead)",
+        "Using conditional logic based on event type (more complex to maintain)"
+      ],
+      "files_affected": [
+        ".github/workflows/build-package.yml",
+        ".github/workflows/publish.yml"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Fix release commit checkout in CI/CD workflows",
+      "description": "Ensure release builds checkout and build from the version bump commit that triggered the release, not from an outdated commit. This fixes the issue where releases were being built from incorrect code states.",
+      "files_to_modify": [
+        ".github/workflows/build-package.yml",
+        ".github/workflows/publish.yml"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The fix addresses a critical CI/CD issue where release builds were being created from outdated commits rather than the version bump commit that triggered the release workflow. The solution modifies two GitHub Actions workflow files to accept an optional 'ref' input parameter that specifies which commit to checkout and build from.\n\nIn build-package.yml, the checkout action now includes a 'ref' parameter with fallback logic (${{ inputs.ref || github.sha }}). This allows the release workflow to pass the version bump commit reference while maintaining compatibility with other workflow triggers. The same pattern is applied to the COMMIT build argument in publish.yml to ensure consistency between the package build and Docker image build stages.\n\nThe implementation follows the principle of minimal change - it adds only the necessary parameters without restructuring the entire workflow. The fallback pattern ensures backward compatibility, allowing the workflows to continue functioning for manual runs, PR builds, and other triggers that don't provide the 'ref' input. This approach fixes the release process while minimizing risk to existing CI/CD pipelines.",
+  "source_pr": "https://github.com/mealie-recipes/mealie/pull/7274",
+  "before_sha": "2ff2f22060412b2919aa793ab4ddf5188f42f909",
+  "after_sha": "3413c23f16ff80185a216e792ff5720a1191c1fb",
+  "diff_stats": {
+    "additions": 3,
+    "deletions": 1,
+    "files_changed": 2
+  }
+}

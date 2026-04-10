@@ -1,0 +1,136 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "api_design",
+      "recommendation": "Created a shared billing redirect helper function to handle Cloud vs Self-Hosted routing logic",
+      "rationale": "Multiple components were duplicating the same conditional logic for billing redirects. Centralizing this logic into a single helper function (getBillingFallbackPath) improves maintainability, ensures consistency, and makes it easier to test the routing behavior.",
+      "alternatives_considered": [
+        "Keeping the conditional logic duplicated in each component",
+        "Creating a more complex routing service with dependency injection",
+        "Using environment variables directly in each component"
+      ],
+      "files_affected": [
+        "apps/web/lib/membership/navigation.ts",
+        "apps/web/app/(app)/environments/[environmentId]/page.tsx",
+        "apps/web/app/(app)/environments/[environmentId]/workspace/integrations/page.tsx",
+        "apps/web/modules/ee/contacts/layout.tsx",
+        "apps/web/modules/projects/settings/layout.tsx",
+        "apps/web/modules/survey/list/page.tsx"
+      ]
+    },
+    {
+      "dimension": "ui_ux_design",
+      "recommendation": "Implemented a consistent disabled-state pattern for unauthorized navigation items instead of hiding them",
+      "rationale": "Hiding restricted items causes flickering during authorization checks and reduces transparency. Showing disabled items with explanatory tooltips provides better user experience, communicates permission boundaries clearly, and eliminates visual instability during loading states.",
+      "alternatives_considered": [
+        "Continuing to hide unauthorized items (causes flickering)",
+        "Showing unauthorized items without any visual indication (confusing)",
+        "Using modal dialogs instead of tooltips (more intrusive)"
+      ],
+      "files_affected": [
+        "apps/web/app/(app)/environments/[environmentId]/components/NavigationLink.tsx",
+        "apps/web/app/(app)/environments/[environmentId]/components/organization-breadcrumb.tsx",
+        "apps/web/app/(app)/environments/[environmentId]/components/project-breadcrumb.tsx",
+        "apps/web/modules/ui/components/secondary-navigation/index.tsx"
+      ]
+    },
+    {
+      "dimension": "authorization_pattern",
+      "recommendation": "Enhanced role-based access control to include 'manager' role for API key operations and improved membership state handling",
+      "rationale": "Previously only 'owner' could manage API keys, but 'manager' role should also have this permission. Added explicit handling for pending membership states (membershipRole === undefined) to prevent authorization errors during loading.",
+      "alternatives_considered": [
+        "Keeping API key management restricted to owners only",
+        "Creating separate permission sets for different resource types",
+        "Implementing a more complex RBAC system with permission inheritance"
+      ],
+      "files_affected": [
+        "apps/web/modules/organization/settings/api-keys/actions.ts",
+        "apps/web/app/(app)/environments/[environmentId]/components/MainNavigation.tsx",
+        "apps/web/app/(app)/environments/[environmentId]/components/organization-breadcrumb.tsx",
+        "apps/web/app/(app)/environments/[environmentId]/components/project-breadcrumb.tsx"
+      ]
+    },
+    {
+      "dimension": "testing",
+      "recommendation": "Added comprehensive unit tests for the new billing redirect helper function",
+      "rationale": "The billing redirect logic is critical for proper user routing in both deployment modes. Unit tests ensure the helper function behaves correctly for both Cloud and Self-Hosted scenarios, preventing regression errors.",
+      "alternatives_considered": [
+        "Relying only on existing integration tests",
+        "Adding end-to-end tests instead of unit tests",
+        "Not testing the helper function at all"
+      ],
+      "files_affected": [
+        "apps/web/lib/membership/navigation.test.ts"
+      ]
+    },
+    {
+      "dimension": "component_design",
+      "recommendation": "Enhanced NavigationLink component to support disabled states with tooltips and popovers",
+      "rationale": "The NavigationLink component needed to handle both collapsed (tooltip) and expanded (popover) states when disabled. This required conditional rendering of either Link or disabled button elements, with appropriate accessibility attributes and visual styling.",
+      "alternatives_considered": [
+        "Creating separate DisabledNavigationLink component",
+        "Using only tooltips for both collapsed and expanded states",
+        "Implementing a higher-order component pattern"
+      ],
+      "files_affected": [
+        "apps/web/app/(app)/environments/[environmentId]/components/NavigationLink.tsx"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Create shared billing redirect helper and update all redirects",
+      "description": "Implement a centralized billing redirect helper function that handles Cloud vs Self-Hosted routing logic, and update all existing redirects to use this helper for consistency",
+      "files_to_modify": [
+        "apps/web/app/(app)/environments/[environmentId]/page.tsx",
+        "apps/web/app/(app)/environments/[environmentId]/workspace/integrations/page.tsx",
+        "apps/web/modules/ee/contacts/layout.tsx",
+        "apps/web/modules/projects/settings/layout.tsx",
+        "apps/web/modules/survey/list/page.tsx"
+      ],
+      "files_to_create": [
+        "apps/web/lib/membership/navigation.ts",
+        "apps/web/lib/membership/navigation.test.ts"
+      ],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-002",
+      "title": "Implement disabled navigation pattern across all UI components",
+      "description": "Update all navigation components to show unauthorized items as disabled with explanatory tooltips instead of hiding them, eliminating flickering and improving transparency",
+      "files_to_modify": [
+        "apps/web/app/(app)/environments/[environmentId]/components/MainNavigation.tsx",
+        "apps/web/app/(app)/environments/[environmentId]/components/NavigationLink.tsx",
+        "apps/web/app/(app)/environments/[environmentId]/components/organization-breadcrumb.tsx",
+        "apps/web/app/(app)/environments/[environmentId]/components/project-breadcrumb.tsx",
+        "apps/web/modules/ui/components/secondary-navigation/index.tsx"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "large"
+    },
+    {
+      "id": "T-003",
+      "title": "Enhance authorization patterns and fix API key permissions",
+      "description": "Update API key actions to allow 'manager' role in addition to 'owner', and improve membership state handling to properly manage pending membership states",
+      "files_to_modify": [
+        "apps/web/modules/organization/settings/api-keys/actions.ts",
+        "apps/web/app/(app)/(onboarding)/organizations/[organizationId]/landing/page.tsx",
+        "apps/web/app/(app)/environments/[environmentId]/components/TopControlBar.tsx",
+        "apps/web/app/(app)/environments/[environmentId]/components/project-and-org-switch.tsx",
+        "apps/web/app/(app)/environments/[environmentId]/settings/(organization)/components/OrganizationSettingsNavbar.tsx"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation addresses two main concerns: consistent navigation authorization behavior and unified billing redirect logic. For navigation, instead of hiding unauthorized items (which caused flickering), we now display them as disabled with explanatory tooltips. This required enhancing the NavigationLink component to support disabled states with appropriate visual styling and accessibility attributes, using tooltips for collapsed navigation and popovers for expanded states.\n\nThe billing redirect logic was centralized into a shared helper function (getBillingFallbackPath) that determines the correct redirect path based on deployment mode (Cloud vs Self-Hosted). This eliminates code duplication and ensures consistency across all redirect points. Comprehensive unit tests were added to verify the helper function's behavior.\n\nAuthorization patterns were also improved by expanding API key management permissions to include the 'manager' role (previously only 'owner'), and adding explicit handling for pending membership states (membershipRole === undefined). This prevents authorization errors during loading and provides clearer permission boundaries. The changes integrate seamlessly with the existing codebase by extending existing components and utilities rather than rewriting them, maintaining backward compatibility while improving user experience and code maintainability.",
+  "source_pr": "https://github.com/formbricks/formbricks/pull/7635",
+  "before_sha": "d96304d86d7809eabb330c4a25074f31ea4ed244",
+  "after_sha": "31d455002dba5ac2a178f60d860fc3be11bfe41b",
+  "diff_stats": {
+    "additions": 359,
+    "deletions": 158,
+    "files_changed": 17
+  }
+}

@@ -1,0 +1,111 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "feature_flag_management",
+      "recommendation": "Removed the feature flag check for view-level permissions and made the feature always available when the enterprise plugin is active",
+      "rationale": "The feature has been stabilized and tested sufficiently to be considered production-ready. Removing the feature flag simplifies the codebase by eliminating conditional logic paths and reduces technical debt. The enterprise license validation remains as the primary access control mechanism.",
+      "alternatives_considered": [
+        "Keep the feature flag but set it to always be enabled",
+        "Add a configuration setting instead of a feature flag",
+        "Gradually phase out the feature flag over multiple releases"
+      ],
+      "files_affected": [
+        "enterprise/backend/src/baserow_enterprise/apps.py",
+        "enterprise/web-frontend/modules/baserow_enterprise/plugin.js"
+      ]
+    },
+    {
+      "dimension": "license_validation",
+      "recommendation": "Maintained existing license validation logic while removing the feature flag wrapper",
+      "rationale": "The enterprise license system already provides proper access control. By removing only the feature flag check, we ensure that view-level permissions remain gated by the enterprise license, which handles expiration and validation. This preserves the business model while simplifying the feature availability logic.",
+      "alternatives_considered": [
+        "Move license validation into the feature flag system",
+        "Create a separate permission system for view-level features",
+        "Combine feature flags with license validation"
+      ],
+      "files_affected": [
+        "enterprise/backend/src/baserow_enterprise/apps.py",
+        "enterprise/web-frontend/modules/baserow_enterprise/plugin.js"
+      ]
+    },
+    {
+      "dimension": "registry_pattern",
+      "recommendation": "Directly registered the RestrictedViewOwnershipType without conditional checks",
+      "rationale": "The registry pattern in Baserow allows for clean plugin architecture. By unconditionally registering the view ownership type, we ensure it's always available when the enterprise plugin loads, reducing runtime checks and improving performance. The plugin system itself handles whether the enterprise features are active based on license.",
+      "alternatives_considered": [
+        "Keep conditional registration but move the check to plugin initialization",
+        "Create a separate registry for enterprise-only components",
+        "Use dependency injection to conditionally provide the component"
+      ],
+      "files_affected": [
+        "enterprise/backend/src/baserow_enterprise/apps.py",
+        "enterprise/web-frontend/modules/baserow_enterprise/plugin.js"
+      ]
+    },
+    {
+      "dimension": "documentation_and_communication",
+      "recommendation": "Updated UI text and created changelog entry to reflect the feature availability change",
+      "rationale": "Clear communication about feature availability is crucial for user experience. The UI text update clarifies that view-level permissions are now part of the RBAC offering, and the changelog entry documents the change for release notes. This helps users understand what features they can expect.",
+      "alternatives_considered": [
+        "Only update code without documentation changes",
+        "Create separate announcement or blog post",
+        "Add in-app notifications about the change"
+      ],
+      "files_affected": [
+        "enterprise/web-frontend/modules/baserow_enterprise/locales/en.json",
+        "changelog/entries/unreleased/feature/3673_view_level_permissions.json"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Remove view-level permissions feature flag from backend",
+      "description": "Remove the feature flag check that gates the RestrictedViewOwnershipType registration in the Django app initialization, making view-level permissions always available when enterprise plugin is active",
+      "files_to_modify": [
+        "enterprise/backend/src/baserow_enterprise/apps.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-002",
+      "title": "Remove view-level permissions feature flag from frontend",
+      "description": "Remove the feature flag check in the Nuxt plugin that conditionally registers the RestrictedViewOwnershipType, ensuring consistent behavior between backend and frontend",
+      "files_to_modify": [
+        "enterprise/web-frontend/modules/baserow_enterprise/plugin.js"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-003",
+      "title": "Update RBAC feature description in UI",
+      "description": "Update the RBAC content text to include 'view level' in the permission hierarchy description, accurately reflecting the now-available feature",
+      "files_to_modify": [
+        "enterprise/web-frontend/modules/baserow_enterprise/locales/en.json"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-004",
+      "title": "Create changelog entry for feature promotion",
+      "description": "Add a changelog entry documenting the introduction of restricted view ownership type for view-level permissions as a feature",
+      "files_to_modify": [],
+      "files_to_create": [
+        "changelog/entries/unreleased/feature/3673_view_level_permissions.json"
+      ],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation removes the feature flag that previously gated view-level permissions in Baserow Enterprise, making the feature permanently available when an enterprise license is active. This change was made across both backend and frontend components to ensure consistency.\n\nIn the backend Django app initialization (apps.py), the feature flag check was removed, and the RestrictedViewOwnershipType is now always registered when the enterprise plugin loads. This simplifies the code by eliminating conditional logic while maintaining license-based access control through the existing enterprise plugin system. The import of the feature_flag_is_enabled function was also removed as it's no longer needed.\n\nOn the frontend side, the Nuxt plugin similarly removes the feature flag check and unconditionally registers the RestrictedViewOwnershipType with the registry. This ensures the UI components for view-level permissions are always available when the enterprise module is active. The $featureFlagIsEnabled dependency was removed from the plugin setup since it's no longer used.\n\nAdditional changes include updating the RBAC feature description in the UI to explicitly mention view-level permissions, providing accurate information to users. A changelog entry was created to document this feature promotion for release notes. The overall approach maintains the existing license validation mechanism while removing the temporary feature flag layer, reducing technical debt and simplifying the codebase.",
+  "source_pr": "https://github.com/baserow/baserow/pull/5146",
+  "before_sha": "dc47caf0e4e2a37d11fcf7aff67a701f1b182e2b",
+  "after_sha": "a8a6a079d7818d9d851305a4cd3b40cf4ba3d772",
+  "diff_stats": {
+    "additions": 16,
+    "deletions": 11,
+    "files_changed": 4
+  }
+}

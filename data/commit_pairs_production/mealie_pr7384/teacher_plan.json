@@ -1,0 +1,110 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "ui_component_design",
+      "recommendation": "Created a reusable AppScrollToTop component with fixed positioning and fade transition",
+      "rationale": "The component is placed in LayoutParts directory since it's a UI utility that can be reused across different pages, not just recipe-related ones. Using Vuetify's v-btn with fixed positioning ensures it stays visible in the viewport. The fade transition provides smooth appearance/disappearance.",
+      "alternatives_considered": [
+        "Adding scroll-to-top logic directly to each page component",
+        "Creating a global plugin or directive",
+        "Using a floating action button (FAB) component"
+      ],
+      "files_affected": [
+        "frontend/components/Layout/LayoutParts/AppScrollToTop.vue"
+      ]
+    },
+    {
+      "dimension": "user_experience",
+      "recommendation": "Implemented scroll detection with a 400px threshold and smooth appearance",
+      "rationale": "400px threshold prevents the button from appearing during minor scrolling while ensuring it's visible when users have scrolled enough to need it. The v-fade-transition provides visual feedback without being jarring. Direct DOM manipulation (document.documentElement.scrollTop) is used for simplicity and performance.",
+      "alternatives_considered": [
+        "Using IntersectionObserver API",
+        "Implementing debounced scroll events",
+        "Using VueUse composables for scroll detection"
+      ],
+      "files_affected": [
+        "frontend/components/Layout/LayoutParts/AppScrollToTop.vue"
+      ]
+    },
+    {
+      "dimension": "icon_system_integration",
+      "recommendation": "Added mdiArrowUp icon to the global icons registry",
+      "rationale": "The project uses a centralized icon system ($globals.icons) for consistency. Adding arrowUp to the icons.ts file ensures the icon is available throughout the application and follows the existing pattern of Material Design Icons integration.",
+      "alternatives_considered": [
+        "Importing the icon directly in the component",
+        "Using a different icon library",
+        "Creating a custom SVG icon"
+      ],
+      "files_affected": [
+        "frontend/lib/icons/icons.ts"
+      ]
+    },
+    {
+      "dimension": "component_integration",
+      "recommendation": "Integrated AppScrollToTop into RecipeCardSection component",
+      "rationale": "RecipeCardSection is the main container for recipe lists, favorites, and cookbook pages - exactly the pages specified in the requirements. Adding the component here ensures it appears on all relevant pages without duplicating code. The component is placed at the end of the template to avoid interfering with other content.",
+      "alternatives_considered": [
+        "Adding to individual page components",
+        "Creating a layout wrapper component",
+        "Using a portal or teleport to body"
+      ],
+      "files_affected": [
+        "frontend/components/Domain/Recipe/RecipeCardSection.vue"
+      ]
+    },
+    {
+      "dimension": "performance_and_memory",
+      "recommendation": "Implemented proper event listener cleanup in onUnmounted hook",
+      "rationale": "Removing scroll event listeners when the component is destroyed prevents memory leaks and ensures the scroll detection logic doesn't run when not needed. This is especially important for single-page applications where components might be mounted/unmounted frequently.",
+      "alternatives_considered": [
+        "Using passive event listeners",
+        "Throttling scroll events",
+        "Using a shared scroll manager"
+      ],
+      "files_affected": [
+        "frontend/components/Layout/LayoutParts/AppScrollToTop.vue"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Create reusable scroll-to-top component",
+      "description": "Implement a Vue component that shows a scroll-to-top button when users scroll beyond a threshold, with smooth transitions and proper event handling",
+      "files_to_modify": [],
+      "files_to_create": [
+        "frontend/components/Layout/LayoutParts/AppScrollToTop.vue"
+      ],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-002",
+      "title": "Add scroll-to-top icon to icon system",
+      "description": "Extend the global icon registry to include the arrow-up icon needed for the scroll-to-top button",
+      "files_to_modify": [
+        "frontend/lib/icons/icons.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-003",
+      "title": "Integrate scroll-to-top into recipe pages",
+      "description": "Add the AppScrollToTop component to recipe list containers to make it available on recipe lists, favorites, and cookbook pages",
+      "files_to_modify": [
+        "frontend/components/Domain/Recipe/RecipeCardSection.vue"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation adds a scroll-to-top feature through three coordinated changes. First, a new reusable component AppScrollToTop.vue was created in the LayoutParts directory, positioning it as a general UI utility. This component uses Vue's Composition API with ref for reactive state, monitors scroll position with a 400px threshold, and shows/hides a fixed-position button with a fade transition. Event listeners are properly cleaned up to prevent memory leaks.\n\nSecond, the Material Design Icons arrow-up icon was added to the centralized icon registry (icons.ts), following the project's pattern of maintaining all icons in one place for consistency. This allows the component to use $globals.icons.arrowUp for the button icon.\n\nThird, the component was integrated into RecipeCardSection.vue, which serves as the container for recipe lists, favorites, and cookbook pages - exactly the pages specified in the requirements. This strategic placement ensures the feature is available where needed without duplicating code across multiple files. The implementation leverages existing Vuetify components (v-btn, v-icon, v-fade-transition) for consistent styling and behavior with the rest of the application.\n\nThe approach is minimal and focused, adding only what's necessary for the feature while following the project's established patterns for component organization, icon management, and UI consistency. The fixed positioning with z-index ensures the button is always visible above other content, and the responsive design works across device sizes without additional CSS.",
+  "source_pr": "https://github.com/mealie-recipes/mealie/pull/7384",
+  "before_sha": "4ee97e534807ce09f484f5377d575677fde5628d",
+  "after_sha": "bb278aac35a38046f1dced3ca1c28e84d86db669",
+  "diff_stats": {
+    "additions": 41,
+    "deletions": 0,
+    "files_changed": 3
+  }
+}

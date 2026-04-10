@@ -1,0 +1,88 @@
+diff --git a/packages/trpc/server/routers/viewer/webhook/create.handler.ts b/packages/trpc/server/routers/viewer/webhook/create.handler.ts
+index 387e79b607ab59..d5411b7cc0fbf5 100644
+--- a/packages/trpc/server/routers/viewer/webhook/create.handler.ts
++++ b/packages/trpc/server/routers/viewer/webhook/create.handler.ts
+@@ -33,9 +33,10 @@ export const createHandler = async ({ ctx, input }: CreateOptions) => {
+     });
+   }
+ 
++  const { webhookId: _webhookId, ...inputWithoutWebhookId } = input;
+   const webhookData: Prisma.WebhookCreateInput = {
+     id: v4(),
+-    ...input,
++    ...inputWithoutWebhookId,
+   };
+   if (input.platform && user.role !== "ADMIN") {
+     throw new TRPCError({ code: "UNAUTHORIZED" });
+diff --git a/packages/trpc/server/routers/viewer/webhook/edit.handler.ts b/packages/trpc/server/routers/viewer/webhook/edit.handler.ts
+index 88925d7c7ff58e..53666e2ca260b5 100644
+--- a/packages/trpc/server/routers/viewer/webhook/edit.handler.ts
++++ b/packages/trpc/server/routers/viewer/webhook/edit.handler.ts
+@@ -21,7 +21,7 @@ type EditOptions = {
+ };
+ 
+ export const editHandler = async ({ input, ctx }: EditOptions) => {
+-  const { id, ...data } = input;
++  const { id, webhookId: _webhookId, ...data } = input;
+ 
+   const webhook = await prisma.webhook.findUnique({
+     where: {
+diff --git a/packages/trpc/server/routers/viewer/webhook/get.handler.ts b/packages/trpc/server/routers/viewer/webhook/get.handler.ts
+index 4815316c00b523..10b9708400eaa9 100644
+--- a/packages/trpc/server/routers/viewer/webhook/get.handler.ts
++++ b/packages/trpc/server/routers/viewer/webhook/get.handler.ts
+@@ -11,5 +11,5 @@ type GetOptions = {
+ 
+ export const getHandler = async ({ ctx: _ctx, input }: GetOptions) => {
+   const { repository: webhookRepository } = getWebhookFeature();
+-  return await webhookRepository.findByWebhookId(input.webhookId);
++  return await webhookRepository.findByWebhookId(input.id || input.webhookId);
+ };
+diff --git a/packages/trpc/server/routers/viewer/webhook/get.schema.ts b/packages/trpc/server/routers/viewer/webhook/get.schema.ts
+index 6e97404ca3b486..639248e8f9c01b 100644
+--- a/packages/trpc/server/routers/viewer/webhook/get.schema.ts
++++ b/packages/trpc/server/routers/viewer/webhook/get.schema.ts
+@@ -2,8 +2,6 @@ import { z } from "zod";
+ 
+ import { webhookIdAndEventTypeIdSchema } from "./types";
+ 
+-export const ZGetInputSchema = webhookIdAndEventTypeIdSchema.extend({
+-  webhookId: z.string().optional(),
+-});
++export const ZGetInputSchema = webhookIdAndEventTypeIdSchema;
+ 
+ export type TGetInputSchema = z.infer<typeof ZGetInputSchema>;
+diff --git a/packages/trpc/server/routers/viewer/webhook/types.ts b/packages/trpc/server/routers/viewer/webhook/types.ts
+index 562f4465045a45..ba1217fe114477 100644
+--- a/packages/trpc/server/routers/viewer/webhook/types.ts
++++ b/packages/trpc/server/routers/viewer/webhook/types.ts
+@@ -4,6 +4,7 @@ import { z } from "zod";
+ export const webhookIdAndEventTypeIdSchema = z.object({
+   // Webhook ID
+   id: z.string().optional(),
++  webhookId: z.string().optional(),
+   eventTypeId: z.number().optional(),
+   teamId: z.number().optional(),
+ });
+diff --git a/packages/trpc/server/routers/viewer/webhook/util.ts b/packages/trpc/server/routers/viewer/webhook/util.ts
+index e576ed64659de2..50eabe7879a0ab 100644
+--- a/packages/trpc/server/routers/viewer/webhook/util.ts
++++ b/packages/trpc/server/routers/viewer/webhook/util.ts
+@@ -22,13 +22,14 @@ export const createWebhookPbacProcedure = (
+     // Endpoints that just read the logged in user's data - like 'list' don't necessarily have any input
+     if (!input) return next();
+ 
+-    const { id, teamId, eventTypeId } = input;
++    const { id, webhookId, teamId, eventTypeId } = input;
++    const lookupId = id || webhookId;
+     const permissionCheckService = new PermissionCheckService();
+ 
+-    if (id) {
++    if (lookupId) {
+       // Check if user is authorized to edit webhook
+       const webhook = await prisma.webhook.findUnique({
+-        where: { id },
++        where: { id: lookupId },
+         select: {
+           id: true,
+           userId: true,

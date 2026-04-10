@@ -1,0 +1,126 @@
+diff --git a/packages/ak-axum/src/error.rs b/packages/ak-axum/src/error.rs
+index 9c2574137320..60df94a98862 100644
+--- a/packages/ak-axum/src/error.rs
++++ b/packages/ak-axum/src/error.rs
+@@ -24,7 +24,7 @@ where
+ 
+ impl IntoResponse for AppError {
+     fn into_response(self) -> Response {
+-        warn!(error = ?self.0, "error occurred");
++        warn!(err = ?self.0, "error occurred");
+         (StatusCode::INTERNAL_SERVER_ERROR, "Something went wrong").into_response()
+     }
+ }
+diff --git a/packages/ak-axum/src/server.rs b/packages/ak-axum/src/server.rs
+index 79d0ba724e34..5d5ebbb696d9 100644
+--- a/packages/ak-axum/src/server.rs
++++ b/packages/ak-axum/src/server.rs
+@@ -68,7 +68,7 @@ pub(crate) async fn run_unix(
+     addr: unix::net::SocketAddr,
+     allow_failure: bool,
+ ) -> Result<()> {
+-    info!(addr = ?addr, "starting {name} server");
++    info!(?addr, "starting {name} server");
+ 
+     let handle = Handle::new();
+     arbiter.add_unix_handle(handle.clone()).await;
+diff --git a/packages/ak-common/src/arbiter.rs b/packages/ak-common/src/arbiter.rs
+index 43b571b8f931..0634a1b3b5a3 100644
+--- a/packages/ak-common/src/arbiter.rs
++++ b/packages/ak-common/src/arbiter.rs
+@@ -69,11 +69,11 @@ async fn watch_signals(streams: SignalStreams, arbiter: Arbiter) -> Result<()> {
+                 arbiter.do_graceful_shutdown().await;
+             },
+             _ = usr1.recv() => {
+-                info!("signal URS1 received");
++                info!("signal USR1 received");
+                 let _ = arbiter.send_event(SignalKind::user_defined1().into());
+             },
+             _ = usr2.recv() => {
+-                info!("USR2 received.");
++                info!("signal USR2 received");
+                 let _ = arbiter.send_event(SignalKind::user_defined2().into());
+             },
+             () = arbiter.shutdown() => {
+diff --git a/packages/ak-common/src/config/mod.rs b/packages/ak-common/src/config/mod.rs
+index 6d4d9f957119..8e94d7dc9faf 100644
+--- a/packages/ak-common/src/config/mod.rs
++++ b/packages/ak-common/src/config/mod.rs
+@@ -104,7 +104,10 @@ impl Config {
+                     match read_to_string(path).map(|s| s.trim().to_owned()) {
+                         Ok(value) => return (value, Some(PathBuf::from(path))),
+                         Err(err) => {
+-                            error!("failed to read config value from {path}: {err}");
++                            error!(
++                                ?err,
++                                "failed to read config value from '{path}', using fallback"
++                            );
+                             return (fallback, Some(PathBuf::from(path)));
+                         }
+                     }
+@@ -224,7 +227,7 @@ async fn watch_config(arbiter: Arbiter) -> Result<()> {
+     }
+ 
+     let _ = arbiter.send_event(Event::ConfigChanged);
+-    info!("config file watcher started on paths: {:?}", watch_paths);
++    info!(paths = ?watch_paths, "config file watcher started");
+ 
+     loop {
+         tokio::select! {
+@@ -239,12 +242,12 @@ async fn watch_config(arbiter: Arbiter) -> Result<()> {
+                         info!("configuration reloaded");
+                         manager.config.store(Arc::new(new_config));
+                         if let Err(err) = arbiter.send_event(Event::ConfigChanged) {
+-                            warn!("failed to notify of config change, aborting: {err:?}");
++                            warn!(?err, "failed to notify of config change, aborting");
+                             break;
+                         }
+                     }
+                     Err(err) => {
+-                        warn!("failed to reload config, continuing with previous config: {err:?}");
++                        warn!(?err, "failed to reload config, continuing with previous config");
+                     }
+                 }
+             },
+diff --git a/packages/ak-common/src/mode.rs b/packages/ak-common/src/mode.rs
+index 56829da57b57..7181bd4cd0f6 100644
+--- a/packages/ak-common/src/mode.rs
++++ b/packages/ak-common/src/mode.rs
+@@ -7,7 +7,7 @@ use std::{
+ };
+ 
+ use eyre::{Result, eyre};
+-use tracing::debug;
++use tracing::trace;
+ 
+ /// Stores the current mode.
+ static MODE: AtomicU8 = AtomicU8::new(0);
+@@ -101,7 +101,7 @@ impl Mode {
+     pub fn cleanup() {
+         let mode_path = mode_path();
+         if let Err(err) = std::fs::remove_file(&mode_path) {
+-            debug!(%err, mode_path = %&mode_path.display(), "failed to remove mode file");
++            trace!(?err, "failed to remove mode file, ignoring");
+         }
+     }
+ 
+diff --git a/packages/ak-common/src/tls.rs b/packages/ak-common/src/tls.rs
+index 7847f4f12398..f3e52ce4b79f 100644
+--- a/packages/ak-common/src/tls.rs
++++ b/packages/ak-common/src/tls.rs
+@@ -3,6 +3,7 @@ use std::sync::Arc;
+ 
+ use eyre::{Result, eyre};
+ use rustls::server::ResolvesServerCert;
++use tracing::trace;
+ 
+ use crate::config;
+ 
+@@ -37,6 +38,7 @@ fn is_fips_enabled() -> bool {
+ 
+ /// Initialize default [`rustls`] crypto provider, and check that FIPS is working correctly.
+ pub fn init() -> Result<()> {
++    trace!("installing rustls crypto provider");
+     #[expect(
+         clippy::unwrap_in_result,
+         reason = "result type does not implement Error"

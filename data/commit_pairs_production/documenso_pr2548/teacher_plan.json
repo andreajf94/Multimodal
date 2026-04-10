@@ -1,0 +1,162 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "ui_component_design",
+      "recommendation": "Created reusable admin detail components (DetailsCard, DetailsValue) for consistent presentation of key-value data across admin panels",
+      "rationale": "The admin panel needed consistent styling for displaying team/organization details. Creating reusable components ensures design consistency, reduces code duplication, and makes future maintenance easier. The components support features like monospace fonts, selectable text, and action buttons.",
+      "alternatives_considered": [
+        "Inline styling in each page",
+        "Extending existing table components",
+        "Creating separate components for each detail type"
+      ],
+      "files_affected": [
+        "apps/remix/app/components/general/admin-details.tsx"
+      ]
+    },
+    {
+      "dimension": "data_modeling",
+      "recommendation": "Created a shared global settings display component that handles both team and organization settings with inheritance logic",
+      "rationale": "Global settings exist at both team and organization levels with inheritance relationships. The AdminGlobalSettingsSection component handles parsing email settings, displaying inherited values, and showing appropriate labels for both contexts. This avoids duplicating complex rendering logic across multiple pages.",
+      "alternatives_considered": [
+        "Separate components for team vs organization settings",
+        "Inline rendering in each page",
+        "Server-side rendering of formatted settings"
+      ],
+      "files_affected": [
+        "apps/remix/app/components/general/admin-global-settings-section.tsx"
+      ]
+    },
+    {
+      "dimension": "api_design",
+      "recommendation": "Added a new tRPC endpoint for fetching team details with comprehensive related data",
+      "rationale": "The team details page requires data from multiple related tables (team, organization, members, invites, settings). Creating a dedicated endpoint with proper typing ensures type safety, reduces client-side data fetching complexity, and allows for optimized database queries with includes.",
+      "alternatives_considered": [
+        "Multiple separate API calls",
+        "Extending existing organization endpoint",
+        "REST endpoint instead of tRPC"
+      ],
+      "files_affected": [
+        "packages/trpc/server/admin-router/get-admin-team.ts",
+        "packages/trpc/server/admin-router/get-admin-team.types.ts"
+      ]
+    },
+    {
+      "dimension": "navigation_design",
+      "recommendation": "Enhanced navigation between related admin pages with clickable links and improved data relationships",
+      "rationale": "Admin users need to navigate between related entities (organizations \u2192 teams \u2192 users). Adding clickable links to team names, showing IDs for reference, and providing clear navigation buttons improves usability and workflow efficiency.",
+      "alternatives_considered": [
+        "Separate navigation menus",
+        "Modal-based navigation",
+        "Keeping static tables without links"
+      ],
+      "files_affected": [
+        "apps/remix/app/components/tables/organisation-insights-table.tsx",
+        "apps/remix/app/routes/_authenticated+/admin+/organisations.$id.tsx"
+      ]
+    },
+    {
+      "dimension": "data_presentation",
+      "recommendation": "Enhanced organization member tables to show roles, IDs, and team relationships with proper role hierarchy resolution",
+      "rationale": "Organization members can have different roles across multiple teams. Using getHighestOrganisationRoleInGroup and getHighestTeamRoleInGroup utilities ensures the displayed role reflects the member's highest privilege level. Showing user IDs and creation dates provides audit trail information.",
+      "alternatives_considered": [
+        "Showing all roles per member",
+        "Simplified role display without hierarchy",
+        "Omitting ID and timestamp information"
+      ],
+      "files_affected": [
+        "apps/remix/app/routes/_authenticated+/admin+/organisations.$id.tsx",
+        "apps/remix/app/routes/_authenticated+/admin+/teams.$id.tsx"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Added comprehensive error handling and loading states for the new team details page",
+      "rationale": "The team details page needs to handle invalid IDs, missing teams, and loading states gracefully. Using the existing GenericErrorLayout pattern ensures consistent error presentation across the admin panel.",
+      "alternatives_considered": [
+        "Simple error throwing",
+        "Inline error messages",
+        "Redirecting without explanation"
+      ],
+      "files_affected": [
+        "apps/remix/app/routes/_authenticated+/admin+/teams.$id.tsx"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Create reusable admin detail components",
+      "description": "Build reusable UI components for displaying key-value details in admin panels with consistent styling and features like copy-to-clipboard",
+      "files_to_modify": [],
+      "files_to_create": [
+        "apps/remix/app/components/general/admin-details.tsx"
+      ],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-002",
+      "title": "Build global settings display component",
+      "description": "Create a component to display global settings for both teams and organizations with inheritance handling and proper internationalization",
+      "files_to_modify": [],
+      "files_to_create": [
+        "apps/remix/app/components/general/admin-global-settings-section.tsx"
+      ],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-003",
+      "title": "Implement team details page",
+      "description": "Create a new admin page for viewing team details including information, settings, members, and pending invites",
+      "files_to_modify": [],
+      "files_to_create": [
+        "apps/remix/app/routes/_authenticated+/admin+/teams.$id.tsx"
+      ],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-004",
+      "title": "Add team details API endpoint",
+      "description": "Create tRPC endpoint and types for fetching comprehensive team data including related organization, members, invites, and settings",
+      "files_to_modify": [
+        "packages/trpc/server/admin-router/router.ts"
+      ],
+      "files_to_create": [
+        "packages/trpc/server/admin-router/get-admin-team.ts",
+        "packages/trpc/server/admin-router/get-admin-team.types.ts"
+      ],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-005",
+      "title": "Enhance organization page with usage metrics",
+      "description": "Update organization admin page to show usage statistics against limits and display global settings in an accordion",
+      "files_to_modify": [
+        "apps/remix/app/routes/_authenticated+/admin+/organisations.$id.tsx"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-006",
+      "title": "Improve admin table navigation and data",
+      "description": "Add clickable links to team names in tables, enhance member listings with roles and IDs, and improve data presentation",
+      "files_to_modify": [
+        "apps/remix/app/components/tables/organisation-insights-table.tsx",
+        "apps/remix/app/components/tables/organisation-teams-table.tsx",
+        "apps/remix/app/routes/_authenticated+/admin+/organisation-insights.$id.tsx",
+        "packages/ui/primitives/select.tsx"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation enhances the admin panel with improved organization and team management capabilities through a systematic approach. First, reusable UI components (DetailsCard, DetailsValue, AdminGlobalSettingsSection) were created to ensure consistency across new and existing admin pages. These components handle the presentation of key-value data, global settings with inheritance logic, and proper internationalization.\n\nA new team details page was implemented at `/admin/teams/$id` that displays comprehensive team information including identifiers, relationships, global settings, members with their roles, and pending organization invites. The page integrates with a new tRPC endpoint (`admin.team.get`) that fetches related data from multiple tables in an optimized query, ensuring type safety through Zod schemas.\n\nThe existing organization page was enhanced to show usage metrics (members and teams against limits) and display global settings in a collapsible accordion. Navigation between related entities was improved by making team names clickable in tables, showing user and team IDs for reference, and adding clear navigation buttons between organization and team pages.\n\nKey patterns used include: consistent error handling with GenericErrorLayout, proper role hierarchy resolution using existing utility functions, copy-to-clipboard functionality for IDs, and maintaining the existing design system. The changes integrate seamlessly with the existing codebase by following established patterns for admin routes, tRPC procedures, and component organization.",
+  "source_pr": "https://github.com/documenso/documenso/pull/2548",
+  "before_sha": "f5b3babcbb2a89614d606ab462d8957370b22ff6",
+  "after_sha": "a71c44570b74b3340fb5a5f21508f24579743dca",
+  "diff_stats": {
+    "additions": 875,
+    "deletions": 23,
+    "files_changed": 11
+  }
+}

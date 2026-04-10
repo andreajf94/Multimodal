@@ -1,0 +1,1587 @@
+diff --git a/apps/remix/app/components/general/document-signing/envelope-signing-provider.tsx b/apps/remix/app/components/general/document-signing/envelope-signing-provider.tsx
+index ddaf3c3551..9e4eb16581 100644
+--- a/apps/remix/app/components/general/document-signing/envelope-signing-provider.tsx
++++ b/apps/remix/app/components/general/document-signing/envelope-signing-provider.tsx
+@@ -8,9 +8,12 @@ import {
+   RecipientRole,
+   SigningStatus,
+ } from '@prisma/client';
++import { DateTime } from 'luxon';
+ import { prop, sortBy } from 'remeda';
+ 
++import { DEFAULT_DOCUMENT_DATE_FORMAT } from '@documenso/lib/constants/date-formats';
+ import { isBase64Image } from '@documenso/lib/constants/signatures';
++import { DEFAULT_DOCUMENT_TIME_ZONE } from '@documenso/lib/constants/time-zones';
+ import { DO_NOT_INVALIDATE_QUERY_ON_MUTATION } from '@documenso/lib/constants/trpc';
+ import type { EnvelopeForSigningResponse } from '@documenso/lib/server-only/envelope/get-envelope-for-recipient-signing';
+ import type { TRecipientActionAuth } from '@documenso/lib/types/document-auth';
+@@ -83,6 +86,54 @@ export interface EnvelopeSigningProviderProps {
+   children: React.ReactNode;
+ }
+ 
++/**
++ * Inject prefilled date fields for the current recipient.
++ *
++ * The dates are filled in correctly when the recipient "completes" the document.
++ */
++const prefillDateFields = (data: EnvelopeForSigningResponse): EnvelopeForSigningResponse => {
++  const { timezone, dateFormat } = data.envelope.documentMeta;
++
++  const formattedDate = DateTime.now()
++    .setZone(timezone ?? DEFAULT_DOCUMENT_TIME_ZONE)
++    .toFormat(dateFormat ?? DEFAULT_DOCUMENT_DATE_FORMAT);
++
++  const prefillField = <
++    T extends { type: FieldType; inserted: boolean; customText: string; fieldMeta: unknown },
++  >(
++    field: T,
++  ): T => {
++    if (field.type !== FieldType.DATE || field.inserted) {
++      return field;
++    }
++
++    return {
++      ...field,
++      customText: formattedDate,
++      inserted: true,
++      fieldMeta: {
++        ...(typeof field.fieldMeta === 'object' ? field.fieldMeta : {}),
++        readOnly: true,
++      },
++    };
++  };
++
++  return {
++    ...data,
++    envelope: {
++      ...data.envelope,
++      recipients: data.envelope.recipients.map((recipient) => ({
++        ...recipient,
++        fields: recipient.fields.map(prefillField),
++      })),
++    },
++    recipient: {
++      ...data.recipient,
++      fields: data.recipient.fields.map(prefillField),
++    },
++  };
++};
++
+ export const EnvelopeSigningProvider = ({
+   fullName: initialFullName,
+   email: initialEmail,
+@@ -90,7 +141,7 @@ export const EnvelopeSigningProvider = ({
+   envelopeData: initialEnvelopeData,
+   children,
+ }: EnvelopeSigningProviderProps) => {
+-  const [envelopeData, setEnvelopeData] = useState(initialEnvelopeData);
++  const [envelopeData, setEnvelopeData] = useState(() => prefillDateFields(initialEnvelopeData));
+ 
+   const { envelope, recipient } = envelopeData;
+ 
+diff --git a/packages/app-tests/e2e/envelopes/envelope-alignment.spec.ts b/packages/app-tests/e2e/envelopes/envelope-alignment.spec.ts
+index 3647072c37..71c960ad71 100644
+--- a/packages/app-tests/e2e/envelopes/envelope-alignment.spec.ts
++++ b/packages/app-tests/e2e/envelopes/envelope-alignment.spec.ts
+@@ -1,7 +1,7 @@
+ import { createCanvas } from '@napi-rs/canvas';
+ import type { TestInfo } from '@playwright/test';
+ import { expect, test } from '@playwright/test';
+-import { DocumentStatus, EnvelopeType } from '@prisma/client';
++import { DocumentStatus, EnvelopeType, FieldType } from '@prisma/client';
+ import fs from 'node:fs';
+ import path from 'node:path';
+ import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf.mjs';
+@@ -161,7 +161,16 @@ test('field placement visual regression', async ({ page, request }, testInfo) =>
+   const uninsertedFields = await prisma.field.findMany({
+     where: {
+       envelopeId: envelope.id,
+-      inserted: false,
++      OR: [
++        {
++          inserted: false,
++        },
++        {
++          // Include email fields because they are automatically inserted during envelope distribution.
++          // We need to extract it to override their values for accurate comparison in tests.
++          type: FieldType.EMAIL,
++        },
++      ],
+     },
+     include: {
+       envelopeItem: {
+diff --git a/packages/app-tests/e2e/envelopes/envelope-v2-field-insertion.spec.ts b/packages/app-tests/e2e/envelopes/envelope-v2-field-insertion.spec.ts
+new file mode 100644
+index 0000000000..19c328780f
+--- /dev/null
++++ b/packages/app-tests/e2e/envelopes/envelope-v2-field-insertion.spec.ts
+@@ -0,0 +1,264 @@
++import { expect, test } from '@playwright/test';
++import { DocumentStatus, FieldType } from '@prisma/client';
++import { DateTime } from 'luxon';
++
++import { DEFAULT_DOCUMENT_DATE_FORMAT } from '@documenso/lib/constants/date-formats';
++import { DEFAULT_DOCUMENT_TIME_ZONE } from '@documenso/lib/constants/time-zones';
++import { prisma } from '@documenso/prisma';
++
++import { apiSeedPendingDocument } from '../fixtures/api-seeds';
++
++const PDF_PAGE_SELECTOR = 'img[data-page-number]';
++
++test.describe('V2 envelope field insertion during signing', () => {
++  test('date fields are auto-inserted when completing a V2 envelope', async ({ page, request }) => {
++    const now = DateTime.now().setZone(DEFAULT_DOCUMENT_TIME_ZONE);
++
++    const { envelope, distributeResult } = await apiSeedPendingDocument(request, {
++      recipients: [{ email: 'signer-date@test.documenso.com', name: 'Date Signer' }],
++      fieldsPerRecipient: [
++        [
++          { type: FieldType.DATE, page: 1, positionX: 5, positionY: 5, width: 5, height: 5 },
++          { type: FieldType.SIGNATURE, page: 1, positionX: 5, positionY: 15, width: 5, height: 5 },
++        ],
++      ],
++    });
++
++    const { token } = distributeResult.recipients[0];
++
++    await page.goto(`/sign/${token}`);
++
++    // wait for PDF to be visible
++    await expect(page.locator(PDF_PAGE_SELECTOR).first()).toBeVisible({ timeout: 30_000 });
++
++    // Wait for the Konva canvas to be ready.
++    const canvas = page.locator('.konva-container canvas').first();
++    await expect(canvas).toBeVisible({ timeout: 30_000 });
++
++    // DATE is auto-filled, but SIGNATURE still needs manual interaction.
++    await expect(page.getByText('1 Field Remaining').first()).toBeVisible();
++
++    // Set up a signature via the sidebar form.
++    await page.getByTestId('signature-pad-dialog-button').click();
++    await page.getByRole('tab', { name: 'Type' }).click();
++    await page.getByTestId('signature-pad-type-input').fill('Signature');
++    await page.getByRole('button', { name: 'Next' }).click();
++
++    // Click the signature field on the canvas.
++    const canvasBox = await canvas.boundingBox();
++
++    if (!canvasBox) {
++      throw new Error('Canvas bounding box not found');
++    }
++
++    const sigField = envelope.fields.find((f) => f.type === FieldType.SIGNATURE);
++
++    if (!sigField) {
++      throw new Error('Signature field not found');
++    }
++
++    const x =
++      (Number(sigField.positionX) / 100) * canvasBox.width +
++      ((Number(sigField.width) / 100) * canvasBox.width) / 2;
++    const y =
++      (Number(sigField.positionY) / 100) * canvasBox.height +
++      ((Number(sigField.height) / 100) * canvasBox.height) / 2;
++
++    await canvas.click({ position: { x, y } });
++    await page.waitForTimeout(500);
++
++    await expect(page.getByText('0 Fields Remaining').first()).toBeVisible({ timeout: 10_000 });
++
++    await page.getByRole('button', { name: 'Complete' }).click();
++    await expect(page.getByRole('heading', { name: 'Are you sure?' })).toBeVisible();
++    await page.getByRole('button', { name: 'Sign' }).click();
++
++    await page.waitForURL(`/sign/${token}/complete`);
++    await expect(page.getByText('Document Signed')).toBeVisible();
++
++    // Verify the date field was inserted in the database with the correct format.
++    const dateField = await prisma.field.findFirstOrThrow({
++      where: {
++        envelopeId: envelope.id,
++        type: FieldType.DATE,
++      },
++    });
++
++    expect(dateField.inserted).toBe(true);
++    expect(dateField.customText).toBeTruthy();
++
++    // Verify the inserted date is close to now (within 2 minutes).
++    const insertedDate = DateTime.fromFormat(dateField.customText, DEFAULT_DOCUMENT_DATE_FORMAT, {
++      zone: DEFAULT_DOCUMENT_TIME_ZONE,
++    });
++
++    expect(insertedDate.isValid).toBe(true);
++    expect(Math.abs(insertedDate.diff(now, 'minutes').minutes)).toBeLessThanOrEqual(2);
++
++    // Verify the document reached COMPLETED status.
++    await expect(async () => {
++      const dbEnvelope = await prisma.envelope.findUniqueOrThrow({
++        where: { id: envelope.id },
++      });
++
++      expect(dbEnvelope.status).toBe(DocumentStatus.COMPLETED);
++    }).toPass();
++  });
++
++  test('date and email fields are inserted when completing a V2 envelope with multiple field types', async ({
++    page,
++    request,
++  }) => {
++    const now = DateTime.now().setZone(DEFAULT_DOCUMENT_TIME_ZONE);
++
++    const recipientEmail = 'signer-multi@test.documenso.com';
++
++    const { envelope, distributeResult } = await apiSeedPendingDocument(request, {
++      recipients: [{ email: recipientEmail, name: 'Multi Signer' }],
++      fieldsPerRecipient: [
++        [
++          { type: FieldType.DATE, page: 1, positionX: 5, positionY: 5, width: 5, height: 5 },
++          { type: FieldType.EMAIL, page: 1, positionX: 5, positionY: 10, width: 5, height: 5 },
++          { type: FieldType.NAME, page: 1, positionX: 5, positionY: 15, width: 5, height: 5 },
++          {
++            type: FieldType.SIGNATURE,
++            page: 1,
++            positionX: 5,
++            positionY: 20,
++            width: 5,
++            height: 5,
++          },
++        ],
++      ],
++    });
++
++    const { token } = distributeResult.recipients[0];
++
++    // Resolve the fields from the envelope for position calculations.
++    const fields = envelope.fields;
++
++    await page.goto(`/sign/${token}`);
++
++    // wait for PDF to be visible
++    await expect(page.locator(PDF_PAGE_SELECTOR).first()).toBeVisible({ timeout: 30_000 });
++
++    // Wait for the Konva canvas to be ready.
++    const canvas = page.locator('.konva-container canvas').first();
++    await expect(canvas).toBeVisible({ timeout: 30_000 });
++
++    // DATE and EMAIL fields are auto-filled, so only NAME and SIGNATURE remain.
++    await expect(page.getByText('2 Fields Remaining').first()).toBeVisible();
++
++    // Set up a signature via the sidebar form.
++    await page.getByTestId('signature-pad-dialog-button').click();
++    await page.getByRole('tab', { name: 'Type' }).click();
++    await page.getByTestId('signature-pad-type-input').fill('Signature');
++    await page.getByRole('button', { name: 'Next' }).click();
++
++    // Click each non-date field on the Konva canvas to insert it.
++    // Fields are seeded with positions as percentages of the page.
++    // We need to convert these percentages to pixel positions on the canvas.
++    const canvasBox = await canvas.boundingBox();
++
++    if (!canvasBox) {
++      throw new Error('Canvas bounding box not found');
++    }
++
++    // Only NAME and SIGNATURE fields need manual interaction (DATE and EMAIL are auto-filled).
++    const manualFields = fields.filter(
++      (f) => f.type !== FieldType.DATE && f.type !== FieldType.EMAIL,
++    );
++
++    for (const field of manualFields) {
++      const x =
++        (Number(field.positionX) / 100) * canvasBox.width +
++        ((Number(field.width) / 100) * canvasBox.width) / 2;
++      const y =
++        (Number(field.positionY) / 100) * canvasBox.height +
++        ((Number(field.height) / 100) * canvasBox.height) / 2;
++
++      await canvas.click({ position: { x, y } });
++
++      if (field.type === FieldType.NAME) {
++        const nameDialog = page.getByRole('dialog');
++        const isDialogVisible = await nameDialog.isVisible().catch(() => false);
++
++        if (isDialogVisible) {
++          const nameInput = nameDialog.locator('input[type="text"], input[name="name"]').first();
++          const isInputVisible = await nameInput.isVisible().catch(() => false);
++
++          if (isInputVisible) {
++            await nameInput.fill('Test Signer');
++          }
++
++          const saveButton = nameDialog.getByRole('button', { name: 'Save' });
++          const isButtonVisible = await saveButton.isVisible().catch(() => false);
++
++          if (isButtonVisible) {
++            await saveButton.click();
++          }
++        }
++      }
++
++      // Small delay to allow the field signing to complete.
++      await page.waitForTimeout(500);
++    }
++
++    // All fields should now be complete.
++    await expect(page.getByText('0 Fields Remaining').first()).toBeVisible({ timeout: 10_000 });
++
++    await page.getByRole('button', { name: 'Complete' }).click();
++    await expect(page.getByRole('heading', { name: 'Are you sure?' })).toBeVisible();
++    await page.getByRole('button', { name: 'Sign' }).click();
++
++    await page.waitForURL(`/sign/${token}/complete`);
++    await expect(page.getByText('Document Signed')).toBeVisible();
++
++    // Verify the date field was auto-inserted with the correct format.
++    const dateField = await prisma.field.findFirstOrThrow({
++      where: {
++        envelopeId: envelope.id,
++        type: FieldType.DATE,
++      },
++    });
++
++    expect(dateField.inserted).toBe(true);
++    expect(dateField.customText).toBeTruthy();
++
++    const insertedDate = DateTime.fromFormat(dateField.customText, DEFAULT_DOCUMENT_DATE_FORMAT, {
++      zone: DEFAULT_DOCUMENT_TIME_ZONE,
++    });
++
++    expect(insertedDate.isValid).toBe(true);
++    expect(Math.abs(insertedDate.diff(now, 'minutes').minutes)).toBeLessThanOrEqual(2);
++
++    // Verify the email field was inserted with the recipient's email.
++    const emailField = await prisma.field.findFirstOrThrow({
++      where: {
++        envelopeId: envelope.id,
++        type: FieldType.EMAIL,
++      },
++    });
++
++    expect(emailField.inserted).toBe(true);
++    expect(emailField.customText).toBe(recipientEmail);
++
++    // Verify all fields are inserted.
++    const allFields = await prisma.field.findMany({
++      where: { envelopeId: envelope.id },
++    });
++
++    for (const field of allFields) {
++      expect(field.inserted).toBe(true);
++    }
++
++    // Verify the document reached COMPLETED status.
++    await expect(async () => {
++      const dbEnvelope = await prisma.envelope.findUniqueOrThrow({
++        where: { id: envelope.id },
++      });
++
++      expect(dbEnvelope.status).toBe(DocumentStatus.COMPLETED);
++    }).toPass();
++  });
++});
+diff --git a/packages/app-tests/e2e/fixtures/api-seeds.ts b/packages/app-tests/e2e/fixtures/api-seeds.ts
+new file mode 100644
+index 0000000000..a2c2fc3f96
+--- /dev/null
++++ b/packages/app-tests/e2e/fixtures/api-seeds.ts
+@@ -0,0 +1,901 @@
++/**
++ * API V2-based seed fixtures for E2E tests.
++ *
++ * These fixtures create documents, templates, envelopes, recipients, fields,
++ * and folders through the API V2 endpoints instead of direct Prisma calls.
++ * This ensures all creation-time side effects (PDF normalization, field meta
++ * defaults, etc.) are exercised the same way a real user would trigger them.
++ *
++ * Usage:
++ *   import { apiSeedDraftDocument, apiSeedPendingDocument, ... } from '../fixtures/api-seeds';
++ *
++ *   test('my test', async ({ request }) => {
++ *     const { envelope, token, user, team } = await apiSeedDraftDocument(request, {
++ *       title: 'My Document',
++ *       recipients: [{ email: 'signer@example.com', name: 'Signer', role: 'SIGNER' }],
++ *     });
++ *   });
++ */
++import { type APIRequestContext, expect } from '@playwright/test';
++import fs from 'node:fs';
++import path from 'node:path';
++
++import { NEXT_PUBLIC_WEBAPP_URL } from '@documenso/lib/constants/app';
++import { createApiToken } from '@documenso/lib/server-only/public-api/create-api-token';
++import { mapSecondaryIdToTemplateId } from '@documenso/lib/utils/envelope';
++import { seedUser } from '@documenso/prisma/seed/users';
++import type {
++  TCreateEnvelopePayload,
++  TCreateEnvelopeResponse,
++} from '@documenso/trpc/server/envelope-router/create-envelope.types';
++import type {
++  TDistributeEnvelopeRequest,
++  TDistributeEnvelopeResponse,
++} from '@documenso/trpc/server/envelope-router/distribute-envelope.types';
++import type { TCreateEnvelopeRecipientsResponse } from '@documenso/trpc/server/envelope-router/envelope-recipients/create-envelope-recipients.types';
++import type { TGetEnvelopeResponse } from '@documenso/trpc/server/envelope-router/get-envelope.types';
++
++// ---------------------------------------------------------------------------
++// Constants
++// ---------------------------------------------------------------------------
++
++const WEBAPP_BASE_URL = NEXT_PUBLIC_WEBAPP_URL();
++const API_BASE_URL = `${WEBAPP_BASE_URL}/api/v2-beta`;
++
++const examplePdfBuffer = fs.readFileSync(path.join(__dirname, '../../../../assets/example.pdf'));
++
++// ---------------------------------------------------------------------------
++// Types
++// ---------------------------------------------------------------------------
++
++export type ApiRecipient = {
++  email: string;
++  name?: string;
++  role?: 'SIGNER' | 'APPROVER' | 'VIEWER' | 'CC' | 'ASSISTANT';
++  signingOrder?: number;
++  accessAuth?: string[];
++  actionAuth?: string[];
++};
++
++export type ApiField = {
++  recipientId: number;
++  envelopeItemId?: string;
++  type: string;
++  page?: number;
++  positionX?: number;
++  positionY?: number;
++  width?: number;
++  height?: number;
++  fieldMeta?: Record<string, unknown>;
++  placeholder?: string;
++  matchAll?: boolean;
++};
++
++export type ApiSeedContext = {
++  user: Awaited<ReturnType<typeof seedUser>>['user'];
++  team: Awaited<ReturnType<typeof seedUser>>['team'];
++  token: string;
++};
++
++export type ApiSeedEnvelopeOptions = {
++  title?: string;
++  type?: 'DOCUMENT' | 'TEMPLATE';
++  externalId?: string;
++  visibility?: string;
++  globalAccessAuth?: string[];
++  globalActionAuth?: string[];
++  folderId?: string;
++  pdfFile?: { name: string; data: Buffer };
++  meta?: TCreateEnvelopePayload['meta'];
++  recipients?: Array<
++    ApiRecipient & {
++      fields?: Array<{
++        type: string;
++        identifier?: string | number;
++        page?: number;
++        positionX?: number;
++        positionY?: number;
++        width?: number;
++        height?: number;
++        fieldMeta?: Record<string, unknown>;
++      }>;
++    }
++  >;
++};
++
++// ---------------------------------------------------------------------------
++// Core API helpers (low-level)
++// ---------------------------------------------------------------------------
++
++/**
++ * Create a fresh user + team + API token for test isolation.
++ * Every high-level seed function calls this internally, but you can also
++ * call it directly if you need the context for multiple operations.
++ */
++export const apiCreateTestContext = async (tokenName = 'e2e-seed'): Promise<ApiSeedContext> => {
++  const { user, team } = await seedUser();
++
++  const { token } = await createApiToken({
++    userId: user.id,
++    teamId: team.id,
++    tokenName,
++    expiresIn: null,
++  });
++
++  return { user, team, token };
++};
++
++const authHeader = (token: string) => ({
++  Authorization: `Bearer ${token}`,
++});
++
++/**
++ * Create an envelope via API V2 with a PDF file attached.
++ *
++ * This is the lowest-level envelope creation function. It creates the
++ * envelope with optional inline recipients and fields in a single call.
++ */
++export const apiCreateEnvelope = async (
++  request: APIRequestContext,
++  token: string,
++  options: ApiSeedEnvelopeOptions = {},
++): Promise<TCreateEnvelopeResponse> => {
++  const {
++    title = '[TEST] API Seeded Envelope',
++    type = 'DOCUMENT',
++    externalId,
++    visibility,
++    globalAccessAuth,
++    globalActionAuth,
++    folderId,
++    pdfFile,
++    meta,
++    recipients,
++  } = options;
++
++  // Build payload as a plain object. The API receives this as a JSON string
++  // inside multipart form data, so strict TypeScript union narrowing is not
++  // required - the server validates with Zod at runtime.
++  const payload: Record<string, unknown> = {
++    title,
++    type,
++  };
++
++  if (externalId !== undefined) {
++    payload.externalId = externalId;
++  }
++
++  if (visibility !== undefined) {
++    payload.visibility = visibility;
++  }
++
++  if (globalAccessAuth !== undefined) {
++    payload.globalAccessAuth = globalAccessAuth;
++  }
++
++  if (globalActionAuth !== undefined) {
++    payload.globalActionAuth = globalActionAuth;
++  }
++
++  if (folderId !== undefined) {
++    payload.folderId = folderId;
++  }
++
++  if (meta !== undefined) {
++    payload.meta = meta;
++  }
++
++  if (recipients !== undefined) {
++    payload.recipients = recipients.map((r) => {
++      const recipientPayload: Record<string, unknown> = {
++        email: r.email,
++        name: r.name ?? r.email,
++        role: r.role ?? 'SIGNER',
++      };
++
++      if (r.signingOrder !== undefined) {
++        recipientPayload.signingOrder = r.signingOrder;
++      }
++
++      if (r.accessAuth !== undefined) {
++        recipientPayload.accessAuth = r.accessAuth;
++      }
++
++      if (r.actionAuth !== undefined) {
++        recipientPayload.actionAuth = r.actionAuth;
++      }
++
++      if (r.fields !== undefined) {
++        recipientPayload.fields = r.fields.map((f) => {
++          const fieldPayload: Record<string, unknown> = {
++            type: f.type,
++            page: f.page ?? 1,
++            positionX: f.positionX ?? 10,
++            positionY: f.positionY ?? 10,
++            width: f.width ?? 15,
++            height: f.height ?? 5,
++          };
++
++          if (f.identifier !== undefined) {
++            fieldPayload.identifier = f.identifier;
++          }
++
++          if (f.fieldMeta !== undefined) {
++            fieldPayload.fieldMeta = f.fieldMeta;
++          }
++
++          return fieldPayload;
++        });
++      }
++
++      return recipientPayload;
++    });
++  }
++
++  const formData = new FormData();
++  formData.append('payload', JSON.stringify(payload));
++
++  const pdf = pdfFile ?? { name: 'example.pdf', data: examplePdfBuffer };
++  formData.append('files', new File([pdf.data], pdf.name, { type: 'application/pdf' }));
++
++  const res = await request.post(`${API_BASE_URL}/envelope/create`, {
++    headers: authHeader(token),
++    multipart: formData,
++  });
++
++  expect(res.ok(), `envelope/create failed: ${await res.text()}`).toBeTruthy();
++
++  return (await res.json()) as TCreateEnvelopeResponse;
++};
++
++/**
++ * Get full envelope data via API V2.
++ */
++export const apiGetEnvelope = async (
++  request: APIRequestContext,
++  token: string,
++  envelopeId: string,
++): Promise<TGetEnvelopeResponse> => {
++  const res = await request.get(`${API_BASE_URL}/envelope/${envelopeId}`, {
++    headers: authHeader(token),
++  });
++
++  expect(res.ok(), `envelope/get failed: ${await res.text()}`).toBeTruthy();
++
++  return (await res.json()) as TGetEnvelopeResponse;
++};
++
++/**
++ * Add recipients to an existing envelope via API V2.
++ */
++export const apiCreateRecipients = async (
++  request: APIRequestContext,
++  token: string,
++  envelopeId: string,
++  recipients: ApiRecipient[],
++): Promise<TCreateEnvelopeRecipientsResponse> => {
++  const data = {
++    envelopeId,
++    data: recipients.map((r) => {
++      const recipientPayload: Record<string, unknown> = {
++        email: r.email,
++        name: r.name ?? r.email,
++        role: r.role ?? 'SIGNER',
++      };
++
++      if (r.signingOrder !== undefined) {
++        recipientPayload.signingOrder = r.signingOrder;
++      }
++
++      if (r.accessAuth !== undefined) {
++        recipientPayload.accessAuth = r.accessAuth;
++      }
++
++      if (r.actionAuth !== undefined) {
++        recipientPayload.actionAuth = r.actionAuth;
++      }
++
++      return recipientPayload;
++    }),
++  };
++
++  const res = await request.post(`${API_BASE_URL}/envelope/recipient/create-many`, {
++    headers: { ...authHeader(token), 'Content-Type': 'application/json' },
++    data,
++  });
++
++  expect(res.ok(), `recipient/create-many failed: ${await res.text()}`).toBeTruthy();
++
++  return (await res.json()) as TCreateEnvelopeRecipientsResponse;
++};
++
++/**
++ * Add fields to an existing envelope via API V2.
++ *
++ * If `recipientId` is not set on fields, the first recipient is used.
++ * If `envelopeItemId` is not set, the first envelope item is used.
++ */
++export const apiCreateFields = async (
++  request: APIRequestContext,
++  token: string,
++  envelopeId: string,
++  fields: ApiField[],
++): Promise<void> => {
++  // Build as plain object - the deeply discriminated union types for fields
++  // (type + fieldMeta combinations) are validated by Zod on the server.
++  const data = {
++    envelopeId,
++    data: fields.map((f) => {
++      const fieldPayload: Record<string, unknown> = {
++        recipientId: f.recipientId,
++        type: f.type,
++      };
++
++      if (f.envelopeItemId !== undefined) {
++        fieldPayload.envelopeItemId = f.envelopeItemId;
++      }
++
++      if (f.fieldMeta !== undefined) {
++        fieldPayload.fieldMeta = f.fieldMeta;
++      }
++
++      if (f.placeholder) {
++        fieldPayload.placeholder = f.placeholder;
++
++        if (f.width !== undefined) {
++          fieldPayload.width = f.width;
++        }
++
++        if (f.height !== undefined) {
++          fieldPayload.height = f.height;
++        }
++
++        if (f.matchAll !== undefined) {
++          fieldPayload.matchAll = f.matchAll;
++        }
++      } else {
++        fieldPayload.page = f.page ?? 1;
++        fieldPayload.positionX = f.positionX ?? 10;
++        fieldPayload.positionY = f.positionY ?? 10;
++        fieldPayload.width = f.width ?? 15;
++        fieldPayload.height = f.height ?? 5;
++      }
++
++      return fieldPayload;
++    }),
++  };
++
++  const res = await request.post(`${API_BASE_URL}/envelope/field/create-many`, {
++    headers: { ...authHeader(token), 'Content-Type': 'application/json' },
++    data,
++  });
++
++  expect(res.ok(), `field/create-many failed: ${await res.text()}`).toBeTruthy();
++};
++
++/**
++ * Distribute (send) an envelope via API V2.
++ * Returns the distribute response which includes signing URLs for recipients.
++ */
++export const apiDistributeEnvelope = async (
++  request: APIRequestContext,
++  token: string,
++  envelopeId: string,
++  meta?: TDistributeEnvelopeRequest['meta'],
++): Promise<TDistributeEnvelopeResponse> => {
++  const data: TDistributeEnvelopeRequest = {
++    envelopeId,
++    ...(meta !== undefined && { meta }),
++  };
++
++  const res = await request.post(`${API_BASE_URL}/envelope/distribute`, {
++    headers: { ...authHeader(token), 'Content-Type': 'application/json' },
++    data,
++  });
++
++  expect(res.ok(), `envelope/distribute failed: ${await res.text()}`).toBeTruthy();
++
++  return (await res.json()) as TDistributeEnvelopeResponse;
++};
++
++/**
++ * Create a folder via API V2.
++ */
++export const apiCreateFolder = async (
++  request: APIRequestContext,
++  token: string,
++  options: {
++    name?: string;
++    parentId?: string;
++    type?: 'DOCUMENT' | 'TEMPLATE';
++  } = {},
++): Promise<{ id: string; name: string }> => {
++  const { name = 'Test Folder', parentId, type } = options;
++
++  const res = await request.post(`${API_BASE_URL}/folder/create`, {
++    headers: { ...authHeader(token), 'Content-Type': 'application/json' },
++    data: {
++      name,
++      ...(parentId !== undefined && { parentId }),
++      ...(type !== undefined && { type }),
++    },
++  });
++
++  expect(res.ok(), `folder/create failed: ${await res.text()}`).toBeTruthy();
++
++  return (await res.json()) as { id: string; name: string };
++};
++
++/**
++ * Create a direct template link via API V2.
++ */
++export const apiCreateDirectTemplateLink = async (
++  request: APIRequestContext,
++  token: string,
++  templateId: number,
++  directRecipientId?: number,
++): Promise<{ id: number; token: string; enabled: boolean; directTemplateRecipientId: number }> => {
++  const res = await request.post(`${API_BASE_URL}/template/direct/create`, {
++    headers: { ...authHeader(token), 'Content-Type': 'application/json' },
++    data: {
++      templateId,
++      ...(directRecipientId !== undefined && { directRecipientId }),
++    },
++  });
++
++  expect(res.ok(), `template/direct/create failed: ${await res.text()}`).toBeTruthy();
++
++  return await res.json();
++};
++
++// ---------------------------------------------------------------------------
++// High-level seed functions (composites)
++// ---------------------------------------------------------------------------
++
++export type ApiSeedResult = {
++  /** The created envelope/document/template. */
++  envelope: TGetEnvelopeResponse;
++  /** API token for further API calls. */
++  token: string;
++  /** The seeded user. */
++  user: ApiSeedContext['user'];
++  /** The seeded team. */
++  team: ApiSeedContext['team'];
++};
++
++export type ApiSeedDocumentOptions = {
++  /** Document title. Default: '[TEST] API Document - Draft' */
++  title?: string;
++  /** Recipients to add to the document. */
++  recipients?: ApiRecipient[];
++  /** Fields to add per recipient. If provided, must match recipients order. */
++  fieldsPerRecipient?: Array<
++    Array<{
++      type: string;
++      page?: number;
++      positionX?: number;
++      positionY?: number;
++      width?: number;
++      height?: number;
++      fieldMeta?: Record<string, unknown>;
++    }>
++  >;
++  /** External ID for the envelope. */
++  externalId?: string;
++  /** Document visibility setting. */
++  visibility?: string;
++  /** Global access auth requirements. */
++  globalAccessAuth?: string[];
++  /** Global action auth requirements. */
++  globalActionAuth?: string[];
++  /** Folder ID to place the document in. */
++  folderId?: string;
++  /** Document meta settings. */
++  meta?: TCreateEnvelopePayload['meta'];
++  /** Custom PDF file. Default: example.pdf */
++  pdfFile?: { name: string; data: Buffer };
++  /** Reuse an existing test context instead of creating a new one. */
++  context?: ApiSeedContext;
++};
++
++/**
++ * Create a draft document via API V2.
++ *
++ * Creates a user, team, API token, and a DRAFT document. Optionally adds
++ * recipients and fields.
++ *
++ * @example
++ * ```ts
++ * const { envelope, token, user, team } = await apiSeedDraftDocument(request, {
++ *   title: 'My Document',
++ *   recipients: [{ email: 'signer@test.com', name: 'Test Signer' }],
++ * });
++ * ```
++ */
++export const apiSeedDraftDocument = async (
++  request: APIRequestContext,
++  options: ApiSeedDocumentOptions = {},
++): Promise<ApiSeedResult> => {
++  const ctx = options.context ?? (await apiCreateTestContext('e2e-draft-doc'));
++
++  // Create the envelope with inline recipients if provided
++  const createOptions: ApiSeedEnvelopeOptions = {
++    title: options.title ?? '[TEST] API Document - Draft',
++    type: 'DOCUMENT',
++    externalId: options.externalId,
++    visibility: options.visibility,
++    globalAccessAuth: options.globalAccessAuth,
++    globalActionAuth: options.globalActionAuth,
++    folderId: options.folderId,
++    meta: options.meta,
++    pdfFile: options.pdfFile,
++  };
++
++  // If we have recipients but no per-recipient fields, use inline creation
++  if (options.recipients && !options.fieldsPerRecipient) {
++    createOptions.recipients = options.recipients.map((r) => ({
++      ...r,
++      role: r.role ?? 'SIGNER',
++    }));
++  }
++
++  const { id: envelopeId } = await apiCreateEnvelope(request, ctx.token, createOptions);
++
++  // If we need per-recipient fields, add recipients and fields separately
++  if (options.recipients && options.fieldsPerRecipient) {
++    const recipientsRes = await apiCreateRecipients(
++      request,
++      ctx.token,
++      envelopeId,
++      options.recipients,
++    );
++
++    // Get envelope to resolve envelope item IDs
++    const envelopeData = await apiGetEnvelope(request, ctx.token, envelopeId);
++    const firstItemId = envelopeData.envelopeItems[0]?.id;
++
++    // Create fields for each recipient
++    for (const [index, recipientFields] of options.fieldsPerRecipient.entries()) {
++      if (recipientFields.length === 0) {
++        continue;
++      }
++
++      const recipientId = recipientsRes.data[index].id;
++
++      await apiCreateFields(
++        request,
++        ctx.token,
++        envelopeId,
++        recipientFields.map((f) => ({
++          ...f,
++          recipientId,
++          envelopeItemId: firstItemId,
++          type: f.type,
++        })),
++      );
++    }
++  }
++
++  const envelope = await apiGetEnvelope(request, ctx.token, envelopeId);
++
++  return { envelope, token: ctx.token, user: ctx.user, team: ctx.team };
++};
++
++export type ApiSeedPendingDocumentOptions = ApiSeedDocumentOptions & {
++  /** Distribution meta (subject, message, etc.). */
++  distributeMeta?: TDistributeEnvelopeRequest['meta'];
++};
++
++/**
++ * Seed a pending (distributed) document via API V2.
++ *
++ * Creates the document, adds recipients with SIGNATURE fields, then
++ * distributes (sends) it. The response includes signing URLs for each
++ * recipient.
++ *
++ * Every SIGNER recipient must have at least one SIGNATURE field for
++ * distribution to succeed. If you don't provide `fieldsPerRecipient`,
++ * a default SIGNATURE field is added for each SIGNER/APPROVER recipient.
++ *
++ * @example
++ * ```ts
++ * const { envelope, distributeResult, token } = await apiSeedPendingDocument(request, {
++ *   recipients: [
++ *     { email: 'signer@test.com', name: 'Signer' },
++ *     { email: 'viewer@test.com', name: 'Viewer', role: 'VIEWER' },
++ *   ],
++ * });
++ *
++ * // Access signing URL:
++ * const signingUrl = distributeResult.recipients[0].signingUrl;
++ * ```
++ */
++export const apiSeedPendingDocument = async (
++  request: APIRequestContext,
++  options: ApiSeedPendingDocumentOptions = {},
++): Promise<
++  ApiSeedResult & {
++    distributeResult: TDistributeEnvelopeResponse;
++  }
++> => {
++  const ctx = options.context ?? (await apiCreateTestContext('e2e-pending-doc'));
++
++  const recipients = options.recipients ?? [
++    {
++      email: `signer-${Date.now()}@test.documenso.com`,
++      name: 'Test Signer',
++      role: 'SIGNER' as const,
++    },
++  ];
++
++  // Create the base envelope
++  const { id: envelopeId } = await apiCreateEnvelope(request, ctx.token, {
++    title: options.title ?? '[TEST] API Document - Pending',
++    type: 'DOCUMENT',
++    externalId: options.externalId,
++    visibility: options.visibility,
++    globalAccessAuth: options.globalAccessAuth,
++    globalActionAuth: options.globalActionAuth,
++    folderId: options.folderId,
++    meta: options.meta,
++    pdfFile: options.pdfFile,
++  });
++
++  // Add recipients
++  const recipientsRes = await apiCreateRecipients(request, ctx.token, envelopeId, recipients);
++
++  // Get envelope for item IDs
++  const envelopeData = await apiGetEnvelope(request, ctx.token, envelopeId);
++  const firstItemId = envelopeData.envelopeItems[0]?.id;
++
++  // Add fields
++  if (options.fieldsPerRecipient) {
++    for (const [index, recipientFields] of options.fieldsPerRecipient.entries()) {
++      if (recipientFields.length === 0) {
++        continue;
++      }
++
++      await apiCreateFields(
++        request,
++        ctx.token,
++        envelopeId,
++        recipientFields.map((f) => ({
++          ...f,
++          recipientId: recipientsRes.data[index].id,
++          envelopeItemId: firstItemId,
++          type: f.type,
++        })),
++      );
++    }
++  } else {
++    // Auto-add a SIGNATURE field for each SIGNER/APPROVER recipient
++    const signerFields: ApiField[] = [];
++
++    for (const [index, r] of recipientsRes.data.entries()) {
++      const role = recipients[index].role ?? 'SIGNER';
++
++      if (role === 'SIGNER' || role === 'APPROVER') {
++        signerFields.push({
++          recipientId: r.id,
++          envelopeItemId: firstItemId,
++          type: 'SIGNATURE',
++          page: 1,
++          positionX: 10,
++          positionY: 10 + index * 10,
++          width: 15,
++          height: 5,
++        });
++      }
++    }
++
++    if (signerFields.length > 0) {
++      await apiCreateFields(request, ctx.token, envelopeId, signerFields);
++    }
++  }
++
++  // Distribute
++  const distributeResult = await apiDistributeEnvelope(
++    request,
++    ctx.token,
++    envelopeId,
++    options.distributeMeta,
++  );
++
++  const envelope = await apiGetEnvelope(request, ctx.token, envelopeId);
++
++  return {
++    envelope,
++    distributeResult,
++    token: ctx.token,
++    user: ctx.user,
++    team: ctx.team,
++  };
++};
++
++export type ApiSeedTemplateOptions = Omit<ApiSeedDocumentOptions, 'folderId'> & {
++  /** Folder ID to place the template in. */
++  folderId?: string;
++};
++
++/**
++ * Seed a template via API V2.
++ *
++ * Creates a TEMPLATE envelope with optional recipients and fields.
++ *
++ * @example
++ * ```ts
++ * const { envelope, token } = await apiSeedTemplate(request, {
++ *   title: 'My Template',
++ *   recipients: [{ email: 'recipient@test.com', name: 'Signer', role: 'SIGNER' }],
++ * });
++ * ```
++ */
++export const apiSeedTemplate = async (
++  request: APIRequestContext,
++  options: ApiSeedTemplateOptions = {},
++): Promise<ApiSeedResult> => {
++  const ctx = options.context ?? (await apiCreateTestContext('e2e-template'));
++
++  const createOptions: ApiSeedEnvelopeOptions = {
++    title: options.title ?? '[TEST] API Template',
++    type: 'TEMPLATE',
++    externalId: options.externalId,
++    visibility: options.visibility,
++    globalAccessAuth: options.globalAccessAuth,
++    globalActionAuth: options.globalActionAuth,
++    folderId: options.folderId,
++    meta: options.meta,
++    pdfFile: options.pdfFile,
++  };
++
++  if (options.recipients && !options.fieldsPerRecipient) {
++    createOptions.recipients = options.recipients.map((r) => ({
++      ...r,
++      role: r.role ?? 'SIGNER',
++    }));
++  }
++
++  const { id: envelopeId } = await apiCreateEnvelope(request, ctx.token, createOptions);
++
++  if (options.recipients && options.fieldsPerRecipient) {
++    const recipientsRes = await apiCreateRecipients(
++      request,
++      ctx.token,
++      envelopeId,
++      options.recipients,
++    );
++
++    const envelopeData = await apiGetEnvelope(request, ctx.token, envelopeId);
++    const firstItemId = envelopeData.envelopeItems[0]?.id;
++
++    for (const [index, recipientFields] of options.fieldsPerRecipient.entries()) {
++      if (recipientFields.length === 0) {
++        continue;
++      }
++
++      await apiCreateFields(
++        request,
++        ctx.token,
++        envelopeId,
++        recipientFields.map((f) => ({
++          ...f,
++          recipientId: recipientsRes.data[index].id,
++          envelopeItemId: firstItemId,
++          type: f.type,
++        })),
++      );
++    }
++  }
++
++  const envelope = await apiGetEnvelope(request, ctx.token, envelopeId);
++
++  return { envelope, token: ctx.token, user: ctx.user, team: ctx.team };
++};
++
++/**
++ * Seed a template with a direct link via API V2.
++ *
++ * Creates a template with a recipient, then creates a direct link for it.
++ *
++ * @example
++ * ```ts
++ * const { envelope, directLink, token } = await apiSeedDirectTemplate(request, {
++ *   title: 'Direct Template',
++ * });
++ *
++ * // Use directLink.token for the signing URL
++ * ```
++ */
++export const apiSeedDirectTemplate = async (
++  request: APIRequestContext,
++  options: ApiSeedTemplateOptions & {
++    /** Custom recipient for the direct link. Default: a SIGNER placeholder. */
++    directRecipient?: ApiRecipient;
++  } = {},
++): Promise<
++  ApiSeedResult & {
++    directLink: { id: number; token: string; enabled: boolean; directTemplateRecipientId: number };
++  }
++> => {
++  const recipients = options.recipients ?? [
++    options.directRecipient ?? {
++      email: 'direct-template-recipient@documenso.com',
++      name: 'Direct Template Recipient',
++      role: 'SIGNER' as const,
++    },
++  ];
++
++  const templateResult = await apiSeedTemplate(request, {
++    ...options,
++    recipients,
++  });
++
++  // Find the recipient ID for the direct link
++  const directRecipientEmail = options.directRecipient?.email ?? recipients[0].email;
++
++  const directRecipient = templateResult.envelope.recipients.find(
++    (r) => r.email === directRecipientEmail,
++  );
++
++  if (!directRecipient) {
++    throw new Error(`Direct template recipient not found: ${directRecipientEmail}`);
++  }
++
++  const numericTemplateId = mapSecondaryIdToTemplateId(templateResult.envelope.secondaryId);
++
++  const directLink = await apiCreateDirectTemplateLink(
++    request,
++    templateResult.token,
++    numericTemplateId,
++    directRecipient.id,
++  );
++
++  // Re-fetch envelope to include directLink data
++  const envelope = await apiGetEnvelope(request, templateResult.token, templateResult.envelope.id);
++
++  return {
++    ...templateResult,
++    envelope,
++    directLink,
++  };
++};
++
++/**
++ * Seed multiple draft documents in parallel for a single user context.
++ *
++ * Useful for tests that need multiple documents (e.g., bulk actions, find/filter tests).
++ *
++ * @example
++ * ```ts
++ * const { documents, token, user, team } = await apiSeedMultipleDraftDocuments(request, [
++ *   { title: 'Doc A' },
++ *   { title: 'Doc B' },
++ *   { title: 'Doc C' },
++ * ]);
++ * ```
++ */
++export const apiSeedMultipleDraftDocuments = async (
++  request: APIRequestContext,
++  documents: ApiSeedDocumentOptions[],
++  context?: ApiSeedContext,
++): Promise<{
++  documents: TGetEnvelopeResponse[];
++  token: string;
++  user: ApiSeedContext['user'];
++  team: ApiSeedContext['team'];
++}> => {
++  const ctx = context ?? (await apiCreateTestContext('e2e-multi-doc'));
++
++  const results = await Promise.all(
++    documents.map(async (docOptions) =>
++      apiSeedDraftDocument(request, { ...docOptions, context: ctx }),
++    ),
++  );
++
++  return {
++    documents: results.map((r) => r.envelope),
++    token: ctx.token,
++    user: ctx.user,
++    team: ctx.team,
++  };
++};
+diff --git a/packages/app-tests/e2e/pdf-viewer/pdf-viewer.spec.ts b/packages/app-tests/e2e/pdf-viewer/pdf-viewer.spec.ts
+index 3ffce7e770..3fb9a77a2c 100644
+--- a/packages/app-tests/e2e/pdf-viewer/pdf-viewer.spec.ts
++++ b/packages/app-tests/e2e/pdf-viewer/pdf-viewer.spec.ts
+@@ -22,7 +22,7 @@ import { seedUser } from '@documenso/prisma/seed/users';
+ 
+ import { apiSignin } from '../fixtures/authentication';
+ 
+-const PDF_PAGE_SELECTOR = 'img[data-page-number]';
++export const PDF_PAGE_SELECTOR = 'img[data-page-number]';
+ 
+ async function addSecondEnvelopeItem(envelopeId: string) {
+   const firstItem = await prisma.envelopeItem.findFirstOrThrow({
+diff --git a/packages/lib/server-only/document/complete-document-with-token.ts b/packages/lib/server-only/document/complete-document-with-token.ts
+index 9b56d20616..e8f78a6738 100644
+--- a/packages/lib/server-only/document/complete-document-with-token.ts
++++ b/packages/lib/server-only/document/complete-document-with-token.ts
+@@ -8,7 +8,10 @@ import {
+   SigningStatus,
+   WebhookTriggerEvents,
+ } from '@prisma/client';
++import { DateTime } from 'luxon';
+ 
++import { DEFAULT_DOCUMENT_DATE_FORMAT } from '@documenso/lib/constants/date-formats';
++import { DEFAULT_DOCUMENT_TIME_ZONE } from '@documenso/lib/constants/time-zones';
+ import {
+   DOCUMENT_AUDIT_LOG_TYPE,
+   RECIPIENT_DIFF_TYPE,
+@@ -120,46 +123,6 @@ export const completeDocumentWithToken = async ({
+     }
+   }
+ 
+-  const fields = await prisma.field.findMany({
+-    where: {
+-      envelopeId: envelope.id,
+-      recipientId: recipient.id,
+-    },
+-  });
+-
+-  if (fieldsContainUnsignedRequiredField(fields)) {
+-    throw new Error(`Recipient ${recipient.id} has unsigned fields`);
+-  }
+-
+-  let recipientName = recipient.name;
+-  let recipientEmail = recipient.email;
+-
+-  // Only trim the name if it's been derived.
+-  if (!recipientName) {
+-    recipientName = (
+-      recipientOverride?.name ||
+-      fields.find((field) => field.type === FieldType.NAME)?.customText ||
+-      ''
+-    ).trim();
+-  }
+-
+-  // Only trim the email if it's been derived.
+-  if (!recipient.email) {
+-    recipientEmail = (
+-      recipientOverride?.email ||
+-      fields.find((field) => field.type === FieldType.EMAIL)?.customText ||
+-      ''
+-    )
+-      .trim()
+-      .toLowerCase();
+-  }
+-
+-  if (!recipientEmail) {
+-    throw new AppError(AppErrorCode.INVALID_BODY, {
+-      message: 'Recipient email is required',
+-    });
+-  }
+-
+   // Check ACCESS AUTH 2FA validation during document completion
+   const { derivedRecipientAccessAuth } = extractDocumentAuthMethods({
+     documentAuth: envelope.authOptions,
+@@ -218,6 +181,112 @@ export const completeDocumentWithToken = async ({
+     });
+   }
+ 
++  let fields = await prisma.field.findMany({
++    where: {
++      envelopeId: envelope.id,
++      recipientId: recipient.id,
++    },
++  });
++
++  // This should be scoped to the current recipient.
++  const uninsertedDateFields = fields.filter(
++    (field) => field.type === FieldType.DATE && !field.inserted,
++  );
++
++  let recipientName = recipient.name;
++  let recipientEmail = recipient.email;
++
++  // Only trim the name if it's been derived.
++  if (!recipientName) {
++    recipientName = (
++      recipientOverride?.name ||
++      fields.find((field) => field.type === FieldType.NAME)?.customText ||
++      ''
++    ).trim();
++  }
++
++  // Only trim the email if it's been derived.
++  if (!recipient.email) {
++    recipientEmail = (
++      recipientOverride?.email ||
++      fields.find((field) => field.type === FieldType.EMAIL)?.customText ||
++      ''
++    )
++      .trim()
++      .toLowerCase();
++  }
++
++  if (!recipientEmail) {
++    throw new AppError(AppErrorCode.INVALID_BODY, {
++      message: 'Recipient email is required',
++    });
++  }
++
++  // Auto-insert all un-inserted date fields for V2 envelopes at completion time.
++  if (envelope.internalVersion === 2 && uninsertedDateFields.length > 0) {
++    const formattedDate = DateTime.now()
++      .setZone(envelope.documentMeta?.timezone ?? DEFAULT_DOCUMENT_TIME_ZONE)
++      .toFormat(envelope.documentMeta?.dateFormat ?? DEFAULT_DOCUMENT_DATE_FORMAT);
++
++    const newDateFieldValues = {
++      customText: formattedDate,
++      inserted: true,
++    };
++
++    await prisma.field.updateMany({
++      where: {
++        id: {
++          in: uninsertedDateFields.map((field) => field.id),
++        },
++      },
++      data: {
++        ...newDateFieldValues,
++      },
++    });
++
++    // Create audit log entries for each auto-inserted date field.
++    await prisma.documentAuditLog.createMany({
++      data: uninsertedDateFields.map((field) =>
++        createDocumentAuditLogData({
++          type: DOCUMENT_AUDIT_LOG_TYPE.DOCUMENT_FIELD_INSERTED,
++          envelopeId: envelope.id,
++          user: {
++            email: recipientEmail,
++            name: recipientName,
++          },
++          requestMetadata,
++          data: {
++            recipientEmail: recipientEmail,
++            recipientId: recipient.id,
++            recipientName: recipientName,
++            recipientRole: recipient.role,
++            fieldId: field.secondaryId,
++            field: {
++              type: FieldType.DATE,
++              data: formattedDate,
++            },
++          },
++        }),
++      ),
++    });
++
++    // Update the local fields array so the subsequent validation check passes.
++    fields = fields.map((field) => {
++      if (field.type === FieldType.DATE && !field.inserted) {
++        return {
++          ...field,
++          ...newDateFieldValues,
++        };
++      }
++
++      return field;
++    });
++  }
++
++  if (fieldsContainUnsignedRequiredField(fields)) {
++    throw new Error(`Recipient ${recipient.id} has unsigned fields`);
++  }
++
+   await prisma.$transaction(async (tx) => {
+     await tx.recipient.update({
+       where: {
+diff --git a/packages/lib/server-only/document/send-document.ts b/packages/lib/server-only/document/send-document.ts
+index 1ce4227149..e1e10dd80b 100644
+--- a/packages/lib/server-only/document/send-document.ts
++++ b/packages/lib/server-only/document/send-document.ts
+@@ -1,4 +1,4 @@
+-import type { DocumentData, Envelope, EnvelopeItem, Field } from '@prisma/client';
++import type { DocumentData, Envelope, EnvelopeItem, Field, Recipient } from '@prisma/client';
+ import {
+   DocumentSigningOrder,
+   DocumentStatus,
+@@ -18,6 +18,7 @@ import { prisma } from '@documenso/prisma';
+ import { checkboxValidationSigns } from '@documenso/ui/primitives/document-flow/field-items-advanced-settings/constants';
+ 
+ import { validateCheckboxLength } from '../../advanced-fields-validation/validate-checkbox';
++import { DIRECT_TEMPLATE_RECIPIENT_EMAIL } from '../../constants/direct-templates';
+ import { AppError, AppErrorCode } from '../../errors/app-error';
+ import { jobs } from '../../jobs/client';
+ import { extractDerivedDocumentEmailSettings } from '../../types/document-email';
+@@ -207,7 +208,7 @@ export const sendDocument = async ({
+         });
+       }
+ 
+-      const fieldToAutoInsert = extractFieldAutoInsertValues(unknownField);
++      const fieldToAutoInsert = extractFieldAutoInsertValues(unknownField, recipient);
+ 
+       // Only auto-insert fields if the recipient has not been sent the document yet.
+       if (fieldToAutoInsert && recipient.sendStatus !== SendStatus.SENT) {
+@@ -374,6 +375,7 @@ const injectFormValuesIntoDocument = async (
+  */
+ export const extractFieldAutoInsertValues = (
+   unknownField: Field,
++  recipient: Pick<Recipient, 'email'>,
+ ): { fieldId: number; customText: string } | null => {
+   const parsedField = ZFieldAndMetaSchema.safeParse(unknownField);
+ 
+@@ -386,6 +388,18 @@ export const extractFieldAutoInsertValues = (
+   const field = parsedField.data;
+   const fieldId = unknownField.id;
+ 
++  // Auto insert email fields if the recipient has a valid email.
++  if (
++    field.type === FieldType.EMAIL &&
++    isRecipientEmailValidForSending(recipient) &&
++    recipient.email !== DIRECT_TEMPLATE_RECIPIENT_EMAIL
++  ) {
++    return {
++      fieldId,
++      customText: recipient.email,
++    };
++  }
++
+   // Auto insert text fields with prefilled values.
+   if (field.type === FieldType.TEXT) {
+     const { text } = ZTextFieldMeta.parse(field.fieldMeta);
+diff --git a/packages/lib/server-only/envelope/get-envelope-for-direct-template-signing.ts b/packages/lib/server-only/envelope/get-envelope-for-direct-template-signing.ts
+index d6be78773e..91062ba1fe 100644
+--- a/packages/lib/server-only/envelope/get-envelope-for-direct-template-signing.ts
++++ b/packages/lib/server-only/envelope/get-envelope-for-direct-template-signing.ts
+@@ -146,7 +146,7 @@ export const getEnvelopeForDirectTemplateSigning = async ({
+       ...recipient,
+       directToken: envelope.directLink?.token || '',
+       fields: recipient.fields.map((field) => {
+-        const autoInsertValue = extractFieldAutoInsertValues(field);
++        const autoInsertValue = extractFieldAutoInsertValues(field, recipient);
+ 
+         if (!autoInsertValue) {
+           return field;
+diff --git a/packages/prisma/seed/documents.ts b/packages/prisma/seed/documents.ts
+index fcb87f974d..2bf565b7c3 100644
+--- a/packages/prisma/seed/documents.ts
++++ b/packages/prisma/seed/documents.ts
+@@ -6,6 +6,18 @@ import { match } from 'ts-pattern';
+ 
+ import { createEnvelope } from '@documenso/lib/server-only/envelope/create-envelope';
+ import { incrementDocumentId } from '@documenso/lib/server-only/envelope/increment-id';
++import {
++  FIELD_CHECKBOX_META_DEFAULT_VALUES,
++  FIELD_DATE_META_DEFAULT_VALUES,
++  FIELD_DROPDOWN_META_DEFAULT_VALUES,
++  FIELD_EMAIL_META_DEFAULT_VALUES,
++  FIELD_INITIALS_META_DEFAULT_VALUES,
++  FIELD_NAME_META_DEFAULT_VALUES,
++  FIELD_NUMBER_META_DEFAULT_VALUES,
++  FIELD_RADIO_META_DEFAULT_VALUES,
++  FIELD_SIGNATURE_META_DEFAULT_VALUES,
++  FIELD_TEXT_META_DEFAULT_VALUES,
++} from '@documenso/lib/types/field-meta';
+ import { prefixedId } from '@documenso/lib/universal/id';
+ 
+ import { prisma } from '..';
+@@ -576,6 +588,19 @@ export const seedPendingDocumentWithFullFields = async ({
+               height: new Prisma.Decimal(5),
+               envelopeId: document.id,
+               envelopeItemId: firstItem.id,
++              fieldMeta: match(fieldType)
++                .with(FieldType.DATE, () => FIELD_DATE_META_DEFAULT_VALUES)
++                .with(FieldType.EMAIL, () => FIELD_EMAIL_META_DEFAULT_VALUES)
++                .with(FieldType.NAME, () => FIELD_NAME_META_DEFAULT_VALUES)
++                .with(FieldType.SIGNATURE, () => FIELD_SIGNATURE_META_DEFAULT_VALUES)
++                .with(FieldType.TEXT, () => FIELD_TEXT_META_DEFAULT_VALUES)
++                .with(FieldType.NUMBER, () => FIELD_NUMBER_META_DEFAULT_VALUES)
++                .with(FieldType.CHECKBOX, () => FIELD_CHECKBOX_META_DEFAULT_VALUES)
++                .with(FieldType.RADIO, () => FIELD_RADIO_META_DEFAULT_VALUES)
++                .with(FieldType.DROPDOWN, () => FIELD_DROPDOWN_META_DEFAULT_VALUES)
++                .with(FieldType.INITIALS, () => FIELD_INITIALS_META_DEFAULT_VALUES)
++                .with(FieldType.FREE_SIGNATURE, () => undefined)
++                .exhaustive(),
+             })),
+           },
+         },

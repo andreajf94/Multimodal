@@ -1,0 +1,123 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "dependency_management",
+      "recommendation": "Replaced direct llama_index.core.bridge.pydantic import with standard pydantic.BaseModel import in base_model.py",
+      "rationale": "The llama_index.core.bridge.pydantic module was just re-exporting pydantic.BaseModel. Using the standard pydantic import eliminates an unnecessary dependency on llama_index for this base class, reducing startup overhead and making the code more maintainable.",
+      "alternatives_considered": [
+        "Keeping the llama_index import",
+        "Creating a custom base class"
+      ],
+      "files_affected": [
+        "src/paperless_ai/base_model.py"
+      ]
+    },
+    {
+      "dimension": "lazy_loading",
+      "recommendation": "Moved llama_index imports from module-level to function-level in chat.py, client.py, embedding.py, and indexing.py",
+      "rationale": "Heavy AI libraries (llama_index, torch, transformers, sentence_transformers) are now only imported when specific AI functionality is actually invoked. This reduces memory usage during application startup, especially for management commands and operations that don't use AI features.",
+      "alternatives_considered": [
+        "Using import hooks",
+        "Creating a proxy module",
+        "Keeping eager imports"
+      ],
+      "files_affected": [
+        "src/paperless_ai/chat.py",
+        "src/paperless_ai/client.py",
+        "src/paperless_ai/embedding.py",
+        "src/paperless_ai/indexing.py"
+      ]
+    },
+    {
+      "dimension": "type_checking",
+      "recommendation": "Used TYPE_CHECKING conditional imports for type hints in client.py, embedding.py, and indexing.py",
+      "rationale": "TYPE_CHECKING imports are only evaluated during static type checking (mypy, pyright) but not at runtime. This allows proper type hints without triggering actual imports of heavy AI libraries during application startup.",
+      "alternatives_considered": [
+        "String type annotations",
+        "Using 'Any' type",
+        "Keeping runtime imports for types"
+      ],
+      "files_affected": [
+        "src/paperless_ai/client.py",
+        "src/paperless_ai/embedding.py",
+        "src/paperless_ai/indexing.py"
+      ]
+    },
+    {
+      "dimension": "api_design",
+      "recommendation": "Converted PromptTemplate object to string template in chat.py and moved PromptTemplate creation inside function",
+      "rationale": "The original CHAT_PROMPT_TMPL was a PromptTemplate object that required llama_index imports at module level. By converting it to a plain string and creating the PromptTemplate object inside the function, we maintain the same functionality while enabling lazy loading.",
+      "alternatives_considered": [
+        "Creating a factory function",
+        "Using a different templating system",
+        "Keeping the object but with conditional imports"
+      ],
+      "files_affected": [
+        "src/paperless_ai/chat.py"
+      ]
+    },
+    {
+      "dimension": "testing_strategy",
+      "recommendation": "Updated test patches to target the actual llama_index module paths instead of paperless_ai module paths",
+      "rationale": "Since imports were moved inside functions, the patching targets needed to be updated to match where the imports actually occur. This ensures tests properly mock the AI dependencies without triggering actual imports.",
+      "alternatives_considered": [
+        "Refactoring tests to not need patching",
+        "Creating test fixtures that handle imports",
+        "Keeping old patch targets with import redirects"
+      ],
+      "files_affected": [
+        "src/paperless_ai/tests/test_ai_indexing.py",
+        "src/paperless_ai/tests/test_chat.py",
+        "src/paperless_ai/tests/test_client.py",
+        "src/paperless_ai/tests/test_embedding.py"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Implement lazy loading for AI module imports",
+      "description": "Move all llama_index and related AI library imports from module level to function level to reduce memory usage during application startup",
+      "files_to_modify": [
+        "src/paperless_ai/chat.py",
+        "src/paperless_ai/client.py",
+        "src/paperless_ai/embedding.py",
+        "src/paperless_ai/indexing.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-002",
+      "title": "Simplify base model dependency",
+      "description": "Replace llama_index.core.bridge.pydantic import with standard pydantic.BaseModel to eliminate unnecessary dependency",
+      "files_to_modify": [
+        "src/paperless_ai/base_model.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-003",
+      "title": "Update test patches for lazy loading",
+      "description": "Update test mock patches to target the correct module paths after moving imports inside functions",
+      "files_to_modify": [
+        "src/paperless_ai/tests/test_ai_indexing.py",
+        "src/paperless_ai/tests/test_chat.py",
+        "src/paperless_ai/tests/test_client.py",
+        "src/paperless_ai/tests/test_embedding.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    }
+  ],
+  "implementation_summary": "The implementation introduces lazy loading for AI-related modules to reduce memory usage during application startup. The key approach was to move imports of heavy AI libraries (llama_index, torch, transformers, sentence_transformers) from module level to inside the functions where they're actually needed. This ensures that these dependencies are only loaded when specific AI functionality is invoked, such as when running chat queries, building indexes, or generating embeddings.\n\nIn chat.py, the PromptTemplate object was converted to a string template and its instantiation moved inside the stream_chat_with_documents function. In client.py, embedding.py, and indexing.py, TYPE_CHECKING conditional imports were used for type hints to maintain proper static typing without triggering runtime imports. The base_model.py file was simplified to use standard pydantic.BaseModel instead of the llama_index re-export, eliminating an unnecessary dependency.\n\nAll existing functionality remains exactly the same - the changes are purely about when imports happen, not what the code does. The implementation maintains backward compatibility while significantly reducing the memory footprint for operations that don't require AI features, such as management commands, basic document operations, and system administration tasks. Test files were updated to patch the correct module paths since imports now occur inside functions rather than at module level.",
+  "source_pr": "https://github.com/paperless-ngx/paperless-ngx/pull/12275",
+  "before_sha": "91ddda925675a58e52cfc9b3b2026893ff011f77",
+  "after_sha": "f5c0c21922b4711a8cb89a62178b5969d41b59e7",
+  "diff_stats": {
+    "additions": 78,
+    "deletions": 50,
+    "files_changed": 9
+  }
+}

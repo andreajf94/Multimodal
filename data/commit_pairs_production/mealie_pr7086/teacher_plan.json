@@ -1,0 +1,110 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "api_design",
+      "recommendation": "Added a new function `ingredientToParserString` to the ingredient text parser composable that provides specialized text reconstruction for NLP parsing",
+      "rationale": "The existing `parseIngredientText` function was designed for human-readable display with formatting options, but NLP parsing requires different logic. Creating a separate function with a clear name (`ingredientToParserString`) maintains separation of concerns and prevents the existing display logic from being polluted with parser-specific requirements.",
+      "alternatives_considered": [
+        "Modifying the existing `parseIngredientText` function with additional parameters",
+        "Creating a completely separate composable for parser-specific logic",
+        "Handling the logic inline in the component rather than creating a reusable function"
+      ],
+      "files_affected": [
+        "frontend/composables/recipes/use-recipe-ingredients.ts"
+      ]
+    },
+    {
+      "dimension": "data_modeling",
+      "recommendation": "Implemented a three-tier decision logic for ingredient text reconstruction based on ingredient state: 1) Use originalText when available, 2) Use note field for unparsed ingredients, 3) Use full reconstruction for parsed ingredients",
+      "rationale": "This approach respects the data model's semantics: `originalText` represents the user's original input and should be prioritized for parsing. Unparsed ingredients (lacking both unit and food) have their full content in the `note` field, while reconstructed text for parsed ingredients ensures consistency. This prevents misinterpretation where default quantities would be incorrectly prepended to unparsed ingredients.",
+      "alternatives_considered": [
+        "Always using originalText when available, otherwise always reconstructing",
+        "Treating all ingredients the same regardless of parsing state",
+        "Adding a new field to track parsing state explicitly"
+      ],
+      "files_affected": [
+        "frontend/composables/recipes/use-recipe-ingredients.ts"
+      ]
+    },
+    {
+      "dimension": "testing",
+      "recommendation": "Added comprehensive test suite for the new `ingredientToParserString` function covering all decision branches and edge cases",
+      "rationale": "The function has complex conditional logic with multiple decision points. Comprehensive testing ensures each path works correctly and prevents regression. Tests cover: originalText priority, unparsed ingredients with notes, parsed ingredients with unit/food combinations, and edge cases like empty data. This follows the existing testing pattern in the codebase.",
+      "alternatives_considered": [
+        "Only testing happy paths",
+        "Adding tests later as a separate task",
+        "Relying on existing tests for parseIngredientText"
+      ],
+      "files_affected": [
+        "frontend/composables/recipes/use-recipe-ingredients.test.ts"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Implemented graceful fallbacks with empty string returns for ingredients with no usable data",
+      "rationale": "When an ingredient has no originalText, no unit/food for reconstruction, and no note, returning an empty string prevents null/undefined errors in the parser API call. This ensures the function is robust and won't break the parsing flow even with malformed or incomplete data.",
+      "alternatives_considered": [
+        "Throwing an error for invalid ingredients",
+        "Returning null/undefined",
+        "Attempting to reconstruct with default values"
+      ],
+      "files_affected": [
+        "frontend/composables/recipes/use-recipe-ingredients.ts"
+      ]
+    },
+    {
+      "dimension": "maintainability",
+      "recommendation": "Updated the component to use the new function while maintaining the same API call structure",
+      "rationale": "The component change is minimal - just swapping the function call from `parseIngredientText` to `ingredientToParserString`. This keeps the component logic simple and delegates the complexity to the composable where it belongs. The component doesn't need to understand the different ingredient states or reconstruction rules.",
+      "alternatives_considered": [
+        "Adding conditional logic directly in the component",
+        "Creating a wrapper function in the component",
+        "Modifying the component to handle different ingredient types differently"
+      ],
+      "files_affected": [
+        "frontend/components/Domain/Recipe/RecipePage/RecipePageParts/RecipePageParseDialog.vue"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Implement ingredientToParserString function for NLP parsing",
+      "description": "Create a new function in the ingredient text parser composable that reconstructs ingredient text specifically for NLP parsing, with logic to prioritize originalText, handle unparsed ingredients correctly, and only reconstruct parsed ingredients",
+      "files_to_modify": [
+        "frontend/composables/recipes/use-recipe-ingredients.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-002",
+      "title": "Add comprehensive tests for ingredientToParserString",
+      "description": "Create test cases covering all decision branches of the new function including originalText priority, unparsed ingredients, parsed ingredients, and edge cases",
+      "files_to_modify": [
+        "frontend/composables/recipes/use-recipe-ingredients.test.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-003",
+      "title": "Update parse dialog to use new parser function",
+      "description": "Replace the call to parseIngredientText with ingredientToParserString in the recipe parse dialog component to fix NLP parsing issues",
+      "files_to_modify": [
+        "frontend/components/Domain/Recipe/RecipePage/RecipePageParts/RecipePageParseDialog.vue"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation addresses a specific issue with NLP parsing where unparsed ingredients were being incorrectly reconstructed with default quantities. The solution introduces a new function `ingredientToParserString` in the existing `use-recipe-ingredients.ts` composable that provides specialized text reconstruction logic for parser consumption.\n\nThe key design pattern is the three-tier decision logic: 1) Prioritize `originalText` when available (preserving user intent), 2) For unparsed ingredients (no unit AND no food), use only the `note` field (avoiding quantity prepending), 3) For properly parsed ingredients, use the existing reconstruction logic via `parseIngredientText`. This approach respects the semantic meaning of each data field while solving the specific parsing issue.\n\nThe changes integrate cleanly with the existing architecture by extending the composable pattern already established in the codebase. The component update is minimal, maintaining separation of concerns. Comprehensive tests ensure all decision paths work correctly, following the established testing patterns. This solution is backward compatible and doesn't break existing functionality while fixing the NLP parsing issue described in the feature request.",
+  "source_pr": "https://github.com/mealie-recipes/mealie/pull/7086",
+  "before_sha": "449e3baa0761f6471b60de4639ff2a3cf129d478",
+  "after_sha": "4dd8d836e11eb118a72f4729999c65940d8988cc",
+  "diff_stats": {
+    "additions": 133,
+    "deletions": 3,
+    "files_changed": 3
+  }
+}

@@ -1,0 +1,147 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "api_design",
+      "recommendation": "Created a unified progress tracking system by extending PaperlessCommand base class instead of using tqdm directly in individual commands",
+      "rationale": "The PaperlessCommand base class already had a `track()` method and `_create_progress()` method for progress display. By making document_exporter.py and document_importer.py inherit from PaperlessCommand instead of BaseCommand, we can leverage the existing rich progress infrastructure consistently across all commands. This eliminates code duplication and ensures uniform progress behavior.",
+      "alternatives_considered": [
+        "Keep tqdm in individual commands with custom progress bar logic",
+        "Create a separate progress utility module",
+        "Use Django's built-in progress reporting (which is limited)"
+      ],
+      "files_affected": [
+        "src/documents/management/commands/document_exporter.py",
+        "src/documents/management/commands/document_importer.py"
+      ]
+    },
+    {
+      "dimension": "data_modeling",
+      "recommendation": "Added `supports_progress_bar` and `supports_multiprocessing` class attributes to all PaperlessCommand subclasses",
+      "rationale": "These boolean flags provide metadata about command capabilities. `supports_progress_bar` indicates whether a command can use the rich progress tracking system, while `supports_multiprocessing` indicates if it can process items in parallel. This declarative approach allows the base class to make decisions about progress display and parallel processing without complex runtime detection.",
+      "alternatives_considered": [
+        "Detect progress bar support dynamically based on method presence",
+        "Use decorators to mark commands",
+        "Maintain a registry of command capabilities"
+      ],
+      "files_affected": [
+        "src/documents/management/commands/document_archiver.py",
+        "src/documents/management/commands/document_exporter.py",
+        "src/documents/management/commands/document_fuzzy_match.py",
+        "src/documents/management/commands/document_importer.py",
+        "src/documents/management/commands/document_index.py",
+        "src/documents/management/commands/document_llmindex.py",
+        "src/documents/management/commands/document_renamer.py",
+        "src/documents/management/commands/document_retagger.py",
+        "src/documents/management/commands/document_sanity_checker.py",
+        "src/documents/management/commands/document_thumbnails.py",
+        "src/documents/management/commands/prune_audit_logs.py"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Removed the `--no-progress-bar` argument from individual commands and centralized it in PaperlessCommand",
+      "rationale": "The `--no-progress-bar` argument was previously defined in multiple places (document_exporter.py, document_importer.py, and mixins.py). By removing it from individual commands and relying on PaperlessCommand's implementation, we ensure consistent behavior and reduce maintenance burden. The base class already handles this argument through its `add_arguments()` method.",
+      "alternatives_considered": [
+        "Keep the argument in individual commands for backward compatibility",
+        "Create a mixin for progress bar arguments",
+        "Use environment variables instead of command-line arguments"
+      ],
+      "files_affected": [
+        "src/documents/management/commands/document_exporter.py",
+        "src/documents/management/commands/document_importer.py",
+        "src/documents/management/commands/mixins.py"
+      ]
+    },
+    {
+      "dimension": "testing",
+      "recommendation": "Updated progress bar implementation to use stderr consistently for progress output",
+      "rationale": "The comment in base.py was refined to clarify that progress bars are transient UI feedback directed to stderr, not command output. This prevents progress bar rendering from interfering with stdout-based assertions in tests or piped command output. This maintains compatibility with existing test infrastructure that may be checking stdout content.",
+      "alternatives_considered": [
+        "Allow progress bars to write to stdout with special formatting",
+        "Create a configurable output stream",
+        "Use logging framework for progress updates"
+      ],
+      "files_affected": [
+        "src/documents/management/commands/base.py"
+      ]
+    },
+    {
+      "dimension": "dependency_management",
+      "recommendation": "Removed tqdm imports from document_exporter.py and document_importer.py",
+      "rationale": "By using the PaperlessCommand's `track()` method instead of tqdm directly, we eliminate a direct dependency on tqdm in these modules. This reduces the number of external dependencies that need to be managed and allows for centralized control over progress display implementation (which uses rich instead of tqdm).",
+      "alternatives_considered": [
+        "Keep tqdm as an optional dependency",
+        "Create an abstraction layer that supports both tqdm and rich",
+        "Switch entirely to rich while maintaining tqdm compatibility"
+      ],
+      "files_affected": [
+        "src/documents/management/commands/document_exporter.py",
+        "src/documents/management/commands/document_importer.py"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Migrate import/export commands to use PaperlessCommand progress system",
+      "description": "Update document_exporter.py and document_importer.py to inherit from PaperlessCommand instead of BaseCommand, remove tqdm dependencies, and use the unified track() method for progress display",
+      "files_to_modify": [
+        "src/documents/management/commands/document_exporter.py",
+        "src/documents/management/commands/document_importer.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-002",
+      "title": "Add progress bar support metadata to all PaperlessCommand subclasses",
+      "description": "Add supports_progress_bar and supports_multiprocessing class attributes to all management commands that extend PaperlessCommand to declaratively indicate their capabilities",
+      "files_to_modify": [
+        "src/documents/management/commands/document_archiver.py",
+        "src/documents/management/commands/document_exporter.py",
+        "src/documents/management/commands/document_fuzzy_match.py",
+        "src/documents/management/commands/document_importer.py",
+        "src/documents/management/commands/document_index.py",
+        "src/documents/management/commands/document_llmindex.py",
+        "src/documents/management/commands/document_renamer.py",
+        "src/documents/management/commands/document_retagger.py",
+        "src/documents/management/commands/document_sanity_checker.py",
+        "src/documents/management/commands/document_thumbnails.py",
+        "src/documents/management/commands/prune_audit_logs.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-003",
+      "title": "Clean up progress bar argument handling",
+      "description": "Remove duplicate --no-progress-bar arguments from individual commands and the ProgressBarMixin class since PaperlessCommand already provides this functionality",
+      "files_to_modify": [
+        "src/documents/management/commands/document_exporter.py",
+        "src/documents/management/commands/document_importer.py",
+        "src/documents/management/commands/mixins.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-004",
+      "title": "Refine progress output documentation",
+      "description": "Update comments in base.py to better explain the rationale for directing progress bars to stderr and their transient nature",
+      "files_to_modify": [
+        "src/documents/management/commands/base.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation migrates the import and export commands to use a unified rich progress tracking system by leveraging the existing PaperlessCommand base class infrastructure. Instead of having document_exporter.py and document_importer.py inherit directly from Django's BaseCommand and use tqdm for progress display, they now extend PaperlessCommand and use its track() method. This provides consistent progress visualization across all document management commands.\n\nKey patterns used include: 1) Inheritance-based specialization where commands declare their capabilities through class attributes (supports_progress_bar, supports_multiprocessing), 2) Centralized progress handling in the base class that respects the --no-progress-bar flag, and 3) Removal of duplicate code and dependencies by eliminating the ProgressBarMixin and tqdm imports from individual modules.\n\nThe changes integrate seamlessly with the existing codebase because PaperlessCommand already had the necessary infrastructure for rich progress display. By adding the supports_progress_bar attribute to all relevant commands, the system becomes more declarative and maintainable. The removal of the --no-progress-bar argument from individual commands doesn't break backward compatibility because PaperlessCommand's add_arguments() method (which is called via super().add_arguments()) already adds this argument. This refactoring reduces code duplication, ensures uniform behavior, and makes it easier to maintain and extend the progress tracking system in the future.",
+  "source_pr": "https://github.com/paperless-ngx/paperless-ngx/pull/12260",
+  "before_sha": "2a28549c5acbe42d39a8a03809742861cf0c861e",
+  "after_sha": "e30676f889f20377773a9ba3744ce24dbe3a4b7c",
+  "diff_stats": {
+    "additions": 41,
+    "deletions": 48,
+    "files_changed": 13
+  }
+}

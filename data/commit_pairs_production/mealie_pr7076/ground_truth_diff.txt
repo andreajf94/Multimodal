@@ -1,0 +1,681 @@
+diff --git a/frontend/components/Domain/Recipe/RecipeDialogBulkAdd.vue b/frontend/components/Domain/Recipe/RecipeDialogBulkAdd.vue
+index dc6bfae7664..64d6b00e6fc 100644
+--- a/frontend/components/Domain/Recipe/RecipeDialogBulkAdd.vue
++++ b/frontend/components/Domain/Recipe/RecipeDialogBulkAdd.vue
+@@ -1,91 +1,60 @@
+ <template>
+   <div class="text-center">
+-    <v-dialog
++    <BaseButton @click="dialog = true">
++      {{ $t("new-recipe.bulk-add") }}
++    </BaseButton>
++    <BaseDialog
+       v-model="dialog"
+       width="800"
++      :title="$t('new-recipe.bulk-add')"
++      :icon="$globals.icons.createAlt"
++      :submit-text="$t('general.add')"
++      :disable-submit-on-enter="true"
++      can-submit
++      @submit="save"
+     >
+-      <template #activator="{ props: activatorProps }">
+-        <BaseButton
+-          v-bind="activatorProps"
+-          @click="inputText = inputTextProp"
+-        >
+-          {{ $t("new-recipe.bulk-add") }}
+-        </BaseButton>
+-      </template>
+-
+-      <v-card>
+-        <v-app-bar
+-          density="compact"
+-          dark
+-          color="primary"
+-          class="mb-2 position-relative left-0 top-0 w-100"
+-        >
+-          <v-icon
+-            size="large"
+-            start
+-          >
+-            {{ $globals.icons.createAlt }}
+-          </v-icon>
+-          <v-toolbar-title class="headline">
+-            {{ $t("new-recipe.bulk-add") }}
+-          </v-toolbar-title>
+-          <v-spacer />
+-        </v-app-bar>
+-
+-        <v-card-text>
+-          <v-textarea
+-            v-model="inputText"
+-            variant="outlined"
+-            rows="12"
+-            hide-details
+-            :placeholder="$t('new-recipe.paste-in-your-recipe-data-each-line-will-be-treated-as-an-item-in-a-list')"
+-          />
+-
+-          <v-divider />
++      <v-card-text>
++        <v-textarea
++          v-model="inputText"
++          variant="outlined"
++          rows="12"
++          hide-details
++          autofocus
++          :placeholder="$t('new-recipe.paste-in-your-recipe-data-each-line-will-be-treated-as-an-item-in-a-list')"
++        />
++
++        <v-divider />
++        <v-list lines="two">
+           <template
+             v-for="(util) in utilities"
+             :key="util.id"
+           >
+             <v-list-item
+-              density="compact"
+-              class="py-1"
++              class="px-0"
+             >
+-              <v-list-item-title>
+-                <v-list-item-subtitle class="wrap-word">
+-                  {{ util.description }}
+-                </v-list-item-subtitle>
++              <template #prepend>
++                <v-avatar>
++                  <v-btn
++                    icon
++                    variant="tonal"
++                    base-color="info"
++                    :title="$t('general.run')"
++                    @click="util.action"
++                  >
++                    <v-icon>
++                      {{ $globals.icons.play }}
++                    </v-icon>
++                  </v-btn>
++                </v-avatar>
++              </template>
++              <v-list-item-title class="text-pre-wrap">
++                {{ util.description }}
+               </v-list-item-title>
+-              <BaseButton
+-                size="small"
+-                color="info"
+-                @click="util.action"
+-              >
+-                <template #icon>
+-                  {{ $globals.icons.robot }}
+-                </template>
+-                {{ $t("general.run") }}
+-              </BaseButton>
+             </v-list-item>
+-            <v-divider class="mx-2" />
+           </template>
+-        </v-card-text>
+-
+-        <v-divider />
+-
+-        <v-card-actions>
+-          <BaseButton
+-            cancel
+-            @click="dialog = false"
+-          />
+-          <v-spacer />
+-          <BaseButton
+-            save
+-            color="success"
+-            @click="save"
+-          />
+-        </v-card-actions>
+-      </v-card>
+-    </v-dialog>
++        </v-list>
++      </v-card-text>
++    </BaseDialog>
+   </div>
+ </template>
+ 
+diff --git a/frontend/components/Domain/Recipe/RecipeOrganizerDialog.vue b/frontend/components/Domain/Recipe/RecipeOrganizerDialog.vue
+index 18b9ac672cf..61dca7a5650 100644
+--- a/frontend/components/Domain/Recipe/RecipeOrganizerDialog.vue
++++ b/frontend/components/Domain/Recipe/RecipeOrganizerDialog.vue
+@@ -1,62 +1,30 @@
+ <template>
+   <div>
+-    <v-dialog
++    <BaseDialog
+       v-model="dialog"
+       width="500"
++      :title="properties.title"
++      :icon="properties.icon"
++      can-submit
++      :submit-disabled="!name"
++      @submit="select"
+     >
+-      <v-card>
+-        <v-app-bar
+-          density="compact"
+-          dark
+-          color="primary mb-2 position-relative left-0 top-0 w-100 pl-3"
+-        >
+-          <v-icon
+-            size="large"
+-            start
+-            class="mt-1"
+-          >
+-            {{ itemType === Organizer.Tool ? $globals.icons.potSteam
+-              : itemType === Organizer.Category ? $globals.icons.categories
+-                : $globals.icons.tags }}
+-          </v-icon>
+-
+-          <v-toolbar-title class="headline">
+-            {{ properties.title }}
+-          </v-toolbar-title>
+-
+-          <v-spacer />
+-        </v-app-bar>
+-        <v-card-title />
+-        <v-form @submit.prevent="select">
+-          <v-card-text>
+-            <v-text-field
+-              v-model="name"
+-              density="compact"
+-              :label="properties.label"
+-              :rules="[rules.required]"
+-              autofocus
+-            />
+-            <v-checkbox
+-              v-if="itemType === Organizer.Tool"
+-              v-model="onHand"
+-              :label="$t('tool.on-hand')"
+-            />
+-          </v-card-text>
+-          <v-card-actions>
+-            <BaseButton
+-              cancel
+-              @click="dialog = false"
+-            />
+-            <v-spacer />
+-            <BaseButton
+-              type="submit"
+-              create
+-              :disabled="!name"
+-            />
+-          </v-card-actions>
+-        </v-form>
+-      </v-card>
+-    </v-dialog>
++      <v-form>
++        <v-card-text>
++          <v-text-field
++            v-model="name"
++            :label="properties.label"
++            :rules="[rules.required]"
++            autofocus
++          />
++          <v-checkbox
++            v-if="itemType === Organizer.Tool"
++            v-model="onHand"
++            :label="$t('tool.on-hand')"
++          />
++        </v-card-text>
++      </v-form>
++    </BaseDialog>
+   </div>
+ </template>
+ 
+@@ -65,6 +33,8 @@ import { useUserApi } from "~/composables/api";
+ import { useCategoryStore, useTagStore, useToolStore } from "~/composables/store";
+ import { type RecipeOrganizer, Organizer } from "~/lib/api/types/non-generated";
+ 
++const { $globals } = useNuxtApp();
++
+ const CREATED_ITEM_EVENT = "created-item";
+ 
+ interface Props {
+@@ -115,18 +85,21 @@ const properties = computed(() => {
+       return {
+         title: i18n.t("tag.create-a-tag"),
+         label: i18n.t("tag.tag-name"),
++        icon: $globals.icons.tags,
+         api: userApi.tags,
+       };
+     case Organizer.Tool:
+       return {
+         title: i18n.t("tool.create-a-tool"),
+         label: i18n.t("tool.tool-name"),
++        icon: $globals.icons.potSteam,
+         api: userApi.tools,
+       };
+     default:
+       return {
+         title: i18n.t("category.create-a-category"),
+         label: i18n.t("category.category-name"),
++        icon: $globals.icons.categories,
+         api: userApi.categories,
+       };
+   }
+@@ -139,12 +112,9 @@ const rules = {
+ async function select() {
+   if (store) {
+     // @ts-expect-error the same state is used for different organizer types, which have different requirements
+-    await store.actions.createOne({ name: name.value, onHand: onHand.value });
++    const newItem = await store.actions.createOne({ name: name.value, onHand: onHand.value });
++    emit(CREATED_ITEM_EVENT, newItem);
+   }
+-
+-  const newItem = store.store.value.find(item => item.name === name.value);
+-
+-  emit(CREATED_ITEM_EVENT, newItem);
+   dialog.value = false;
+ }
+ </script>
+diff --git a/frontend/components/Domain/Recipe/RecipeOrganizerPage.vue b/frontend/components/Domain/Recipe/RecipeOrganizerPage.vue
+index 66fe5c41c73..fdc49e013e8 100644
+--- a/frontend/components/Domain/Recipe/RecipeOrganizerPage.vue
++++ b/frontend/components/Domain/Recipe/RecipeOrganizerPage.vue
+@@ -26,6 +26,7 @@
+       v-if="updateTarget"
+       v-model="dialogs.update"
+       :title="$t('general.update')"
++      :icon="$globals.icons.edit"
+       can-confirm
+       @confirm="updateOne()"
+     >
+diff --git a/frontend/components/Domain/Recipe/RecipePage/RecipePageParts/RecipePageInstructions.vue b/frontend/components/Domain/Recipe/RecipePage/RecipePageParts/RecipePageInstructions.vue
+index ab3cef3768f..fc764f9ec0b 100644
+--- a/frontend/components/Domain/Recipe/RecipePage/RecipePageParts/RecipePageInstructions.vue
++++ b/frontend/components/Domain/Recipe/RecipePage/RecipePageParts/RecipePageInstructions.vue
+@@ -1,117 +1,101 @@
+ <template>
+   <section @keyup.ctrl.z="undoMerge">
+     <!-- Ingredient Link Editor -->
+-    <v-dialog
+-      v-if="dialog"
++    <BaseDialog
+       v-model="dialog"
+-      width="600"
++      :title="$t('recipe.ingredient-linker')"
++      :icon="$globals.icons.link"
++      width="100%"
++      max-width="600px"
++      max-height="40%"
+     >
+-      <v-card :ripple="false">
+-        <v-sheet
+-          color="primary"
+-          class="mt-n1 mb-3 pa-3 d-flex align-center"
+-          style="border-radius: 6px; width: 100%;"
+-        >
+-          <v-icon
+-            size="large"
+-            start
+-          >
+-            {{ $globals.icons.link }}
+-          </v-icon>
+-          <v-toolbar-title class="headline">
+-            {{ $t("recipe.ingredient-linker") }}
+-          </v-toolbar-title>
+-          <v-spacer />
+-        </v-sheet>
+-
+-        <v-card-text class="pt-4">
+-          <p>
+-            {{ activeText }}
+-          </p>
+-          <v-divider class="mb-4" />
+-          <template v-if="Object.keys(groupedUnusedIngredients).length > 0">
+-            <h4 class="py-3 ml-1">
+-              {{ $t("recipe.unlinked") }}
++      <v-card-text class="pt-4">
++        <p>
++          {{ activeText }}
++        </p>
++        <v-divider class="my-4" />
++        <template v-if="Object.keys(groupedUnusedIngredients).length > 0">
++          <h4 class="ml-1">
++            {{ $t("recipe.unlinked") }}
++          </h4>
++          <template v-for="(ingredients, title) in groupedUnusedIngredients" :key="title">
++            <h4 v-if="title" class="py-3 ml-1 pl-4">
++              {{ title }}
+             </h4>
+-            <template v-for="(ingredients, title) in groupedUnusedIngredients" :key="title">
+-              <h4 v-if="title" class="py-3 ml-1 pl-4">
+-                {{ title }}
+-              </h4>
+-              <v-checkbox-btn
+-                v-for="ing in ingredients"
+-                :key="ing.referenceId"
+-                v-model="activeRefs"
+-                :value="ing.referenceId"
+-                class="ml-4"
+-              >
+-                <template #label>
+-                  <RecipeIngredientHtml :ingredient="ing" :scale="scale" />
+-                </template>
+-              </v-checkbox-btn>
+-            </template>
++            <v-checkbox-btn
++              v-for="ing in ingredients"
++              :key="ing.referenceId"
++              v-model="activeRefs"
++              :value="ing.referenceId"
++              class="ml-4"
++            >
++              <template #label>
++                <RecipeIngredientHtml :ingredient="ing" :scale="scale" />
++              </template>
++            </v-checkbox-btn>
+           </template>
++        </template>
+ 
+-          <template v-if="Object.keys(groupedUsedIngredients).length > 0">
+-            <h4 class="py-3 ml-1">
+-              {{ $t("recipe.linked-to-other-step") }}
++        <template v-if="Object.keys(groupedUsedIngredients).length > 0">
++          <h4 class="py-3 ml-1">
++            {{ $t("recipe.linked-to-other-step") }}
++          </h4>
++          <template v-for="(ingredients, title) in groupedUsedIngredients" :key="title">
++            <h4 v-if="title" class="py-3 ml-1 pl-4">
++              {{ title }}
+             </h4>
+-            <template v-for="(ingredients, title) in groupedUsedIngredients" :key="title">
+-              <h4 v-if="title" class="py-3 ml-1 pl-4">
+-                {{ title }}
+-              </h4>
+-              <v-checkbox-btn
+-                v-for="ing in ingredients"
+-                :key="ing.referenceId"
+-                v-model="activeRefs"
+-                :value="ing.referenceId"
+-                class="ml-4"
+-              >
+-                <template #label>
+-                  <RecipeIngredientHtml :ingredient="ing" :scale="scale" />
+-                </template>
+-              </v-checkbox-btn>
+-            </template>
++            <v-checkbox-btn
++              v-for="ing in ingredients"
++              :key="ing.referenceId"
++              v-model="activeRefs"
++              :value="ing.referenceId"
++              class="ml-4"
++            >
++              <template #label>
++                <RecipeIngredientHtml :ingredient="ing" :scale="scale" />
++              </template>
++            </v-checkbox-btn>
+           </template>
+-        </v-card-text>
++        </template>
++      </v-card-text>
+ 
+-        <v-divider />
++      <v-divider />
+ 
+-        <v-card-actions>
++      <template #card-actions>
++        <BaseButton
++          cancel
++          @click="dialog = false"
++        />
++        <v-spacer />
++        <div class="d-flex flex-wrap justify-end">
+           <BaseButton
+-            cancel
+-            @click="dialog = false"
++            class="my-1"
++            color="info"
++            @click="autoSetReferences"
++          >
++            <template #icon>
++              {{ $globals.icons.robot }}
++            </template>
++            {{ $t("recipe.auto") }}
++          </BaseButton>
++          <BaseButton
++            class="ml-2 my-1"
++            save
++            @click="setIngredientIds"
+           />
+-          <v-spacer />
+-          <div class="d-flex flex-wrap justify-end">
+-            <BaseButton
+-              class="my-1"
+-              color="info"
+-              @click="autoSetReferences"
+-            >
+-              <template #icon>
+-                {{ $globals.icons.robot }}
+-              </template>
+-              {{ $t("recipe.auto") }}
+-            </BaseButton>
+-            <BaseButton
+-              class="ml-2 my-1"
+-              save
+-              @click="setIngredientIds"
+-            />
+-            <BaseButton
+-              v-if="availableNextStep"
+-              class="ml-2 my-1"
+-              @click="saveAndOpenNextLinkIngredients"
+-            >
+-              <template #icon>
+-                {{ $globals.icons.forward }}
+-              </template>
+-              {{ $t("recipe.nextStep") }}
+-            </BaseButton>
+-          </div>
+-        </v-card-actions>
+-      </v-card>
+-    </v-dialog>
++          <BaseButton
++            v-if="availableNextStep"
++            class="ml-2 my-1"
++            @click="saveAndOpenNextLinkIngredients"
++          >
++            <template #icon>
++              {{ $globals.icons.forward }}
++            </template>
++            {{ $t("recipe.nextStep") }}
++          </BaseButton>
++        </div>
++      </template>
++    </BaseDialog>
+ 
+     <div class="d-flex justify-space-between justify-start">
+       <h2
+@@ -851,6 +835,10 @@ function openImageUpload(index: number) {
+   font-size: 1.5rem;
+ }
+ 
++.v-card-text {
++  font-size: 1rem;
++}
++
+ .recipe-step-title {
+   /* Multiline display */
+   white-space: normal;
+diff --git a/frontend/components/Domain/Recipe/RecipeTimelineBadge.vue b/frontend/components/Domain/Recipe/RecipeTimelineBadge.vue
+index e914b62e595..ae3f5924aec 100644
+--- a/frontend/components/Domain/Recipe/RecipeTimelineBadge.vue
++++ b/frontend/components/Domain/Recipe/RecipeTimelineBadge.vue
+@@ -24,7 +24,7 @@
+       </v-btn>
+       <BaseDialog
+         v-model="showTimeline"
+-        :title="timelineAttrs.title"
++        :title="$t('recipe.timeline')"
+         :icon="$globals.icons.timelineText"
+         width="70%"
+       >
+@@ -53,8 +53,6 @@ const props = withDefaults(defineProps<Props>(), {
+   recipeName: "",
+ });
+ 
+-const i18n = useI18n();
+-const { smAndDown } = useDisplay();
+ const showTimeline = ref(false);
+ 
+ function toggleTimeline() {
+@@ -62,13 +60,7 @@ function toggleTimeline() {
+ }
+ 
+ const timelineAttrs = computed(() => {
+-  let title = i18n.t("recipe.timeline");
+-  if (smAndDown.value) {
+-    title += ` – ${props.recipeName}`;
+-  }
+-
+   return {
+-    title,
+     queryFilter: `recipe.slug="${props.slug}"`,
+   };
+ });
+diff --git a/frontend/components/global/BaseDialog.vue b/frontend/components/global/BaseDialog.vue
+index 468f2df202d..a3f11f76f26 100644
+--- a/frontend/components/global/BaseDialog.vue
++++ b/frontend/components/global/BaseDialog.vue
+@@ -14,7 +14,13 @@
+       @click:outside="emit('cancel')"
+       @keydown.esc="emit('cancel')"
+     >
+-      <v-card height="100%">
++      <v-card height="100%" :loading="loading">
++        <template #loader="{ isActive }">
++          <v-progress-linear
++            :active="isActive"
++            indeterminate
++          />
++        </template>
+         <v-toolbar
+           dark
+           density="comfortable"
+@@ -28,17 +34,12 @@
+             {{ title }}
+           </v-toolbar-title>
+         </v-toolbar>
+-        <v-progress-linear
+-          v-if="loading"
+-          class="mt-1"
+-          indeterminate
+-          color="primary"
+-        />
+ 
+         <div>
+           <slot v-bind="{ submitEvent }" />
+         </div>
+ 
++        <v-spacer />
+         <v-divider class="mx-2" />
+ 
+         <v-card-actions>
+diff --git a/frontend/lib/icons/icons.ts b/frontend/lib/icons/icons.ts
+index 65103505dce..f4482bc3d9c 100644
+--- a/frontend/lib/icons/icons.ts
++++ b/frontend/lib/icons/icons.ts
+@@ -107,6 +107,7 @@ import {
+   mdiOpenInNew,
+   mdiOrderAlphabeticalAscending,
+   mdiPageLayoutBody,
++  mdiPlay,
+   mdiPlus,
+   mdiPlusCircle,
+   mdiPotSteamOutline,
+@@ -252,6 +253,7 @@ export const icons = {
+   openInNew: mdiOpenInNew,
+   orderAlphabeticalAscending: mdiOrderAlphabeticalAscending,
+   pageLayoutBody: mdiPageLayoutBody,
++  play: mdiPlay,
+   printer: mdiPrinter,
+   printerSettings: mdiPrinterPosCog,
+   refreshCircle: mdiRefreshCircle,
+diff --git a/frontend/pages/admin/manage/groups/index.vue b/frontend/pages/admin/manage/groups/index.vue
+index 1cca6268475..899cc7475e5 100644
+--- a/frontend/pages/admin/manage/groups/index.vue
++++ b/frontend/pages/admin/manage/groups/index.vue
+@@ -20,6 +20,7 @@
+     <BaseDialog
+       v-model="state.confirmDialog"
+       :title="$t('general.confirm')"
++      :icon="$globals.icons.alertCircle"
+       color="error"
+       can-confirm
+       @confirm="deleteGroup(state.deleteTarget)"
+diff --git a/frontend/pages/admin/manage/households/index.vue b/frontend/pages/admin/manage/households/index.vue
+index 3b6d4eff8b4..4e60e78e1bb 100644
+--- a/frontend/pages/admin/manage/households/index.vue
++++ b/frontend/pages/admin/manage/households/index.vue
+@@ -38,6 +38,7 @@
+     <BaseDialog
+       v-model="confirmDialog"
+       :title="$t('general.confirm')"
++      :icon="$globals.icons.alertCircle"
+       color="error"
+       can-confirm
+       @confirm="deleteHousehold(deleteTarget)"
+diff --git a/frontend/pages/admin/manage/users/index.vue b/frontend/pages/admin/manage/users/index.vue
+index b63ae66c8ea..42290eb847a 100644
+--- a/frontend/pages/admin/manage/users/index.vue
++++ b/frontend/pages/admin/manage/users/index.vue
+@@ -4,6 +4,7 @@
+     <BaseDialog
+       v-model="state.deleteDialog"
+       :title="$t('general.confirm')"
++      :icon="$globals.icons.alertCircle"
+       color="error"
+       can-confirm
+       @confirm="deleteUser(state.deleteTargetId)"
+diff --git a/frontend/pages/shopping-lists/[id].vue b/frontend/pages/shopping-lists/[id].vue
+index d4d4136647e..706d2cae6d8 100644
+--- a/frontend/pages/shopping-lists/[id].vue
++++ b/frontend/pages/shopping-lists/[id].vue
+@@ -6,6 +6,7 @@
+     <BaseDialog
+       v-model="state.checkAllDialog"
+       :title="$t('general.confirm')"
++      :icon="$globals.icons.checkboxOutline"
+       can-confirm
+       @confirm="checkAll"
+     >
+@@ -17,6 +18,7 @@
+     <BaseDialog
+       v-model="state.uncheckAllDialog"
+       :title="$t('general.confirm')"
++      :icon="$globals.icons.checkboxBlankOutline"
+       can-confirm
+       @confirm="uncheckAll"
+     >
+@@ -28,6 +30,7 @@
+     <BaseDialog
+       v-model="state.deleteCheckedDialog"
+       :title="$t('general.confirm')"
++      :icon="$globals.icons.alertCircle"
+       can-confirm
+       @confirm="deleteChecked"
+     >
+diff --git a/frontend/pages/shopping-lists/index.vue b/frontend/pages/shopping-lists/index.vue
+index ddb2f2c862d..e60b8a284ac 100644
+--- a/frontend/pages/shopping-lists/index.vue
++++ b/frontend/pages/shopping-lists/index.vue
+@@ -6,6 +6,7 @@
+     <BaseDialog
+       v-model="state.createDialog"
+       :title="$t('shopping-list.create-shopping-list')"
++      :icon="$globals.icons.formatListCheck"
+       can-submit
+       @submit="createOne"
+     >
+@@ -43,6 +44,7 @@
+     <BaseDialog
+       v-model="state.deleteDialog"
+       :title="$t('general.confirm')"
++      :icon="$globals.icons.alertCircle"
+       color="error"
+       can-confirm
+       @confirm="deleteOne"

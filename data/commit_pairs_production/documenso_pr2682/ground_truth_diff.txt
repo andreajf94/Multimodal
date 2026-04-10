@@ -1,0 +1,36 @@
+diff --git a/packages/prisma/migrations/20260408052212_add_set_null_for_audit_log_foreign_key/migration.sql b/packages/prisma/migrations/20260408052212_add_set_null_for_audit_log_foreign_key/migration.sql
+new file mode 100644
+index 0000000000..8bb6dbea21
+--- /dev/null
++++ b/packages/prisma/migrations/20260408052212_add_set_null_for_audit_log_foreign_key/migration.sql
+@@ -0,0 +1,8 @@
++-- DropForeignKey
++ALTER TABLE "DocumentAuditLog" DROP CONSTRAINT "DocumentAuditLog_envelopeId_fkey";
++
++-- AlterTable
++ALTER TABLE "DocumentAuditLog" ALTER COLUMN "envelopeId" DROP NOT NULL;
++
++-- AddForeignKey
++ALTER TABLE "DocumentAuditLog" ADD CONSTRAINT "DocumentAuditLog_envelopeId_fkey" FOREIGN KEY ("envelopeId") REFERENCES "Envelope"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+diff --git a/packages/prisma/schema.prisma b/packages/prisma/schema.prisma
+index d9037c386a..56b0a8a29c 100644
+--- a/packages/prisma/schema.prisma
++++ b/packages/prisma/schema.prisma
+@@ -466,7 +466,7 @@ model EnvelopeItem {
+ 
+ model DocumentAuditLog {
+   id         String   @id @default(cuid())
+-  envelopeId String
++  envelopeId String?
+   createdAt  DateTime @default(now())
+   type       String
+   data       Json
+@@ -478,7 +478,7 @@ model DocumentAuditLog {
+   userAgent String?
+   ipAddress String?
+ 
+-  envelope Envelope @relation(fields: [envelopeId], references: [id], onDelete: Cascade)
++  envelope Envelope? @relation(fields: [envelopeId], references: [id], onDelete: SetNull)
+ 
+   @@index([envelopeId])
+ }

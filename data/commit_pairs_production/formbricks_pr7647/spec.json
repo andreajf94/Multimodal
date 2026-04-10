@@ -1,0 +1,13 @@
+{
+  "feature_name": "Custom PostHog Events System",
+  "description": "Implement a server-side PostHog analytics system to replace fragile autocapture tracking. Create a robust event tracking infrastructure that captures key user actions reliably, including signup/signin events that were previously untracked. The system should be safe for self-hosted deployments and work seamlessly in serverless environments.",
+  "functional_requirements": [
+    "Set up a PostHog server singleton with serverless-safe flushing that uses the globalThis pattern similar to the existing Prisma client implementation",
+    "Create a fire-and-forget capture helper function that never throws errors and gracefully handles missing PostHog configuration for self-hosted instances",
+    "Implement user_signed_up and user_signed_in events with detailed properties including auth provider, email domain, and organization context",
+    "Migrate autocapture events to explicit server-side tracking for survey_published, survey_created, and organization_created with relevant metadata",
+    "Ensure all tracking is gated on PostHog configuration availability and properly integrated into the existing authentication and survey workflows"
+  ],
+  "project_name": "formbricks",
+  "source_pr": "https://github.com/formbricks/formbricks/pull/7647"
+}

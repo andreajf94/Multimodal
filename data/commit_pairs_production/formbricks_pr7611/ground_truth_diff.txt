@@ -1,0 +1,1418 @@
+diff --git a/.env.example b/.env.example
+index 017b0acfd3bc..a09e5be89a77 100644
+--- a/.env.example
++++ b/.env.example
+@@ -138,6 +138,31 @@ AZUREAD_CLIENT_ID=
+ AZUREAD_CLIENT_SECRET=
+ AZUREAD_TENANT_ID=
+ 
++# Configure Formbricks AI at the instance level
++# Set the provider used for AI features on this instance.
++# Accepted values for AI_PROVIDER: aws, gcp, azure
++# Set AI_MODEL to the provider-specific model or deployment name and configure the matching credentials below.
++# AI_PROVIDER=gcp
++# AI_MODEL=gemini-2.5-flash
++
++# Google Vertex AI credentials
++# AI_GCP_PROJECT=
++# AI_GCP_LOCATION=
++# AI_GCP_CREDENTIALS_JSON=
++# AI_GCP_APPLICATION_CREDENTIALS=
++
++# Amazon Bedrock credentials
++# AI_AWS_REGION=
++# AI_AWS_ACCESS_KEY_ID=
++# AI_AWS_SECRET_ACCESS_KEY=
++# AI_AWS_SESSION_TOKEN=
++
++# Azure AI / Microsoft Foundry credentials
++# AI_AZURE_BASE_URL=
++# AI_AZURE_RESOURCE_NAME=
++# AI_AZURE_API_KEY=
++# AI_AZURE_API_VERSION=v1
++
+ # OpenID Connect (OIDC) configuration
+ # OIDC_CLIENT_ID=
+ # OIDC_CLIENT_SECRET=
+diff --git a/apps/web/app/(app)/environments/[environmentId]/settings/(organization)/general/actions.test.ts b/apps/web/app/(app)/environments/[environmentId]/settings/(organization)/general/actions.test.ts
+new file mode 100644
+index 000000000000..9a8ecd2a3fd3
+--- /dev/null
++++ b/apps/web/app/(app)/environments/[environmentId]/settings/(organization)/general/actions.test.ts
+@@ -0,0 +1,218 @@
++import { beforeEach, describe, expect, test, vi } from "vitest";
++import { AuthorizationError, OperationNotAllowedError } from "@formbricks/types/errors";
++import { updateOrganizationAISettingsAction } from "./actions";
++import { ZOrganizationAISettingsInput } from "./schemas";
++
++const mocks = vi.hoisted(() => ({
++  isInstanceAIConfigured: vi.fn(),
++  checkAuthorizationUpdated: vi.fn(),
++  deleteOrganization: vi.fn(),
++  getOrganization: vi.fn(),
++  getIsMultiOrgEnabled: vi.fn(),
++  getTranslate: vi.fn(),
++  updateOrganization: vi.fn(),
++}));
++
++vi.mock("@/lib/utils/action-client", () => ({
++  authenticatedActionClient: {
++    inputSchema: vi.fn(() => ({
++      action: vi.fn((fn) => fn),
++    })),
++  },
++}));
++
++vi.mock("@/lib/utils/action-client/action-client-middleware", () => ({
++  checkAuthorizationUpdated: mocks.checkAuthorizationUpdated,
++}));
++
++vi.mock("@/lib/organization/service", () => ({
++  deleteOrganization: mocks.deleteOrganization,
++  getOrganization: mocks.getOrganization,
++  updateOrganization: mocks.updateOrganization,
++}));
++
++vi.mock("@/lib/ai/service", () => ({
++  isInstanceAIConfigured: mocks.isInstanceAIConfigured,
++}));
++
++vi.mock("@/lingodotdev/server", () => ({
++  getTranslate: mocks.getTranslate,
++}));
++
++vi.mock("@/modules/ee/audit-logs/lib/handler", () => ({
++  withAuditLogging: vi.fn((_eventName, _objectType, fn) => fn),
++}));
++
++vi.mock("@/modules/ee/license-check/lib/utils", () => ({
++  getIsMultiOrgEnabled: mocks.getIsMultiOrgEnabled,
++}));
++
++const organizationId = "cm9gptbhg0000192zceq9ayuc";
++
++describe("organization AI settings actions", () => {
++  beforeEach(() => {
++    vi.clearAllMocks();
++
++    mocks.checkAuthorizationUpdated.mockResolvedValue(undefined);
++    mocks.getOrganization.mockResolvedValue({
++      id: organizationId,
++      isAISmartToolsEnabled: false,
++      isAIDataAnalysisEnabled: false,
++    });
++    mocks.isInstanceAIConfigured.mockReturnValue(true);
++    mocks.getTranslate.mockResolvedValue((key: string, values?: Record<string, string>) =>
++      values ? `${key}:${JSON.stringify(values)}` : key
++    );
++    mocks.updateOrganization.mockResolvedValue({
++      id: organizationId,
++      isAISmartToolsEnabled: true,
++      isAIDataAnalysisEnabled: false,
++    });
++    mocks.getIsMultiOrgEnabled.mockResolvedValue(true);
++  });
++
++  test("accepts AI toggle updates", () => {
++    expect(
++      ZOrganizationAISettingsInput.parse({
++        isAISmartToolsEnabled: true,
++      })
++    ).toEqual({
++      isAISmartToolsEnabled: true,
++    });
++  });
++
++  test("passes owner and manager roles to the authorization check and updates organization settings", async () => {
++    const ctx = {
++      user: { id: "user_1", locale: "en-US" },
++      auditLoggingCtx: {},
++    };
++    const parsedInput = {
++      organizationId,
++      data: {
++        isAISmartToolsEnabled: true,
++      },
++    };
++
++    const result = await updateOrganizationAISettingsAction({ ctx, parsedInput } as any);
++
++    expect(mocks.checkAuthorizationUpdated).toHaveBeenCalledWith({
++      userId: "user_1",
++      organizationId,
++      access: [
++        {
++          type: "organization",
++          schema: ZOrganizationAISettingsInput,
++          data: parsedInput.data,
++          roles: ["owner", "manager"],
++        },
++      ],
++    });
++    expect(mocks.getOrganization).toHaveBeenCalledWith(organizationId);
++    expect(mocks.updateOrganization).toHaveBeenCalledWith(organizationId, parsedInput.data);
++    expect(ctx.auditLoggingCtx).toMatchObject({
++      organizationId,
++      oldObject: {
++        id: organizationId,
++        isAISmartToolsEnabled: false,
++        isAIDataAnalysisEnabled: false,
++      },
++      newObject: {
++        id: organizationId,
++        isAISmartToolsEnabled: true,
++        isAIDataAnalysisEnabled: false,
++      },
++    });
++    expect(result).toEqual({
++      id: organizationId,
++      isAISmartToolsEnabled: true,
++      isAIDataAnalysisEnabled: false,
++    });
++  });
++
++  test("propagates authorization failures so members cannot update AI settings", async () => {
++    mocks.checkAuthorizationUpdated.mockRejectedValueOnce(new AuthorizationError("Not authorized"));
++
++    await expect(
++      updateOrganizationAISettingsAction({
++        ctx: {
++          user: { id: "user_member", locale: "en-US" },
++          auditLoggingCtx: {},
++        },
++        parsedInput: {
++          organizationId,
++          data: {
++            isAISmartToolsEnabled: true,
++          },
++        },
++      } as any)
++    ).rejects.toThrow(AuthorizationError);
++
++    expect(mocks.updateOrganization).not.toHaveBeenCalled();
++  });
++
++  test("rejects enabling AI when the instance AI provider is not configured", async () => {
++    mocks.isInstanceAIConfigured.mockReturnValueOnce(false);
++
++    await expect(
++      updateOrganizationAISettingsAction({
++        ctx: {
++          user: { id: "user_owner", locale: "en-US" },
++          auditLoggingCtx: {},
++        },
++        parsedInput: {
++          organizationId,
++          data: {
++            isAISmartToolsEnabled: true,
++          },
++        },
++      } as any)
++    ).rejects.toThrow(OperationNotAllowedError);
++
++    expect(mocks.updateOrganization).not.toHaveBeenCalled();
++  });
++
++  test("allows enabling AI when the instance configuration is valid", async () => {
++    await updateOrganizationAISettingsAction({
++      ctx: {
++        user: { id: "user_owner", locale: "en-US" },
++        auditLoggingCtx: {},
++      },
++      parsedInput: {
++        organizationId,
++        data: {
++          isAISmartToolsEnabled: true,
++        },
++      },
++    } as any);
++
++    expect(mocks.updateOrganization).toHaveBeenCalledWith(organizationId, {
++      isAISmartToolsEnabled: true,
++    });
++  });
++
++  test("allows disabling AI when the instance configuration later becomes invalid", async () => {
++    mocks.getOrganization.mockResolvedValueOnce({
++      id: organizationId,
++      isAISmartToolsEnabled: true,
++      isAIDataAnalysisEnabled: false,
++    });
++    mocks.isInstanceAIConfigured.mockReturnValueOnce(false);
++
++    await updateOrganizationAISettingsAction({
++      ctx: {
++        user: { id: "user_owner", locale: "en-US" },
++        auditLoggingCtx: {},
++      },
++      parsedInput: {
++        organizationId,
++        data: {
++          isAISmartToolsEnabled: false,
++        },
++      },
++    } as any);
++
++    expect(mocks.updateOrganization).toHaveBeenCalledWith(organizationId, {
++      isAISmartToolsEnabled: false,
++    });
++  });
++});
+diff --git a/apps/web/app/(app)/environments/[environmentId]/settings/(organization)/general/actions.ts b/apps/web/app/(app)/environments/[environmentId]/settings/(organization)/general/actions.ts
+index 1b7c627b7db4..60584c870c36 100644
+--- a/apps/web/app/(app)/environments/[environmentId]/settings/(organization)/general/actions.ts
++++ b/apps/web/app/(app)/environments/[environmentId]/settings/(organization)/general/actions.ts
+@@ -2,15 +2,18 @@
+ 
+ import { z } from "zod";
+ import { ZId } from "@formbricks/types/common";
+-import { OperationNotAllowedError } from "@formbricks/types/errors";
++import { OperationNotAllowedError, ResourceNotFoundError } from "@formbricks/types/errors";
+ import type { TOrganizationRole } from "@formbricks/types/memberships";
+ import { ZOrganizationUpdateInput } from "@formbricks/types/organizations";
++import { isInstanceAIConfigured } from "@/lib/ai/service";
+ import { deleteOrganization, getOrganization, updateOrganization } from "@/lib/organization/service";
+ import { authenticatedActionClient } from "@/lib/utils/action-client";
+ import { checkAuthorizationUpdated } from "@/lib/utils/action-client/action-client-middleware";
+ import { AuthenticatedActionClientCtx } from "@/lib/utils/action-client/types/context";
++import { getTranslate } from "@/lingodotdev/server";
+ import { withAuditLogging } from "@/modules/ee/audit-logs/lib/handler";
+ import { getIsMultiOrgEnabled } from "@/modules/ee/license-check/lib/utils";
++import { ZOrganizationAISettingsInput, ZUpdateOrganizationAISettingsAction } from "./schemas";
+ 
+ async function updateOrganizationAction<T extends z.ZodRawShape>({
+   ctx,
+@@ -66,10 +69,53 @@ export const updateOrganizationNameAction = authenticatedActionClient
+     )
+   );
+ 
+-const ZUpdateOrganizationAISettingsAction = z.object({
+-  organizationId: ZId,
+-  data: ZOrganizationUpdateInput.pick({ isAISmartToolsEnabled: true, isAIDataAnalysisEnabled: true }),
+-});
++type TOrganizationAISettings = Pick<
++  NonNullable<Awaited<ReturnType<typeof getOrganization>>>,
++  "isAISmartToolsEnabled" | "isAIDataAnalysisEnabled"
++>;
++
++type TResolvedOrganizationAISettings = {
++  smartToolsEnabled: boolean;
++  dataAnalysisEnabled: boolean;
++  isEnablingAnyAISetting: boolean;
++};
++
++const resolveOrganizationAISettings = ({
++  data,
++  organization,
++}: {
++  data: z.infer<typeof ZOrganizationAISettingsInput>;
++  organization: TOrganizationAISettings;
++}): TResolvedOrganizationAISettings => {
++  const smartToolsEnabled = Object.hasOwn(data, "isAISmartToolsEnabled")
++    ? (data.isAISmartToolsEnabled ?? organization.isAISmartToolsEnabled)
++    : organization.isAISmartToolsEnabled;
++  const dataAnalysisEnabled = Object.hasOwn(data, "isAIDataAnalysisEnabled")
++    ? (data.isAIDataAnalysisEnabled ?? organization.isAIDataAnalysisEnabled)
++    : organization.isAIDataAnalysisEnabled;
++
++  return {
++    smartToolsEnabled,
++    dataAnalysisEnabled,
++    isEnablingAnyAISetting:
++      (smartToolsEnabled && !organization.isAISmartToolsEnabled) ||
++      (dataAnalysisEnabled && !organization.isAIDataAnalysisEnabled),
++  };
++};
++
++const assertOrganizationAISettingsUpdateAllowed = ({
++  isInstanceAIConfigured,
++  resolvedSettings,
++  t,
++}: {
++  isInstanceAIConfigured: boolean;
++  resolvedSettings: TResolvedOrganizationAISettings;
++  t: Awaited<ReturnType<typeof getTranslate>>;
++}) => {
++  if (resolvedSettings.isEnablingAnyAISetting && !isInstanceAIConfigured) {
++    throw new OperationNotAllowedError(t("environments.settings.general.ai_instance_not_configured"));
++  }
++};
+ 
+ export const updateOrganizationAISettingsAction = authenticatedActionClient
+   .inputSchema(ZUpdateOrganizationAISettingsAction)
+@@ -83,17 +129,33 @@ export const updateOrganizationAISettingsAction = authenticatedActionClient
+       }: {
+         ctx: AuthenticatedActionClientCtx;
+         parsedInput: z.infer<typeof ZUpdateOrganizationAISettingsAction>;
+-      }) =>
+-        updateOrganizationAction({
++      }) => {
++        const t = await getTranslate(ctx.user.locale);
++        const organization = await getOrganization(parsedInput.organizationId);
++
++        if (!organization) {
++          throw new ResourceNotFoundError("Organization", parsedInput.organizationId);
++        }
++
++        const resolvedSettings = resolveOrganizationAISettings({
++          data: parsedInput.data,
++          organization,
++        });
++
++        assertOrganizationAISettingsUpdateAllowed({
++          isInstanceAIConfigured: isInstanceAIConfigured(),
++          resolvedSettings,
++          t,
++        });
++
++        return updateOrganizationAction({
+           ctx,
+           organizationId: parsedInput.organizationId,
+-          schema: ZOrganizationUpdateInput.pick({
+-            isAISmartToolsEnabled: true,
+-            isAIDataAnalysisEnabled: true,
+-          }),
++          schema: ZOrganizationAISettingsInput,
+           data: parsedInput.data,
+           roles: ["owner", "manager"],
+-        })
++        });
++      }
+     )
+   );
+ 
+@@ -106,7 +168,10 @@ export const deleteOrganizationAction = authenticatedActionClient
+   .action(
+     withAuditLogging("deleted", "organization", async ({ ctx, parsedInput }) => {
+       const isMultiOrgEnabled = await getIsMultiOrgEnabled();
+-      if (!isMultiOrgEnabled) throw new OperationNotAllowedError("Organization deletion disabled");
++      if (!isMultiOrgEnabled) {
++        const t = await getTranslate(ctx.user.locale);
++        throw new OperationNotAllowedError(t("environments.settings.general.organization_deletion_disabled"));
++      }
+ 
+       await checkAuthorizationUpdated({
+         userId: ctx.user.id,
+diff --git a/apps/web/app/(app)/environments/[environmentId]/settings/(organization)/general/components/AISettingsToggle.tsx b/apps/web/app/(app)/environments/[environmentId]/settings/(organization)/general/components/AISettingsToggle.tsx
+index 423e06dec5cc..9dd7a006faef 100644
+--- a/apps/web/app/(app)/environments/[environmentId]/settings/(organization)/general/components/AISettingsToggle.tsx
++++ b/apps/web/app/(app)/environments/[environmentId]/settings/(organization)/general/components/AISettingsToggle.tsx
+@@ -7,6 +7,7 @@ import { useTranslation } from "react-i18next";
+ import { TOrganizationRole } from "@formbricks/types/memberships";
+ import { TOrganization } from "@formbricks/types/organizations";
+ import { updateOrganizationAISettingsAction } from "@/app/(app)/environments/[environmentId]/settings/(organization)/general/actions";
++import { getDisplayedOrganizationAISettingValue, getOrganizationAIEnablementState } from "@/lib/ai/utils";
+ import { getAccessFlags } from "@/lib/membership/utils";
+ import { getFormattedErrorMessage } from "@/lib/utils/helper";
+ import { AdvancedOptionToggle } from "@/modules/ui/components/advanced-option-toggle";
+@@ -15,60 +16,93 @@ import { Alert, AlertDescription } from "@/modules/ui/components/alert";
+ interface AISettingsToggleProps {
+   organization: TOrganization;
+   membershipRole?: TOrganizationRole;
++  isInstanceAIConfigured: boolean;
+ }
+ 
+-export const AISettingsToggle = ({ organization, membershipRole }: Readonly<AISettingsToggleProps>) => {
++export const AISettingsToggle = ({
++  organization,
++  membershipRole,
++  isInstanceAIConfigured,
++}: Readonly<AISettingsToggleProps>) => {
+   const [loadingField, setLoadingField] = useState<string | null>(null);
+   const { t } = useTranslation();
+   const router = useRouter();
+ 
+   const { isOwner, isManager } = getAccessFlags(membershipRole);
+   const canEdit = isOwner || isManager;
++  const aiEnablementState = getOrganizationAIEnablementState({
++    isInstanceConfigured: isInstanceAIConfigured,
++  });
++  const showInstanceConfigWarning = aiEnablementState.blockReason === "instanceNotConfigured";
++  const isToggleDisabled = loadingField !== null || !canEdit || !aiEnablementState.canEnableFeatures;
++  const aiEnablementBlockedMessage = t("environments.settings.general.ai_instance_not_configured");
++  const displayedSmartToolsValue = getDisplayedOrganizationAISettingValue({
++    currentValue: organization.isAISmartToolsEnabled,
++    isInstanceConfigured: isInstanceAIConfigured,
++  });
++  const displayedDataAnalysisValue = getDisplayedOrganizationAISettingValue({
++    currentValue: organization.isAIDataAnalysisEnabled,
++    isInstanceConfigured: isInstanceAIConfigured,
++  });
+ 
+   const handleToggle = async (
+     field: "isAISmartToolsEnabled" | "isAIDataAnalysisEnabled",
+     checked: boolean
+   ) => {
++    if (checked && !aiEnablementState.canEnableFeatures) {
++      toast.error(aiEnablementBlockedMessage);
++      return;
++    }
++
+     setLoadingField(field);
+     try {
++      const data =
++        field === "isAISmartToolsEnabled"
++          ? { isAISmartToolsEnabled: checked }
++          : { isAIDataAnalysisEnabled: checked };
+       const response = await updateOrganizationAISettingsAction({
+         organizationId: organization.id,
+-        data: { [field]: checked },
++        data,
+       });
+ 
+       if (response?.data) {
+         toast.success(t("environments.settings.general.ai_settings_updated_successfully"));
+         router.refresh();
+       } else {
+-        const errorMessage = getFormattedErrorMessage(response);
+-        toast.error(errorMessage);
++        toast.error(getFormattedErrorMessage(response));
+       }
+-    } catch {
+-      toast.error(t("common.something_went_wrong"));
++    } catch (error) {
++      toast.error(error instanceof Error ? error.message : t("common.something_went_wrong_please_try_again"));
+     } finally {
+       setLoadingField(null);
+     }
+   };
+ 
+   return (
+-    <div>
++    <div className="space-y-4">
++      {showInstanceConfigWarning && (
++        <Alert variant="warning">
++          <AlertDescription>{aiEnablementBlockedMessage}</AlertDescription>
++        </Alert>
++      )}
++
+       <AdvancedOptionToggle
+-        isChecked={organization.isAISmartToolsEnabled}
++        isChecked={displayedSmartToolsValue}
+         onToggle={(checked) => handleToggle("isAISmartToolsEnabled", checked)}
+         htmlId="ai-smart-tools-toggle"
+         title={t("environments.settings.general.ai_smart_tools_enabled")}
+         description={t("environments.settings.general.ai_smart_tools_enabled_description")}
+-        disabled={loadingField !== null || !canEdit}
++        disabled={isToggleDisabled}
+         customContainerClass="px-0"
+       />
+ 
+       <AdvancedOptionToggle
+-        isChecked={organization.isAIDataAnalysisEnabled}
++        isChecked={displayedDataAnalysisValue}
+         onToggle={(checked) => handleToggle("isAIDataAnalysisEnabled", checked)}
+         htmlId="ai-data-analysis-toggle"
+         title={t("environments.settings.general.ai_data_analysis_enabled")}
+         description={t("environments.settings.general.ai_data_analysis_enabled_description")}
+-        disabled={loadingField !== null || !canEdit}
++        disabled={isToggleDisabled}
+         customContainerClass="px-0"
+       />
+ 
+diff --git a/apps/web/app/(app)/environments/[environmentId]/settings/(organization)/general/page.tsx b/apps/web/app/(app)/environments/[environmentId]/settings/(organization)/general/page.tsx
+index 98e0aa0fd86c..9305e7e4d1ca 100644
+--- a/apps/web/app/(app)/environments/[environmentId]/settings/(organization)/general/page.tsx
++++ b/apps/web/app/(app)/environments/[environmentId]/settings/(organization)/general/page.tsx
+@@ -1,4 +1,5 @@
+ import { OrganizationSettingsNavbar } from "@/app/(app)/environments/[environmentId]/settings/(organization)/components/OrganizationSettingsNavbar";
++import { isInstanceAIConfigured } from "@/lib/ai/service";
+ import { FB_LOGO_URL, IS_FORMBRICKS_CLOUD, IS_STORAGE_CONFIGURED } from "@/lib/constants";
+ import { getUser } from "@/lib/user/service";
+ import { getTranslate } from "@/lingodotdev/server";
+@@ -64,7 +65,11 @@ const Page = async (props: { params: Promise<{ environmentId: string }> }) => {
+       <SettingsCard
+         title={t("environments.settings.general.ai_enabled")}
+         description={t("environments.settings.general.ai_enabled_description")}>
+-        <AISettingsToggle organization={organization} membershipRole={currentUserMembership?.role} />
++        <AISettingsToggle
++          organization={organization}
++          membershipRole={currentUserMembership?.role}
++          isInstanceAIConfigured={isInstanceAIConfigured()}
++        />
+       </SettingsCard>
+       <EmailCustomizationSettings
+         organization={organization}
+diff --git a/apps/web/app/(app)/environments/[environmentId]/settings/(organization)/general/schemas.ts b/apps/web/app/(app)/environments/[environmentId]/settings/(organization)/general/schemas.ts
+new file mode 100644
+index 000000000000..576fbdce51c4
+--- /dev/null
++++ b/apps/web/app/(app)/environments/[environmentId]/settings/(organization)/general/schemas.ts
+@@ -0,0 +1,13 @@
++import { z } from "zod";
++import { ZId } from "@formbricks/types/common";
++import { ZOrganizationUpdateInput } from "@formbricks/types/organizations";
++
++export const ZOrganizationAISettingsInput = ZOrganizationUpdateInput.pick({
++  isAISmartToolsEnabled: true,
++  isAIDataAnalysisEnabled: true,
++});
++
++export const ZUpdateOrganizationAISettingsAction = z.object({
++  organizationId: ZId,
++  data: ZOrganizationAISettingsInput,
++});
+diff --git a/apps/web/lib/ai/service.test.ts b/apps/web/lib/ai/service.test.ts
+new file mode 100644
+index 000000000000..3f92a0d6ca6b
+--- /dev/null
++++ b/apps/web/lib/ai/service.test.ts
+@@ -0,0 +1,184 @@
++import { beforeEach, describe, expect, test, vi } from "vitest";
++import { OperationNotAllowedError, ResourceNotFoundError } from "@formbricks/types/errors";
++import {
++  assertOrganizationAIConfigured,
++  generateOrganizationAIText,
++  getOrganizationAIConfig,
++  isInstanceAIConfigured,
++} from "./service";
++
++const mocks = vi.hoisted(() => ({
++  generateText: vi.fn(),
++  isAiConfigured: vi.fn(),
++  getOrganization: vi.fn(),
++  getIsAIDataAnalysisEnabled: vi.fn(),
++  getIsAISmartToolsEnabled: vi.fn(),
++  getTranslate: vi.fn(),
++  loggerError: vi.fn(),
++}));
++
++vi.mock("server-only", () => ({}));
++
++vi.mock("@formbricks/ai", () => ({
++  AIConfigurationError: class AIConfigurationError extends Error {
++    code: string;
++
++    constructor(code: string, message: string) {
++      super(message);
++      this.code = code;
++    }
++  },
++  generateText: mocks.generateText,
++  isAiConfigured: mocks.isAiConfigured,
++}));
++
++vi.mock("@formbricks/logger", () => ({
++  logger: {
++    error: mocks.loggerError,
++  },
++}));
++
++vi.mock("@/lib/env", () => ({
++  env: {
++    AI_PROVIDER: "gcp",
++    AI_MODEL: "gemini-2.5-flash",
++    AI_GCP_PROJECT: "vertex-project",
++    AI_GCP_LOCATION: "us-central1",
++    AI_GCP_CREDENTIALS_JSON: undefined,
++    AI_GCP_APPLICATION_CREDENTIALS: "/tmp/vertex.json",
++    AI_AWS_REGION: "us-east-1",
++    AI_AWS_ACCESS_KEY_ID: "aws-access-key-id",
++    AI_AWS_SECRET_ACCESS_KEY: "aws-secret-access-key",
++    AI_AWS_SESSION_TOKEN: undefined,
++    AI_AZURE_BASE_URL: "https://example-resource.openai.azure.com/openai",
++    AI_AZURE_RESOURCE_NAME: undefined,
++    AI_AZURE_API_KEY: "azure-api-key",
++    AI_AZURE_API_VERSION: "v1",
++  },
++}));
++
++vi.mock("@/lib/organization/service", () => ({
++  getOrganization: mocks.getOrganization,
++}));
++
++vi.mock("@/modules/ee/license-check/lib/utils", () => ({
++  getIsAIDataAnalysisEnabled: mocks.getIsAIDataAnalysisEnabled,
++  getIsAISmartToolsEnabled: mocks.getIsAISmartToolsEnabled,
++}));
++
++vi.mock("@/lingodotdev/server", () => ({
++  getTranslate: mocks.getTranslate,
++}));
++
++describe("AI organization service", () => {
++  beforeEach(() => {
++    vi.clearAllMocks();
++
++    mocks.isAiConfigured.mockReturnValue(true);
++    mocks.getOrganization.mockResolvedValue({
++      id: "org_1",
++      isAISmartToolsEnabled: true,
++      isAIDataAnalysisEnabled: false,
++    });
++    mocks.getIsAISmartToolsEnabled.mockResolvedValue(true);
++    mocks.getIsAIDataAnalysisEnabled.mockResolvedValue(true);
++    mocks.getTranslate.mockResolvedValue((key: string, values?: Record<string, string>) =>
++      values ? `${key}:${JSON.stringify(values)}` : key
++    );
++  });
++
++  test("returns the instance AI status and organization settings", async () => {
++    const configured = isInstanceAIConfigured();
++    const result = await getOrganizationAIConfig("org_1");
++
++    expect(configured).toBe(true);
++    expect(result).toMatchObject({
++      organizationId: "org_1",
++      isAISmartToolsEnabled: true,
++      isAIDataAnalysisEnabled: false,
++      isAISmartToolsEntitled: true,
++      isAIDataAnalysisEntitled: true,
++      isInstanceConfigured: true,
++    });
++  });
++
++  test("throws when the organization cannot be found", async () => {
++    mocks.getOrganization.mockResolvedValueOnce(null);
++
++    await expect(getOrganizationAIConfig("org_missing")).rejects.toThrow(ResourceNotFoundError);
++  });
++
++  test("fails closed when the organization is not entitled to AI", async () => {
++    mocks.getIsAISmartToolsEnabled.mockResolvedValueOnce(false);
++
++    await expect(assertOrganizationAIConfigured("org_1", "smartTools")).rejects.toThrow(
++      OperationNotAllowedError
++    );
++  });
++
++  test("fails closed when the requested AI capability is disabled", async () => {
++    mocks.getOrganization.mockResolvedValueOnce({
++      id: "org_1",
++      isAISmartToolsEnabled: false,
++      isAIDataAnalysisEnabled: true,
++    });
++
++    await expect(assertOrganizationAIConfigured("org_1", "smartTools")).rejects.toThrow(
++      OperationNotAllowedError
++    );
++  });
++
++  test("fails closed when the instance AI configuration is incomplete", async () => {
++    mocks.isAiConfigured.mockReturnValueOnce(false);
++
++    await expect(assertOrganizationAIConfigured("org_1", "smartTools")).rejects.toThrow(
++      OperationNotAllowedError
++    );
++  });
++
++  test("generates organization AI text with the configured package abstraction", async () => {
++    const generatedText = { text: "Translated text" };
++    mocks.generateText.mockResolvedValueOnce(generatedText);
++
++    const result = await generateOrganizationAIText({
++      organizationId: "org_1",
++      capability: "smartTools",
++      prompt: "Translate this survey",
++    });
++
++    expect(result).toBe(generatedText);
++    expect(mocks.generateText).toHaveBeenCalledWith(
++      {
++        prompt: "Translate this survey",
++      },
++      expect.objectContaining({
++        AI_PROVIDER: "gcp",
++        AI_MODEL: "gemini-2.5-flash",
++        AI_GCP_PROJECT: "vertex-project",
++      })
++    );
++  });
++
++  test("logs and rethrows generation errors", async () => {
++    const modelError = new Error("provider boom");
++    mocks.generateText.mockRejectedValueOnce(modelError);
++
++    await expect(
++      generateOrganizationAIText({
++        organizationId: "org_1",
++        capability: "smartTools",
++        prompt: "Translate this survey",
++      })
++    ).rejects.toThrow(modelError);
++    expect(mocks.loggerError).toHaveBeenCalledWith(
++      {
++        organizationId: "org_1",
++        capability: "smartTools",
++        isInstanceConfigured: true,
++        errorCode: undefined,
++        err: modelError,
++      },
++      "Failed to generate organization AI text"
++    );
++  });
++});
+diff --git a/apps/web/lib/ai/service.ts b/apps/web/lib/ai/service.ts
+new file mode 100644
+index 000000000000..7b5a714ff4d9
+--- /dev/null
++++ b/apps/web/lib/ai/service.ts
+@@ -0,0 +1,104 @@
++import "server-only";
++import { AIConfigurationError, generateText, isAiConfigured } from "@formbricks/ai";
++import { logger } from "@formbricks/logger";
++import { OperationNotAllowedError, ResourceNotFoundError } from "@formbricks/types/errors";
++import { env } from "@/lib/env";
++import { getOrganization } from "@/lib/organization/service";
++import { getTranslate } from "@/lingodotdev/server";
++import { getIsAIDataAnalysisEnabled, getIsAISmartToolsEnabled } from "@/modules/ee/license-check/lib/utils";
++
++export interface TOrganizationAIConfig {
++  organizationId: string;
++  isAISmartToolsEnabled: boolean;
++  isAIDataAnalysisEnabled: boolean;
++  isAISmartToolsEntitled: boolean;
++  isAIDataAnalysisEntitled: boolean;
++  isInstanceConfigured: boolean;
++}
++
++export const isInstanceAIConfigured = (): boolean => isAiConfigured(env);
++
++export const getOrganizationAIConfig = async (organizationId: string): Promise<TOrganizationAIConfig> => {
++  const organization = await getOrganization(organizationId);
++
++  if (!organization) {
++    throw new ResourceNotFoundError("Organization", organizationId);
++  }
++
++  const [isAISmartToolsEntitled, isAIDataAnalysisEntitled] = await Promise.all([
++    getIsAISmartToolsEnabled(organizationId),
++    getIsAIDataAnalysisEnabled(organizationId),
++  ]);
++
++  return {
++    organizationId,
++    isAISmartToolsEnabled: organization.isAISmartToolsEnabled,
++    isAIDataAnalysisEnabled: organization.isAIDataAnalysisEnabled,
++    isAISmartToolsEntitled,
++    isAIDataAnalysisEntitled,
++    isInstanceConfigured: isInstanceAIConfigured(),
++  };
++};
++
++export const assertOrganizationAIConfigured = async (
++  organizationId: string,
++  capability: "smartTools" | "dataAnalysis"
++): Promise<TOrganizationAIConfig> => {
++  const t = await getTranslate();
++  const aiConfig = await getOrganizationAIConfig(organizationId);
++  const isCapabilityEntitled =
++    capability === "smartTools" ? aiConfig.isAISmartToolsEntitled : aiConfig.isAIDataAnalysisEntitled;
++
++  if (!isCapabilityEntitled) {
++    throw new OperationNotAllowedError(
++      t("environments.settings.general.ai_features_not_enabled_for_organization")
++    );
++  }
++
++  if (capability === "smartTools" && !aiConfig.isAISmartToolsEnabled) {
++    throw new OperationNotAllowedError(
++      t("environments.settings.general.ai_smart_tools_disabled_for_organization")
++    );
++  }
++
++  if (capability === "dataAnalysis" && !aiConfig.isAIDataAnalysisEnabled) {
++    throw new OperationNotAllowedError(
++      t("environments.settings.general.ai_data_analysis_disabled_for_organization")
++    );
++  }
++
++  if (!aiConfig.isInstanceConfigured) {
++    throw new OperationNotAllowedError(t("environments.settings.general.ai_instance_not_configured"));
++  }
++
++  return aiConfig;
++};
++
++type TGenerateOrganizationAITextInput = {
++  organizationId: string;
++  capability: "smartTools" | "dataAnalysis";
++} & Parameters<typeof generateText>[0];
++
++export const generateOrganizationAIText = async ({
++  organizationId,
++  capability,
++  ...options
++}: TGenerateOrganizationAITextInput): Promise<Awaited<ReturnType<typeof generateText>>> => {
++  const aiConfig = await assertOrganizationAIConfigured(organizationId, capability);
++
++  try {
++    return await generateText(options, env);
++  } catch (error) {
++    logger.error(
++      {
++        organizationId,
++        capability,
++        isInstanceConfigured: aiConfig.isInstanceConfigured,
++        errorCode: error instanceof AIConfigurationError ? error.code : undefined,
++        err: error,
++      },
++      "Failed to generate organization AI text"
++    );
++    throw error;
++  }
++};
+diff --git a/apps/web/lib/ai/utils.test.ts b/apps/web/lib/ai/utils.test.ts
+new file mode 100644
+index 000000000000..3556289ec201
+--- /dev/null
++++ b/apps/web/lib/ai/utils.test.ts
+@@ -0,0 +1,54 @@
++import { describe, expect, test } from "vitest";
++import { getDisplayedOrganizationAISettingValue, getOrganizationAIEnablementState } from "./utils";
++
++describe("getOrganizationAIEnablementState", () => {
++  test("blocks enabling when instance AI is not configured", () => {
++    expect(
++      getOrganizationAIEnablementState({
++        isInstanceConfigured: false,
++      })
++    ).toMatchObject({
++      canEnableFeatures: false,
++      blockReason: "instanceNotConfigured",
++    });
++  });
++
++  test("allows enabling when instance AI is configured", () => {
++    expect(
++      getOrganizationAIEnablementState({
++        isInstanceConfigured: true,
++      })
++    ).toMatchObject({
++      canEnableFeatures: true,
++    });
++  });
++});
++
++describe("getDisplayedOrganizationAISettingValue", () => {
++  test("renders enabled settings as off when instance AI is not configured", () => {
++    expect(
++      getDisplayedOrganizationAISettingValue({
++        currentValue: true,
++        isInstanceConfigured: false,
++      })
++    ).toBe(false);
++  });
++
++  test("renders the stored setting value when instance AI is configured", () => {
++    expect(
++      getDisplayedOrganizationAISettingValue({
++        currentValue: true,
++        isInstanceConfigured: true,
++      })
++    ).toBe(true);
++  });
++
++  test("renders false when the stored setting is false and instance AI is configured", () => {
++    expect(
++      getDisplayedOrganizationAISettingValue({
++        currentValue: false,
++        isInstanceConfigured: true,
++      })
++    ).toBe(false);
++  });
++});
+diff --git a/apps/web/lib/ai/utils.ts b/apps/web/lib/ai/utils.ts
+new file mode 100644
+index 000000000000..0c8c0012e04a
+--- /dev/null
++++ b/apps/web/lib/ai/utils.ts
+@@ -0,0 +1,31 @@
++export type TAIEnablementBlockReason = "instanceNotConfigured";
++
++interface TOrganizationAIEnablementState {
++  canEnableFeatures: boolean;
++  blockReason?: TAIEnablementBlockReason;
++}
++
++export const getDisplayedOrganizationAISettingValue = ({
++  currentValue,
++  isInstanceConfigured,
++}: {
++  currentValue: boolean;
++  isInstanceConfigured: boolean;
++}): boolean => isInstanceConfigured && currentValue;
++
++export const getOrganizationAIEnablementState = ({
++  isInstanceConfigured,
++}: {
++  isInstanceConfigured: boolean;
++}): TOrganizationAIEnablementState => {
++  if (!isInstanceConfigured) {
++    return {
++      canEnableFeatures: false,
++      blockReason: "instanceNotConfigured",
++    };
++  }
++
++  return {
++    canEnableFeatures: true,
++  };
++};
+diff --git a/apps/web/lib/env.ts b/apps/web/lib/env.ts
+index f3b022b90d6e..0d0c4939505c 100644
+--- a/apps/web/lib/env.ts
++++ b/apps/web/lib/env.ts
+@@ -1,12 +1,120 @@
+ import { createEnv } from "@t3-oss/env-nextjs";
+ import { z } from "zod";
++import { AI_PROVIDERS } from "@formbricks/types/ai";
+ 
+-export const env = createEnv({
++const ZActiveAIProvider = z.enum(AI_PROVIDERS);
++const ZAIConfigurationEnv = z.object({
++  AI_PROVIDER: ZActiveAIProvider.optional(),
++  AI_MODEL: z.string().optional(),
++  AI_GCP_PROJECT: z.string().optional(),
++  AI_GCP_LOCATION: z.string().optional(),
++  AI_GCP_CREDENTIALS_JSON: z.string().optional(),
++  AI_GCP_APPLICATION_CREDENTIALS: z.string().optional(),
++  AI_AWS_REGION: z.string().optional(),
++  AI_AWS_ACCESS_KEY_ID: z.string().optional(),
++  AI_AWS_SECRET_ACCESS_KEY: z.string().optional(),
++  AI_AZURE_API_KEY: z.string().optional(),
++  AI_AZURE_BASE_URL: z.url().optional(),
++  AI_AZURE_RESOURCE_NAME: z.string().optional(),
++});
++
++type TAIConfigurationEnv = z.infer<typeof ZAIConfigurationEnv>;
++
++const addEnvIssue = (ctx: z.RefinementCtx, path: keyof TAIConfigurationEnv, message: string): void => {
++  ctx.addIssue({
++    code: "custom",
++    path: [path],
++    message,
++  });
++};
++
++const validateActiveAIModel = (values: TAIConfigurationEnv, ctx: z.RefinementCtx): void => {
++  if (values.AI_PROVIDER && !values.AI_MODEL) {
++    addEnvIssue(ctx, "AI_MODEL", "AI_MODEL is required when AI_PROVIDER is set");
++  }
++};
++
++const validateAwsAIConfiguration = (values: TAIConfigurationEnv, ctx: z.RefinementCtx): void => {
++  if (!values.AI_AWS_REGION) {
++    addEnvIssue(ctx, "AI_AWS_REGION", "AI_AWS_REGION is required when AI_PROVIDER=aws");
++  }
++
++  if (!values.AI_AWS_ACCESS_KEY_ID) {
++    addEnvIssue(ctx, "AI_AWS_ACCESS_KEY_ID", "AI_AWS_ACCESS_KEY_ID is required when AI_PROVIDER=aws");
++  }
++
++  if (!values.AI_AWS_SECRET_ACCESS_KEY) {
++    addEnvIssue(ctx, "AI_AWS_SECRET_ACCESS_KEY", "AI_AWS_SECRET_ACCESS_KEY is required when AI_PROVIDER=aws");
++  }
++};
++
++const validateGcpAIConfiguration = (values: TAIConfigurationEnv, ctx: z.RefinementCtx): void => {
++  if (!values.AI_GCP_PROJECT) {
++    addEnvIssue(ctx, "AI_GCP_PROJECT", "AI_GCP_PROJECT is required when AI_PROVIDER=gcp");
++  }
++
++  if (!values.AI_GCP_LOCATION) {
++    addEnvIssue(ctx, "AI_GCP_LOCATION", "AI_GCP_LOCATION is required when AI_PROVIDER=gcp");
++  }
++
++  if (!values.AI_GCP_CREDENTIALS_JSON && !values.AI_GCP_APPLICATION_CREDENTIALS) {
++    addEnvIssue(
++      ctx,
++      "AI_GCP_CREDENTIALS_JSON",
++      "AI_GCP_CREDENTIALS_JSON or AI_GCP_APPLICATION_CREDENTIALS is required when AI_PROVIDER=gcp"
++    );
++  }
++
++  if (values.AI_GCP_CREDENTIALS_JSON) {
++    try {
++      JSON.parse(values.AI_GCP_CREDENTIALS_JSON);
++    } catch {
++      addEnvIssue(ctx, "AI_GCP_CREDENTIALS_JSON", "AI_GCP_CREDENTIALS_JSON must be valid JSON");
++    }
++  }
++};
++
++const validateAzureAIConfiguration = (values: TAIConfigurationEnv, ctx: z.RefinementCtx): void => {
++  if (!values.AI_AZURE_API_KEY) {
++    addEnvIssue(ctx, "AI_AZURE_API_KEY", "AI_AZURE_API_KEY is required when AI_PROVIDER=azure");
++  }
++
++  if (!values.AI_AZURE_BASE_URL && !values.AI_AZURE_RESOURCE_NAME) {
++    addEnvIssue(
++      ctx,
++      "AI_AZURE_BASE_URL",
++      "AI_AZURE_BASE_URL or AI_AZURE_RESOURCE_NAME is required when AI_PROVIDER=azure"
++    );
++  }
++};
++
++const validateActiveAIProviderConfiguration = (values: TAIConfigurationEnv, ctx: z.RefinementCtx): void => {
++  validateActiveAIModel(values, ctx);
++
++  if (!values.AI_PROVIDER) {
++    return;
++  }
++
++  const providerValidators: Record<
++    z.infer<typeof ZActiveAIProvider>,
++    (values: TAIConfigurationEnv, ctx: z.RefinementCtx) => void
++  > = {
++    aws: validateAwsAIConfiguration,
++    gcp: validateGcpAIConfiguration,
++    azure: validateAzureAIConfiguration,
++  };
++
++  providerValidators[values.AI_PROVIDER](values, ctx);
++};
++
++const parsedEnv = createEnv({
+   /*
+    * Serverside Environment variables, not available on the client.
+    * Will throw if you access these variables on the client.
+    */
+   server: {
++    AI_PROVIDER: ZActiveAIProvider.optional(),
++    AI_MODEL: z.string().optional(),
+     AIRTABLE_CLIENT_ID: z.string().optional(),
+     AZUREAD_CLIENT_ID: z.string().optional(),
+     AZUREAD_CLIENT_SECRET: z.string().optional(),
+@@ -30,9 +138,21 @@ export const env = createEnv({
+     GITHUB_SECRET: z.string().optional(),
+     GOOGLE_CLIENT_ID: z.string().optional(),
+     GOOGLE_CLIENT_SECRET: z.string().optional(),
++    AI_GCP_PROJECT: z.string().optional(),
++    AI_GCP_LOCATION: z.string().optional(),
++    AI_GCP_CREDENTIALS_JSON: z.string().optional(),
++    AI_GCP_APPLICATION_CREDENTIALS: z.string().optional(),
+     GOOGLE_SHEETS_CLIENT_ID: z.string().optional(),
+     GOOGLE_SHEETS_CLIENT_SECRET: z.string().optional(),
+     GOOGLE_SHEETS_REDIRECT_URL: z.string().optional(),
++    AI_AWS_REGION: z.string().optional(),
++    AI_AWS_ACCESS_KEY_ID: z.string().optional(),
++    AI_AWS_SECRET_ACCESS_KEY: z.string().optional(),
++    AI_AWS_SESSION_TOKEN: z.string().optional(),
++    AI_AZURE_BASE_URL: z.url().optional(),
++    AI_AZURE_API_KEY: z.string().optional(),
++    AI_AZURE_API_VERSION: z.string().optional(),
++    AI_AZURE_RESOURCE_NAME: z.string().optional(),
+     HTTP_PROXY: z.url().optional(),
+     HTTPS_PROXY: z.url().optional(),
+     IMPRINT_URL: z
+@@ -125,7 +245,7 @@ export const env = createEnv({
+     AUDIT_LOG_GET_USER_IP: z.enum(["1", "0"]).optional(),
+     SESSION_MAX_AGE: z
+       .string()
+-      .transform((val) => parseInt(val))
++      .transform((val) => Number.parseInt(val, 10))
+       .optional(),
+     SENTRY_ENVIRONMENT: z.string().optional(),
+   },
+@@ -137,6 +257,8 @@ export const env = createEnv({
+    * 💡 You'll get type errors if not all variables from `server` & `client` are included here.
+    */
+   runtimeEnv: {
++    AI_PROVIDER: process.env.AI_PROVIDER,
++    AI_MODEL: process.env.AI_MODEL,
+     AIRTABLE_CLIENT_ID: process.env.AIRTABLE_CLIENT_ID,
+     AZUREAD_CLIENT_ID: process.env.AZUREAD_CLIENT_ID,
+     AZUREAD_CLIENT_SECRET: process.env.AZUREAD_CLIENT_SECRET,
+@@ -160,9 +282,21 @@ export const env = createEnv({
+     GITHUB_SECRET: process.env.GITHUB_SECRET,
+     GOOGLE_CLIENT_ID: process.env.GOOGLE_CLIENT_ID,
+     GOOGLE_CLIENT_SECRET: process.env.GOOGLE_CLIENT_SECRET,
++    AI_GCP_PROJECT: process.env.AI_GCP_PROJECT,
++    AI_GCP_LOCATION: process.env.AI_GCP_LOCATION,
++    AI_GCP_CREDENTIALS_JSON: process.env.AI_GCP_CREDENTIALS_JSON,
++    AI_GCP_APPLICATION_CREDENTIALS: process.env.AI_GCP_APPLICATION_CREDENTIALS,
+     GOOGLE_SHEETS_CLIENT_ID: process.env.GOOGLE_SHEETS_CLIENT_ID,
+     GOOGLE_SHEETS_CLIENT_SECRET: process.env.GOOGLE_SHEETS_CLIENT_SECRET,
+     GOOGLE_SHEETS_REDIRECT_URL: process.env.GOOGLE_SHEETS_REDIRECT_URL,
++    AI_AWS_REGION: process.env.AI_AWS_REGION,
++    AI_AWS_ACCESS_KEY_ID: process.env.AI_AWS_ACCESS_KEY_ID,
++    AI_AWS_SECRET_ACCESS_KEY: process.env.AI_AWS_SECRET_ACCESS_KEY,
++    AI_AWS_SESSION_TOKEN: process.env.AI_AWS_SESSION_TOKEN,
++    AI_AZURE_BASE_URL: process.env.AI_AZURE_BASE_URL,
++    AI_AZURE_API_KEY: process.env.AI_AZURE_API_KEY,
++    AI_AZURE_API_VERSION: process.env.AI_AZURE_API_VERSION,
++    AI_AZURE_RESOURCE_NAME: process.env.AI_AZURE_RESOURCE_NAME,
+     HTTP_PROXY: process.env.HTTP_PROXY,
+     HTTPS_PROXY: process.env.HTTPS_PROXY,
+     IMPRINT_URL: process.env.IMPRINT_URL,
+@@ -229,3 +363,7 @@ export const env = createEnv({
+     SENTRY_ENVIRONMENT: process.env.SENTRY_ENVIRONMENT,
+   },
+ });
++
++export const env = ZAIConfigurationEnv.superRefine(validateActiveAIProviderConfiguration)
++  .transform(() => parsedEnv)
++  .parse(parsedEnv);
+diff --git a/apps/web/lib/organization/service.ts b/apps/web/lib/organization/service.ts
+index 3244bfb62ecc..228b52588d5e 100644
+--- a/apps/web/lib/organization/service.ts
++++ b/apps/web/lib/organization/service.ts
+@@ -367,35 +367,34 @@ export const subscribeOrganizationMembersToSurveyResponses = async (
+   createdBy: string,
+   organizationId: string
+ ): Promise<void> => {
+-  try {
+-    const surveyCreator = await prisma.user.findUnique({
+-      where: {
+-        id: createdBy,
+-      },
+-    });
++  const surveyCreator = await prisma.user.findUnique({
++    where: {
++      id: createdBy,
++    },
++  });
+ 
+-    if (!surveyCreator) {
+-      throw new ResourceNotFoundError("User", createdBy);
+-    }
++  if (!surveyCreator) {
++    throw new ResourceNotFoundError("User", createdBy);
++  }
+ 
+-    if (surveyCreator.notificationSettings?.unsubscribedOrganizationIds?.includes(organizationId)) {
+-      return;
+-    }
++  if (surveyCreator.notificationSettings?.unsubscribedOrganizationIds?.includes(organizationId)) {
++    return;
++  }
+ 
+-    const defaultSettings = { alert: {} };
+-    const updatedNotificationSettings: TUserNotificationSettings = {
+-      ...defaultSettings,
+-      ...surveyCreator.notificationSettings,
+-    };
++  const defaultSettings = { alert: {} as NonNullable<TUserNotificationSettings["alert"]> };
++  const updatedNotificationSettings: TUserNotificationSettings = {
++    ...defaultSettings,
++    ...surveyCreator.notificationSettings,
++    alert: surveyCreator.notificationSettings?.alert
++      ? { ...surveyCreator.notificationSettings.alert }
++      : defaultSettings.alert,
++  };
+ 
+-    updatedNotificationSettings.alert[surveyId] = true;
++  updatedNotificationSettings.alert[surveyId] = true;
+ 
+-    await updateUser(surveyCreator.id, {
+-      notificationSettings: updatedNotificationSettings,
+-    });
+-  } catch (error) {
+-    throw error;
+-  }
++  await updateUser(surveyCreator.id, {
++    notificationSettings: updatedNotificationSettings,
++  });
+ };
+ 
+ export const getOrganizationsWhereUserIsSingleOwner = reactCache(
+diff --git a/apps/web/locales/de-DE.json b/apps/web/locales/de-DE.json
+index b28c466f0504..fc685f6da004 100644
+--- a/apps/web/locales/de-DE.json
++++ b/apps/web/locales/de-DE.json
+@@ -1129,11 +1129,15 @@
+         "unlock_the_full_power_of_formbricks_free_for_30_days": "Schalte die volle Power von Formbricks frei. 30 Tage kostenlos."
+       },
+       "general": {
++        "ai_data_analysis_disabled_for_organization": "KI-Datenanalyse und -Anreicherung sind für diese Organisation deaktiviert.",
+         "ai_data_analysis_enabled": "Datenanreicherung & Analyse (KI)",
+         "ai_data_analysis_enabled_description": "KI, um mehr aus deinen Daten herauszuholen, Dashboards, Diagramme, Berichte und mehr einzurichten. Greift auf deine Erfahrungsdaten zu.",
+         "ai_enabled": "Formbricks AI",
+         "ai_enabled_description": "Verwalte KI-gestützte Funktionen für diese Organisation.",
++        "ai_features_not_enabled_for_organization": "KI-Funktionen sind für diese Organisation nicht aktiviert.",
++        "ai_instance_not_configured": "KI wird auf Instanzebene über Umgebungsvariablen konfiguriert. Bitte den Administrator, AI_PROVIDER, die Anmeldedaten für diesen Anbieter und die passende Modellliste zu konfigurieren, bevor du KI-Funktionen aktivierst.",
+         "ai_settings_updated_successfully": "KI-Einstellungen erfolgreich aktualisiert",
++        "ai_smart_tools_disabled_for_organization": "KI-Smart-Tools sind für diese Organisation deaktiviert.",
+         "ai_smart_tools_enabled": "Intelligente Funktionen (KI)",
+         "ai_smart_tools_enabled_description": "KI, um dir zu helfen, in kürzerer Zeit mehr zu erreichen. Greift niemals auf mit Formbricks gesammelte Daten zu. Wird nur verwendet, um z. B. Umfragen in andere Sprachen zu übersetzen.",
+         "bulk_invite_warning_description": "Bitte beachte, dass im Free-Plan alle Organisationsmitglieder automatisch die Rolle \"Owner\" zugewiesen bekommen, unabhängig von der im CSV-File angegebenen Rolle.",
+@@ -1174,6 +1178,7 @@
+         "only_org_owner_can_perform_action": "Nur der Besitzer kann die Organisation löschen.",
+         "organization_created_successfully": "Organisation erfolgreich erstellt!",
+         "organization_deleted_successfully": "Organisation erfolgreich gelöscht.",
++        "organization_deletion_disabled": "Das Löschen von Organisationen ist deaktiviert.",
+         "organization_invite_link_ready": "Dein Einladungslink für die Organisation ist fertig!",
+         "organization_name": "Organisationsname",
+         "organization_name_description": "Gib deiner Organisation einen Namen.",
+@@ -2619,8 +2624,8 @@
+     "csat_question_1_headline": "Wie wahrscheinlich ist es, dass Du dieses $[projectName] einem Freund oder Kollegen empfehlen würdest?",
+     "csat_question_1_lower_label": "Nicht wahrscheinlich",
+     "csat_question_1_upper_label": "Sehr wahrscheinlich",
+-    "csat_question_2_choice_1": "Sehr zufrieden",
+-    "csat_question_2_choice_2": "Etwas zufrieden",
++    "csat_question_2_choice_1": "Etwas zufrieden",
++    "csat_question_2_choice_2": "Sehr zufrieden",
+     "csat_question_2_choice_3": "Weder zufrieden noch unzufrieden",
+     "csat_question_2_choice_4": "Etwas unzufrieden",
+     "csat_question_2_choice_5": "Sehr unzufrieden",
+diff --git a/apps/web/locales/en-US.json b/apps/web/locales/en-US.json
+index f143910817d4..b2be09f9192c 100644
+--- a/apps/web/locales/en-US.json
++++ b/apps/web/locales/en-US.json
+@@ -1129,11 +1129,15 @@
+         "unlock_the_full_power_of_formbricks_free_for_30_days": "Unlock the full power of Formbricks. Free for 30 days."
+       },
+       "general": {
++        "ai_data_analysis_disabled_for_organization": "AI data analysis is disabled for this organization.",
+         "ai_data_analysis_enabled": "Data enrichment & analysis (AI)",
+         "ai_data_analysis_enabled_description": "AI to get more out of your data, setup dashboards, charts, reports and more. Touches your experience data.",
+         "ai_enabled": "Formbricks AI",
+         "ai_enabled_description": "Manage AI-powered features for this organization.",
++        "ai_features_not_enabled_for_organization": "AI features are not enabled for this organization.",
++        "ai_instance_not_configured": "AI is configured at the instance level via environment variables. Ask your administrator to set AI_PROVIDER, AI_MODEL, and the matching provider credentials before enabling AI features.",
+         "ai_settings_updated_successfully": "AI settings updated successfully",
++        "ai_smart_tools_disabled_for_organization": "AI smart tools are disabled for this organization.",
+         "ai_smart_tools_enabled": "Smart functionality (AI)",
+         "ai_smart_tools_enabled_description": "AI to help you achieve more in less time. Never touches data collected with Formbricks. Only used to e.g. translate surveys to other languages.",
+         "bulk_invite_warning_description": "On the free plan, all organization members are always assigned the “Owner” role.",
+@@ -1174,6 +1178,7 @@
+         "only_org_owner_can_perform_action": "Only organization owners can access this setting.",
+         "organization_created_successfully": "Organization created successfully",
+         "organization_deleted_successfully": "Organization deleted successfully",
++        "organization_deletion_disabled": "Organization deletion is disabled.",
+         "organization_invite_link_ready": "Your organization invite link is ready!",
+         "organization_name": "Organization Name",
+         "organization_name_description": "Give your organization a descriptive name.",
+@@ -2619,8 +2624,8 @@
+     "csat_question_1_headline": "How likely is it that you would recommend this $[projectName] to a friend or colleague?",
+     "csat_question_1_lower_label": "Not likely",
+     "csat_question_1_upper_label": "Very likely",
+-    "csat_question_2_choice_1": "Very satisfied",
+-    "csat_question_2_choice_2": "Somewhat satisfied",
++    "csat_question_2_choice_1": "Somewhat satisfied",
++    "csat_question_2_choice_2": "Very satisfied",
+     "csat_question_2_choice_3": "Neither satisfied nor dissatisfied",
+     "csat_question_2_choice_4": "Somewhat dissatisfied",
+     "csat_question_2_choice_5": "Very dissatisfied",
+diff --git a/apps/web/locales/es-ES.json b/apps/web/locales/es-ES.json
+index 3787c637f503..00f82a70c652 100644
+--- a/apps/web/locales/es-ES.json
++++ b/apps/web/locales/es-ES.json
+@@ -1129,11 +1129,15 @@
+         "unlock_the_full_power_of_formbricks_free_for_30_days": "Desbloquea todo el potencial de Formbricks. Gratis durante 30 días."
+       },
+       "general": {
++        "ai_data_analysis_disabled_for_organization": "El análisis y enriquecimiento de datos con IA está deshabilitado para esta organización.",
+         "ai_data_analysis_enabled": "Enriquecimiento y análisis de datos (IA)",
+         "ai_data_analysis_enabled_description": "IA para sacar más partido a tus datos, configurar paneles, gráficos, informes y más. Accede a los datos de experiencia.",
+         "ai_enabled": "IA de Formbricks",
+         "ai_enabled_description": "Gestiona las funciones impulsadas por IA para esta organización.",
++        "ai_features_not_enabled_for_organization": "Las funciones de IA no están habilitadas para esta organización.",
++        "ai_instance_not_configured": "La IA se configura a nivel de instancia mediante variables de entorno. Pide a tu administrador que configure AI_PROVIDER, las credenciales de ese proveedor y la lista de modelos correspondiente antes de habilitar las funciones de IA.",
+         "ai_settings_updated_successfully": "Configuración de IA actualizada correctamente",
++        "ai_smart_tools_disabled_for_organization": "Las herramientas inteligentes de IA están deshabilitadas para esta organización.",
+         "ai_smart_tools_enabled": "Funcionalidad inteligente (IA)",
+         "ai_smart_tools_enabled_description": "IA para ayudarte a conseguir más en menos tiempo. Nunca accede a los datos recopilados con Formbricks. Solo se usa para, por ejemplo, traducir encuestas a otros idiomas.",
+         "bulk_invite_warning_description": "En el plan gratuito, a todos los miembros de la organización se les asigna siempre el rol de \"Propietario\".",
+@@ -1174,6 +1178,7 @@
+         "only_org_owner_can_perform_action": "Solo los propietarios de la organización pueden acceder a esta configuración.",
+         "organization_created_successfully": "¡Organización creada correctamente!",
+         "organization_deleted_successfully": "Organización eliminada correctamente.",
++        "organization_deletion_disabled": "La eliminación de organizaciones está deshabilitada.",
+         "organization_invite_link_ready": "¡Tu enlace de invitación a la organización está listo!",
+         "organization_name": "Nombre de la organización",
+         "organization_name_description": "Dale a tu organización un nombre descriptivo.",
+@@ -2619,8 +2624,8 @@
+     "csat_question_1_headline": "¿Qué probabilidad hay de que recomiendes este $[projectName] a un amigo o colega?",
+     "csat_question_1_lower_label": "Poco probable",
+     "csat_question_1_upper_label": "Muy probable",
+-    "csat_question_2_choice_1": "Muy satisfecho",
+-    "csat_question_2_choice_2": "Algo satisfecho",
++    "csat_question_2_choice_1": "Algo satisfecho",
++    "csat_question_2_choice_2": "Muy satisfecho",
+     "csat_question_2_choice_3": "Ni satisfecho ni insatisfecho",
+     "csat_question_2_choice_4": "Algo insatisfecho",
+     "csat_question_2_choice_5": "Muy insatisfecho",
+diff --git a/apps/web/locales/fr-FR.json b/apps/web/locales/fr-FR.json
+index a57c0d0caba9..93cea584e168 100644
+--- a/apps/web/locales/fr-FR.json
++++ b/apps/web/locales/fr-FR.json
+@@ -1129,11 +1129,15 @@
+         "unlock_the_full_power_of_formbricks_free_for_30_days": "Débloquez tout le potentiel de Formbricks. Gratuit pendant 30 jours."
+       },
+       "general": {
++        "ai_data_analysis_disabled_for_organization": "L'analyse et l'enrichissement des données par IA sont désactivés pour cette organisation.",
+         "ai_data_analysis_enabled": "Enrichissement et analyse des données (IA)",
+         "ai_data_analysis_enabled_description": "L'IA pour tirer le meilleur parti de vos données, configurer des tableaux de bord, des graphiques, des rapports et plus encore. Accède à vos données d'expérience.",
+         "ai_enabled": "IA Formbricks",
+         "ai_enabled_description": "Gérer les fonctionnalités alimentées par l'IA pour cette organisation.",
++        "ai_features_not_enabled_for_organization": "Les fonctionnalités d'IA ne sont pas activées pour cette organisation.",
++        "ai_instance_not_configured": "L'IA est configurée au niveau de l'instance via des variables d'environnement. Demandez à votre administrateur de définir AI_PROVIDER, les identifiants du fournisseur et la liste de modèles correspondante avant d'activer les fonctionnalités d'IA.",
+         "ai_settings_updated_successfully": "Paramètres IA mis à jour avec succès",
++        "ai_smart_tools_disabled_for_organization": "Les outils intelligents d'IA sont désactivés pour cette organisation.",
+         "ai_smart_tools_enabled": "Fonctionnalités intelligentes (IA)",
+         "ai_smart_tools_enabled_description": "L'IA pour vous aider à accomplir plus en moins de temps. N'accède jamais aux données collectées avec Formbricks. Utilisée uniquement pour, par exemple, traduire les sondages dans d'autres langues.",
+         "bulk_invite_warning_description": "Dans le plan gratuit, tous les membres de l'organisation se voient toujours attribuer le rôle \"Owner\".",
+@@ -1174,6 +1178,7 @@
+         "only_org_owner_can_perform_action": "Seules les personnes ayant un rôle d'administrateur dans l'organisation peuvent accéder à ce paramètre.",
+         "organization_created_successfully": "Organisation créée avec succès !",
+         "organization_deleted_successfully": "Organisation supprimée avec succès.",
++        "organization_deletion_disabled": "La suppression des organisations est désactivée.",
+         "organization_invite_link_ready": "Le lien d'invitation de votre organisation est prêt !",
+         "organization_name": "Nom de l'organisation",
+         "organization_name_description": "Attribuez un nom descriptif à votre organisation.",
+@@ -2619,8 +2624,8 @@
+     "csat_question_1_headline": "Quelle est la probabilité que vous recommandiez ce $[projectName] à un ami ou un collègue ?",
+     "csat_question_1_lower_label": "Peu probable",
+     "csat_question_1_upper_label": "Très probable",
+-    "csat_question_2_choice_1": "Très satisfait",
+-    "csat_question_2_choice_2": "Un peu satisfait",
++    "csat_question_2_choice_1": "Un peu satisfait",
++    "csat_question_2_choice_2": "Très satisfait",
+     "csat_question_2_choice_3": "Ni satisfait ni insatisfait",
+     "csat_question_2_choice_4": "Un peu insatisfait",
+     "csat_question_2_choice_5": "Très insatisfait",
+diff --git a/apps/web/locales/hu-HU.json b/apps/web/locales/hu-HU.json
+index 6246f515e078..1192338ca001 100644
+--- a/apps/web/locales/hu-HU.json
++++ b/apps/web/locales/hu-HU.json
+@@ -1129,11 +1129,15 @@
+         "unlock_the_full_power_of_formbricks_free_for_30_days": "A Formbricks teljes erejének feloldása. 30 napig ingyen."
+       },
+       "general": {
++        "ai_data_analysis_disabled_for_organization": "Az MI-alapú adatelemzés és adatgazdagítás ki van kapcsolva ennél a szervezetnél.",
+         "ai_data_analysis_enabled": "Adatgazdagítás és elemzés (AI)",
+         "ai_data_analysis_enabled_description": "AI segítségével többet hozhat ki az adataiból, irányítópultokat, diagramokat, jelentéseket és egyebeket állíthat be. Hozzáfér az élményekhez kapcsolódó adatokhoz.",
+         "ai_enabled": "Formbricks AI",
+         "ai_enabled_description": "AI-alapú funkciók kezelése ehhez a szervezethez.",
++        "ai_features_not_enabled_for_organization": "Az MI-funkciók nincsenek engedélyezve ennél a szervezetnél.",
++        "ai_instance_not_configured": "Az MI példányszinten, környezeti változókkal van konfigurálva. Kérd meg a rendszergazdát, hogy állítsa be az AI_PROVIDER értékét, a szolgáltató hitelesítő adatait és a megfelelő modelllistát, mielőtt engedélyezné az MI-funkciókat.",
+         "ai_settings_updated_successfully": "AI beállítások sikeresen frissítve",
++        "ai_smart_tools_disabled_for_organization": "Az MI intelligens funkciói ki vannak kapcsolva ennél a szervezetnél.",
+         "ai_smart_tools_enabled": "Intelligens funkciók (AI)",
+         "ai_smart_tools_enabled_description": "AI segítségével kevesebb idő alatt többet érhet el. Soha nem fér hozzá a Formbricks által gyűjtött adatokhoz. Csak például felmérések más nyelvekre történő fordításához használatos.",
+         "bulk_invite_warning_description": "Az ingyenes csomagban az összes szervezeti tag mindig a „Tulajdonos” szerephez van hozzárendelve.",
+@@ -1174,6 +1178,7 @@
+         "only_org_owner_can_perform_action": "Csak a szervezet tulajdonosai férhetnek hozzá ehhez a beállításhoz.",
+         "organization_created_successfully": "A szervezet sikeresen létrehozva",
+         "organization_deleted_successfully": "A szervezet sikeresen törölve",
++        "organization_deletion_disabled": "A szervezet törlése le van tiltva.",
+         "organization_invite_link_ready": "A szervezete meghívási hivatkozása készen áll!",
+         "organization_name": "Szervezet neve",
+         "organization_name_description": "Adjon a szervezetének egy leíró nevet.",
+@@ -2619,8 +2624,8 @@
+     "csat_question_1_headline": "Mennyire valószínű, hogy ezt a(z) $[projectName] projektet ajánlaná egy ismerősnek vagy kollégának?",
+     "csat_question_1_lower_label": "Nem valószínű",
+     "csat_question_1_upper_label": "Nagyon valószínű",
+-    "csat_question_2_choice_1": "Nagyon elégedett",
+-    "csat_question_2_choice_2": "Valamelyest elégedett",
++    "csat_question_2_choice_1": "Valamelyest elégedett",
++    "csat_question_2_choice_2": "Nagyon elégedett",
+     "csat_question_2_choice_3": "Sem elégedett, sem elégedetlen",
+     "csat_question_2_choice_4": "Valamelyest elégedetlen",
+     "csat_question_2_choice_5": "Nagyon elégedetlen",
+diff --git a/apps/web/locales/ja-JP.json b/apps/web/locales/ja-JP.json
+index 03b2456d6daf..a5c8b825ff78 100644
+--- a/apps/web/locales/ja-JP.json
++++ b/apps/web/locales/ja-JP.json
+@@ -1129,11 +1129,15 @@
+         "unlock_the_full_power_of_formbricks_free_for_30_days": "Formbricksの全機能をアンロック。30日間無料。"
+       },
+       "general": {
++        "ai_data_analysis_disabled_for_organization": "この組織では AI によるデータ分析と拡張が無効になっています。",
+         "ai_data_analysis_enabled": "データエンリッチメントと分析（AI）",
+         "ai_data_analysis_enabled_descriptio
+
+... [truncated, 311490 chars total]

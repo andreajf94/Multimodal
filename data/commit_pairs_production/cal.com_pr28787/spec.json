@@ -1,0 +1,14 @@
+{
+  "feature_name": "Proxy-based CalendarServiceMap Mock for Test Stability",
+  "description": "Create a Proxy-based mock implementation for the CalendarServiceMap to prevent flaky test failures in CI. The mock should intercept all calendar service module imports and prevent real implementations from triggering async operations that can cause Vitest worker shutdown errors. This should replace the current hardcoded mock that only handles specific calendar services.",
+  "functional_requirements": [
+    "Implement a Proxy handler that intercepts all property access on the CalendarServiceMap mock",
+    "Ensure the mock prevents real calendar service modules (feishu, lark, etc.) from importing and executing their initialization code",
+    "Create a shared mock factory that can be used both in vi.mock() calls and in test setup functions",
+    "Make the mock compatible with existing test infrastructure that expects specific calendar service keys to be available",
+    "Ensure the solution handles transitive imports that trigger module-resolution RPC calls during test teardown",
+    "Maintain backward compatibility with existing tests that rely on calendar service mocking"
+  ],
+  "project_name": "cal.com",
+  "source_pr": "https://github.com/calcom/cal.com/pull/28787"
+}

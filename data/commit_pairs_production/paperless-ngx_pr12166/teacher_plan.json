@@ -1,0 +1,99 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "api_design",
+      "recommendation": "Removed API v1 support by eliminating version-specific serializers and version detection logic from views",
+      "rationale": "API v1 has been deprecated for years and removing it simplifies the codebase by eliminating legacy versioning logic. The TagSerializerVersion1 class was specifically for v1 compatibility, handling the 'colour' field differently (using integer color codes vs. hex strings). By removing this serializer and the version detection in TagViewSet.get_serializer_class(), we ensure only current API versions are supported.",
+      "alternatives_considered": [
+        "Keeping v1 endpoints with deprecation warnings",
+        "Creating a migration path for v1 clients",
+        "Maintaining v1 code in a separate module"
+      ],
+      "files_affected": [
+        "src/documents/serialisers.py",
+        "src/documents/views.py"
+      ]
+    },
+    {
+      "dimension": "configuration_management",
+      "recommendation": "Updated Django REST Framework settings to remove '1' from ALLOWED_VERSIONS list",
+      "rationale": "The ALLOWED_VERSIONS setting controls which API versions the application accepts. Removing '1' from this list ensures that API v1 requests are automatically rejected at the framework level, providing a clean boundary between supported and unsupported versions. This prevents any accidental v1 usage and aligns with the removal of v1-specific code.",
+      "alternatives_considered": [
+        "Keeping v1 in ALLOWED_VERSIONS but returning 410 Gone responses",
+        "Using middleware to intercept and reject v1 requests",
+        "Gradually phasing out v1 by making it optional"
+      ],
+      "files_affected": [
+        "src/paperless/settings.py"
+      ]
+    },
+    {
+      "dimension": "testing",
+      "recommendation": "Removed all API v1-specific test cases while preserving core functionality tests",
+      "rationale": "Tests that specifically validated v1 behavior (like color field handling with version=1 headers) are no longer relevant. Removing these tests reduces test suite complexity and maintenance burden. The tests removed were checking v1-specific serialization behavior (colour field as integer codes) which doesn't exist in current API versions.",
+      "alternatives_considered": [
+        "Keeping v1 tests as historical reference",
+        "Converting v1 tests to test deprecated behavior",
+        "Adding tests for v1 removal validation"
+      ],
+      "files_affected": [
+        "src/documents/tests/test_api_documents.py"
+      ]
+    },
+    {
+      "dimension": "code_maintenance",
+      "recommendation": "Simplified TagViewSet by removing dynamic serializer selection and hardcoding TagSerializer",
+      "rationale": "The get_serializer_class() method with version detection was unnecessary complexity after v1 removal. By setting serializer_class = TagSerializer directly on the viewset, we eliminate conditional logic and make the code more straightforward. This follows the principle of removing dead code paths to improve maintainability.",
+      "alternatives_considered": [
+        "Keeping the get_serializer_class method with simplified logic",
+        "Using class inheritance for different API versions",
+        "Implementing a versioning middleware instead of viewset logic"
+      ],
+      "files_affected": [
+        "src/documents/views.py"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Remove API v1 serializers and versioning logic",
+      "description": "Eliminate the deprecated TagSerializerVersion1 class and remove version detection logic from TagViewSet to simplify the codebase and remove v1 API support",
+      "files_to_modify": [
+        "src/documents/serialisers.py",
+        "src/documents/views.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-002",
+      "title": "Update API version configuration",
+      "description": "Remove API version 1 from the ALLOWED_VERSIONS setting to prevent v1 requests from being processed by the application",
+      "files_to_modify": [
+        "src/paperless/settings.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-003",
+      "title": "Clean up v1-specific test cases",
+      "description": "Remove test methods that specifically test API v1 functionality, including color field handling with version=1 headers",
+      "files_to_modify": [
+        "src/documents/tests/test_api_documents.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The API v1 removal was implemented as a clean, surgical removal of deprecated functionality across multiple layers of the application. The approach focused on eliminating v1-specific code paths while preserving the current API behavior for all supported versions (2-9).\n\nKey patterns used include: 1) Removing dead code (TagSerializerVersion1 class), 2) Simplifying conditional logic (removing version detection in TagViewSet), 3) Updating configuration boundaries (ALLOWED_VERSIONS), and 4) Pruning obsolete tests. This follows the principle of 'remove, don't deprecate' for long-outdated features.\n\nThe changes integrate seamlessly with the existing codebase because they only remove elements that were exclusively used for v1 support. The TagSerializer remains unchanged for current API versions, and the removal of version detection in TagViewSet actually simplifies the viewset logic. By updating ALLOWED_VERSIONS in settings.py, the framework itself will now reject v1 requests, providing a clean upgrade path for any remaining v1 clients.",
+  "source_pr": "https://github.com/paperless-ngx/paperless-ngx/pull/12166",
+  "before_sha": "503845ce5bcfe822cd7487a5e016d4d912ffcd86",
+  "after_sha": "53ac338946d9438549e670621dd89175d3deebad",
+  "diff_stats": {
+    "additions": 2,
+    "deletions": 81,
+    "files_changed": 4
+  }
+}

@@ -1,0 +1,131 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "api_design",
+      "recommendation": "Created a Host extractor struct that implements axum's FromRequestParts trait to provide route handlers with access to the HTTP Host header. The extractor follows axum's established patterns for request extraction.",
+      "rationale": "Following axum's idiomatic extractor pattern ensures consistency with the existing codebase. The Host struct wraps a String and implements FromRequestParts, making it easy for route handlers to use via parameter injection. This approach aligns with how other extractors (like client_ip and scheme) work in the same package.",
+      "alternatives_considered": [
+        "Parsing host from request URI directly in each handler",
+        "Creating a custom trait instead of using FromRequestParts",
+        "Making Host extraction always fallible rather than using middleware"
+      ],
+      "files_affected": [
+        "packages/ak-axum/src/extract/host.rs"
+      ]
+    },
+    {
+      "dimension": "security",
+      "recommendation": "Implemented trusted proxy handling for forwarded host headers (X-Forwarded-Host and Forwarded header). Only trusted proxies can influence the host value, preventing header injection attacks from untrusted sources.",
+      "rationale": "In production deployments behind reverse proxies, the original Host header may be overwritten. The system needs to respect X-Forwarded-Host and Forwarded headers but only from trusted sources to prevent spoofing. This integrates with the existing TrustedProxy extractor already in the codebase.",
+      "alternatives_considered": [
+        "Always trusting forwarded headers",
+        "Ignoring forwarded headers entirely",
+        "Using a separate configuration for host header trust"
+      ],
+      "files_affected": [
+        "packages/ak-axum/src/extract/host.rs"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Defined clear error handling for missing or malformed host headers, returning HTTP 400 Bad Request when no host can be determined from headers or URI.",
+      "rationale": "The HTTP specification requires a Host header for HTTP/1.1 requests. Returning a 400 error for missing hosts is standards-compliant and provides clear feedback. The error is returned as a tuple (StatusCode, &'static str) that axum can convert to a proper response.",
+      "alternatives_considered": [
+        "Returning a default host",
+        "Making the extractor optional",
+        "Logging a warning but continuing"
+      ],
+      "files_affected": [
+        "packages/ak-axum/src/extract/host.rs"
+      ]
+    },
+    {
+      "dimension": "middleware_design",
+      "recommendation": "Created a host_middleware function that extracts the host early in the request lifecycle and stores it in request extensions, making it available to the Host extractor and tracing system.",
+      "rationale": "Middleware ensures host extraction happens once per request and is available to all downstream handlers. Storing it in request extensions follows axum's pattern for sharing data between middleware and extractors. This is consistent with how client_ip and scheme middleware work.",
+      "alternatives_considered": [
+        "Extracting host on-demand in each handler",
+        "Using global state",
+        "Passing host as a custom header"
+      ],
+      "files_affected": [
+        "packages/ak-axum/src/extract/host.rs",
+        "packages/ak-axum/src/router.rs"
+      ]
+    },
+    {
+      "dimension": "observability",
+      "recommendation": "Added host field to tracing spans and integrated host extraction into the existing tracing middleware to provide host information in logs and traces.",
+      "rationale": "Having host information in traces is crucial for debugging multi-tenant deployments and understanding request routing. This follows the existing pattern where scheme and other request attributes are recorded in spans. The host is recorded in both the host_middleware and span_middleware.",
+      "alternatives_considered": [
+        "Only logging host in access logs",
+        "Creating separate host-specific tracing",
+        "Not tracing host at all"
+      ],
+      "files_affected": [
+        "packages/ak-axum/src/extract/host.rs",
+        "packages/ak-axum/src/tracing.rs"
+      ]
+    },
+    {
+      "dimension": "integration",
+      "recommendation": "Registered the host middleware in the router wrapper function and exported the Host extractor from the extract module, ensuring it integrates seamlessly with existing routing and middleware layers.",
+      "rationale": "The router.rs file contains the wrap_router function that sets up middleware layers in a specific order. Adding host_middleware after scheme_middleware maintains logical ordering. Exporting from mod.rs makes the Host type available to consumers of the library.",
+      "alternatives_considered": [
+        "Requiring manual middleware registration",
+        "Creating a separate router builder",
+        "Making host extraction opt-in per route"
+      ],
+      "files_affected": [
+        "packages/ak-axum/src/extract/mod.rs",
+        "packages/ak-axum/src/router.rs"
+      ]
+    },
+    {
+      "dimension": "testing",
+      "recommendation": "Implemented comprehensive unit tests covering all host extraction scenarios: direct Host header, URI fallback, trusted/untrusted proxy headers, priority ordering, and error cases.",
+      "rationale": "Host extraction has security implications and multiple fallback mechanisms, so thorough testing is essential. The tests verify the priority order (X-Forwarded-Host > Forwarded header > Host header > URI host) and security boundary (trusted vs untrusted proxies).",
+      "alternatives_considered": [
+        "Only testing happy path",
+        "Integration tests only",
+        "No testing for security boundaries"
+      ],
+      "files_affected": [
+        "packages/ak-axum/src/extract/host.rs"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Implement Host header extractor with trusted proxy support",
+      "description": "Create the core Host extractor struct with FromRequestParts implementation, host extraction logic with trusted proxy handling, and associated middleware",
+      "files_to_modify": [],
+      "files_to_create": [
+        "packages/ak-axum/src/extract/host.rs"
+      ],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-002",
+      "title": "Integrate host middleware into router and tracing",
+      "description": "Add host_middleware to the router middleware stack and update tracing to include host field in spans",
+      "files_to_modify": [
+        "packages/ak-axum/src/extract/mod.rs",
+        "packages/ak-axum/src/router.rs",
+        "packages/ak-axum/src/tracing.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation adds a Host header extractor to the ak-axum package following established patterns in the codebase. A new host.rs file creates a Host struct that implements axum's FromRequestParts trait, allowing route handlers to access the request host via parameter injection. The extractor includes sophisticated handling for reverse proxy scenarios with support for X-Forwarded-Host and Forwarded headers, but only when the request comes from a trusted proxy (using the existing TrustedProxy extractor).\n\nThe design uses a middleware-based approach where host_middleware extracts the host early in the request lifecycle, stores it in request extensions, and makes it available to both the Host extractor and tracing system. The middleware is integrated into the existing router wrapper function, placed after scheme_middleware in the middleware stack. The host is also added to tracing spans for observability, following the same pattern used for scheme and other request attributes.\n\nComprehensive unit tests verify all extraction scenarios including security boundaries (trusted vs untrusted proxies), fallback mechanisms (header priority: X-Forwarded-Host > Forwarded > Host > URI host), and error handling for missing hosts. The implementation integrates seamlessly with existing infrastructure while maintaining security through the trusted proxy mechanism already established in the codebase.",
+  "source_pr": "https://github.com/goauthentik/authentik/pull/21323",
+  "before_sha": "165297dcd4a81e5b812b78ef1bb999f0b1395541",
+  "after_sha": "dedbbee55cdac8e56cbeabca54d4a794112d3a48",
+  "diff_stats": {
+    "additions": 277,
+    "deletions": 2,
+    "files_changed": 4
+  }
+}

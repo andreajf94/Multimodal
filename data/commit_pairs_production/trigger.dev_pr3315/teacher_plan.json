@@ -1,0 +1,120 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "feature_flag_management",
+      "recommendation": "Consolidated AI models access control under a single feature flag (hasAiAccess) instead of separate flags for AI features and AI models",
+      "rationale": "The previous approach had redundant feature flags (AI_FEATURES_ENABLED and AI_MODELS_ENABLED) which created complexity and potential inconsistency. By consolidating to a single flag, we simplify permission checking and ensure consistent access control across all AI-related features.",
+      "alternatives_considered": [
+        "Keeping separate flags for granular control",
+        "Creating a hierarchical flag system with parent/child relationships",
+        "Using role-based access control instead of feature flags"
+      ],
+      "files_affected": [
+        "apps/webapp/app/components/navigation/SideMenu.tsx",
+        "apps/webapp/app/env.server.ts",
+        "apps/webapp/app/v3/featureFlags.ts"
+      ]
+    },
+    {
+      "dimension": "access_control_pattern",
+      "recommendation": "Removed the dedicated canAccessAiModels.server.ts utility and integrated access control directly into the feature flag system",
+      "rationale": "The dedicated utility function created unnecessary abstraction and duplicated logic that was already handled by the feature flag system. By removing it, we reduce code complexity and maintain a single source of truth for access control decisions.",
+      "alternatives_considered": [
+        "Keeping the utility function as a wrapper around feature flags",
+        "Moving the logic to middleware or route guards",
+        "Creating a more comprehensive access control service"
+      ],
+      "files_affected": [
+        "apps/webapp/app/v3/canAccessAiModels.server.ts",
+        "apps/webapp/app/presenters/OrganizationsPresenter.server.ts"
+      ]
+    },
+    {
+      "dimension": "ui_ux_design",
+      "recommendation": "Redesigned the models detail page tabs and metrics presentation for better clarity and usability",
+      "rationale": "The original tab structure ('Overview', 'Global Metrics', 'Your Usage') was confusing because 'Global Metrics' and 'Your Usage' both showed metrics. The new structure ('Overview', 'Metrics', 'Global metrics') provides clearer hierarchy and better information architecture. Additionally, simplified the metrics display by removing redundant charts and focusing on the most important data.",
+      "alternatives_considered": [
+        "Keeping the original tab structure with improved labeling",
+        "Creating a dashboard-style single page view",
+        "Adding more granular filtering options instead of restructuring"
+      ],
+      "files_affected": [
+        "apps/webapp/app/routes/_app.orgs.$organizationSlug.projects.$projectParam.env.$envParam.models.$modelId/route.tsx",
+        "apps/webapp/app/routes/_app.orgs.$organizationSlug.projects.$projectParam.env.$envParam.models._index/route.tsx"
+      ]
+    },
+    {
+      "dimension": "data_presentation",
+      "recommendation": "Optimized the models list and detail views by removing less important columns and reorganizing metric widgets",
+      "rationale": "The 'Calls (7d)' column in the models list was removed because it duplicated information available in the detail view and cluttered the interface. In the detail views, redundant charts were removed (like 'Calls over time') and widget heights were adjusted to create better visual hierarchy and more efficient use of screen space.",
+      "alternatives_considered": [
+        "Keeping all columns but making them collapsible",
+        "Adding tooltips instead of removing columns",
+        "Creating a customizable dashboard where users could choose which metrics to display"
+      ],
+      "files_affected": [
+        "apps/webapp/app/routes/_app.orgs.$organizationSlug.projects.$projectParam.env.$envParam.models.$modelId/route.tsx",
+        "apps/webapp/app/routes/_app.orgs.$organizationSlug.projects.$projectParam.env.$envParam.models._index/route.tsx"
+      ]
+    },
+    {
+      "dimension": "testing_infrastructure",
+      "recommendation": "Increased timeout for a Redis fair queue test from 15000ms to 30000ms to prevent flaky tests",
+      "rationale": "The test 'should enqueue and process a single message' was timing out in some environments, likely due to Redis latency or resource constraints. Doubling the timeout ensures the test has sufficient time to complete without being flaky, while maintaining test coverage for the fair queue functionality.",
+      "alternatives_considered": [
+        "Refactoring the test to be faster",
+        "Using mocks instead of real Redis",
+        "Skipping the test in certain environments"
+      ],
+      "files_affected": [
+        "packages/redis-worker/src/fair-queue/tests/fairQueue.test.ts"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Consolidate AI Feature Flags and Access Control",
+      "description": "Simplify the AI models access control by removing redundant feature flags and consolidating permission checking logic. This includes removing the AI_MODELS_ENABLED environment variable, deleting the dedicated canAccessAiModels utility, and updating all references to use the unified hasAiAccess feature flag.",
+      "files_to_modify": [
+        "apps/webapp/app/components/navigation/SideMenu.tsx",
+        "apps/webapp/app/env.server.ts",
+        "apps/webapp/app/presenters/OrganizationsPresenter.server.ts",
+        "apps/webapp/app/v3/canAccessAiModels.server.ts",
+        "apps/webapp/app/v3/featureFlags.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-002",
+      "title": "Redesign AI Models UI for Better Usability",
+      "description": "Improve the user interface of the AI models pages by restructuring tabs, optimizing metric displays, and removing redundant information. This includes renaming tabs for clarity, removing the 'Calls (7d)' column from the models list, and reorganizing metric widgets in detail views for better visual hierarchy.",
+      "files_to_modify": [
+        "apps/webapp/app/routes/_app.orgs.$organizationSlug.projects.$projectParam.env.$envParam.models.$modelId/route.tsx",
+        "apps/webapp/app/routes/_app.orgs.$organizationSlug.projects.$projectParam.env.$envParam.models._index/route.tsx"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-003",
+      "title": "Fix Flaky Redis Test",
+      "description": "Address intermittent test failures by increasing the timeout for a Redis fair queue test that was timing out under certain conditions.",
+      "files_to_modify": [
+        "packages/redis-worker/src/fair-queue/tests/fairQueue.test.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The AI Models Page Enhancements implementation focused on three key areas: simplifying access control, improving user interface design, and fixing a testing issue. First, we consolidated the feature flag system by removing the redundant AI_MODELS_ENABLED environment variable and the dedicated canAccessAiModels.server.ts utility function. Instead, we now use a single hasAiAccess feature flag that controls access to all AI features, including models. This simplification reduces complexity and ensures consistent permission checking across the application.\n\nSecond, we significantly improved the UI/UX of the models pages. The tab structure was reorganized from ('Overview', 'Global Metrics', 'Your Usage') to ('Overview', 'Metrics', 'Global metrics') for better clarity. We removed the 'Calls (7d)' column from the models list table to reduce clutter, and optimized the metric widgets in detail views by eliminating redundant charts and adjusting widget heights to create better visual hierarchy. The 'Metrics' tab now focuses on user-specific data with clear timeframes (e.g., 'Total calls (7d)'), while 'Global metrics' provides broader system-wide statistics.\n\nThird, we addressed a flaky test in the Redis worker package by doubling the timeout for a fair queue test, ensuring reliable test execution across different environments. All changes maintain backward compatibility while delivering a cleaner, more intuitive user experience for the AI models functionality. The implementation follows the existing patterns in the codebase, leveraging the established feature flag system and maintaining consistency with other dashboard sections.",
+  "source_pr": "https://github.com/triggerdotdev/trigger.dev/pull/3315",
+  "before_sha": "ed6404216870125740c202dee0f28ff35ee20ab8",
+  "after_sha": "f1f1d02f1dbb7916fcdbdeab5708f1e1a8c98634",
+  "diff_stats": {
+    "additions": 37,
+    "deletions": 138,
+    "files_changed": 8
+  }
+}

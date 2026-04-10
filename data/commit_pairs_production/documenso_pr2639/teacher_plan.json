@@ -1,0 +1,113 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "data_modeling",
+      "recommendation": "Added automatic field insertion logic for DATE and EMAIL field types during document signing. DATE fields are pre-filled with the current date formatted according to document metadata, and EMAIL fields are populated with the signer's email address.",
+      "rationale": "This approach leverages the existing field data model (FieldType enum, inserted boolean, customText field) to auto-populate fields without requiring database schema changes. The system respects document-level timezone and date format preferences stored in documentMeta, ensuring consistent formatting across the application.",
+      "alternatives_considered": [
+        "Adding new database columns for auto-inserted values",
+        "Creating separate auto-insertion tables",
+        "Handling insertion only at the database layer via triggers"
+      ],
+      "files_affected": [
+        "apps/remix/app/components/general/document-signing/envelope-signing-provider.tsx"
+      ]
+    },
+    {
+      "dimension": "api_design",
+      "recommendation": "Created comprehensive E2E test fixtures that use the actual API V2 endpoints instead of direct database calls. This ensures all creation-time side effects (PDF normalization, field meta defaults, etc.) are exercised the same way a real user would trigger them.",
+      "rationale": "Testing through the API layer provides higher confidence that the auto-insertion feature works correctly in production scenarios. It validates the complete flow from envelope creation through distribution to signing, catching integration issues that unit tests might miss.",
+      "alternatives_considered": [
+        "Direct Prisma calls in tests",
+        "Mocking API responses",
+        "Testing only the frontend component in isolation"
+      ],
+      "files_affected": [
+        "packages/app-tests/e2e/fixtures/api-seeds.ts"
+      ]
+    },
+    {
+      "dimension": "testing_strategy",
+      "recommendation": "Added dedicated E2E tests for field auto-insertion and updated existing visual regression tests to handle automatically inserted fields. Created a new test file specifically for V2 envelope field insertion scenarios.",
+      "rationale": "The feature requires testing both DATE field auto-insertion and EMAIL field insertion across different scenarios. Separate test files maintain clear separation of concerns: envelope-alignment.spec.ts for visual regression, envelope-v2-field-insertion.spec.ts for auto-insertion behavior. Updated the existing test to include EMAIL fields in uninserted field queries since they're automatically inserted during distribution.",
+      "alternatives_considered": [
+        "Adding tests to existing envelope test files",
+        "Creating unit tests instead of E2E tests",
+        "Relying only on manual testing"
+      ],
+      "files_affected": [
+        "packages/app-tests/e2e/envelopes/envelope-alignment.spec.ts",
+        "packages/app-tests/e2e/envelopes/envelope-v2-field-insertion.spec.ts"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Implemented graceful handling of missing email addresses for EMAIL fields - if no email is provided, the field insertion is skipped. For DATE fields, fallback to default timezone and date format when document metadata is missing.",
+      "rationale": "This ensures backward compatibility and prevents runtime errors when documents don't have complete metadata. The system uses DEFAULT_DOCUMENT_TIME_ZONE and DEFAULT_DOCUMENT_DATE_FORMAT constants as sensible defaults, maintaining consistency across the application.",
+      "alternatives_considered": [
+        "Throwing errors when metadata is missing",
+        "Using system defaults instead of document defaults",
+        "Skipping auto-insertion entirely when metadata is incomplete"
+      ],
+      "files_affected": [
+        "apps/remix/app/components/general/document-signing/envelope-signing-provider.tsx"
+      ]
+    },
+    {
+      "dimension": "state_management",
+      "recommendation": "Added a prefillDateFields function that transforms envelope data on initial load in the React component. This happens at the provider level before state is set, ensuring all downstream components receive pre-filled data.",
+      "rationale": "By handling the transformation at the provider level, we ensure consistent behavior across all signing flows. The function is pure and idempotent, only modifying DATE fields that haven't been inserted yet. This approach minimizes side effects and keeps the transformation logic isolated.",
+      "alternatives_considered": [
+        "Handling insertion in each field component individually",
+        "Using React effects to modify state after mount",
+        "Implementing insertion at the API response level"
+      ],
+      "files_affected": [
+        "apps/remix/app/components/general/document-signing/envelope-signing-provider.tsx"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Implement DATE field auto-insertion during signing",
+      "description": "Add logic to automatically populate DATE fields with current date when a recipient completes document signing. Respects document timezone and date format preferences.",
+      "files_to_modify": [
+        "apps/remix/app/components/general/document-signing/envelope-signing-provider.tsx"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-002",
+      "title": "Create comprehensive E2E test infrastructure",
+      "description": "Build API-based test fixtures for creating documents, templates, and envelopes through actual API endpoints to ensure realistic testing of auto-insertion feature.",
+      "files_to_modify": [],
+      "files_to_create": [
+        "packages/app-tests/e2e/fixtures/api-seeds.ts"
+      ],
+      "estimated_effort": "large"
+    },
+    {
+      "id": "T-003",
+      "title": "Add E2E tests for field auto-insertion",
+      "description": "Create Playwright tests that verify DATE and EMAIL fields are automatically inserted during envelope signing, covering various field type combinations.",
+      "files_to_modify": [
+        "packages/app-tests/e2e/envelopes/envelope-alignment.spec.ts"
+      ],
+      "files_to_create": [
+        "packages/app-tests/e2e/envelopes/envelope-v2-field-insertion.spec.ts"
+      ],
+      "estimated_effort": "medium"
+    }
+  ],
+  "implementation_summary": "The auto-insertion feature was implemented through a multi-layered approach that ensures DATE and EMAIL fields are automatically populated during document signing. At the core, a `prefillDateFields` function was added to the envelope signing provider that transforms envelope data on initial load, populating DATE fields with the current date formatted according to document metadata (timezone and date format). This transformation happens before React state is set, ensuring all downstream components receive pre-filled data.\n\nThe implementation respects the existing data model by leveraging the `FieldType` enum, `inserted` boolean flag, and `customText` field. DATE fields are marked as `readOnly` in their `fieldMeta` after auto-insertion to prevent manual modification. For EMAIL fields, the system uses the recipient's email address when available, with graceful handling for cases where no email is provided.\n\nTo ensure robust testing, a comprehensive API-based test infrastructure was created in `api-seeds.ts`, allowing tests to exercise the complete flow through actual API endpoints rather than direct database calls. This approach validates all side effects including PDF normalization and field meta defaults. Dedicated E2E tests in `envelope-v2-field-insertion.spec.ts` verify the auto-insertion behavior across various scenarios, while existing visual regression tests were updated to handle automatically inserted EMAIL fields during envelope distribution.\n\nThe solution integrates seamlessly with the existing codebase by following established patterns for field manipulation and leveraging existing constants for default timezone and date formats. The provider-based approach ensures the feature works consistently across both direct template signing and regular envelope workflows without requiring changes to individual field components or API endpoints.",
+  "source_pr": "https://github.com/documenso/documenso/pull/2639",
+  "before_sha": "9bfaa08d3829364c5073ad9a590983e6e7bc6442",
+  "after_sha": "14b0b4805dde3a70f4dbf8c5e107757a5f4c4977",
+  "diff_stats": {
+    "additions": 1380,
+    "deletions": 47,
+    "files_changed": 9
+  }
+}

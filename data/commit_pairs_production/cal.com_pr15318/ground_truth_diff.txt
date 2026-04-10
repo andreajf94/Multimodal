@@ -1,0 +1,748 @@
+diff --git a/apps/api/v2/src/ee/calendars/controllers/calendars.controller.ts b/apps/api/v2/src/ee/calendars/controllers/calendars.controller.ts
+index 0d95327fc3b211..995492fb64952c 100644
+--- a/apps/api/v2/src/ee/calendars/controllers/calendars.controller.ts
++++ b/apps/api/v2/src/ee/calendars/controllers/calendars.controller.ts
+@@ -71,6 +71,7 @@ export class CalendarsController {
+   }
+ 
+   @Get("/")
++  @UseGuards(AccessTokenGuard)
+   async getCalendars(@GetUser("id") userId: number): Promise<ConnectedCalendarsOutput> {
+     const calendars = await this.calendarsService.getCalendars(userId);
+ 
+@@ -86,13 +87,14 @@ export class CalendarsController {
+   async redirect(
+     @Req() req: Request,
+     @Headers("Authorization") authorization: string,
+-    @Param("calendar") calendar: string
++    @Param("calendar") calendar: string,
++    @Query("redir") redir?: string | null
+   ): Promise<ApiResponse<{ authUrl: string }>> {
+     switch (calendar) {
+       case OFFICE_365_CALENDAR:
+-        return await this.outlookService.connect(authorization, req);
++        return await this.outlookService.connect(authorization, req, redir ?? "");
+       case GOOGLE_CALENDAR:
+-        return await this.googleCalendarService.connect(authorization, req);
++        return await this.googleCalendarService.connect(authorization, req, redir ?? "");
+       default:
+         throw new BadRequestException(
+           "Invalid calendar type, available calendars are: ",
+@@ -111,15 +113,18 @@ export class CalendarsController {
+   ): Promise<{ url: string }> {
+     // state params contains our user access token
+     const stateParams = new URLSearchParams(state);
+-    const { accessToken, origin } = z
+-      .object({ accessToken: z.string(), origin: z.string() })
+-      .parse({ accessToken: stateParams.get("accessToken"), origin: stateParams.get("origin") });
+-
++    const { accessToken, origin, redir } = z
++      .object({ accessToken: z.string(), origin: z.string(), redir: z.string().nullish().optional() })
++      .parse({
++        accessToken: stateParams.get("accessToken"),
++        origin: stateParams.get("origin"),
++        redir: stateParams.get("redir"),
++      });
+     switch (calendar) {
+       case OFFICE_365_CALENDAR:
+-        return await this.outlookService.save(code, accessToken, origin);
++        return await this.outlookService.save(code, accessToken, origin, redir ?? "");
+       case GOOGLE_CALENDAR:
+-        return await this.googleCalendarService.save(code, accessToken, origin);
++        return await this.googleCalendarService.save(code, accessToken, origin, redir ?? "");
+       default:
+         throw new BadRequestException(
+           "Invalid calendar type, available calendars are: ",
+diff --git a/apps/api/v2/src/ee/calendars/services/gcal.service.ts b/apps/api/v2/src/ee/calendars/services/gcal.service.ts
+index 17ebbeff723160..9f0d25471c8be2 100644
+--- a/apps/api/v2/src/ee/calendars/services/gcal.service.ts
++++ b/apps/api/v2/src/ee/calendars/services/gcal.service.ts
+@@ -37,31 +37,32 @@ export class GoogleCalendarService implements OAuthCalendarApp {
+ 
+   async connect(
+     authorization: string,
+-    req: Request
++    req: Request,
++    redir?: string
+   ): Promise<{ status: typeof SUCCESS_STATUS; data: { authUrl: string } }> {
+     const accessToken = authorization.replace("Bearer ", "");
+     const origin = req.get("origin") ?? req.get("host");
+-    const redirectUrl = await await this.getCalendarRedirectUrl(accessToken, origin ?? "");
++    const redirectUrl = await await this.getCalendarRedirectUrl(accessToken, origin ?? "", redir);
+ 
+     return { status: SUCCESS_STATUS, data: { authUrl: redirectUrl } };
+   }
+ 
+-  async save(code: string, accessToken: string, origin: string): Promise<{ url: string }> {
+-    return await this.saveCalendarCredentialsAndRedirect(code, accessToken, origin);
++  async save(code: string, accessToken: string, origin: string, redir?: string): Promise<{ url: string }> {
++    return await this.saveCalendarCredentialsAndRedirect(code, accessToken, origin, redir);
+   }
+ 
+   async check(userId: number): Promise<{ status: typeof SUCCESS_STATUS }> {
+     return await this.checkIfCalendarConnected(userId);
+   }
+ 
+-  async getCalendarRedirectUrl(accessToken: string, origin: string) {
++  async getCalendarRedirectUrl(accessToken: string, origin: string, redir?: string) {
+     const oAuth2Client = await this.getOAuthClient(this.redirectUri);
+ 
+     const authUrl = oAuth2Client.generateAuthUrl({
+       access_type: "offline",
+       scope: CALENDAR_SCOPES,
+       prompt: "consent",
+-      state: `accessToken=${accessToken}&origin=${origin}`,
++      state: `accessToken=${accessToken}&origin=${origin}&redir=${redir ?? ""}`,
+     });
+ 
+     return authUrl;
+@@ -106,11 +107,16 @@ export class GoogleCalendarService implements OAuthCalendarApp {
+     return { status: SUCCESS_STATUS };
+   }
+ 
+-  async saveCalendarCredentialsAndRedirect(code: string, accessToken: string, origin: string) {
++  async saveCalendarCredentialsAndRedirect(
++    code: string,
++    accessToken: string,
++    origin: string,
++    redir?: string
++  ) {
+     // User chose not to authorize your app or didn't authorize your app
+     // redirect directly without oauth code
+     if (!code) {
+-      return { url: origin };
++      return { url: redir || origin };
+     }
+ 
+     const parsedCode = z.string().parse(code);
+@@ -151,6 +157,6 @@ export class GoogleCalendarService implements OAuthCalendarApp {
+       );
+     }
+ 
+-    return { url: origin };
++    return { url: redir || origin };
+   }
+ }
+diff --git a/apps/api/v2/src/ee/calendars/services/outlook.service.ts b/apps/api/v2/src/ee/calendars/services/outlook.service.ts
+index c675526c90709e..060427fdcee819 100644
+--- a/apps/api/v2/src/ee/calendars/services/outlook.service.ts
++++ b/apps/api/v2/src/ee/calendars/services/outlook.service.ts
+@@ -11,13 +11,16 @@ import { Request } from "express";
+ import { stringify } from "querystring";
+ import { z } from "zod";
+ 
+-import { OFFICE_365_CALENDAR_TYPE } from "@calcom/platform-constants";
+-import { SUCCESS_STATUS } from "@calcom/platform-constants";
+-import { OFFICE_365_CALENDAR_ID } from "@calcom/platform-constants";
++import {
++  SUCCESS_STATUS,
++  OFFICE_365_CALENDAR,
++  OFFICE_365_CALENDAR_ID,
++  OFFICE_365_CALENDAR_TYPE,
++} from "@calcom/platform-constants";
+ 
+ @Injectable()
+ export class OutlookService implements OAuthCalendarApp {
+-  private redirectUri = `${this.config.get("api.url")}/calendars/office365/save`;
++  private redirectUri = `${this.config.get("api.url")}/calendars/${OFFICE_365_CALENDAR}/save`;
+ 
+   constructor(
+     private readonly config: ConfigService,
+@@ -29,24 +32,25 @@ export class OutlookService implements OAuthCalendarApp {
+ 
+   async connect(
+     authorization: string,
+-    req: Request
++    req: Request,
++    redir?: string
+   ): Promise<{ status: typeof SUCCESS_STATUS; data: { authUrl: string } }> {
+     const accessToken = authorization.replace("Bearer ", "");
+     const origin = req.get("origin") ?? req.get("host");
+-    const redirectUrl = await await this.getCalendarRedirectUrl(accessToken, origin ?? "");
++    const redirectUrl = await await this.getCalendarRedirectUrl(accessToken, origin ?? "", redir);
+ 
+     return { status: SUCCESS_STATUS, data: { authUrl: redirectUrl } };
+   }
+ 
+-  async save(code: string, accessToken: string, origin: string): Promise<{ url: string }> {
+-    return await this.saveCalendarCredentialsAndRedirect(code, accessToken, origin);
++  async save(code: string, accessToken: string, origin: string, redir?: string): Promise<{ url: string }> {
++    return await this.saveCalendarCredentialsAndRedirect(code, accessToken, origin, redir);
+   }
+ 
+   async check(userId: number): Promise<{ status: typeof SUCCESS_STATUS }> {
+     return await this.checkIfCalendarConnected(userId);
+   }
+ 
+-  async getCalendarRedirectUrl(accessToken: string, origin: string) {
++  async getCalendarRedirectUrl(accessToken: string, origin: string, redir?: string) {
+     const { client_id } = await this.calendarsService.getAppKeys(OFFICE_365_CALENDAR_ID);
+ 
+     const scopes = ["User.Read", "Calendars.Read", "Calendars.ReadWrite", "offline_access"];
+@@ -56,7 +60,7 @@ export class OutlookService implements OAuthCalendarApp {
+       client_id,
+       prompt: "select_account",
+       redirect_uri: this.redirectUri,
+-      state: `accessToken=${accessToken}&origin=${origin}`,
++      state: `accessToken=${accessToken}&origin=${origin}&redir=${redir ?? ""}`,
+     };
+ 
+     const query = stringify(params);
+@@ -140,10 +144,15 @@ export class OutlookService implements OAuthCalendarApp {
+     return responseBody as OfficeCalendar;
+   }
+ 
+-  async saveCalendarCredentialsAndRedirect(code: string, accessToken: string, origin: string) {
++  async saveCalendarCredentialsAndRedirect(
++    code: string,
++    accessToken: string,
++    origin: string,
++    redir?: string
++  ) {
+     // if code is not defined, user denied to authorize office 365 app, just redirect straight away
+     if (!code) {
+-      return { url: origin };
++      return { url: redir || origin };
+     }
+ 
+     const parsedCode = z.string().parse(code);
+@@ -174,7 +183,7 @@ export class OutlookService implements OAuthCalendarApp {
+     }
+ 
+     return {
+-      url: origin,
++      url: redir || origin,
+     };
+   }
+ }
+diff --git a/apps/api/v2/src/ee/gcal/gcal.controller.ts b/apps/api/v2/src/ee/gcal/gcal.controller.ts
+index 6afb1eb2820601..b2a363de458a22 100644
+--- a/apps/api/v2/src/ee/gcal/gcal.controller.ts
++++ b/apps/api/v2/src/ee/gcal/gcal.controller.ts
+@@ -82,56 +82,10 @@ export class GcalController {
+   @Redirect(undefined, 301)
+   @HttpCode(HttpStatus.OK)
+   async save(@Query("state") state: string, @Query("code") code: string): Promise<GcalSaveRedirectOutput> {
+-    const stateParams = new URLSearchParams(state);
+-    const { accessToken, origin } = z
+-      .object({ accessToken: z.string(), origin: z.string() })
+-      .parse({ accessToken: stateParams.get("accessToken"), origin: stateParams.get("origin") });
+-
+-    // User chose not to authorize your app or didn't authorize your app
+-    // redirect directly without oauth code
+-    if (!code) {
+-      return { url: origin };
+-    }
+-
+-    const parsedCode = z.string().parse(code);
+-
+-    const ownerId = await this.tokensRepository.getAccessTokenOwnerId(accessToken);
+-
+-    if (!ownerId) {
+-      throw new UnauthorizedException("Invalid Access token.");
+-    }
+-
+-    const oAuth2Client = await this.gcalService.getOAuthClient(this.redirectUri);
+-    const token = await oAuth2Client.getToken(parsedCode);
+-    // Google oAuth Credentials are stored in token.tokens
+-    const key = token.tokens;
+-    const credential = await this.credentialRepository.createAppCredential(
+-      GOOGLE_CALENDAR_TYPE,
+-      key as Prisma.InputJsonValue,
+-      ownerId
+-    );
+-
+-    oAuth2Client.setCredentials(key);
+-
+-    const calendar = google.calendar({
+-      version: "v3",
+-      auth: oAuth2Client,
+-    });
+-
+-    const cals = await calendar.calendarList.list({ fields: "items(id,summary,primary,accessRole)" });
+-
+-    const primaryCal = cals.data.items?.find((cal) => cal.primary);
+-
+-    if (primaryCal?.id) {
+-      await this.selectedCalendarsRepository.createSelectedCalendar(
+-        primaryCal.id,
+-        credential.id,
+-        ownerId,
+-        GOOGLE_CALENDAR_TYPE
+-      );
+-    }
+-
+-    return { url: origin };
++    const url = new URL(this.config.get("api.url") + "/calendars/google/save");
++    url.searchParams.append("code", code);
++    url.searchParams.append("state", state);
++    return { url: url.href };
+   }
+ 
+   @Get("/check")
+diff --git a/packages/platform/atoms/connect/OAuthConnect.tsx b/packages/platform/atoms/connect/OAuthConnect.tsx
+new file mode 100644
+index 00000000000000..eae542717fefbf
+--- /dev/null
++++ b/packages/platform/atoms/connect/OAuthConnect.tsx
+@@ -0,0 +1,69 @@
++import type { FC } from "react";
++
++import type { CALENDARS } from "@calcom/platform-constants";
++import { Button } from "@calcom/ui";
++
++import type { OnCheckErrorType } from "../hooks/connect/useCheck";
++import { useCheck } from "../hooks/connect/useCheck";
++import { useConnect } from "../hooks/connect/useConnect";
++import { useAtomsContext } from "../hooks/useAtomsContext";
++import { AtomsWrapper } from "../src/components/atoms-wrapper";
++import { cn } from "../src/lib/utils";
++
++export type OAuthConnectProps = {
++  className?: string;
++  label: string;
++  alreadyConnectedLabel: string;
++  loadingLabel: string;
++  onCheckError?: OnCheckErrorType;
++  redir?: string;
++};
++
++export const OAuthConnect: FC<OAuthConnectProps & { calendar: (typeof CALENDARS)[number] }> = ({
++  label,
++  alreadyConnectedLabel,
++  loadingLabel,
++  className,
++  onCheckError,
++  calendar,
++  redir,
++}) => {
++  const { isAuth } = useAtomsContext();
++  const { connect } = useConnect(calendar, redir);
++
++  const { allowConnect, checked } = useCheck({
++    isAuth,
++    onCheckError,
++    calendar: calendar,
++  });
++
++  const isChecking = !isAuth || !checked;
++  const isDisabled = isChecking || !allowConnect;
++
++  let displayedLabel = label;
++
++  if (isChecking) {
++    displayedLabel = loadingLabel;
++  } else if (!allowConnect) {
++    displayedLabel = alreadyConnectedLabel;
++  }
++
++  return (
++    <AtomsWrapper>
++      <Button
++        StartIcon="calendar-days"
++        color="primary"
++        disabled={isDisabled}
++        className={cn(
++          "",
++          className,
++          isChecking && "animate-pulse",
++          isDisabled && "cursor-not-allowed",
++          !isDisabled && "cursor-pointer"
++        )}
++        onClick={() => connect()}>
++        {displayedLabel}
++      </Button>
++    </AtomsWrapper>
++  );
++};
+diff --git a/packages/platform/atoms/connect/google/GcalConnect.tsx b/packages/platform/atoms/connect/google/GcalConnect.tsx
+new file mode 100644
+index 00000000000000..7edc81974ecc35
+--- /dev/null
++++ b/packages/platform/atoms/connect/google/GcalConnect.tsx
+@@ -0,0 +1,27 @@
++import type { FC } from "react";
++
++import { GOOGLE_CALENDAR } from "@calcom/platform-constants";
++
++import type { OAuthConnectProps } from "../OAuthConnect";
++import { OAuthConnect } from "../OAuthConnect";
++
++export const GcalConnect: FC<Partial<OAuthConnectProps>> = ({
++  label = "Connect Google Calendar",
++  alreadyConnectedLabel = "Connected Google Calendar",
++  loadingLabel = "Checking Google Calendar",
++  className,
++  onCheckError,
++  redir,
++}) => {
++  return (
++    <OAuthConnect
++      label={label}
++      alreadyConnectedLabel={alreadyConnectedLabel}
++      loadingLabel={loadingLabel}
++      calendar={GOOGLE_CALENDAR}
++      className={className}
++      onCheckError={onCheckError}
++      redir={redir}
++    />
++  );
++};
+diff --git a/packages/platform/atoms/connect/index.ts b/packages/platform/atoms/connect/index.ts
+new file mode 100644
+index 00000000000000..c8d90797249e8a
+--- /dev/null
++++ b/packages/platform/atoms/connect/index.ts
+@@ -0,0 +1,2 @@
++export { GcalConnect as GoogleCalendar } from "./google/GcalConnect";
++export { OutlookConnect as OutlookCalendar } from "./outlook/OutlookConnect";
+diff --git a/packages/platform/atoms/connect/outlook/OutlookConnect.tsx b/packages/platform/atoms/connect/outlook/OutlookConnect.tsx
+new file mode 100644
+index 00000000000000..e276d81fe324c4
+--- /dev/null
++++ b/packages/platform/atoms/connect/outlook/OutlookConnect.tsx
+@@ -0,0 +1,27 @@
++import type { FC } from "react";
++
++import { OFFICE_365_CALENDAR } from "@calcom/platform-constants";
++
++import type { OAuthConnectProps } from "../OAuthConnect";
++import { OAuthConnect } from "../OAuthConnect";
++
++export const OutlookConnect: FC<Partial<OAuthConnectProps>> = ({
++  label = "Connect Outlook Calendar",
++  alreadyConnectedLabel = "Connected Outlook Calendar",
++  loadingLabel = "Checking Outlook Calendar",
++  className,
++  onCheckError,
++  redir,
++}) => {
++  return (
++    <OAuthConnect
++      label={label}
++      alreadyConnectedLabel={alreadyConnectedLabel}
++      loadingLabel={loadingLabel}
++      calendar={OFFICE_365_CALENDAR}
++      className={className}
++      onCheckError={onCheckError}
++      redir={redir}
++    />
++  );
++};
+diff --git a/packages/platform/atoms/gcal-connect/GcalConnect.tsx b/packages/platform/atoms/gcal-connect/GcalConnect.tsx
+deleted file mode 100644
+index 10e798649135a8..00000000000000
+--- a/packages/platform/atoms/gcal-connect/GcalConnect.tsx
++++ /dev/null
+@@ -1,65 +0,0 @@
+-import type { FC } from "react";
+-
+-import { Button } from "@calcom/ui";
+-
+-import { useAtomsContext } from "../hooks/useAtomsContext";
+-import type { OnCheckErrorType } from "../hooks/useGcal";
+-import { useGcal } from "../hooks/useGcal";
+-import { AtomsWrapper } from "../src/components/atoms-wrapper";
+-import { cn } from "../src/lib/utils";
+-
+-interface GcalConnectProps {
+-  className?: string;
+-  label?: string;
+-  alreadyConnectedLabel?: string;
+-  onCheckError?: OnCheckErrorType;
+-}
+-
+-/**
+- * Renders a button to connect or disconnect the Google Calendar of a user.
+- * @requires AccessToken - The user must be authenticated with an access token passed to CalProvider.
+- * @component
+- * @example
+- * ```tsx
+- * <GcalConnect
+- *   label="Connect Google Calendar"
+- *   alreadyConnectedLabel="Connected Google Calendar"
+- *   className="my-button"
+- * />
+- * ```
+- *
+- *
+- * @param {string} [label="Connect Google Calendar"] - The label for the connect button. Optional.
+- * @param {string} [alreadyConnectedLabel="Connected Google Calendar"] - The label for the already connected button. Optional.
+- * @param {string} [className] - Additional CSS class name for the button. Optional.
+- * @param {OnCheckErrorType} [onCheckError] - A callback function to handle errors when checking the connection status. Optional.
+- * @returns {JSX.Element} The rendered component.
+- */
+-export const GcalConnect: FC<GcalConnectProps> = ({
+-  label = "Connect Google Calendar",
+-  alreadyConnectedLabel = "Connected Google Calendar",
+-  className,
+-  onCheckError,
+-}) => {
+-  const { isAuth } = useAtomsContext();
+-
+-  const { allowConnect, checked, redirectToGcalOAuth } = useGcal({
+-    isAuth,
+-    onCheckError,
+-  });
+-
+-  if (!isAuth || !checked) return <></>;
+-
+-  return (
+-    <AtomsWrapper>
+-      <Button
+-        StartIcon="calendar-days"
+-        color="primary"
+-        disabled={!allowConnect}
+-        className={cn("", className)}
+-        onClick={() => redirectToGcalOAuth()}>
+-        {allowConnect ? label : alreadyConnectedLabel}
+-      </Button>
+-    </AtomsWrapper>
+-  );
+-};
+diff --git a/packages/platform/atoms/gcal-connect/index.ts b/packages/platform/atoms/gcal-connect/index.ts
+deleted file mode 100644
+index 490a111c941d63..00000000000000
+--- a/packages/platform/atoms/gcal-connect/index.ts
++++ /dev/null
+@@ -1 +0,0 @@
+-export { GcalConnect } from "./GcalConnect";
+diff --git a/packages/platform/atoms/hooks/connect/useCheck.ts b/packages/platform/atoms/hooks/connect/useCheck.ts
+new file mode 100644
+index 00000000000000..f587a0b6a82bde
+--- /dev/null
++++ b/packages/platform/atoms/hooks/connect/useCheck.ts
+@@ -0,0 +1,39 @@
++import { useQuery } from "@tanstack/react-query";
++
++import type { CALENDARS } from "@calcom/platform-constants";
++import { SUCCESS_STATUS, ERROR_STATUS } from "@calcom/platform-constants";
++import type { ApiResponse, ApiErrorResponse } from "@calcom/platform-types";
++
++import http from "../../lib/http";
++
++export interface UseCheckProps {
++  isAuth: boolean;
++  onCheckError?: OnCheckErrorType;
++  calendar: (typeof CALENDARS)[number];
++}
++export type OnCheckErrorType = (err: ApiErrorResponse) => void;
++export const getQueryKey = (calendar: (typeof CALENDARS)[number]) => [`get-${calendar}-check`];
++
++export const useCheck = ({ isAuth, onCheckError, calendar }: UseCheckProps) => {
++  const { data: check } = useQuery({
++    queryKey: getQueryKey(calendar),
++    staleTime: 6000,
++    enabled: isAuth,
++    queryFn: () => {
++      return http
++        ?.get<ApiResponse<{ checked: boolean; allowConnect: boolean }>>(`/calendars/${calendar}/check`)
++        .then(({ data: responseBody }) => {
++          if (responseBody.status === SUCCESS_STATUS) {
++            return { status: SUCCESS_STATUS, data: { allowConnect: false, checked: true } };
++          }
++          onCheckError?.(responseBody);
++          return { status: ERROR_STATUS, data: { allowConnect: true, checked: true } };
++        })
++        .catch((err) => {
++          onCheckError?.(err);
++          return { status: ERROR_STATUS, data: { allowConnect: true, checked: true } };
++        });
++    },
++  });
++  return { allowConnect: check?.data?.allowConnect ?? false, checked: check?.data?.checked ?? false };
++};
+diff --git a/packages/platform/atoms/hooks/connect/useConnect.ts b/packages/platform/atoms/hooks/connect/useConnect.ts
+new file mode 100644
+index 00000000000000..0c8bea3e40a405
+--- /dev/null
++++ b/packages/platform/atoms/hooks/connect/useConnect.ts
+@@ -0,0 +1,46 @@
++import { useQuery } from "@tanstack/react-query";
++
++import type { CALENDARS } from "@calcom/platform-constants";
++import { SUCCESS_STATUS, ERROR_STATUS } from "@calcom/platform-constants";
++import type { ApiResponse } from "@calcom/platform-types";
++
++import http from "../../lib/http";
++
++export const getQueryKey = (calendar: (typeof CALENDARS)[number]) => [`get-${calendar}-redirect-uri`];
++
++export const useGetRedirectUrl = (calendar: (typeof CALENDARS)[number], redir?: string) => {
++  const authUrl = useQuery({
++    queryKey: getQueryKey(calendar),
++    staleTime: Infinity,
++    enabled: false,
++    queryFn: () => {
++      return http
++        ?.get<ApiResponse<{ authUrl: string }>>(
++          `/calendars/${calendar}/connect${redir ? `?redir=${redir}` : ""}`
++        )
++        .then(({ data: responseBody }) => {
++          if (responseBody.status === SUCCESS_STATUS) {
++            return responseBody.data.authUrl;
++          }
++          if (responseBody.status === ERROR_STATUS) throw new Error(responseBody.error.message);
++          return "";
++        });
++    },
++  });
++
++  return authUrl;
++};
++
++export const useConnect = (calendar: (typeof CALENDARS)[number], redir?: string) => {
++  const { refetch } = useGetRedirectUrl(calendar, redir);
++
++  const connect = async () => {
++    const redirectUri = await refetch();
++
++    if (redirectUri.data) {
++      window.location.href = redirectUri.data;
++    }
++  };
++
++  return { connect };
++};
+diff --git a/packages/platform/atoms/hooks/useGcal.ts b/packages/platform/atoms/hooks/useGcal.ts
+deleted file mode 100644
+index 1c617c9e54d0e5..00000000000000
+--- a/packages/platform/atoms/hooks/useGcal.ts
++++ /dev/null
+@@ -1,42 +0,0 @@
+-import { useState, useEffect } from "react";
+-
+-import type { ApiErrorResponse } from "@calcom/platform-types";
+-
+-import http from "../lib/http";
+-
+-export type OnCheckErrorType = (err: ApiErrorResponse) => void;
+-export interface useGcalProps {
+-  isAuth: boolean;
+-  onCheckError?: OnCheckErrorType;
+-}
+-
+-export const useGcal = ({ isAuth, onCheckError }: useGcalProps) => {
+-  const [allowConnect, setAllowConnect] = useState<boolean>(false);
+-  const [checked, setChecked] = useState<boolean>(false);
+-
+-  const redirectToGcalOAuth = () => {
+-    http
+-      ?.get("/gcal/oauth/auth-url")
+-      .then(({ data: responseBody }) => {
+-        if (responseBody.data?.authUrl) {
+-          window.location.href = responseBody.data.authUrl;
+-        }
+-      })
+-      .catch(console.error);
+-  };
+-
+-  useEffect(() => {
+-    if (isAuth) {
+-      http
+-        ?.get("/gcal/check")
+-        .then(() => setAllowConnect(false))
+-        .catch((err) => {
+-          setAllowConnect(true);
+-          onCheckError?.(err as ApiErrorResponse);
+-        })
+-        .finally(() => setChecked(true));
+-    }
+-  }, [isAuth]);
+-
+-  return { allowConnect, checked, redirectToGcalOAuth };
+-};
+diff --git a/packages/platform/atoms/index.ts b/packages/platform/atoms/index.ts
+index 6c20753b6efd45..502377b231acaf 100644
+--- a/packages/platform/atoms/index.ts
++++ b/packages/platform/atoms/index.ts
+@@ -1,5 +1,5 @@
+ export { CalProvider } from "./cal-provider";
+-export { GcalConnect } from "./gcal-connect";
++export { GcalConnect } from "./connect/google/GcalConnect";
+ export { AvailabilitySettingsPlatformWrapper as AvailabilitySettings } from "./availability";
+ export { BookerPlatformWrapper as Booker } from "./booker";
+ export { useIsPlatform } from "./hooks/useIsPlatform";
+@@ -12,3 +12,5 @@ export { useCancelBooking } from "./hooks/useCancelBooking";
+ export { useGetBooking } from "./hooks/useGetBooking";
+ export { useGetBookings } from "./hooks/useGetBookings";
+ export { useMe } from "./hooks/useMe";
++export { OutlookConnect } from "./connect/outlook/OutlookConnect";
++export * as Connect from "./connect";
+diff --git a/packages/platform/atoms/package.json b/packages/platform/atoms/package.json
+index 534de2250fa33e..937591be78f15c 100644
+--- a/packages/platform/atoms/package.json
++++ b/packages/platform/atoms/package.json
+@@ -17,6 +17,7 @@
+     "@types/react": "18.0.26",
+     "@types/react-dom": "^18.0.9",
+     "@vitejs/plugin-react": "^2.2.0",
++    "@vitejs/plugin-react-swc": "^3.7.0",
+     "autoprefixer": "^10.4.19",
+     "postcss": "^8.4.38",
+     "postcss-import": "^16.1.0",
+@@ -25,7 +26,8 @@
+     "rollup-plugin-node-builtins": "^2.1.2",
+     "typescript": "^4.9.4",
+     "vite": "^5.0.10",
+-    "vite-plugin-dts": "^3.7.3"
++    "vite-plugin-dts": "^3.7.3",
++    "vite-plugin-inspect": "^0.8.4"
+   },
+   "files": [
+     "dist",
+diff --git a/packages/platform/atoms/vite.config.ts b/packages/platform/atoms/vite.config.ts
+index 49d34dd172f275..efc4d68a7c921b 100644
+--- a/packages/platform/atoms/vite.config.ts
++++ b/packages/platform/atoms/vite.config.ts
+@@ -1,8 +1,9 @@
+-import react from "@vitejs/plugin-react";
++import react from "@vitejs/plugin-react-swc";
+ import path from "path";
+ import { resolve } from "path";
+ import { defineConfig } from "vite";
+ import dts from "vite-plugin-dts";
++import Inspect from "vite-plugin-inspect";
+ 
+ export default defineConfig({
+   optimizeDeps: {
+@@ -16,7 +17,7 @@ export default defineConfig({
+       "@calcom/platform-utils",
+     ],
+   },
+-  plugins: [react(), dts({ insertTypesEntry: true })],
++  plugins: [Inspect(), react(), dts({ insertTypesEntry: true })],
+   build: {
+     commonjsOptions: {
+       include: [/@calcom\/lib/, /@calcom\/features/, /node_modules/],
+diff --git a/packages/platform/examples/base/src/pages/index.tsx b/packages/platform/examples/base/src/pages/index.tsx
+index 525ffe1a79b836..6be5d5266cacb7 100644
+--- a/packages/platform/examples/base/src/pages/index.tsx
++++ b/packages/platform/examples/base/src/pages/index.tsx
+@@ -1,7 +1,7 @@
+ import { Navbar } from "@/components/Navbar";
+ import { Inter, Poppins } from "next/font/google";
+ 
+-import { GcalConnect } from "@calcom/atoms";
++import { GcalConnect, Connect } from "@calcom/atoms";
+ 
+ const inter = Inter({ subsets: ["latin"] });
+ const poppins = Poppins({ subsets: ["latin"], weight: ["400", "800"] });
+@@ -19,7 +19,16 @@ export default function Home(props: { calUsername: string; calEmail: string }) {
+           <p className={`w-[70%] font-normal ${inter.className} pb-3 text-2xl`}>
+             To get started, connect your google calendar.
+           </p>
+-          <GcalConnect className="h-[40px] bg-gradient-to-r from-[#8A2387] via-[#E94057] to-[#F27121] text-center text-base font-semibold text-transparent text-white hover:bg-orange-700" />
++          <div className="flex flex-row gap-4">
++            <GcalConnect
++              redir="http://localhost:4321/calendars"
++              className="h-[40px] bg-gradient-to-r from-[#8A2387] via-[#E94057] to-[#F27121] text-center text-base font-semibold text-transparent text-white hover:bg-orange-700"
++            />
++            <Connect.OutlookCalendar
++              redir="http://localhost:4321/calendars"
++              className="h-[40px] bg-gradient-to-r from-[#8A2387] via-[#E94057] to-[#F27121] text-center text-base font-semibold text-transparent text-white hover:bg-orange-700"
++            />
++          </div>
+         </div>
+         <div className="hidden lg:block">
+           <img

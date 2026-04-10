@@ -1,0 +1,142 @@
+diff --git a/backend/src/baserow/contrib/database/data_sync/postgresql_data_sync_type.py b/backend/src/baserow/contrib/database/data_sync/postgresql_data_sync_type.py
+index eb70f0c5c9..841ab47c38 100644
+--- a/backend/src/baserow/contrib/database/data_sync/postgresql_data_sync_type.py
++++ b/backend/src/baserow/contrib/database/data_sync/postgresql_data_sync_type.py
+@@ -13,7 +13,11 @@
+     TextField,
+ )
+ from baserow.core.psycopg import psycopg, sql
+-from baserow.core.utils import ChildProgressBuilder, are_hostnames_same
++from baserow.core.utils import (
++    ChildProgressBuilder,
++    are_hostnames_same,
++    is_hostname_safe,
++)
+ 
+ from .exceptions import SyncError
+ from .models import PostgreSQLDataSync
+@@ -155,6 +159,9 @@ def _connection(self, instance):
+         cursor = None
+         connection = None
+ 
++        if not is_hostname_safe(instance.postgresql_host):
++            raise SyncError("It's not allowed to connect to this hostname.")
++
+         baserow_postgresql_connection = (
+             settings.BASEROW_PREVENT_POSTGRESQL_DATA_SYNC_CONNECTION_TO_DATABASE
+             and are_hostnames_same(
+diff --git a/backend/src/baserow/core/utils.py b/backend/src/baserow/core/utils.py
+index bad6d6899b..ea333ad7d3 100644
+--- a/backend/src/baserow/core/utils.py
++++ b/backend/src/baserow/core/utils.py
+@@ -4,6 +4,7 @@
+ import hashlib
+ import inspect
+ import io
++import ipaddress
+ import math
+ import os
+ import random
+@@ -1204,6 +1205,42 @@ def get_all_ips(hostname: str) -> Set:
+         return set()
+ 
+ 
++def is_hostname_safe(hostname: str) -> bool:
++    """
++    Checks if the hostname resolves only to safe addresses.
++
++    Unsafe addresses include:
++    - Wildcard (0.0.0.0, ::)
++    - Loopback (127.0.0.0/8, ::1)
++    - Link-local (169.254.0.0/16, fe80::/10)
++    - Reserved, multicast, etc.
++
++    :param hostname: The hostname to check.
++    :return: True if all resolved IPs are safe.
++    """
++
++    ips = get_all_ips(hostname)
++    if not ips:
++        return False
++
++    for ip in ips:
++        try:
++            ip_obj = ipaddress.ip_address(ip)
++        except ValueError:
++            return False
++
++        if (
++            ip_obj.is_unspecified  # wildcard
++            or ip_obj.is_loopback
++            or ip_obj.is_link_local
++            or ip_obj.is_multicast
++            or ip_obj.is_reserved
++        ):
++            return False
++
++    return True
++
++
+ def are_hostnames_same(hostname1: str, hostname2: str) -> bool:
+     """
+     Resolves the IP addresses of both hostnames, and checks they resolve to the same IP
+diff --git a/backend/tests/baserow/core/test_core_utils.py b/backend/tests/baserow/core/test_core_utils.py
+index a161f42f97..c48371137e 100755
+--- a/backend/tests/baserow/core/test_core_utils.py
++++ b/backend/tests/baserow/core/test_core_utils.py
+@@ -26,6 +26,7 @@
+     get_baserow_saas_base_url,
+     get_value_at_path,
+     grouper,
++    is_hostname_safe,
+     random_string,
+     remove_duplicates,
+     remove_invalid_surrogate_characters,
+@@ -683,6 +684,32 @@ def test_remove_duplicates():
+ 
+ def test_get_all_ips():
+     assert get_all_ips("localhost") == {"127.0.0.1", "::1"}
++    assert get_all_ips("0.0.0.0") == {"0.0.0.0"}  # noqa: S104
++    assert get_all_ips("::") == {"::"}
++
++
++def test_is_hostname_safe():
++    # Public address (should be safe)
++    assert is_hostname_safe("12.33.56.1") is True
++
++    # Wildcard addresses are not considered safe
++    assert is_hostname_safe("0.0.0.0") is False  # noqa: S104 IPv4 wildcard
++    assert is_hostname_safe("::") is False  # IPv6 wildcard
++
++    # Loopback addresse sare not considered safe
++    assert is_hostname_safe("127.0.0.1") is False  # IPv4 loopback
++    assert is_hostname_safe("::1") is False  # IPv6 loopback
++
++    # Link-local addresses are not considered safe
++    assert is_hostname_safe("169.254.1.1") is False  # IPv4 link-local
++    assert is_hostname_safe("fe80::1") is False  # IPv6 link-local
++
++    # Multicast addresses are not considered safe
++    assert is_hostname_safe("224.0.0.1") is False  # IPv4 multicast
++    assert is_hostname_safe("ff02::1") is False  # IPv6 multicast
++
++    # Reserved addresses are not considered safe
++    assert is_hostname_safe("240.0.0.1") is False  # IPv4 reserved
+ 
+ 
+ def test_are_hostnames_same():
+diff --git a/changelog/entries/unreleased/bug/postgres_sync_wildcard_address.json b/changelog/entries/unreleased/bug/postgres_sync_wildcard_address.json
+new file mode 100644
+index 0000000000..76e2f0bcad
+--- /dev/null
++++ b/changelog/entries/unreleased/bug/postgres_sync_wildcard_address.json
+@@ -0,0 +1,9 @@
++{
++    "type": "bug",
++    "message": "Forbid wildcard addresses in Postgres data sync",
++    "issue_origin": null,
++    "issue_number": null,
++    "domain": "database",
++    "bullet_points": [],
++    "created_at": "2026-04-07"
++}

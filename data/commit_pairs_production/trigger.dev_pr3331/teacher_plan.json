@@ -1,0 +1,120 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "error_handling",
+      "recommendation": "Added retry logic with exponential backoff for R2 object store uploads using p-retry library",
+      "rationale": "Transient network failures during upload were causing entire batch streams to abort. The p-retry library provides battle-tested retry logic with configurable attempts, delays, and exponential backoff. This allows the system to self-heal from temporary network issues without manual intervention.",
+      "alternatives_considered": [
+        "Custom retry implementation",
+        "Circuit breaker pattern",
+        "Queue-based retry mechanism"
+      ],
+      "files_affected": [
+        "apps/webapp/app/runEngine/concerns/batchPayloads.server.ts"
+      ]
+    },
+    {
+      "dimension": "api_design",
+      "recommendation": "Removed 'x-should-retry: false' header from 500 responses to allow SDK retry logic to work",
+      "rationale": "The header was preventing SDK retries even when server-side retries were exhausted. Since batch items are deduplicated by index, full-stream retries are safe. This creates a layered retry strategy: server-side retries for transient issues, SDK retries for persistent failures.",
+      "alternatives_considered": [
+        "Keeping the header and implementing different error codes",
+        "Adding a new header to indicate retry exhaustion",
+        "Changing the status code to 400 for permanent failures"
+      ],
+      "files_affected": [
+        "apps/webapp/app/routes/api.v3.batches.$batchId.items.ts"
+      ]
+    },
+    {
+      "dimension": "testing",
+      "recommendation": "Created comprehensive test suite for batch payload processor with mocked dependencies",
+      "rationale": "Tests verify retry behavior without making actual network calls. Mocking object store uploads allows testing of success, transient failure recovery, and retry exhaustion scenarios. The tests use vi.mock() to isolate the unit under test and ensure reliable, fast test execution.",
+      "alternatives_considered": [
+        "Integration tests with real R2",
+        "End-to-end tests",
+        "Property-based testing"
+      ],
+      "files_affected": [
+        "apps/webapp/test/engine/batchPayloads.test.ts"
+      ]
+    },
+    {
+      "dimension": "observability",
+      "recommendation": "Added structured logging for retry attempts with context about batch, item, and attempt number",
+      "rationale": "Monitoring retry behavior is crucial for operational visibility. The onFailedAttempt callback logs warnings with attempt numbers and retries left, while final failures log errors. This helps operators distinguish between normal retry behavior and actual failures requiring intervention.",
+      "alternatives_considered": [
+        "Metrics counters",
+        "Distributed tracing spans",
+        "Alerting on retry thresholds"
+      ],
+      "files_affected": [
+        "apps/webapp/app/runEngine/concerns/batchPayloads.server.ts"
+      ]
+    },
+    {
+      "dimension": "documentation",
+      "recommendation": "Created server changes documentation explaining the fix and its rationale",
+      "rationale": "The .server-changes file provides context for the change, explaining that transient network errors now self-heal server-side rather than aborting entire batch streams. This helps with code review, knowledge sharing, and future maintenance.",
+      "alternatives_considered": [
+        "Adding comments in code",
+        "Updating README",
+        "Creating a separate changelog entry"
+      ],
+      "files_affected": [
+        ".server-changes/batch-r2-upload-retry.md"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Implement R2 upload retry logic for batch payloads",
+      "description": "Add retry mechanism with exponential backoff for transient network failures during R2 object store uploads in batch processing",
+      "files_to_modify": [
+        "apps/webapp/app/runEngine/concerns/batchPayloads.server.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-002",
+      "title": "Enable SDK retry fallback for batch items",
+      "description": "Remove header blocking SDK retries to allow layered retry strategy when server-side retries are exhausted",
+      "files_to_modify": [
+        "apps/webapp/app/routes/api.v3.batches.$batchId.items.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-003",
+      "title": "Add test coverage for batch payload retry behavior",
+      "description": "Create unit tests verifying retry logic works correctly for success, transient failure, and retry exhaustion scenarios",
+      "files_to_modify": [],
+      "files_to_create": [
+        "apps/webapp/test/engine/batchPayloads.test.ts"
+      ],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-004",
+      "title": "Document the batch R2 upload retry fix",
+      "description": "Create documentation explaining the change and its impact on batch processing reliability",
+      "files_to_modify": [],
+      "files_to_create": [
+        ".server-changes/batch-r2-upload-retry.md"
+      ],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation adds a robust retry mechanism for R2 object store uploads during batch payload processing. The core change wraps the existing `uploadPacketToObjectStore` call with `p-retry`, configured for 3 attempts with exponential backoff between 500ms and 2 seconds. This addresses transient network failures that previously caused entire batch streams to abort.\n\nA key design decision was creating a layered retry strategy: server-side retries handle transient issues, while SDK retries (enabled by removing the `x-should-retry: false` header) provide a fallback for persistent failures. This works safely because batch items are deduplicated by index, preventing duplicate processing during retries.\n\nThe implementation follows established patterns in the codebase, using the existing `tryCatch` utility and maintaining the same error propagation behavior when retries are exhausted. Comprehensive tests verify the retry logic without requiring actual R2 connectivity, using mocked dependencies to simulate various failure scenarios. Structured logging provides operational visibility into retry attempts, helping distinguish between normal self-healing behavior and issues requiring intervention.",
+  "source_pr": "https://github.com/triggerdotdev/trigger.dev/pull/3331",
+  "before_sha": "4f2ff3d9def90ebcd09cedb42a67eb61612ca99c",
+  "after_sha": "def21b26b64781945acdb0ca352a27213ab94e84",
+  "diff_stats": {
+    "additions": 155,
+    "deletions": 19,
+    "files_changed": 4
+  }
+}

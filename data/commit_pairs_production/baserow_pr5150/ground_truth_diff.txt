@@ -1,0 +1,442 @@
+diff --git a/backend/pyproject.toml b/backend/pyproject.toml
+index 71876d2354..c0ff60040c 100644
+--- a/backend/pyproject.toml
++++ b/backend/pyproject.toml
+@@ -95,7 +95,7 @@ dependencies = [
+     "genson==1.3.0",
+     "pyotp==2.9.0",
+     "qrcode==8.2",
+-    "pydantic-ai-slim[anthropic,bedrock,google,groq,mistral,openai]==1.66.0",
++    "pydantic-ai-slim[anthropic,bedrock,google,groq,mistral,openai]==1.77.0",
+     "opentelemetry-sdk>=1.20.0",
+     "netifaces==0.11.0",
+     "requests-futures>=1.0.2",
+diff --git a/backend/src/baserow/core/generative_ai/generative_ai_model_types.py b/backend/src/baserow/core/generative_ai/generative_ai_model_types.py
+index ea60e12479..1169684ac8 100644
+--- a/backend/src/baserow/core/generative_ai/generative_ai_model_types.py
++++ b/backend/src/baserow/core/generative_ai/generative_ai_model_types.py
+@@ -5,6 +5,8 @@
+ 
+ from django.conf import settings
+ 
++from loguru import logger
++
+ from baserow.core.models import Workspace
+ 
+ from .registries import GenerativeAIModelType
+@@ -124,23 +126,76 @@ def get_base_url(
+         ".xlsx",
+         ".xls",
+     }
+-    _MAX_EMBED_PAYLOAD_BYTES = 45 * 1024 * 1024  # 50 MB minus some headroom
++    # https://developers.openai.com/api/docs/guides/file-inputs
++    _MAX_EMBED_PAYLOAD_BYTES = 45 * 1024 * 1024  # 50 MB minus headroom
+     _MAX_EMBEDS_PER_REQUEST = 500
++    # Below this limit, uploadable files are sent inline.
++    _INLINE_UPLOAD_THRESHOLD_BYTES = 10 * 1024  # 10 KB
+ 
+     def _get_max_upload_bytes(self) -> int:
+         return (
+             min(512, settings.BASEROW_OPENAI_UPLOADED_FILE_SIZE_LIMIT_MB) * 1024 * 1024
+         )
+ 
++    def _can_embed(self, file_size: int, embed_count: int, embed_payload: int) -> bool:
++        return (
++            embed_count < self._MAX_EMBEDS_PER_REQUEST
++            and embed_payload + file_size <= self._MAX_EMBED_PAYLOAD_BYTES
++        )
++
++    @staticmethod
++    def _embed(ai_file: "AIFile", data: bytes) -> None:
++        from pydantic_ai import BinaryContent
++
++        ai_file.content = BinaryContent(
++            data=data,
++            media_type=ai_file.mime_type,
++            identifier=ai_file.original_name,
++        )
++
++    @staticmethod
++    def _inline_text(ai_file: "AIFile", data: bytes) -> bool:
++        """Try to inline file content as TextContent. Returns False if the
++        content is not valid UTF-8."""
++
++        from pydantic_ai import TextContent
++
++        try:
++            text = data.decode("utf-8")
++        except (UnicodeDecodeError, ValueError):
++            return False
++        ai_file.content = TextContent(
++            content=(
++                f"[Content of file '{ai_file.original_name}']\n{text}\n[End of file]"
++            ),
++            metadata={"source": ai_file.original_name},
++        )
++        return True
++
++    def _upload(
++        self,
++        ai_file: "AIFile",
++        data: bytes,
++        workspace: Optional[Workspace] = None,
++        settings_override: Optional[dict[str, Any]] = None,
++    ) -> None:
++        from pydantic_ai import UploadedFile
++
++        file_id = self._upload_file(ai_file.name, data, workspace, settings_override)
++        ai_file.provider_file_id = file_id
++        ai_file.content = UploadedFile(
++            file_id=file_id,
++            provider_name="openai",
++            media_type=ai_file.mime_type,
++            identifier=ai_file.original_name,
++        )
++
+     def prepare_files(
+         self,
+         files: list[AIFile],
+         workspace: Optional[Workspace] = None,
+         settings_override: Optional[dict[str, Any]] = None,
+     ) -> list[AIFile]:
+-        from loguru import logger
+-        from pydantic_ai import BinaryContent, UploadedFile
+-
+         embed_payload = 0
+         embed_count = 0
+         max_upload = self._get_max_upload_bytes()
+@@ -151,17 +206,9 @@ def prepare_files(
+ 
+             try:
+                 if ext in self._EMBEDDABLE_EXTENSIONS:
+-                    if (
+-                        embed_count >= self._MAX_EMBEDS_PER_REQUEST
+-                        or embed_payload + ai_file.size > self._MAX_EMBED_PAYLOAD_BYTES
+-                    ):
++                    if not self._can_embed(ai_file.size, embed_count, embed_payload):
+                         continue
+-                    data = ai_file.read_content()
+-                    ai_file.content = BinaryContent(
+-                        data=data,
+-                        media_type=ai_file.mime_type,
+-                        identifier=ai_file.original_name,
+-                    )
++                    self._embed(ai_file, ai_file.read_content())
+                     embed_payload += ai_file.size
+                     embed_count += 1
+ 
+@@ -169,20 +216,19 @@ def prepare_files(
+                     if ai_file.size > max_upload:
+                         continue
+                     data = ai_file.read_content()
+-                    file_id = self._upload_file(
+-                        ai_file.name, data, workspace, settings_override
+-                    )
+-                    ai_file.provider_file_id = file_id
+-                    ai_file.content = UploadedFile(
+-                        file_id=file_id,
+-                        provider_name="openai",
+-                        media_type=ai_file.mime_type,
+-                        identifier=ai_file.original_name,
+-                    )
+-            except Exception:
+-                logger.warning(
+-                    f"Skipping file {ai_file.name}: failed to read or upload."
+-                )
++
++                    if (
++                        ai_file.size <= self._INLINE_UPLOAD_THRESHOLD_BYTES
++                        and self._can_embed(ai_file.size, embed_count, embed_payload)
++                    ):
++                        if not self._inline_text(ai_file, data):
++                            self._embed(ai_file, data)
++                        embed_payload += ai_file.size
++                        embed_count += 1
++                    else:
++                        self._upload(ai_file, data, workspace, settings_override)
++            except Exception as exc:
++                logger.warning(f"Skipping file {ai_file.name}: {exc}")
+                 continue
+ 
+         return [f for f in files if f.content is not None]
+diff --git a/backend/src/baserow/core/generative_ai/registries.py b/backend/src/baserow/core/generative_ai/registries.py
+index 74eb4e1140..89ecd826d4 100644
+--- a/backend/src/baserow/core/generative_ai/registries.py
++++ b/backend/src/baserow/core/generative_ai/registries.py
+@@ -187,7 +187,7 @@ def _build_user_prompt(
+         if content:
+             prompt = (
+                 f"{prompt}\n\n"
+-                "The contents of the attached files are included below. "
++                "The following file contents are provided for context. "
+                 "Use them to answer the prompt above."
+             )
+             return [prompt] + content
+diff --git a/backend/tests/baserow/core/generative_ai/test_generative_ai_model_types.py b/backend/tests/baserow/core/generative_ai/test_generative_ai_model_types.py
+index 77f804d058..2c02e351cf 100644
+--- a/backend/tests/baserow/core/generative_ai/test_generative_ai_model_types.py
++++ b/backend/tests/baserow/core/generative_ai/test_generative_ai_model_types.py
+@@ -1,6 +1,24 @@
++from unittest.mock import patch
++
++from pydantic_ai import BinaryContent, TextContent, UploadedFile
++
+ from baserow.core.generative_ai.generative_ai_model_types import (
+     OpenAIGenerativeAIModelType,
+ )
++from baserow_premium.fields.ai_file import AIFile
++
++
++def _make_ai_file(
++    name: str, size: int, mime_type: str = "text/plain", content_bytes: bytes = b""
++) -> AIFile:
++    ai_file = AIFile(
++        name=name,
++        original_name=name,
++        size=size,
++        mime_type=mime_type,
++    )
++    ai_file.read_content = lambda: content_bytes  # type: ignore[assignment]
++    return ai_file
+ 
+ 
+ def test_openai_supports_files():
+@@ -34,3 +52,118 @@ def test_openai_max_upload_size(settings):
+ 
+     settings.BASEROW_OPENAI_UPLOADED_FILE_SIZE_LIMIT_MB = 100
+     assert ai_model_type._get_max_upload_bytes() == 100 * 1024 * 1024
++
++
++def test_prepare_files_small_text_file_is_inlined():
++    """A small .txt file should be inlined as TextContent, not uploaded."""
++
++    ai_model_type = OpenAIGenerativeAIModelType()
++    data = b"talk about hamburger"
++    ai_file = _make_ai_file("a.txt", size=len(data), content_bytes=data)
++
++    result = ai_model_type.prepare_files([ai_file])
++
++    assert len(result) == 1
++    assert isinstance(result[0].content, TextContent)
++    assert "talk about hamburger" in result[0].content.content
++    assert "a.txt" in result[0].content.content
++    assert result[0].provider_file_id is None
++
++
++def test_prepare_files_small_binary_uploadable_is_embedded():
++    """A small non-UTF-8 uploadable file falls back to BinaryContent."""
++
++    ai_model_type = OpenAIGenerativeAIModelType()
++    data = b"\x80\x81\x82"
++    ai_file = _make_ai_file(
++        "data.csv", size=len(data), mime_type="text/csv", content_bytes=data
++    )
++
++    result = ai_model_type.prepare_files([ai_file])
++
++    assert len(result) == 1
++    assert isinstance(result[0].content, BinaryContent)
++    assert result[0].provider_file_id is None
++
++
++def test_prepare_files_large_uploadable_is_uploaded():
++    """A .txt file over the inline threshold should be uploaded via the Files API."""
++
++    ai_model_type = OpenAIGenerativeAIModelType()
++    size = ai_model_type._INLINE_UPLOAD_THRESHOLD_BYTES + 1
++    data = b"x" * size
++    ai_file = _make_ai_file("big.txt", size=size, content_bytes=data)
++
++    with patch.object(ai_model_type, "_upload_file", return_value="file-123"):
++        result = ai_model_type.prepare_files([ai_file])
++
++    assert len(result) == 1
++    assert isinstance(result[0].content, UploadedFile)
++    assert result[0].provider_file_id == "file-123"
++
++
++def test_prepare_files_small_uploadable_respects_embed_limits():
++    """When embed payload would exceed the limit, small files fall back to upload."""
++
++    ai_model_type = OpenAIGenerativeAIModelType()
++    data = b"small"
++    ai_file = _make_ai_file("a.txt", size=len(data), content_bytes=data)
++
++    # Pretend we already used up the embed budget by setting the limit to 0.
++    original = ai_model_type._MAX_EMBED_PAYLOAD_BYTES
++    ai_model_type._MAX_EMBED_PAYLOAD_BYTES = 0
++    try:
++        with patch.object(ai_model_type, "_upload_file", return_value="file-456"):
++            result = ai_model_type.prepare_files([ai_file])
++    finally:
++        ai_model_type._MAX_EMBED_PAYLOAD_BYTES = original
++
++    assert len(result) == 1
++    assert isinstance(result[0].content, UploadedFile)
++    assert result[0].provider_file_id == "file-456"
++
++
++def test_prepare_files_image_still_embedded():
++    """Images should still go through the embeddable path as before."""
++
++    ai_model_type = OpenAIGenerativeAIModelType()
++    data = b"\x89PNG\r\n\x1a\n"
++    ai_file = _make_ai_file(
++        "photo.png", size=len(data), mime_type="image/png", content_bytes=data
++    )
++
++    result = ai_model_type.prepare_files([ai_file])
++
++    assert len(result) == 1
++    assert isinstance(result[0].content, BinaryContent)
++    assert result[0].provider_file_id is None
++
++
++def test_prepare_files_unsupported_extension_is_skipped():
++    """Files with unsupported extensions are excluded from the result."""
++
++    ai_model_type = OpenAIGenerativeAIModelType()
++    data = b"some data"
++    ai_file = _make_ai_file(
++        "video.mp4", size=len(data), mime_type="video/mp4", content_bytes=data
++    )
++
++    result = ai_model_type.prepare_files([ai_file])
++
++    assert len(result) == 0
++    assert ai_file.content is None
++
++
++def test_prepare_files_oversized_uploadable_is_skipped(settings):
++    """Uploadable files exceeding the size limit are excluded."""
++
++    ai_model_type = OpenAIGenerativeAIModelType()
++    settings.BASEROW_OPENAI_UPLOADED_FILE_SIZE_LIMIT_MB = 1
++    limit = ai_model_type._get_max_upload_bytes()
++    data = b"x" * (limit + 1)
++    ai_file = _make_ai_file("huge.txt", size=len(data), content_bytes=data)
++
++    result = ai_model_type.prepare_files([ai_file])
++
++    assert len(result) == 0
++    assert ai_file.content is None
+diff --git a/backend/uv.lock b/backend/uv.lock
+index 76f3c9aff3..9a7852eaf4 100644
+--- a/backend/uv.lock
++++ b/backend/uv.lock
+@@ -380,7 +380,7 @@ requires-dist = [
+     { name = "prosemirror", specifier = "==0.5.2" },
+     { name = "psutil", specifier = "==7.2.2" },
+     { name = "psycopg2-binary", specifier = "==2.9.11" },
+-    { name = "pydantic-ai-slim", extras = ["anthropic", "bedrock", "google", "groq", "mistral", "openai"], specifier = "==1.66.0" },
++    { name = "pydantic-ai-slim", extras = ["anthropic", "bedrock", "google", "groq", "mistral", "openai"], specifier = "==1.77.0" },
+     { name = "pyotp", specifier = "==2.9.0" },
+     { name = "pysaml2", specifier = "==7.5.4" },
+     { name = "qrcode", specifier = "==8.2" },
+@@ -2101,7 +2101,7 @@ wheels = [
+ 
+ [[package]]
+ name = "openai"
+-version = "2.14.0"
++version = "2.30.0"
+ source = { registry = "https://pypi.org/simple" }
+ dependencies = [
+     { name = "anyio", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
+@@ -2113,9 +2113,9 @@ dependencies = [
+     { name = "tqdm", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
+     { name = "typing-extensions", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
+ ]
+-sdist = { url = "https://files.pythonhosted.org/packages/d8/b1/12fe1c196bea326261718eb037307c1c1fe1dedc2d2d4de777df822e6238/openai-2.14.0.tar.gz", hash = "sha256:419357bedde9402d23bf8f2ee372fca1985a73348debba94bddff06f19459952", size = 626938, upload-time = "2025-12-19T03:28:45.742Z" }
++sdist = { url = "https://files.pythonhosted.org/packages/88/15/52580c8fbc16d0675d516e8749806eda679b16de1e4434ea06fb6feaa610/openai-2.30.0.tar.gz", hash = "sha256:92f7661c990bda4b22a941806c83eabe4896c3094465030dd882a71abe80c885", size = 676084, upload-time = "2026-03-25T22:08:59.96Z" }
+ wheels = [
+-    { url = "https://files.pythonhosted.org/packages/27/4b/7c1a00c2c3fbd004253937f7520f692a9650767aa73894d7a34f0d65d3f4/openai-2.14.0-py3-none-any.whl", hash = "sha256:7ea40aca4ffc4c4a776e77679021b47eec1160e341f42ae086ba949c9dcc9183", size = 1067558, upload-time = "2025-12-19T03:28:43.727Z" },
++    { url = "https://files.pythonhosted.org/packages/2a/9e/5bfa2270f902d5b92ab7d41ce0475b8630572e71e349b2a4996d14bdda93/openai-2.30.0-py3-none-any.whl", hash = "sha256:9a5ae616888eb2748ec5e0c5b955a51592e0b201a11f4262db920f2a78c5231d", size = 1146656, upload-time = "2026-03-25T22:08:58.2Z" },
+ ]
+ 
+ [[package]]
+@@ -2759,7 +2759,7 @@ wheels = [
+ 
+ [[package]]
+ name = "pydantic-ai-slim"
+-version = "1.66.0"
++version = "1.77.0"
+ source = { registry = "https://pypi.org/simple" }
+ dependencies = [
+     { name = "genai-prices", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
+@@ -2770,9 +2770,9 @@ dependencies = [
+     { name = "pydantic-graph", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
+     { name = "typing-inspection", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
+ ]
+-sdist = { url = "https://files.pythonhosted.org/packages/23/31/1b291e2c169c684290b458a1333d438e34c542d355c60c0bc92866c192a2/pydantic_ai_slim-1.66.0.tar.gz", hash = "sha256:d675f3cf7171c7ea767084a2228d7a2e8eb88e18bfefba71387ed150fcb64069", size = 435408, upload-time = "2026-03-05T00:54:58.587Z" }
++sdist = { url = "https://files.pythonhosted.org/packages/79/a7/ad011e626bed1f275fbaf933181573a50b05c2b9a0be927583d46fb8ff13/pydantic_ai_slim-1.77.0.tar.gz", hash = "sha256:a6e7006a4b048193d45b6ba816d301271e3f5ef1cdc4f9fb340617f382c6ce0d", size = 518781, upload-time = "2026-04-03T02:16:54.524Z" }
+ wheels = [
+-    { url = "https://files.pythonhosted.org/packages/1d/c9/098d675eb20863c6c92a23e09b6cc0d10df3f96191f04f3daefb31f180bc/pydantic_ai_slim-1.66.0-py3-none-any.whl", hash = "sha256:59dcccbcbf948d356dd4a03457962b4079db42c56edf8a11113d827015027e66", size = 566105, upload-time = "2026-03-05T00:54:51.611Z" },
++    { url = "https://files.pythonhosted.org/packages/96/c5/5913cc4ae99047901c602f0d8208e3a75a7952b7e57d76169547307d7cea/pydantic_ai_slim-1.77.0-py3-none-any.whl", hash = "sha256:110c516935de384f1beddc36fda04e8df36cdf5bee3a5bfd0da562726182e52b", size = 664494, upload-time = "2026-04-03T02:16:46.668Z" },
+ ]
+ 
+ [package.optional-dependencies]
+@@ -2831,7 +2831,7 @@ wheels = [
+ 
+ [[package]]
+ name = "pydantic-graph"
+-version = "1.66.0"
++version = "1.77.0"
+ source = { registry = "https://pypi.org/simple" }
+ dependencies = [
+     { name = "httpx", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
+@@ -2839,9 +2839,9 @@ dependencies = [
+     { name = "pydantic", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
+     { name = "typing-inspection", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
+ ]
+-sdist = { url = "https://files.pythonhosted.org/packages/25/5e/4a3ed6c4047fd2676b248cee3666299b6214f691c086fd5f9bdda96ace1d/pydantic_graph-1.66.0.tar.gz", hash = "sha256:834df5137098c2c95d2241b98d4dd61af4a3ff24784751c82cc543db46dd29f5", size = 58522, upload-time = "2026-03-05T00:55:01.019Z" }
++sdist = { url = "https://files.pythonhosted.org/packages/60/40/a8b8e256bb90e4e284b35cc1c5e1a8e2724fa88ad89b7eac958fbf85852b/pydantic_graph-1.77.0.tar.gz", hash = "sha256:ba75dbdf221cd7e366e5c5d250f4d9f3138e05400ea52d3f36330772d989deee", size = 58689, upload-time = "2026-04-03T02:16:56.625Z" }
+ wheels = [
+-    { url = "https://files.pythonhosted.org/packages/8d/95/22c0ad3f3830d7fdd4dbfdc78548705f6c9ac434ada0d790ffc02491b39e/pydantic_graph-1.66.0-py3-none-any.whl", hash = "sha256:8f75d34efbaa4b65767d39faa2b3270fd321fb4104a66d3773754f4854876739", size = 72351, upload-time = "2026-03-05T00:54:54.661Z" },
++    { url = "https://files.pythonhosted.org/packages/2d/09/3c9c3aba8031adbd21d1833e8e4edd749697e50a88fa9bdab641874abe4f/pydantic_graph-1.77.0-py3-none-any.whl", hash = "sha256:063803e87aec901919c2073ccf3fdd6e4fff84e8b05dbfbe8a6c1af63dd12c05", size = 72503, upload-time = "2026-04-03T02:16:49.97Z" },
+ ]
+ 
+ [[package]]
+diff --git a/changelog/entries/unreleased/bug/5082_fix_ai_field_small_text_files.json b/changelog/entries/unreleased/bug/5082_fix_ai_field_small_text_files.json
+new file mode 100644
+index 0000000000..c7a2f22507
+--- /dev/null
++++ b/changelog/entries/unreleased/bug/5082_fix_ai_field_small_text_files.json
+@@ -0,0 +1,9 @@
++{
++    "type": "bug",
++    "message": "Fix AI field not correctly handling small text files",
++    "issue_origin": "github",
++    "issue_number": 5082,
++    "domain": "database",
++    "bullet_points": [],
++    "created_at": "2026-04-08"
++}
+diff --git a/premium/backend/src/baserow_premium/fields/handler.py b/premium/backend/src/baserow_premium/fields/handler.py
+index d0efd10dc3..9d72f04990 100644
+--- a/premium/backend/src/baserow_premium/fields/handler.py
++++ b/premium/backend/src/baserow_premium/fields/handler.py
+@@ -152,6 +152,15 @@ def generate_value_with_ai(
+                 prepared = generative_ai_model_type.prepare_files(ai_files, workspace)
+                 if prepared:
+                     prompt_kwargs["content"] = [f.content for f in prepared]
++                skipped = [f for f in ai_files if f.content is None]
++                if skipped:
++                    names = ", ".join(f.original_name for f in skipped)
++                    message += (
++                        f"\n\nNote: the following files were provided but could "
++                        f"not be included due to format, size, or processing "
++                        f"limitations: "
++                        f"{names}"
++                    )
+ 
+             value = generative_ai_model_type.prompt(
+                 ai_field.ai_generative_ai_model,
+@@ -185,7 +194,7 @@ def _collect_ai_files(
+         return [
+             AIFile(
+                 name=f["name"],
+-                original_name=f.get("original_name", f["name"]),
++                original_name=f.get("visible_name", f["name"]),
+                 size=f.get("size", 0),
+                 mime_type=(
+                     f.get("mime_type")

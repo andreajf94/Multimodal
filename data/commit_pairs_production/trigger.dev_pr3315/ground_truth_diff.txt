@@ -1,0 +1,394 @@
+diff --git a/apps/webapp/app/components/navigation/SideMenu.tsx b/apps/webapp/app/components/navigation/SideMenu.tsx
+index 1169343e9d3..14b3c56495b 100644
+--- a/apps/webapp/app/components/navigation/SideMenu.tsx
++++ b/apps/webapp/app/components/navigation/SideMenu.tsx
+@@ -477,7 +477,7 @@ export function SideMenu({
+                   data-action="prompts"
+                   isCollapsed={isCollapsed}
+                 />
+-                {(user.admin || user.isImpersonating || featureFlags.hasAiModelsAccess) && (
++                {(user.admin || user.isImpersonating || featureFlags.hasAiAccess) && (
+                   <SideMenuItem
+                     name="Models"
+                     icon={CubeIcon}
+diff --git a/apps/webapp/app/env.server.ts b/apps/webapp/app/env.server.ts
+index 82b73b34853..8d72b2e51b2 100644
+--- a/apps/webapp/app/env.server.ts
++++ b/apps/webapp/app/env.server.ts
+@@ -1237,9 +1237,6 @@ const EnvironmentSchema = z
+     // AI features (Prompts, Models, AI Metrics sidebar section)
+     AI_FEATURES_ENABLED: z.string().default("0"),
+ 
+-    // AI Models feature (Models sidebar item within AI section)
+-    AI_MODELS_ENABLED: z.string().default("0"),
+-
+     // Logs page ClickHouse URL (for logs queries)
+     LOGS_CLICKHOUSE_URL: z
+       .string()
+diff --git a/apps/webapp/app/presenters/OrganizationsPresenter.server.ts b/apps/webapp/app/presenters/OrganizationsPresenter.server.ts
+index 591dba5753c..99ced5e3efb 100644
+--- a/apps/webapp/app/presenters/OrganizationsPresenter.server.ts
++++ b/apps/webapp/app/presenters/OrganizationsPresenter.server.ts
+@@ -159,6 +159,7 @@ export class OrganizationsPresenter {
+     // Get global feature flags with env-var-based defaults
+     const globalFlags = await flags({
+       defaultValues: {
++        hasAiAccess: env.AI_FEATURES_ENABLED === "1",
+         hasPrivateConnections: env.PRIVATE_CONNECTIONS_ENABLED === "1",
+       },
+     });
+diff --git a/apps/webapp/app/routes/_app.orgs.$organizationSlug.projects.$projectParam.env.$envParam.models.$modelId/route.tsx b/apps/webapp/app/routes/_app.orgs.$organizationSlug.projects.$projectParam.env.$envParam.models.$modelId/route.tsx
+index 2d2a0ac850f..7a25f996d4d 100644
+--- a/apps/webapp/app/routes/_app.orgs.$organizationSlug.projects.$projectParam.env.$envParam.models.$modelId/route.tsx
++++ b/apps/webapp/app/routes/_app.orgs.$organizationSlug.projects.$projectParam.env.$envParam.models.$modelId/route.tsx
+@@ -112,8 +112,8 @@ type Tab = "overview" | "global" | "usage";
+ 
+ const TAB_CONFIG: { id: Tab; label: string }[] = [
+   { id: "overview", label: "Overview" },
+-  { id: "global", label: "Global Metrics" },
+-  { id: "usage", label: "Your Usage" },
++  { id: "usage", label: "Metrics" },
++  { id: "global", label: "Global metrics" },
+ ];
+ 
+ export default function ModelDetailPage() {
+@@ -425,16 +425,7 @@ function GlobalMetricsTab({
+   return (
+     <div className="space-y-4">
+       {/* Big numbers */}
+-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+-        <div className="h-24">
+-          <MetricWidget
+-            widgetKey={`${modelName}-calls`}
+-            title="Total Calls"
+-            query={`SELECT sum(call_count) AS total_calls FROM llm_models WHERE response_model = '${escapeTSQL(modelName)}'`}
+-            config={bignumberConfig("total_calls", { abbreviate: true })}
+-            {...widgetProps}
+-          />
+-        </div>
++      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+         <div className="h-24">
+           <MetricWidget
+             widgetKey={`${modelName}-ttfc-p50`}
+@@ -465,25 +456,14 @@ function GlobalMetricsTab({
+       </div>
+ 
+       {/* Charts */}
+-      <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+-        <div className="h-[300px]">
+-          <MetricWidget
+-            widgetKey={`${modelName}-calls-time`}
+-            title="Calls over time"
+-            query={`SELECT timeBucket(), sum(call_count) AS calls FROM llm_models WHERE response_model = '${escapeTSQL(modelName)}' GROUP BY timeBucket ORDER BY timeBucket`}
+-            config={chartConfig({ chartType: "bar", xAxisColumn: "timebucket", yAxisColumns: ["calls"] })}
+-            {...widgetProps}
+-          />
+-        </div>
+-        <div className="h-[300px]">
+-          <MetricWidget
+-            widgetKey={`${modelName}-ttfc-time`}
+-            title="TTFC over time"
+-            query={`SELECT timeBucket(), round(quantilesMerge(0.5)(ttfc_quantiles)[1], 0) AS ttfc_p50, round(quantilesMerge(0.9)(ttfc_quantiles)[1], 0) AS ttfc_p90 FROM llm_models WHERE response_model = '${escapeTSQL(modelName)}' GROUP BY timeBucket ORDER BY timeBucket`}
+-            config={chartConfig({ chartType: "line", xAxisColumn: "timebucket", yAxisColumns: ["ttfc_p50", "ttfc_p90"], aggregation: "avg" })}
+-            {...widgetProps}
+-          />
+-        </div>
++      <div className="h-[300px]">
++        <MetricWidget
++          widgetKey={`${modelName}-ttfc-time`}
++          title="TTFC over time"
++          query={`SELECT timeBucket(), round(quantilesMerge(0.5)(ttfc_quantiles)[1], 0) AS ttfc_p50, round(quantilesMerge(0.9)(ttfc_quantiles)[1], 0) AS ttfc_p90 FROM llm_models WHERE response_model = '${escapeTSQL(modelName)}' GROUP BY timeBucket ORDER BY timeBucket`}
++          config={chartConfig({ chartType: "line", xAxisColumn: "timebucket", yAxisColumns: ["ttfc_p50", "ttfc_p90"], aggregation: "avg" })}
++          {...widgetProps}
++        />
+       </div>
+ 
+       <Callout variant="info">
+@@ -523,7 +503,7 @@ function YourUsageTab({
+         <div className="h-24">
+           <MetricWidget
+             widgetKey={`${modelName}-user-calls`}
+-            title="Your Calls"
++            title="Total calls (7d)"
+             query={`SELECT count() AS total_calls FROM llm_metrics WHERE response_model = '${escapeTSQL(modelName)}'`}
+             config={bignumberConfig("total_calls", { abbreviate: true })}
+             {...widgetProps}
+@@ -532,7 +512,7 @@ function YourUsageTab({
+         <div className="h-24">
+           <MetricWidget
+             widgetKey={`${modelName}-user-cost`}
+-            title="Your Cost"
++            title="Total cost (7d)"
+             query={`SELECT sum(total_cost) AS total_cost FROM llm_metrics WHERE response_model = '${escapeTSQL(modelName)}'`}
+             config={bignumberConfig("total_cost", { aggregation: "sum" })}
+             {...widgetProps}
+diff --git a/apps/webapp/app/routes/_app.orgs.$organizationSlug.projects.$projectParam.env.$envParam.models._index/route.tsx b/apps/webapp/app/routes/_app.orgs.$organizationSlug.projects.$projectParam.env.$envParam.models._index/route.tsx
+index 394530b6335..4abf40c0335 100644
+--- a/apps/webapp/app/routes/_app.orgs.$organizationSlug.projects.$projectParam.env.$envParam.models._index/route.tsx
++++ b/apps/webapp/app/routes/_app.orgs.$organizationSlug.projects.$projectParam.env.$envParam.models._index/route.tsx
+@@ -343,7 +343,6 @@ function ModelsList({
+             </>
+           )}
+           <TableHeaderCell alignment="right">p50 TTFC</TableHeaderCell>
+-          <TableHeaderCell alignment="right">Calls (7d)</TableHeaderCell>
+         </TableRow>
+       </TableHeader>
+       <TableBody>
+@@ -397,9 +396,6 @@ function ModelsList({
+               <TableCell onClick={select} alignment="right" className="tabular-nums">
+                 {popular && popular.ttfcP50 > 0 ? `${popular.ttfcP50.toFixed(0)}ms` : "—"}
+               </TableCell>
+-              <TableCell onClick={select} alignment="right" className="tabular-nums">
+-                {popular && popular.callCount > 0 ? formatNumberCompact(popular.callCount) : "—"}
+-              </TableCell>
+             </TableRow>
+           );
+         })}
+@@ -718,20 +714,20 @@ function ModelDetailPanel({
+             Overview
+           </TabButton>
+           <TabButton
+-            isActive={tab === "global"}
++            isActive={tab === "usage"}
+             layoutId="model-detail"
+-            onClick={() => setTab("global")}
+-            shortcut={{ key: "g" }}
++            onClick={() => setTab("usage")}
++            shortcut={{ key: "u" }}
+           >
+-            Global metrics
++            Metrics
+           </TabButton>
+           <TabButton
+-            isActive={tab === "usage"}
++            isActive={tab === "global"}
+             layoutId="model-detail"
+-            onClick={() => setTab("usage")}
+-            shortcut={{ key: "u" }}
++            onClick={() => setTab("global")}
++            shortcut={{ key: "g" }}
+           >
+-            Your usage
++            Global metrics
+           </TabButton>
+         </TabContainer>
+       </div>
+@@ -876,18 +872,7 @@ function DetailGlobalMetricsTab({
+ 
+   return (
+     <div className="flex flex-col gap-3 py-3">
+-      <div className="h-[250px]">
+-        <MetricWidget
+-          widgetKey={`${modelName}-calls`}
+-          title="Total calls"
+-          query={`SELECT sum(call_count) AS total_calls FROM llm_models WHERE response_model = '${escapeTSQL(
+-            modelName
+-          )}'`}
+-          config={bignumberConfig("total_calls", { abbreviate: true })}
+-          {...widgetProps}
+-        />
+-      </div>
+-      <div className="h-[250px]">
++      <div className="h-[120px]">
+         <MetricWidget
+           widgetKey={`${modelName}-ttfc-p50`}
+           title="p50 TTFC"
+@@ -898,7 +883,7 @@ function DetailGlobalMetricsTab({
+           {...widgetProps}
+         />
+       </div>
+-      <div className="h-[250px]">
++      <div className="h-[120px]">
+         <MetricWidget
+           widgetKey={`${modelName}-ttfc-p90`}
+           title="p90 TTFC"
+@@ -909,7 +894,7 @@ function DetailGlobalMetricsTab({
+           {...widgetProps}
+         />
+       </div>
+-      <div className="h-[250px]">
++      <div className="h-[120px]">
+         <MetricWidget
+           widgetKey={`${modelName}-tps`}
+           title="Tokens/sec (p50)"
+@@ -921,22 +906,7 @@ function DetailGlobalMetricsTab({
+         />
+       </div>
+ 
+-      <div className="h-[250px]">
+-        <MetricWidget
+-          widgetKey={`${modelName}-calls-time`}
+-          title="Calls over time"
+-          query={`SELECT timeBucket(), sum(call_count) AS calls FROM llm_models WHERE response_model = '${escapeTSQL(
+-            modelName
+-          )}' GROUP BY timeBucket ORDER BY timeBucket`}
+-          config={chartConfig({
+-            chartType: "bar",
+-            xAxisColumn: "timebucket",
+-            yAxisColumns: ["calls"],
+-          })}
+-          {...widgetProps}
+-        />
+-      </div>
+-      <div className="h-[250px]">
++      <div className="h-[400px]">
+         <MetricWidget
+           widgetKey={`${modelName}-ttfc-time`}
+           title="TTFC over time"
+@@ -983,10 +953,10 @@ function DetailYourUsageTab({
+ 
+   return (
+     <div className="flex flex-col gap-3 py-3">
+-      <div className="h-[250px]">
++      <div className="h-[120px]">
+         <MetricWidget
+           widgetKey={`${modelName}-user-calls`}
+-          title="Your calls"
++          title="Total calls (7d)"
+           query={`SELECT count() AS total_calls FROM llm_metrics WHERE response_model = '${escapeTSQL(
+             modelName
+           )}'`}
+@@ -994,10 +964,10 @@ function DetailYourUsageTab({
+           {...widgetProps}
+         />
+       </div>
+-      <div className="h-[250px]">
++      <div className="h-[120px]">
+         <MetricWidget
+           widgetKey={`${modelName}-user-cost`}
+-          title="Your cost"
++          title="Total cost (7d)"
+           query={`SELECT sum(total_cost) AS total_cost FROM llm_metrics WHERE response_model = '${escapeTSQL(
+             modelName
+           )}'`}
+@@ -1005,7 +975,7 @@ function DetailYourUsageTab({
+           {...widgetProps}
+         />
+       </div>
+-      <div className="h-[250px]">
++      <div className="h-[120px]">
+         <MetricWidget
+           widgetKey={`${modelName}-user-ttfc`}
+           title="Avg TTFC"
+@@ -1016,7 +986,7 @@ function DetailYourUsageTab({
+           {...widgetProps}
+         />
+       </div>
+-      <div className="h-[250px]">
++      <div className="h-[120px]">
+         <MetricWidget
+           widgetKey={`${modelName}-user-tps`}
+           title="Avg tokens/sec"
+@@ -1028,7 +998,7 @@ function DetailYourUsageTab({
+         />
+       </div>
+ 
+-      <div className="h-[250px]">
++      <div className="h-[400px]">
+         <MetricWidget
+           widgetKey={`${modelName}-user-cost-time`}
+           title="Cost over time"
+@@ -1043,7 +1013,7 @@ function DetailYourUsageTab({
+           {...widgetProps}
+         />
+       </div>
+-      <div className="h-[250px]">
++      <div className="h-[400px]">
+         <MetricWidget
+           widgetKey={`${modelName}-user-tokens-time`}
+           title="Tokens over time"
+@@ -1058,7 +1028,7 @@ function DetailYourUsageTab({
+           {...widgetProps}
+         />
+       </div>
+-      <div className="h-[250px]">
++      <div className="h-[400px]">
+         <MetricWidget
+           widgetKey={`${modelName}-user-tasks`}
+           title="Cost by task"
+diff --git a/apps/webapp/app/v3/canAccessAiModels.server.ts b/apps/webapp/app/v3/canAccessAiModels.server.ts
+deleted file mode 100644
+index d1988ba7f89..00000000000
+--- a/apps/webapp/app/v3/canAccessAiModels.server.ts
++++ /dev/null
+@@ -1,47 +0,0 @@
+-import { prisma } from "~/db.server";
+-import { env } from "~/env.server";
+-import { FEATURE_FLAG } from "~/v3/featureFlags";
+-import { makeFlag } from "~/v3/featureFlags.server";
+-
+-export async function canAccessAiModels(options: {
+-  userId: string;
+-  isAdmin: boolean;
+-  isImpersonating: boolean;
+-  organizationSlug: string;
+-}): Promise<boolean> {
+-  const { userId, isAdmin, isImpersonating, organizationSlug } = options;
+-
+-  // 1. If env var is set then globally enabled
+-  if (env.AI_MODELS_ENABLED === "1") {
+-    return true;
+-  }
+-
+-  // 2. Admins always have access
+-  if (isAdmin || isImpersonating) {
+-    return true;
+-  }
+-
+-  // 3. Check if org/global feature flag is on
+-  const org = await prisma.organization.findFirst({
+-    where: {
+-      slug: organizationSlug,
+-      members: { some: { userId } },
+-    },
+-    select: {
+-      featureFlags: true,
+-    },
+-  });
+-
+-  const flag = makeFlag();
+-  const flagResult = await flag({
+-    key: FEATURE_FLAG.hasAiModelsAccess,
+-    defaultValue: false,
+-    overrides: (org?.featureFlags as Record<string, unknown>) ?? {},
+-  });
+-  if (flagResult) {
+-    return true;
+-  }
+-
+-  // 4. Not enabled anywhere
+-  return false;
+-}
+diff --git a/apps/webapp/app/v3/featureFlags.ts b/apps/webapp/app/v3/featureFlags.ts
+index a274abd75ff..b40a83c3a35 100644
+--- a/apps/webapp/app/v3/featureFlags.ts
++++ b/apps/webapp/app/v3/featureFlags.ts
+@@ -6,7 +6,6 @@ export const FEATURE_FLAG = {
+   hasQueryAccess: "hasQueryAccess",
+   hasLogsPageAccess: "hasLogsPageAccess",
+   hasAiAccess: "hasAiAccess",
+-  hasAiModelsAccess: "hasAiModelsAccess",
+   hasComputeAccess: "hasComputeAccess",
+   hasPrivateConnections: "hasPrivateConnections",
+ } as const;
+@@ -17,7 +16,6 @@ export const FeatureFlagCatalog = {
+   [FEATURE_FLAG.hasQueryAccess]: z.coerce.boolean(),
+   [FEATURE_FLAG.hasLogsPageAccess]: z.coerce.boolean(),
+   [FEATURE_FLAG.hasAiAccess]: z.coerce.boolean(),
+-  [FEATURE_FLAG.hasAiModelsAccess]: z.coerce.boolean(),
+   [FEATURE_FLAG.hasComputeAccess]: z.coerce.boolean(),
+   [FEATURE_FLAG.hasPrivateConnections]: z.coerce.boolean(),
+ };
+diff --git a/packages/redis-worker/src/fair-queue/tests/fairQueue.test.ts b/packages/redis-worker/src/fair-queue/tests/fairQueue.test.ts
+index d827da15907..f1634ad2fe0 100644
+--- a/packages/redis-worker/src/fair-queue/tests/fairQueue.test.ts
++++ b/packages/redis-worker/src/fair-queue/tests/fairQueue.test.ts
+@@ -215,7 +215,7 @@ describe("FairQueue", () => {
+   describe("basic enqueue and process", () => {
+     redisTest(
+       "should enqueue and process a single message",
+-      { timeout: 15000 },
++      { timeout: 30000 },
+       async ({ redisOptions }) => {
+         const processed: string[] = [];
+         keys = new DefaultFairQueueKeyProducer({ prefix: "test" });

@@ -1,0 +1,104 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "ci_cd_infrastructure",
+      "recommendation": "Updated all GitHub Actions workflows to use the latest major versions of actions, with a focus on actions/setup-node@v6 to standardize on Node.js 22",
+      "rationale": "The changes eliminate deprecation warnings by migrating from older action versions (v3-v5) to their latest stable releases. This ensures compatibility with GitHub's evolving platform, improves security with updated dependencies, and maintains consistent behavior across all workflows. The Node.js version was already at 22 in most workflows, so the focus was on updating the action versions rather than changing the Node version itself.",
+      "alternatives_considered": [
+        "Updating only the setup-node action while leaving others unchanged",
+        "Switching to a different Node.js version manager or container-based approach",
+        "Creating a composite action to centralize Node.js setup across workflows"
+      ],
+      "files_affected": [
+        ".github/workflows/build-package.yml",
+        ".github/workflows/e2e.yml",
+        ".github/workflows/test-frontend.yml"
+      ]
+    },
+    {
+      "dimension": "dependency_management",
+      "recommendation": "Systematically updated all GitHub Action dependencies to their latest major versions across 12 workflow files",
+      "rationale": "Bulk updates ensure consistency and reduce maintenance overhead. By updating all actions in a single change, we avoid version fragmentation and ensure all workflows benefit from the latest features, security patches, and performance improvements. This approach follows the principle of 'dependency hygiene' for CI/CD pipelines.",
+      "alternatives_considered": [
+        "Gradual rollout updating one workflow at a time",
+        "Pinning to specific patch versions instead of major versions",
+        "Creating a shared action repository for common workflows"
+      ],
+      "files_affected": [
+        ".github/workflows/build-package.yml",
+        ".github/workflows/codeql.yml",
+        ".github/workflows/docs.yml",
+        ".github/workflows/e2e.yml",
+        ".github/workflows/locale-sync.yml",
+        ".github/workflows/partial-trivy-container-scanning.yml",
+        ".github/workflows/publish.yml",
+        ".github/workflows/pull-request-lint.yml",
+        ".github/workflows/release-drafter.yml",
+        ".github/workflows/release.yml",
+        ".github/workflows/scheduled-checks.yml",
+        ".github/workflows/test-backend.yml",
+        ".github/workflows/test-frontend.yml"
+      ]
+    },
+    {
+      "dimension": "workflow_optimization",
+      "recommendation": "Restructured release-drafter.yml to separate concerns between drafting releases and auto-labeling PRs",
+      "rationale": "The workflow was split into two distinct jobs ('draft_release' and 'auto_label') with conditional execution based on event type. This improves clarity, reduces unnecessary job execution, and follows GitHub Actions best practices for event-driven workflows. The auto-labeler now runs only on pull_request events while release drafting runs on push/workflow_dispatch events.",
+      "alternatives_considered": [
+        "Keeping a single job with complex conditional logic",
+        "Creating separate workflow files for different concerns",
+        "Using matrix strategies to handle different event types"
+      ],
+      "files_affected": [
+        ".github/workflows/release-drafter.yml"
+      ]
+    },
+    {
+      "dimension": "security_and_compliance",
+      "recommendation": "Updated security scanning workflows (CodeQL and Trivy) to use latest action versions",
+      "rationale": "Security tools benefit most from staying current, as they receive frequent vulnerability database updates and scanning improvements. Updating github/codeql-action from v3 to v4 and maintaining trivy scanning ensures the project continues to receive the latest security analysis capabilities without breaking changes.",
+      "alternatives_considered": [
+        "Keeping older versions for stability in security scanning",
+        "Switching to alternative security scanning tools",
+        "Disabling security scanning during the transition period"
+      ],
+      "files_affected": [
+        ".github/workflows/codeql.yml",
+        ".github/workflows/partial-trivy-container-scanning.yml"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Update GitHub Actions to Latest Versions",
+      "description": "Update all GitHub Actions workflow files to use the latest major versions of GitHub Actions, focusing on actions/setup-node@v6 and related dependencies",
+      "files_to_modify": [
+        ".github/workflows/build-package.yml",
+        ".github/workflows/codeql.yml",
+        ".github/workflows/docs.yml",
+        ".github/workflows/e2e.yml",
+        ".github/workflows/locale-sync.yml",
+        ".github/workflows/partial-trivy-container-scanning.yml",
+        ".github/workflows/publish.yml",
+        ".github/workflows/pull-request-lint.yml",
+        ".github/workflows/release-drafter.yml",
+        ".github/workflows/release.yml",
+        ".github/workflows/scheduled-checks.yml",
+        ".github/workflows/test-backend.yml",
+        ".github/workflows/test-frontend.yml"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    }
+  ],
+  "implementation_summary": "The implementation focused on modernizing the CI/CD pipeline by systematically updating all GitHub Actions workflows to their latest major versions. Contrary to the feature request's mention of updating to Node.js 24, the actual changes revealed that Node.js was already at version 22 in most workflows, so the primary focus became updating the GitHub Actions themselves rather than changing the Node version.\n\nThe changes follow a consistent pattern across 12 workflow files: updating actions/checkout from v4 to v6, actions/setup-node to v6, actions/cache to v5, and various other actions to their latest stable versions. This bulk update approach ensures consistency and reduces maintenance overhead. The most significant structural change was in release-drafter.yml, which was refactored into two separate jobs with conditional execution based on event type, improving clarity and efficiency.\n\nThese updates integrate seamlessly with the existing codebase because they maintain the same workflow logic and structure while only changing the action versions. The project's mature CI/CD infrastructure, with its extensive GitHub Actions setup, benefits from these updates through improved performance, security, and compatibility with GitHub's evolving platform. The changes demonstrate good dependency management practices by proactively updating CI/CD tools alongside application dependencies.",
+  "source_pr": "https://github.com/mealie-recipes/mealie/pull/7392",
+  "before_sha": "5ce3099cfaff736b61b168f04c5c6cb94eb99ccc",
+  "after_sha": "9c3b94c01955277641d8630ae9f0baa9404ad54c",
+  "diff_stats": {
+    "additions": 52,
+    "deletions": 47,
+    "files_changed": 13
+  }
+}

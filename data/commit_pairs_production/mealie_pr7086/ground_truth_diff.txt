@@ -1,0 +1,189 @@
+diff --git a/frontend/components/Domain/Recipe/RecipePage/RecipePageParts/RecipePageParseDialog.vue b/frontend/components/Domain/Recipe/RecipePage/RecipePageParts/RecipePageParseDialog.vue
+index a93305d5d1d..20d11c9c8f0 100644
+--- a/frontend/components/Domain/Recipe/RecipePage/RecipePageParts/RecipePageParseDialog.vue
++++ b/frontend/components/Domain/Recipe/RecipePage/RecipePageParts/RecipePageParseDialog.vue
+@@ -208,7 +208,7 @@ const props = defineProps<{
+   ingredients: NoUndefinedField<RecipeIngredient[]>;
+ }>();
+ 
+-const { parseIngredientText } = useIngredientTextParser();
++const { ingredientToParserString } = useIngredientTextParser();
+ 
+ const emit = defineEmits<{
+   (e: "update:modelValue", value: boolean): void;
+@@ -373,7 +373,7 @@ async function parseIngredients() {
+   try {
+     const ingsAsString = props.ingredients
+       .filter(ing => !ing.referencedRecipe)
+-      .map(ing => parseIngredientText(ing, 1, false) ?? "");
++      .map(ing => ingredientToParserString(ing));
+     const { data, error } = await api.recipes.parseIngredients(parser.value, ingsAsString);
+     if (error || !data) {
+       throw new Error("Failed to parse ingredients");
+diff --git a/frontend/composables/recipes/use-recipe-ingredients.test.ts b/frontend/composables/recipes/use-recipe-ingredients.test.ts
+index caa3b4ef620..6896b7bef87 100644
+--- a/frontend/composables/recipes/use-recipe-ingredients.test.ts
++++ b/frontend/composables/recipes/use-recipe-ingredients.test.ts
+@@ -6,6 +6,7 @@ import { useLocales } from "../use-locales";
+ vi.mock("../use-locales");
+ 
+ let parseIngredientText: (ingredient: RecipeIngredient, scale?: number, includeFormating?: boolean) => string;
++let ingredientToParserString: (ingredient: RecipeIngredient) => string;
+ 
+ describe("parseIngredientText", () => {
+   beforeEach(() => {
+@@ -13,7 +14,7 @@ describe("parseIngredientText", () => {
+       locales: [{ value: "en-US", pluralFoodHandling: "always" }],
+       locale: { value: "en-US", pluralFoodHandling: "always" },
+     } as any);
+-    ({ parseIngredientText } = useIngredientTextParser());
++    ({ parseIngredientText, ingredientToParserString } = useIngredientTextParser());
+   });
+ 
+   const createRecipeIngredient = (overrides: Partial<RecipeIngredient>): RecipeIngredient => ({
+@@ -236,3 +237,116 @@ describe("parseIngredientText", () => {
+     expect(parseIngredientText(ingredient, 1, false)).toEqual("&lt; 1/10 cup salt");
+   });
+ });
++
++describe("ingredientToParserString", () => {
++  beforeEach(() => {
++    vi.mocked(useLocales).mockReturnValue({
++      locales: [{ value: "en-US", pluralFoodHandling: "always" }],
++      locale: { value: "en-US", pluralFoodHandling: "always" },
++    } as any);
++    ({ ingredientToParserString } = useIngredientTextParser());
++  });
++
++  const createRecipeIngredient = (overrides: Partial<RecipeIngredient>): RecipeIngredient => ({
++    quantity: 1,
++    ...overrides,
++  });
++
++  test("unparsed ingredient with qty=1 and note containing fraction uses just the note", () => {
++    const ingredient = createRecipeIngredient({
++      quantity: 1,
++      unit: undefined,
++      food: undefined,
++      note: "1/2 cup apples",
++    });
++
++    expect(ingredientToParserString(ingredient)).toEqual("1/2 cup apples");
++  });
++
++  test("ingredient with originalText uses originalText", () => {
++    const ingredient = createRecipeIngredient({
++      quantity: 1,
++      unit: { id: "1", name: "cup" },
++      food: { id: "1", name: "apples" },
++      note: "some note",
++      originalText: "half a cup of apples",
++    });
++
++    expect(ingredientToParserString(ingredient)).toEqual("half a cup of apples");
++  });
++
++  test("parsed ingredient with unit and food uses full reconstruction", () => {
++    const ingredient = createRecipeIngredient({
++      quantity: 2,
++      unit: { id: "1", name: "cup" },
++      food: { id: "1", name: "flour" },
++    });
++
++    expect(ingredientToParserString(ingredient)).toEqual("2 cup flour");
++  });
++
++  test("ingredient with no data returns empty string", () => {
++    const ingredient = createRecipeIngredient({
++      quantity: 0,
++      unit: undefined,
++      food: undefined,
++      note: undefined,
++    });
++
++    expect(ingredientToParserString(ingredient)).toEqual("");
++  });
++
++  test("unparsed ingredient with note starting with an integer uses just the note", () => {
++    const ingredient = createRecipeIngredient({
++      quantity: 1,
++      unit: undefined,
++      food: undefined,
++      note: "2 tbsp olive oil",
++    });
++
++    expect(ingredientToParserString(ingredient)).toEqual("2 tbsp olive oil");
++  });
++
++  test("unparsed ingredient with purely descriptive note uses just the note", () => {
++    const ingredient = createRecipeIngredient({
++      quantity: 1,
++      unit: undefined,
++      food: undefined,
++      note: "salt to taste",
++    });
++
++    expect(ingredientToParserString(ingredient)).toEqual("salt to taste");
++  });
++
++  test("originalText wins even when ingredient is unparsed (no unit, no food)", () => {
++    const ingredient = createRecipeIngredient({
++      quantity: 1,
++      unit: undefined,
++      food: undefined,
++      note: "2 tbsp olive oil",
++      originalText: "two tablespoons olive oil",
++    });
++
++    expect(ingredientToParserString(ingredient)).toEqual("two tablespoons olive oil");
++  });
++
++  test("ingredient with only food (no unit) uses full reconstruction", () => {
++    const ingredient = createRecipeIngredient({
++      quantity: 2,
++      unit: undefined,
++      food: { id: "1", name: "apples" },
++    });
++
++    expect(ingredientToParserString(ingredient)).toEqual("2 apples");
++  });
++
++  test("ingredient with only unit (no food) uses full reconstruction", () => {
++    const ingredient = createRecipeIngredient({
++      quantity: 2,
++      unit: { id: "1", name: "cup" },
++      food: undefined,
++    });
++
++    expect(ingredientToParserString(ingredient)).toEqual("2 cup");
++  });
++});
+diff --git a/frontend/composables/recipes/use-recipe-ingredients.ts b/frontend/composables/recipes/use-recipe-ingredients.ts
+index 0e839af7352..dd447612ea0 100644
+--- a/frontend/composables/recipes/use-recipe-ingredients.ts
++++ b/frontend/composables/recipes/use-recipe-ingredients.ts
+@@ -142,8 +142,24 @@ export function useIngredientTextParser() {
+     return sanitizeIngredientHTML(text);
+   };
+ 
++  function ingredientToParserString(ingredient: RecipeIngredient): string {
++    if (ingredient.originalText) {
++      return ingredient.originalText;
++    }
++
++    // If the ingredient has no unit and no food, it's unparsed — the note
++    // contains the full ingredient text. Using parseIngredientText would
++    // incorrectly prepend the quantity (e.g. "1 1/2 cup apples").
++    if (!ingredient.unit && !ingredient.food) {
++      return ingredient.note || "";
++    }
++
++    return parseIngredientText(ingredient, 1, false) ?? "";
++  }
++
+   return {
+     useParsedIngredientText,
+     parseIngredientText,
++    ingredientToParserString,
+   };
+ }

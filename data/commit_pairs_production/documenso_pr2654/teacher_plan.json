@@ -1,0 +1,93 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "security_configuration",
+      "recommendation": "Added environment variable NEXT_PRIVATE_WEBHOOK_SSRF_BYPASS_HOSTS to allow specific hosts to bypass SSRF protection checks",
+      "rationale": "Self-hosted instances need to send webhooks to internal services while maintaining security for external webhooks. Using an environment variable provides runtime configurability without code changes and follows the existing pattern of NEXT_PRIVATE_* configuration variables.",
+      "alternatives_considered": [
+        "Hardcoded allowlist in code",
+        "Database configuration table",
+        "Command-line arguments"
+      ],
+      "files_affected": [
+        ".env.example",
+        "turbo.json"
+      ]
+    },
+    {
+      "dimension": "security_implementation",
+      "recommendation": "Implemented immutable Set-based allowlist parsed once at module initialization for performance and thread safety",
+      "rationale": "Parsing the environment variable once at module load ensures consistent behavior across all webhook validations and avoids repeated string parsing overhead. Using a Set provides O(1) lookup time and automatic deduplication of entries.",
+      "alternatives_considered": [
+        "Array with linear search",
+        "Parsing on each validation",
+        "Using a Map with additional metadata"
+      ],
+      "files_affected": [
+        "packages/lib/server-only/webhooks/assert-webhook-url.ts"
+      ]
+    },
+    {
+      "dimension": "api_design",
+      "recommendation": "Added early bypass check at the beginning of assertNotPrivateUrl function before any DNS resolution",
+      "rationale": "Checking for bypass eligibility first minimizes performance impact for allowed hosts and maintains clean separation of concerns. The bypass check uses the same URL parsing and hostname normalization as the existing validation logic.",
+      "alternatives_considered": [
+        "Wrapping the entire function in a conditional",
+        "Creating a separate validation function",
+        "Modifying isPrivateUrl function instead"
+      ],
+      "files_affected": [
+        "packages/lib/server-only/webhooks/assert-webhook-url.ts"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Gracefully handles malformed URLs in isBypassedHost function with try-catch returning false",
+      "rationale": "If a URL cannot be parsed, it should fail the bypass check and proceed to normal validation where it will be properly rejected. This maintains security by defaulting to strict validation for invalid URLs.",
+      "alternatives_considered": [
+        "Letting the error propagate",
+        "Validating URLs before parsing",
+        "Returning true for invalid URLs to bypass"
+      ],
+      "files_affected": [
+        "packages/lib/server-only/webhooks/assert-webhook-url.ts"
+      ]
+    },
+    {
+      "dimension": "dev_experience",
+      "recommendation": "Updated turbo.json to include the new environment variable in the list of allowed variables",
+      "rationale": "Ensures the variable is recognized by the build system and can be properly passed through to the application. This follows the existing pattern for environment variable management in the project.",
+      "alternatives_considered": [
+        "Not updating turbo.json",
+        "Creating a separate configuration file",
+        "Using a different prefix for the variable"
+      ],
+      "files_affected": [
+        "turbo.json"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Implement Webhook SSRF Bypass Configuration",
+      "description": "Add environment variable configuration and parsing logic to allow specific hosts to bypass private address validation for webhooks",
+      "files_to_modify": [
+        ".env.example",
+        "packages/lib/server-only/webhooks/assert-webhook-url.ts",
+        "turbo.json"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation adds a configurable SSRF bypass mechanism for webhook URLs while maintaining the existing security posture. The core change is in the assert-webhook-url.ts file where a new environment variable NEXT_PRIVATE_WEBHOOK_SSRF_BYPASS_HOSTS is parsed into an immutable Set at module initialization. This Set contains lowercased hostnames or IP addresses that are allowed to resolve to private addresses.\n\nThe key design pattern is the early bypass check in the assertNotPrivateUrl function, which returns immediately if the URL's hostname matches an entry in the allowlist. This minimizes performance impact for allowed hosts. The implementation uses the same URL parsing and hostname normalization logic as the existing validation to ensure consistency. The environment variable uses a comma-separated format for simplicity and follows the established NEXT_PRIVATE_* naming convention used throughout the codebase.\n\nThis change integrates seamlessly with the existing security infrastructure by maintaining all existing validation for non-bypassed hosts. The documentation in .env.example provides clear usage examples, and the turbo.json update ensures the environment variable is properly recognized by the build system. The solution is minimal, focused, and follows the principle of least privilege by requiring explicit configuration for each allowed host.",
+  "source_pr": "https://github.com/documenso/documenso/pull/2654",
+  "before_sha": "ad559f72dd4927f47839589e751e93d06c6f4986",
+  "after_sha": "1c82595c121daee8f425fef3fa6ac60bd69106ff",
+  "diff_stats": {
+    "additions": 56,
+    "deletions": 1,
+    "files_changed": 3
+  }
+}

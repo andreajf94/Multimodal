@@ -1,0 +1,98 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "ui_component_design",
+      "recommendation": "Created a reusable CopyTextLink component for consistent copy functionality across the UI",
+      "rationale": "The copy functionality was needed in multiple places (starting with the run inspector), so creating a dedicated component ensures consistency, reduces code duplication, and follows the existing component pattern in the primitives directory. The component uses the existing useCopy hook for clipboard operations and follows the same styling conventions as other primitive components.",
+      "alternatives_considered": [
+        "Inline copy button implementation directly in the route component",
+        "Extending existing CopyableText component instead of creating new one",
+        "Using a third-party clipboard library instead of the custom useCopy hook"
+      ],
+      "files_affected": [
+        "apps/webapp/app/components/primitives/CopyTextLink.tsx"
+      ]
+    },
+    {
+      "dimension": "ui_layout_and_styling",
+      "recommendation": "Improved text wrapping and truncation using CSS utility classes and grid layout adjustments",
+      "rationale": "Long text content was overflowing containers without proper wrapping. The solution uses `[overflow-wrap:break-word]` to handle long unbroken strings, `min-w-0` to allow flex children to shrink, and `grid-cols-[minmax(0,1fr)_auto]` to create responsive layouts that prevent overflow. This approach maintains the existing Tailwind CSS utility class pattern while fixing specific layout issues.",
+      "alternatives_considered": [
+        "Adding custom CSS classes with specific break-word rules",
+        "Using JavaScript to truncate text based on container width",
+        "Implementing a custom text truncation component"
+      ],
+      "files_affected": [
+        "apps/webapp/app/routes/resources.orgs.$organizationSlug.projects.$projectParam.env.$envParam.runs.$runParam.spans.$spanParam/route.tsx"
+      ]
+    },
+    {
+      "dimension": "user_experience",
+      "recommendation": "Added visual feedback for copy operations with icon and text state changes",
+      "rationale": "Users need clear feedback when copy operations succeed. The implementation shows 'Copy' text with a clipboard icon initially, then changes to 'Copied' with a checkmark icon and success color after copying. This follows established UX patterns in the codebase and provides immediate, clear feedback without disrupting the user's workflow.",
+      "alternatives_considered": [
+        "Toast notifications for copy success",
+        "Temporary text color change only without icon change",
+        "No visual feedback beyond the clipboard operation"
+      ],
+      "files_affected": [
+        "apps/webapp/app/components/primitives/CopyTextLink.tsx",
+        "apps/webapp/app/routes/resources.orgs.$organizationSlug.projects.$projectParam.env.$envParam.runs.$runParam.spans.$spanParam/route.tsx"
+      ]
+    },
+    {
+      "dimension": "code_organization",
+      "recommendation": "Placed the copy button in the Property.Label area rather than next to the value",
+      "rationale": "The copy functionality is placed in the label area (right-aligned) to maintain visual hierarchy and prevent the copy button from interfering with the message content display. This keeps the primary content area clean while making the copy action discoverable through its proximity to the 'Message' label.",
+      "alternatives_considered": [
+        "Placing copy button next to the message value",
+        "Adding copy button as a floating action button",
+        "Using a hover-reveal pattern for the copy button"
+      ],
+      "files_affected": [
+        "apps/webapp/app/routes/resources.orgs.$organizationSlug.projects.$projectParam.env.$envParam.runs.$runParam.spans.$spanParam/route.tsx"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Create reusable CopyTextLink component",
+      "description": "Implement a reusable React component for copy-to-clipboard functionality with visual feedback, following the existing primitives component pattern",
+      "files_to_modify": [],
+      "files_to_create": [
+        "apps/webapp/app/components/primitives/CopyTextLink.tsx"
+      ],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-002",
+      "title": "Fix run inspector text wrapping and layout",
+      "description": "Improve text display in the run inspector by fixing overflow issues with long text and improving the header layout to prevent title truncation problems",
+      "files_to_modify": [
+        "apps/webapp/app/routes/resources.orgs.$organizationSlug.projects.$projectParam.env.$envParam.runs.$runParam.spans.$spanParam/route.tsx"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-003",
+      "title": "Add copy functionality to message property",
+      "description": "Integrate the CopyTextLink component into the Message property display in the span inspector, allowing users to copy message text with a single click",
+      "files_to_modify": [
+        "apps/webapp/app/routes/resources.orgs.$organizationSlug.projects.$projectParam.env.$envParam.runs.$runParam.spans.$spanParam/route.tsx"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation addresses text display improvements in the run inspector through three key changes. First, a new reusable CopyTextLink component was created in the primitives directory, following the established component architecture pattern. This component leverages the existing useCopy hook for clipboard operations and provides visual feedback through icon and text state changes, ensuring consistency with the UI design system.\n\nSecond, layout improvements were made to fix text wrapping issues. The header section was refactored from a flex layout to a grid layout using `grid-cols-[minmax(0,1fr)_auto]` to prevent overflow, and `min-w-0` was added to allow proper shrinking of flex children. For the message content, `[overflow-wrap:break-word]` was added alongside the existing `whitespace-pre-wrap` to handle long unbroken strings that previously overflowed containers.\n\nThird, the copy functionality was integrated into the Message property by adding the CopyTextLink component to the Property.Label area. This placement maintains visual hierarchy while making the copy action easily discoverable. The implementation follows the existing code patterns in the route component, including proper TypeScript typing and consistent use of utility classes from the cn helper. These changes collectively improve the user experience for inspecting run details while maintaining code quality and consistency with the existing architecture.",
+  "source_pr": "https://github.com/triggerdotdev/trigger.dev/pull/3328",
+  "before_sha": "cf0fdde3c4976995990b75cd8382433b71b88541",
+  "after_sha": "4f2ff3d9def90ebcd09cedb42a67eb61612ca99c",
+  "diff_stats": {
+    "additions": 57,
+    "deletions": 12,
+    "files_changed": 2
+  }
+}

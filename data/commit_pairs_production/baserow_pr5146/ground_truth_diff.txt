@@ -1,0 +1,79 @@
+diff --git a/changelog/entries/unreleased/feature/3673_view_level_permissions.json b/changelog/entries/unreleased/feature/3673_view_level_permissions.json
+new file mode 100644
+index 0000000000..24f10587e2
+--- /dev/null
++++ b/changelog/entries/unreleased/feature/3673_view_level_permissions.json
+@@ -0,0 +1,9 @@
++{
++  "type": "feature",
++  "message": "Introduced restricted view ownership type for view-level permissions.",
++  "issue_origin": "github",
++  "issue_number": 3673,
++  "domain": "database",
++  "bullet_points": [],
++  "created_at": "2026-04-08"
++}
+diff --git a/enterprise/backend/src/baserow_enterprise/apps.py b/enterprise/backend/src/baserow_enterprise/apps.py
+index fde8d97625..0d5d53a783 100755
+--- a/enterprise/backend/src/baserow_enterprise/apps.py
++++ b/enterprise/backend/src/baserow_enterprise/apps.py
+@@ -343,7 +343,6 @@ def ready(self):
+         from baserow.contrib.database.ws.views.rows.registries import (
+             view_realtime_rows_registry,
+         )
+-        from baserow.core.feature_flags import feature_flag_is_enabled
+         from baserow.ws.registries import page_registry
+         from baserow_enterprise.view_ownership_types import RestrictedViewOwnershipType
+         from baserow_enterprise.ws.pages import RestrictedViewPageType
+@@ -351,8 +350,7 @@ def ready(self):
+             RestrictedViewRealtimeRowsType,
+         )
+ 
+-        if feature_flag_is_enabled("view_permissions"):
+-            view_ownership_type_registry.register(RestrictedViewOwnershipType())
++        view_ownership_type_registry.register(RestrictedViewOwnershipType())
+ 
+         page_registry.register(RestrictedViewPageType())
+         view_realtime_rows_registry.register(RestrictedViewRealtimeRowsType())
+diff --git a/enterprise/web-frontend/modules/baserow_enterprise/locales/en.json b/enterprise/web-frontend/modules/baserow_enterprise/locales/en.json
+index 279837b38b..958d50c02d 100644
+--- a/enterprise/web-frontend/modules/baserow_enterprise/locales/en.json
++++ b/enterprise/web-frontend/modules/baserow_enterprise/locales/en.json
+@@ -395,7 +395,7 @@
+     "sso": "Single Sign On",
+     "ssoContent": "Enable secure and seamless logins with SAML, Google, Facebook, GitHub, GitLab, or OpenID Connect. Supports multiple providers at once. Note that both Baserow as a tool, and the application builder authentication system support SSO.",
+     "rbac": "Role-based access control",
+-    "rbacContent": "Manage permissions with precision. Assign roles like admin, builder,  editor, commenter, or viewer at the workspace, database, or table level. You can also manage access by team.",
++    "rbacContent": "Manage permissions with precision. Assign roles like admin, builder, editor, commenter, or viewer at the workspace, database, table, and view level. You can also manage access by team.",
+     "auditLogs": "Audit logs",
+     "auditLogsContent": "Track everything that happens. View a full history of actions across your instance or workspace, filterable by user, action, and more.",
+     "dataSync": "Data sync",
+diff --git a/enterprise/web-frontend/modules/baserow_enterprise/plugin.js b/enterprise/web-frontend/modules/baserow_enterprise/plugin.js
+index d738a012ef..c5e16620fd 100644
+--- a/enterprise/web-frontend/modules/baserow_enterprise/plugin.js
++++ b/enterprise/web-frontend/modules/baserow_enterprise/plugin.js
+@@ -98,7 +98,7 @@ export default defineNuxtPlugin({
+   name: 'enterprise',
+   dependsOn: ['premium', 'registry'],
+   setup(nuxtApp) {
+-    const { $registry, $store, $featureFlagIsEnabled } = nuxtApp
++    const { $registry, $store } = nuxtApp
+ 
+     const context = { app: nuxtApp }
+ 
+@@ -271,11 +271,9 @@ export default defineNuxtPlugin({
+       new RealtimePushTwoWaySyncStrategyType(context)
+     )
+ 
+-    if ($featureFlagIsEnabled('view_permissions')) {
+-      $registry.register(
+-        'viewOwnershipType',
+-        new RestrictedViewOwnershipType(context)
+-      )
+-    }
++    $registry.register(
++      'viewOwnershipType',
++      new RestrictedViewOwnershipType(context)
++    )
+   },
+ })

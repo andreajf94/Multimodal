@@ -1,0 +1,96 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "logging_patterns",
+      "recommendation": "Changed from embedded string interpolation to structured logging fields using tracing macros with key-value pairs",
+      "rationale": "Structured logging makes logs machine-readable and enables better log analysis tools to parse and filter logs by specific fields. Using `?err` instead of `{err:?}` in string interpolation separates the error object into a distinct log field that can be indexed and queried separately.",
+      "alternatives_considered": [
+        "Keeping string interpolation for backward compatibility",
+        "Using different field naming conventions",
+        "Creating custom logging macros"
+      ],
+      "files_affected": [
+        "packages/ak-axum/src/error.rs",
+        "packages/ak-axum/src/server.rs",
+        "packages/ak-common/src/config/mod.rs",
+        "packages/ak-common/src/mode.rs"
+      ]
+    },
+    {
+      "dimension": "log_level_optimization",
+      "recommendation": "Adjusted log levels to be more appropriate for each situation, particularly downgrading debug logs to trace logs for non-critical operations",
+      "rationale": "Debug logs for file cleanup operations in mode.rs were too verbose for normal operation. Trace level is more appropriate for low-level implementation details that don't need to be visible in standard debug logging. This reduces log noise while maintaining observability for deep debugging.",
+      "alternatives_considered": [
+        "Keeping debug level for all operations",
+        "Removing the logs entirely",
+        "Adding conditional compilation flags"
+      ],
+      "files_affected": [
+        "packages/ak-common/src/mode.rs",
+        "packages/ak-common/src/tls.rs"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Standardized error field naming from 'error' to 'err' and improved error context in log messages",
+      "rationale": "Consistent field naming ('err' instead of 'error') across the codebase makes log parsing more predictable. Adding context like 'using fallback' when config file reading fails provides better operational visibility into failure recovery behavior.",
+      "alternatives_considered": [
+        "Keeping inconsistent field names",
+        "Adding more detailed error types",
+        "Creating error-specific logging functions"
+      ],
+      "files_affected": [
+        "packages/ak-axum/src/error.rs",
+        "packages/ak-common/src/config/mod.rs"
+      ]
+    },
+    {
+      "dimension": "signal_handling",
+      "recommendation": "Fixed typo in USR1 signal logging and standardized signal log message format",
+      "rationale": "The typo 'URS1' was corrected to 'USR1' for accuracy. Standardizing all signal logs to start with 'signal' prefix creates consistent pattern matching for monitoring systems tracking signal handling.",
+      "alternatives_considered": [
+        "Ignoring the typo as minor",
+        "Removing signal logging entirely",
+        "Creating separate signal logging module"
+      ],
+      "files_affected": [
+        "packages/ak-common/src/arbiter.rs"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Convert string interpolation to structured logging fields",
+      "description": "Replace embedded error and variable data in log messages with structured key-value pairs using tracing macros to improve machine readability",
+      "files_to_modify": [
+        "packages/ak-axum/src/error.rs",
+        "packages/ak-axum/src/server.rs",
+        "packages/ak-common/src/config/mod.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-002",
+      "title": "Optimize log levels and fix signal handling logs",
+      "description": "Adjust log levels for appropriate severity (debug\u2192trace for non-critical operations) and fix typos/standardize format in signal handling logs",
+      "files_to_modify": [
+        "packages/ak-common/src/arbiter.rs",
+        "packages/ak-common/src/mode.rs",
+        "packages/ak-common/src/tls.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The changes implement structured logging enhancements across the Rust components of authentik, focusing on the ak-axum and ak-common packages. The primary approach converts string-interpolated log messages to structured logging using tracing macros with explicit key-value pairs. This transformation makes logs more machine-readable and enables better integration with log analysis systems that can parse structured fields.\n\nKey patterns include: 1) Using `?err` syntax to serialize error objects as separate log fields instead of embedding them in message strings, 2) Standardizing field names (e.g., changing 'error' to 'err' for consistency), 3) Adjusting log levels appropriately (debug\u2192trace for file cleanup operations), and 4) Fixing minor issues like signal handling typos and improving error context messages.\n\nThe changes integrate seamlessly with the existing codebase by maintaining the same logging macro calls (info!, warn!, error!, trace!) while modifying only the parameter format. This ensures backward compatibility with existing log processing pipelines while adding structured data capabilities. The implementation follows Rust's tracing crate best practices and aligns with modern observability standards for production systems.",
+  "source_pr": "https://github.com/goauthentik/authentik/pull/21476",
+  "before_sha": "d4e651d893629dbd30c2f0f2c9d27a14b64fd642",
+  "after_sha": "318ed2eca04209510e99f5d38bf9317e8954db3f",
+  "diff_stats": {
+    "additions": 15,
+    "deletions": 10,
+    "files_changed": 6
+  }
+}

@@ -1,0 +1,87 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "data_modeling",
+      "recommendation": "Added a cleanup method to remove orphaned ingredient references from recipe steps during recipe updates",
+      "rationale": "When ingredients are removed from a recipe, any step references to those ingredients become orphaned and should be cleaned up to maintain data consistency. The approach uses a set of current ingredient reference IDs to filter out invalid references from each instruction's ingredient_references list.",
+      "alternatives_considered": [
+        "Database-level constraints or triggers",
+        "Separate cleanup job that runs periodically",
+        "Frontend validation to prevent invalid references from being sent"
+      ],
+      "files_affected": [
+        "mealie/services/recipe/recipe_service.py"
+      ]
+    },
+    {
+      "dimension": "api_design",
+      "recommendation": "Integrated the cleanup logic into the existing update_one method without changing the API contract",
+      "rationale": "The cleanup happens transparently during the normal recipe update flow, ensuring backward compatibility. No new endpoints or parameters were needed, and clients don't need to be aware of the cleanup logic.",
+      "alternatives_considered": [
+        "New endpoint specifically for cleaning up orphaned references",
+        "Adding a query parameter to control cleanup behavior",
+        "Making cleanup optional with a flag"
+      ],
+      "files_affected": [
+        "mealie/services/recipe/recipe_service.py"
+      ]
+    },
+    {
+      "dimension": "testing",
+      "recommendation": "Added an integration test that simulates the real-world scenario of updating a recipe with invalid ingredient references",
+      "rationale": "The test creates a recipe with an ingredient, then updates it with a step containing both valid and invalid ingredient references. It verifies that only the valid reference remains after the update, ensuring the cleanup logic works correctly in the context of the full API flow.",
+      "alternatives_considered": [
+        "Unit tests for the cleanup method in isolation",
+        "Mock-based tests without database interaction",
+        "Frontend integration tests"
+      ],
+      "files_affected": [
+        "tests/integration_tests/user_recipe_tests/test_recipe_crud.py"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Implemented silent cleanup without throwing errors for invalid references",
+      "rationale": "Invalid ingredient references are simply filtered out rather than causing validation errors. This approach is more user-friendly and mimics the behavior observed from the UI where references can become stale.",
+      "alternatives_considered": [
+        "Throwing validation errors when invalid references are detected",
+        "Logging warnings for removed references",
+        "Returning a list of cleaned references in the response"
+      ],
+      "files_affected": [
+        "mealie/services/recipe/recipe_service.py"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Implement ingredient-step reference cleanup",
+      "description": "Add logic to automatically remove references to deleted ingredients from recipe steps during recipe updates",
+      "files_to_modify": [
+        "mealie/services/recipe/recipe_service.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-002",
+      "title": "Add integration test for reference cleanup",
+      "description": "Create a test that verifies orphaned ingredient references are properly cleaned up when updating recipes",
+      "files_to_modify": [
+        "tests/integration_tests/user_recipe_tests/test_recipe_crud.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation adds data consistency validation to the recipe update process by cleaning up orphaned ingredient references in recipe steps. A new private method `_remove_non_existent_ingredient_references` was added to the RecipeService class. This method collects all current ingredient reference IDs from the updated recipe, then filters each instruction's ingredient_references list to only include references that point to existing ingredients.\n\nThe cleanup is integrated into the existing `update_one` method, running before the sub-recipe resolution step. This ensures the cleanup happens automatically during normal recipe updates without requiring additional database queries or API calls. The approach is efficient, using Python sets for O(1) lookups and list comprehensions for filtering.\n\nAn integration test was added to verify the functionality works correctly in the context of the full API flow. The test simulates a real-world scenario where a recipe is updated with step references to both valid and invalid ingredients, then asserts that only the valid reference remains. This test ensures the cleanup logic works as expected without breaking existing functionality.",
+  "source_pr": "https://github.com/mealie-recipes/mealie/pull/6896",
+  "before_sha": "41c3f1fced816a1bf88ec11c0633b4fba6516702",
+  "after_sha": "93d51a2fdba3a29e697f4869af697d61c90d6c6d",
+  "diff_stats": {
+    "additions": 79,
+    "deletions": 1,
+    "files_changed": 2
+  }
+}

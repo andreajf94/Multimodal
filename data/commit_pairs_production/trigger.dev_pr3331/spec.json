@@ -1,0 +1,14 @@
+{
+  "feature_name": "Batch R2 Upload Retry Mechanism",
+  "description": "Implement automatic retry logic for R2 object store uploads within the batch payload processing system. Currently, transient network failures during upload cause the entire batch stream to abort without recovery. Add configurable retry attempts with exponential backoff to allow self-healing from temporary network issues.",
+  "functional_requirements": [
+    "Wrap the R2 upload function with retry logic that attempts uploads up to 3 times before failing permanently",
+    "Implement exponential backoff between retry attempts with delays ranging from 500ms to 2 seconds",
+    "Ensure retry logic only applies to transient network errors and doesn't retry on permanent failures or validation errors",
+    "Maintain the existing error propagation behavior when all retry attempts are exhausted",
+    "Add appropriate logging to track retry attempts and outcomes for monitoring purposes",
+    "Update existing tests to verify retry behavior and ensure it doesn't break existing functionality"
+  ],
+  "project_name": "trigger.dev",
+  "source_pr": "https://github.com/triggerdotdev/trigger.dev/pull/3331"
+}

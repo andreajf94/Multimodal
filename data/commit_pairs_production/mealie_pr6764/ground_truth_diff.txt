@@ -1,0 +1,1018 @@
+diff --git a/.devcontainer/Dockerfile b/.devcontainer/Dockerfile
+index 1a7ca4104fd..9888085a540 100644
+--- a/.devcontainer/Dockerfile
++++ b/.devcontainer/Dockerfile
+@@ -21,6 +21,7 @@ RUN apt-get update \
+     && apt-get install --no-install-recommends -y \
+     curl \
+     build-essential \
++    ffmpeg \
+     libpq-dev \
+     libwebp-dev \
+     libsasl2-dev libldap2-dev libssl-dev \
+diff --git a/docker/Dockerfile b/docker/Dockerfile
+index 792b1979b07..8261cdd0d2d 100644
+--- a/docker/Dockerfile
++++ b/docker/Dockerfile
+@@ -91,6 +91,7 @@ RUN apt-get update \
+     build-essential \
+     libpq-dev \
+     libwebp-dev \
++    ffmpeg \
+     # LDAP Dependencies
+     libsasl2-dev libldap2-dev libssl-dev \
+     gnupg gnupg2 gnupg1 \
+diff --git a/docs/docs/documentation/getting-started/features.md b/docs/docs/documentation/getting-started/features.md
+index 659b3fc29e5..b82bc9e0430 100644
+--- a/docs/docs/documentation/getting-started/features.md
++++ b/docs/docs/documentation/getting-started/features.md
+@@ -5,9 +5,11 @@
+ ## Recipes
+ 
+ ### Creating Recipes
+-
+-Mealie offers two main ways to create recipes. You can use the integrated recipe-scraper to create recipes from hundreds of websites, or you can create recipes manually using the recipe editor.
+-
++Mealie offers several ways to create recipes:
++- **Recipe Scraper:** Create recipes from hundreds of websites by simply providing a URL.
++- **Image Import:** Upload an image of a written or typed recipe and Mealie will use OCR to import it.
++- **Video URL Import:** Provide a video URL (e.g., YouTube) and Mealie will transcribe the audio and parse the recipe.
++- **Manual Editor:** Create recipes from scratch using the integrated editor.
+ [Creation Demo](https://demo.mealie.io/g/home/r/create/url){ .md-button .md-button--primary .align-right }
+ 
+ ### Importing Recipes
+diff --git a/docs/docs/documentation/getting-started/installation/backend-config.md b/docs/docs/documentation/getting-started/installation/backend-config.md
+index 6301cfad8e7..ee9f1c7098b 100644
+--- a/docs/docs/documentation/getting-started/installation/backend-config.md
++++ b/docs/docs/documentation/getting-started/installation/backend-config.md
+@@ -122,18 +122,19 @@ For usage, see [Usage - OpenID Connect](../authentication/oidc-v2.md)
+ Mealie supports various integrations using OpenAI. For more information, check out our [OpenAI documentation](./open-ai.md).
+ For custom mapping variables (e.g. OPENAI_CUSTOM_HEADERS) you should pass values as JSON encoded strings (e.g. `OPENAI_CUSTOM_PARAMS='{"k1": "v1", "k2": "v2"}'`)
+ 
+-| Variables                                         | Default | Description                                                                                                                                                                                                                                                                                                        |
+-|---------------------------------------------------|:-------:|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+-| OPENAI_BASE_URL<super>[&dagger;][secrets]</super>              |  None   | The base URL for the OpenAI API. If you're not sure, leave this empty to use the standard OpenAI platform                                                                                                                                                                                                          |
+-| OPENAI_API_KEY<super>[&dagger;][secrets]</super>               |  None   | Your OpenAI API Key. Enables OpenAI-related features                                                                                                                                                                                                                                                               |
+-| OPENAI_MODEL                                                   | gpt-4o  | Which OpenAI model to use. If you're not sure, leave this empty                                                                                                                                                                                                                                                    |
+-| OPENAI_CUSTOM_HEADERS <br/> :octicons-tag-24: v2.0.0           |  None   | Custom HTTP headers to add to all OpenAI requests. This should generally be left empty unless your custom service requires them                                                                                                                                                                                    |
+-| OPENAI_CUSTOM_PARAMS <br/> :octicons-tag-24: v2.0.0            |  None   | Custom HTTP query params to add to all OpenAI requests. This should generally be left empty unless your custom service requires them                                                                                                                                                                               |
+-| OPENAI_ENABLE_IMAGE_SERVICES <br/> :octicons-tag-24: v1.12.0   |  True   | Whether to enable OpenAI image services, such as creating recipes via image. Leave this enabled unless your custom model doesn't support it, or you want to reduce costs                                                                                                                                           |
+-| OPENAI_WORKERS                                                 |    2    | Number of OpenAI workers per request. Higher values may increase processing speed, but will incur additional API costs                                                                                                                                                                                             |
+-| OPENAI_SEND_DATABASE_DATA                                      |  True   | Whether to send Mealie data to OpenAI to improve request accuracy. This will incur additional API costs                                                                                                                                                                                                            |
+-| OPENAI_REQUEST_TIMEOUT                                         |   300   | The number of seconds to wait for an OpenAI request to complete before cancelling the request. Leave this empty unless you're running into timeout issues on slower hardware                                                                                                                                       |
+-| OPENAI_CUSTOM_PROMPT_DIR <br/> :octicons-tag-24: v3.10.0       |  None   | Path to custom prompt files. Only existing files in your custom directory will override the defaults; any missing or empty custom files will automatically fall back to the system defaults. See https://github.com/mealie-recipes/mealie/tree/mealie-next/mealie/services/openai/prompts for expected file names. |
++| Variables                                                               | Default | Description                                                                                                                                                                                                                                                                                                            |
++|-------------------------------------------------------------------------|:-------:|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
++| OPENAI_BASE_URL<super>[&dagger;][secrets]</super>                       |  None   | The base URL for the OpenAI API. If you're not sure, leave this empty to use the standard OpenAI platform                                                                                                                                                                                                              |
++| OPENAI_API_KEY<super>[&dagger;][secrets]</super>                        |  None   | Your OpenAI API Key. Enables OpenAI-related features                                                                                                                                                                                                                                                                   |
++| OPENAI_MODEL                                                            | gpt-4o  | Which OpenAI model to use. If you're not sure, leave this empty                                                                                                                                                                                                                                                        |
++| OPENAI_CUSTOM_HEADERS <br/> :octicons-tag-24: v2.0.0                    |  None   | Custom HTTP headers to add to all OpenAI requests. This should generally be left empty unless your custom service requires them                                                                                                                                                                                        |
++| OPENAI_CUSTOM_PARAMS <br/> :octicons-tag-24: v2.0.0                     |  None   | Custom HTTP query params to add to all OpenAI requests. This should generally be left empty unless your custom service requires them                                                                                                                                                                                   |
++| OPENAI_ENABLE_IMAGE_SERVICES <br/> :octicons-tag-24: v1.12.0            |  True   | Whether to enable OpenAI image services, such as creating recipes via image. Leave this enabled unless your custom model doesn't support it, or you want to reduce costs                                                                                                                                               |
++| OPENAI_ENABLE_TRANSCRIPTION_SERVICES <br/> :octicons-tag-24: v3.13.0    |  True   | Whether to enable OpenAI transcription services, such as creating recipes via video URL. Leave this enabled unless your custom model doesn't support it, or you want to reduce costs                                                                                                                                   |
++| OPENAI_WORKERS                                                          |    2    | Number of OpenAI workers per request. Higher values may increase processing speed, but will incur additional API costs                                                                                                                                                                                                 |
++| OPENAI_SEND_DATABASE_DATA                                               |  True   | Whether to send Mealie data to OpenAI to improve request accuracy. This will incur additional API costs                                                                                                                                                                                                                |
++| OPENAI_REQUEST_TIMEOUT                                                  |   300   | The number of seconds to wait for an OpenAI request to complete before cancelling the request. Leave this empty unless you're running into timeout issues on slower hardware                                                                                                                                           |
++| OPENAI_CUSTOM_PROMPT_DIR <br/> :octicons-tag-24: v3.10.0                |  None   | Path to custom prompt files. Only existing files in your custom directory will override the defaults; any missing or empty custom files will automatically fall back to the system defaults. See https://github.com/mealie-recipes/mealie/tree/mealie-next/mealie/services/openai/prompts for expected file names.     |
+ 
+ ### Theming
+ 
+diff --git a/docs/docs/documentation/getting-started/installation/open-ai.md b/docs/docs/documentation/getting-started/installation/open-ai.md
+index 740064c5220..bbaae51d79d 100644
+--- a/docs/docs/documentation/getting-started/installation/open-ai.md
++++ b/docs/docs/documentation/getting-started/installation/open-ai.md
+@@ -10,9 +10,15 @@ For most users, supplying the OpenAI API key is all you need to do; you will use
+ 
+ Alternatively, if you have another service you'd like to use in-place of OpenAI, you can configure Mealie to use that instead, as long as it has an OpenAI-compatible API. For instance, a common self-hosted alternative to OpenAI is [Ollama](https://ollama.com/). To use Ollama with Mealie, change your `OPENAI_BASE_URL` to `http://localhost:11434/v1` (where `http://localhost:11434` is wherever you're hosting Ollama, and `/v1` enables the OpenAI-compatible endpoints). Note that you *must* provide an API key, even though it is ultimately ignored by Ollama.
+ 
+-If you wish to disable image recognition features (to save costs, or because your custom model doesn't support them) you can set `OPENAI_ENABLE_IMAGE_SERVICES` to `False`. For more information on what configuration options are available, check out the [backend configuration](./backend-config.md#openai).
++If you wish to disable image recognition features (to save costs, or because your custom model doesn't support them) you can set `OPENAI_ENABLE_IMAGE_SERVICES` to `False`.
++If you wish to disable transcription features (to save costs, or because your custom model doesn't support them) you can set `OPENAI_ENABLE_TRANSCRIPTION_SERVICES` to `False`.
++
++For more information on what configuration options are available, check out the [backend configuration](./backend-config.md#openai).
++
++
+ 
+ ## OpenAI Features
+ - The OpenAI Ingredient Parser can be used as an alternative to the NLP and Brute Force parsers. Simply choose the OpenAI parser while parsing ingredients (:octicons-tag-24: v1.7.0)
+ - When importing a recipe via URL, if the default recipe scraper is unable to read the recipe data from a webpage, the webpage contents will be parsed by OpenAI (:octicons-tag-24: v1.9.0)
+ - You can import an image of a written recipe, which is sent to OpenAI and imported into Mealie. The recipe can be hand-written or typed, as long as the text is in the picture. You can also optionally have OpenAI translate the recipe into your own language (:octicons-tag-24: v1.12.0)
++- You can import a recipe via a video URL (e.g., a YouTube link). The video is transcribed using OpenAI's Whisper model, and the transcription is parsed into a recipe (:octicons-tag-24: v3.13.0)
+diff --git a/frontend/lang/messages/en-US.json b/frontend/lang/messages/en-US.json
+index 5e6c3d5aa17..275350116f3 100644
+--- a/frontend/lang/messages/en-US.json
++++ b/frontend/lang/messages/en-US.json
+@@ -636,7 +636,8 @@
+     "create-a-recipe-by-providing-the-name-all-recipes-must-have-unique-names": "Create a recipe by providing the name. All recipes must have unique names.",
+     "new-recipe-names-must-be-unique": "New recipe names must be unique",
+     "scrape-recipe": "Scrape Recipe",
+-    "scrape-recipe-description": "Scrape a recipe by url. Provide the url for the site you want to scrape, and Mealie will attempt to scrape the recipe from that site and add it to your collection.",
++    "scrape-recipe-description": "Scrape a recipe by url. Provide the url for the site or the video you want to scrape, and Mealie will attempt to scrape the recipe from that site and add it to your collection.",
++    "scrape-recipe-description-transcription": "You can also provide the url to a video and Mealie will attempt to transcribe it into a recipe.",
+     "scrape-recipe-have-a-lot-of-recipes": "Have a lot of recipes you want to scrape at once?",
+     "scrape-recipe-suggest-bulk-importer": "Try out the bulk importer",
+     "scrape-recipe-have-raw-html-or-json-data": "Have raw HTML or JSON data?",
+diff --git a/frontend/lib/api/types/admin.ts b/frontend/lib/api/types/admin.ts
+index 7d23672eb54..a5658d56fa4 100644
+--- a/frontend/lib/api/types/admin.ts
++++ b/frontend/lib/api/types/admin.ts
+@@ -18,6 +18,7 @@ export interface AdminAboutInfo {
+   oidcProviderName: string;
+   enableOpenai: boolean;
+   enableOpenaiImageServices: boolean;
++  enableOpenaiTranscriptionServices: boolean;
+   tokenTime: number;
+   versionLatest: string;
+   apiPort: number;
+@@ -51,6 +52,7 @@ export interface AppInfo {
+   oidcProviderName: string;
+   enableOpenai: boolean;
+   enableOpenaiImageServices: boolean;
++  enableOpenaiTranscriptionServices: boolean;
+   tokenTime: number;
+ }
+ export interface AppStartupInfo {
+diff --git a/frontend/pages/g/[groupSlug]/r/create/url.vue b/frontend/pages/g/[groupSlug]/r/create/url.vue
+index 5ae565b2093..6e51ce4a7be 100644
+--- a/frontend/pages/g/[groupSlug]/r/create/url.vue
++++ b/frontend/pages/g/[groupSlug]/r/create/url.vue
+@@ -9,14 +9,22 @@
+           {{ $t('recipe.scrape-recipe') }}
+         </v-card-title>
+         <v-card-text>
+-          <p>{{ $t('recipe.scrape-recipe-description') }}</p>
+-          <p>
+-            {{ $t('recipe.scrape-recipe-have-a-lot-of-recipes') }}
+-            <router-link :to="bulkImporterTarget">{{ $t('recipe.scrape-recipe-suggest-bulk-importer') }}</router-link>.
+-            <br>
+-            {{ $t('recipe.scrape-recipe-have-raw-html-or-json-data') }}
+-            <router-link :to="htmlOrJsonImporterTarget">{{ $t('recipe.scrape-recipe-you-can-import-from-raw-data-directly') }}</router-link>.
+-          </p>
++          <v-card-text class="pa-0">
++            <p>{{ $t('recipe.scrape-recipe-description') }}</p>
++            <p v-if="$appInfo.enableOpenaiTranscriptionServices">
++              {{ $t('recipe.scrape-recipe-description-transcription') }}
++            </p>
++          </v-card-text>
++          <v-card-text class="px-0">
++            <p>
++              {{ $t('recipe.scrape-recipe-have-a-lot-of-recipes') }}
++              <router-link :to="bulkImporterTarget">{{ $t('recipe.scrape-recipe-suggest-bulk-importer') }}</router-link>.
++            </p>
++            <p>
++              {{ $t('recipe.scrape-recipe-have-raw-html-or-json-data') }}
++              <router-link :to="htmlOrJsonImporterTarget">{{ $t('recipe.scrape-recipe-you-can-import-from-raw-data-directly') }}</router-link>.
++            </p>
++          </v-card-text>
+           <v-text-field
+             v-model="recipeUrl"
+             :label="$t('new-recipe.recipe-url')"
+@@ -209,7 +217,7 @@ export default defineNuxtComponent({
+           stayInEditMode.value = false;
+         }
+ 
+-        createByUrl(recipeUrl.value, importKeywordsAsTags.value);
++        createByUrl(recipeUrl.value, importKeywordsAsTags.value, false);
+         return;
+       }
+     });
+diff --git a/mealie/core/exceptions.py b/mealie/core/exceptions.py
+index 2c2684bc5ab..781a71a664e 100644
+--- a/mealie/core/exceptions.py
++++ b/mealie/core/exceptions.py
+@@ -46,6 +46,30 @@ class NoEntryFound(Exception):
+     pass
+ 
+ 
++class OpenAIServiceError(Exception):
++    """
++    This exception is raised when there is an error communicating with OpenAI services.
++    """
++
++    pass
++
++
++class RateLimitError(Exception):
++    """
++    This exception is raised when an external API returns a rate limit (429) error.
++    """
++
++    pass
++
++
++class VideoDownloadError(Exception):
++    """
++    This exception is raised when there is an error downloading or processing a video.
++    """
++
++    pass
++
++
+ def mealie_registered_exceptions(t: Translator) -> dict:
+     """
+     This function returns a dictionary of all the globally registered exceptions in the Mealie application.
+diff --git a/mealie/core/settings/settings.py b/mealie/core/settings/settings.py
+index ee08d95cc88..475d79ed328 100644
+--- a/mealie/core/settings/settings.py
++++ b/mealie/core/settings/settings.py
+@@ -393,12 +393,16 @@ def OIDC_READY(self) -> bool:
+     """Your OpenAI API key. Required to enable OpenAI features"""
+     OPENAI_MODEL: str = "gpt-4o"
+     """Which OpenAI model to send requests to. Leave this unset for most usecases"""
++    OPENAI_AUDIO_MODEL: str = "whisper-1"
++    """Which OpenAI model to use for audio transcription. Leave this unset for most usecases"""
+     OPENAI_CUSTOM_HEADERS: dict[str, str] = {}
+     """Custom HTTP headers to send with each OpenAI request"""
+     OPENAI_CUSTOM_PARAMS: dict[str, Any] = {}
+     """Custom HTTP parameters to send with each OpenAI request"""
+     OPENAI_ENABLE_IMAGE_SERVICES: bool = True
+     """Whether to enable image-related features in OpenAI"""
++    OPENAI_ENABLE_TRANSCRIPTION_SERVICES: bool = True
++    """Whether to enable audio transcription features in OpenAI"""
+     OPENAI_WORKERS: int = 2
+     """
+     Number of OpenAI workers per request. Higher values may increase
+diff --git a/mealie/routes/admin/admin_about.py b/mealie/routes/admin/admin_about.py
+index fbf15846ef8..fe102386af3 100644
+--- a/mealie/routes/admin/admin_about.py
++++ b/mealie/routes/admin/admin_about.py
+@@ -38,6 +38,8 @@ def get_app_info(self):
+             oidc_provider_name=settings.OIDC_PROVIDER_NAME,
+             enable_openai=settings.OPENAI_ENABLED,
+             enable_openai_image_services=settings.OPENAI_ENABLED and settings.OPENAI_ENABLE_IMAGE_SERVICES,
++            enable_openai_transcription_services=settings.OPENAI_ENABLED
++            and settings.OPENAI_ENABLE_TRANSCRIPTION_SERVICES,
+         )
+ 
+     @router.get("/statistics", response_model=AppStatistics)
+diff --git a/mealie/routes/admin/admin_debug.py b/mealie/routes/admin/admin_debug.py
+index c429152c65f..15f47877e34 100644
+--- a/mealie/routes/admin/admin_debug.py
++++ b/mealie/routes/admin/admin_debug.py
+@@ -34,14 +34,14 @@ async def debug_openai(self, image: UploadFile | None = File(None)):
+ 
+             try:
+                 openai_service = OpenAIService()
+-                prompt = openai_service.get_prompt("debug")
++                prompt = openai_service.get_prompt("general.debug")
+ 
+                 message = "Hello, checking to see if I can reach you."
+                 if local_images:
+                     message = f"{message} Here is an image to test with:"
+ 
+                 response = await openai_service.get_response(
+-                    prompt, message, response_schema=OpenAIText, images=local_images
++                    prompt, message, response_schema=OpenAIText, attachments=local_images
+                 )
+ 
+                 if not response:
+diff --git a/mealie/routes/app/app_about.py b/mealie/routes/app/app_about.py
+index 1a8ad483e76..59e98662e2c 100644
+--- a/mealie/routes/app/app_about.py
++++ b/mealie/routes/app/app_about.py
+@@ -43,6 +43,7 @@ def get_app_info(session: Session = Depends(generate_session)):
+         oidc_provider_name=settings.OIDC_PROVIDER_NAME,
+         enable_openai=settings.OPENAI_ENABLED,
+         enable_openai_image_services=settings.OPENAI_ENABLED and settings.OPENAI_ENABLE_IMAGE_SERVICES,
++        enable_openai_transcription_services=settings.OPENAI_ENABLED and settings.OPENAI_ENABLE_TRANSCRIPTION_SERVICES,
+         allow_password_login=settings.ALLOW_PASSWORD_LOGIN,
+         token_time=settings.TOKEN_TIME,
+     )
+diff --git a/mealie/schema/admin/about.py b/mealie/schema/admin/about.py
+index 722f7c4ad63..8e077a399d5 100644
+--- a/mealie/schema/admin/about.py
++++ b/mealie/schema/admin/about.py
+@@ -23,6 +23,7 @@ class AppInfo(MealieModel):
+     oidc_provider_name: str
+     enable_openai: bool
+     enable_openai_image_services: bool
++    enable_openai_transcription_services: bool
+     token_time: int
+ 
+ 
+diff --git a/mealie/services/openai/openai.py b/mealie/services/openai/openai.py
+index 3c00e131241..752732131c5 100644
+--- a/mealie/services/openai/openai.py
++++ b/mealie/services/openai/openai.py
+@@ -7,14 +7,16 @@
+ from textwrap import dedent
+ from typing import TypeVar
+ 
++import openai
+ from openai import AsyncOpenAI
+ from openai.types.chat import ChatCompletion
+ from pydantic import BaseModel, field_validator
+ 
+-from mealie.core import root_logger
++from mealie.core import exceptions, root_logger
+ from mealie.core.config import get_app_settings
+ from mealie.pkgs import img
+ from mealie.schema.openai._base import OpenAIBase
++from mealie.schema.openai.general import OpenAIText
+ 
+ from .._base_service import BaseService
+ 
+@@ -48,7 +50,12 @@ def parse_value(cls, value):
+             return value
+ 
+ 
+-class OpenAIImageBase(BaseModel, ABC):
++class OpenAIAttachment(BaseModel, ABC):
++    @abstractmethod
++    def build_message(self) -> dict: ...
++
++
++class OpenAIImageBase(OpenAIAttachment):
+     @abstractmethod
+     def get_image_url(self) -> str: ...
+ 
+@@ -79,6 +86,17 @@ def get_image_url(self) -> str:
+         return f"data:image/jpeg;base64,{b64content}"
+ 
+ 
++class OpenAILocalAudio(OpenAIAttachment):
++    data: str
++    format: str
++
++    def build_message(self) -> dict:
++        return {
++            "type": "input_audio",
++            "input_audio": {"data": self.data, "format": self.format},
++        }
++
++
+ class OpenAIService(BaseService):
+     PROMPTS_DIR = Path(os.path.dirname(os.path.abspath(__file__))) / "prompts"
+ 
+@@ -88,9 +106,9 @@ def __init__(self) -> None:
+             raise ValueError("OpenAI is not enabled")
+ 
+         self.model = settings.OPENAI_MODEL
++        self.audio_model = settings.OPENAI_AUDIO_MODEL
+         self.workers = settings.OPENAI_WORKERS
+         self.send_db_data = settings.OPENAI_SEND_DATABASE_DATA
+-        self.enable_image_services = settings.OPENAI_ENABLE_IMAGE_SERVICES
+         self.custom_prompt_dir = settings.OPENAI_CUSTOM_PROMPT_DIR
+ 
+         self.get_client = lambda: AsyncOpenAI(
+@@ -215,17 +233,14 @@ async def get_response(
+         message: str,
+         *,
+         response_schema: type[T],
+-        images: list[OpenAIImageBase] | None = None,
++        attachments: list[OpenAIAttachment] | None = None,
+     ) -> T | None:
+         """Send data to OpenAI and return the response message content"""
+-        if images and not self.enable_image_services:
+-            self.logger.warning("OpenAI image services are disabled, ignoring images")
+-            images = None
+ 
+         try:
+             user_messages = [{"type": "text", "text": message}]
+-            for image in images or []:
+-                user_messages.append(image.build_message())
++            for attachment in attachments or []:
++                user_messages.append(attachment.build_message())
+ 
+             response = await self._get_raw_response(prompt, user_messages, response_schema)
+             if not response.choices:
+@@ -233,5 +248,41 @@ async def get_response(
+ 
+             response_text = response.choices[0].message.content
+             return response_schema.parse_openai_response(response_text)
++        except openai.RateLimitError as e:
++            raise exceptions.RateLimitError(str(e)) from e
+         except Exception as e:
+             raise Exception(f"OpenAI Request Failed. {e.__class__.__name__}: {e}") from e
++
++    async def transcribe_audio(self, audio_file_path: Path) -> str | None:
++        client = self.get_client()
++
++        # Create a transcription from the audio
++        try:
++            with open(audio_file_path, "rb") as audio_file:
++                transcript = await client.audio.transcriptions.create(
++                    model=self.audio_model,
++                    file=audio_file,
++                )
++            return transcript.text
++        except openai.RateLimitError as e:
++            raise exceptions.RateLimitError(str(e)) from e
++        except Exception as e:
++            self.logger.warning(
++                f"Failed to create audio transcription, falling back to chat completion ({e.__class__.__name__}: {e})"
++            )
++
++        # Fallback to chat completion
++        path_obj = Path(audio_file_path)
++        with open(path_obj, "rb") as audio_file:
++            audio_data = base64.b64encode(audio_file.read()).decode("utf-8")
++
++        file_ext = path_obj.suffix.lstrip(".").lower()
++        audio_attachment = OpenAILocalAudio(data=audio_data, format=file_ext)
++        response = await self.get_response(
++            self.get_prompt("general.transcribe-audio"),
++            "Attached is the audio data.",
++            response_schema=OpenAIText,
++            attachments=[audio_attachment],
++        )
++
++        return response.text if response else None
+diff --git a/mealie/services/openai/prompts/debug.txt b/mealie/services/openai/prompts/general/debug.txt
+similarity index 100%
+rename from mealie/services/openai/prompts/debug.txt
+rename to mealie/services/openai/prompts/general/debug.txt
+diff --git a/mealie/services/openai/prompts/general/transcribe-audio.txt b/mealie/services/openai/prompts/general/transcribe-audio.txt
+new file mode 100644
+index 00000000000..0eb6a5e403d
+--- /dev/null
++++ b/mealie/services/openai/prompts/general/transcribe-audio.txt
+@@ -0,0 +1 @@
++Transcribe any audio data provided to you. You should respond only with the audio transcription and nothing else.
+diff --git a/mealie/services/openai/prompts/recipes/parse-recipe-video.txt b/mealie/services/openai/prompts/recipes/parse-recipe-video.txt
+new file mode 100644
+index 00000000000..a456c54b4d6
+--- /dev/null
++++ b/mealie/services/openai/prompts/recipes/parse-recipe-video.txt
+@@ -0,0 +1,7 @@
++You will receive a video transcript and the video's original caption text. Analyze BOTH inputs to generate a single, accurate recipe in schema.org Recipe format. Reference: https://schema.org/Recipe
++
++Do not create or make up any information. If insufficient data is found, return an empty object.
++
++- The video transcript is the primary source for instructions.
++- The caption text is the primary source for the ingredient list and title.
++- If there is a conflict (e.g., caption says "1 cup" but transcript says "1.5 cups"), trust the video transcript.
+diff --git a/mealie/services/recipe/recipe_service.py b/mealie/services/recipe/recipe_service.py
+index 7a4faab4080..4e83dab5aec 100644
+--- a/mealie/services/recipe/recipe_service.py
++++ b/mealie/services/recipe/recipe_service.py
+@@ -611,7 +611,7 @@ async def build_recipe_from_images(self, images: list[Path], translate_language:
+                 prompt,
+                 message,
+                 response_schema=OpenAIRecipe,
+-                images=openai_images,
++                attachments=openai_images,
+             )
+             if not response:
+                 raise ValueError("Received empty response from OpenAI")
+diff --git a/mealie/services/scraper/recipe_scraper.py b/mealie/services/scraper/recipe_scraper.py
+index 9f17f58a728..5223378aafa 100644
+--- a/mealie/services/scraper/recipe_scraper.py
++++ b/mealie/services/scraper/recipe_scraper.py
+@@ -7,6 +7,7 @@
+ from .scraper_strategies import (
+     ABCScraperStrategy,
+     RecipeScraperOpenAI,
++    RecipeScraperOpenAITranscription,
+     RecipeScraperOpenGraph,
+     RecipeScraperPackage,
+     safe_scrape_html,
+@@ -14,6 +15,7 @@
+ 
+ DEFAULT_SCRAPER_STRATEGIES: list[type[ABCScraperStrategy]] = [
+     RecipeScraperPackage,
++    RecipeScraperOpenAITranscription,
+     RecipeScraperOpenAI,
+     RecipeScraperOpenGraph,
+ ]
+@@ -42,8 +44,11 @@ async def scrape(self, url: str, html: str | None = None) -> tuple[Recipe, Scrap
+         """
+ 
+         raw_html = html or await safe_scrape_html(url)
+-        for scraper_type in self.scrapers:
+-            scraper = scraper_type(url, self.translator, raw_html=raw_html)
++        for ScraperClass in self.scrapers:
++            scraper = ScraperClass(url, self.translator, raw_html=raw_html)
++            if not scraper.can_scrape():
++                self.logger.debug(f"Skipping {scraper.__class__.__name__}")
++                continue
+ 
+             try:
+                 result = await scraper.parse()
+diff --git a/mealie/services/scraper/scraper_strategies.py b/mealie/services/scraper/scraper_strategies.py
+index 41e30eb2828..b15c9c09c77 100644
+--- a/mealie/services/scraper/scraper_strategies.py
++++ b/mealie/services/scraper/scraper_strategies.py
+@@ -1,22 +1,33 @@
++import asyncio
++import functools
++import re
+ import time
+ from abc import ABC, abstractmethod
+ from collections.abc import Callable
+-from typing import Any
++from pathlib import Path
++from typing import Any, TypedDict
+ 
+ import bs4
+ import extruct
++import yt_dlp
+ from fastapi import HTTPException, status
+ from httpx import AsyncClient, Response
+ from recipe_scrapers import NoSchemaFoundInWildMode, SchemaScraperFactory, scrape_html
+ from slugify import slugify
+ from w3lib.html import get_base_url
++from yt_dlp.extractor.generic import GenericIE
+ 
++from mealie.core import exceptions
+ from mealie.core.config import get_app_settings
++from mealie.core.dependencies.dependencies import get_temporary_path
+ from mealie.core.root_logger import get_logger
+ from mealie.lang.providers import Translator
+ from mealie.pkgs import safehttp
+ from mealie.schema.openai.general import OpenAIText
++from mealie.schema.openai.recipe import OpenAIRecipe
+ from mealie.schema.recipe.recipe import Recipe, RecipeStep
++from mealie.schema.recipe.recipe_ingredient import RecipeIngredient
++from mealie.schema.recipe.recipe_notes import RecipeNote
+ from mealie.services.openai import OpenAIService
+ from mealie.services.scraper.scraped_extras import ScrapedExtras
+ 
+@@ -27,6 +38,12 @@
+ logger = get_logger()
+ 
+ 
++@functools.cache
++def _get_yt_dlp_extractors() -> list:
++    """Build and cache the yt-dlp extractor list once per process lifetime."""
++    return [ie for ie in yt_dlp.extractor.gen_extractors() if ie.working() and not isinstance(ie, GenericIE)]
++
++
+ class ForceTimeoutException(Exception):
+     pass
+ 
+@@ -115,6 +132,9 @@ def __init__(
+         self.raw_html = raw_html
+         self.translator = translator
+ 
++    @abstractmethod
++    def can_scrape(self) -> bool: ...
++
+     @abstractmethod
+     async def get_html(self, url: str) -> str: ...
+ 
+@@ -132,6 +152,9 @@ async def parse(self) -> tuple[Recipe, ScrapedExtras] | tuple[None, None]:
+ 
+ 
+ class RecipeScraperPackage(ABCScraperStrategy):
++    def can_scrape(self) -> bool:
++        return bool(self.url or self.raw_html)
++
+     @staticmethod
+     def ld_json_to_html(ld_json: str) -> str:
+         return (
+@@ -271,6 +294,10 @@ class RecipeScraperOpenAI(RecipeScraperPackage):
+     rather than trying to scrape it directly.
+     """
+ 
++    def can_scrape(self) -> bool:
++        settings = get_app_settings()
++        return settings.OPENAI_ENABLED and super().can_scrape()
++
+     def extract_json_ld_data_from_html(self, soup: bs4.BeautifulSoup) -> str:
+         data_parts: list[str] = []
+         for script in soup.find_all("script", type="application/ld+json"):
+@@ -350,7 +377,178 @@ async def get_html(self, url: str) -> str:
+             return ""
+ 
+ 
++class TranscribedAudio(TypedDict):
++    audio: Path
++    subtitle: Path | None
++    title: str
++    description: str
++    thumbnail_url: str | None
++    transcription: str
++
++
++class RecipeScraperOpenAITranscription(ABCScraperStrategy):
++    SUBTITLE_LANGS = ["en", "fr", "es", "de", "it"]
++
++    def can_scrape(self) -> bool:
++        if not self.url:
++            return False
++
++        settings = get_app_settings()
++        if not (settings.OPENAI_ENABLED and settings.OPENAI_ENABLE_TRANSCRIPTION_SERVICES):
++            return False
++
++        # Check if we can actually download something to transcribe
++        return any(ie.suitable(self.url) for ie in _get_yt_dlp_extractors())
++
++    @staticmethod
++    def _parse_subtitle_content(subtitle_content: str) -> str:
++        # TODO: is there a better way to parse subtitles that's more efficient?
++
++        lines = []
++        for line in subtitle_content.split("\n"):
++            if line.strip() and not line.startswith("WEBVTT") and "-->" not in line and not line.isdigit():
++                lines.append(line.strip())
++
++        raw_content = " ".join(lines)
++        content = re.sub(r"<[^>]+>", "", raw_content)
++        return content
++
++    def _download_audio(self, temp_path: Path) -> TranscribedAudio:
++        """Downloads audio and subtitles from the video URL."""
++        output_template = temp_path / "mealie"  # No extension here
++
++        ydl_opts = {
++            "format": "bestaudio/best",
++            "outtmpl": str(output_template) + ".%(ext)s",
++            "quiet": True,
++            "writesubtitles": True,
++            "writeautomaticsub": True,
++            "subtitleslangs": self.SUBTITLE_LANGS,
++            "skip_download": False,
++            "ignoreerrors": True,
++            "postprocessors": [
++                {
++                    "key": "FFmpegExtractAudio",
++                    "preferredcodec": "mp3",
++                    "preferredquality": "32",
++                }
++            ],
++            "postprocessor_args": ["-ac", "1"],
++        }
++
++        try:
++            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
++                info = ydl.extract_info(self.url, download=True)
++
++                if info is None:
++                    raise exceptions.VideoDownloadError(
++                        "Failed to extract video information. The video may be unavailable or the URL is invalid."
++                    )
++
++                sub_path = None
++                for lang in self.SUBTITLE_LANGS:
++                    potential_path = output_template.with_suffix(f".{lang}.vtt")
++                    if potential_path.exists():
++                        sub_path = potential_path
++                        break
++
++                return {
++                    "audio": output_template.with_suffix(".mp3"),
++                    "subtitle": sub_path,
++                    "title": info.get("title", ""),
++                    "description": info.get("description", ""),
++                    "thumbnail_url": info.get("thumbnail") or None,
++                    "transcription": "",
++                }
++        except exceptions.VideoDownloadError:
++            raise
++        except Exception as e:
++            raise exceptions.VideoDownloadError(f"Failed to download video: {e}") from e
++
++    async def get_html(self, url: str) -> str:
++        return self.raw_html or ""  # we don't use HTML with this scraper since we use ytdlp
++
++    async def parse(self) -> tuple[Recipe, ScrapedExtras] | tuple[None, None]:
++        openai_service = OpenAIService()
++
++        with get_temporary_path() as temp_path:
++            video_data = await asyncio.to_thread(self._download_audio, temp_path)
++
++            if video_data["subtitle"]:
++                try:
++                    with open(video_data["subtitle"], encoding="utf-8") as f:
++                        subtitle_content = f.read()
++                    video_data["transcription"] = self._parse_subtitle_content(subtitle_content)
++                    self.logger.info("Using subtitles from video instead of transcription")
++                except Exception:
++                    self.logger.exception("Failed to read subtitles, falling back to transcription")
++                    video_data["transcription"] = ""
++
++            if not video_data["transcription"]:
++                try:
++                    transcription = await openai_service.transcribe_audio(video_data["audio"])
++                except exceptions.RateLimitError:
++                    raise
++                except Exception as e:
++                    raise exceptions.OpenAIServiceError(f"Failed to transcribe audio: {e}") from e
++                if not transcription:
++                    raise exceptions.OpenAIServiceError("No transcription returned from OpenAI")
++                video_data["transcription"] = transcription
++
++        if not video_data["transcription"]:
++            self.logger.error("Could not extract a transcript (no data)")
++            return None, None
++
++        self.logger.debug(f"Transcription: {video_data['transcription'][:200]}...")
++        prompt = openai_service.get_prompt("recipes.parse-recipe-video")
++
++        message_parts = [
++            f"Title: {video_data['title']}",
++            f"Description: {video_data['description']}",
++            f"Transcription: {video_data['transcription']}",
++        ]
++
++        try:
++            response = await openai_service.get_response(prompt, "\n".join(message_parts), response_schema=OpenAIRecipe)
++        except exceptions.RateLimitError:
++            raise
++        except Exception as e:
++            raise exceptions.OpenAIServiceError(f"Failed to extract recipe from video: {e}") from e
++
++        if not response:
++            raise exceptions.OpenAIServiceError("OpenAI returned an empty response when extracting recipe")
++
++        recipe = Recipe(
++            name=response.name,
++            slug="",
++            description=response.description,
++            recipe_yield=response.recipe_yield,
++            total_time=response.total_time,
++            prep_time=response.prep_time,
++            perform_time=response.perform_time,
++            recipe_ingredient=[
++                RecipeIngredient(title=ingredient.title, note=ingredient.text)
++                for ingredient in response.ingredients
++                if ingredient.text
++            ],
++            recipe_instructions=[
++                RecipeStep(title=instruction.title, text=instruction.text)
++                for instruction in response.instructions
++                if instruction.text
++            ],
++            notes=[RecipeNote(title=note.title or "", text=note.text) for note in response.notes if note.text],
++            image=video_data["thumbnail_url"] or None,
++            org_url=self.url,
++        )
++
++        self.logger.info(f"Successfully extracted recipe from video: {video_data['title']}")
++        return recipe, ScrapedExtras()
++
++
+ class RecipeScraperOpenGraph(ABCScraperStrategy):
++    def can_scrape(self) -> bool:
++        return bool(self.url or self.raw_html)
++
+     async def get_html(self, url: str) -> str:
+         return self.raw_html or await safe_scrape_html(url)
+ 
+diff --git a/pyproject.toml b/pyproject.toml
+index 0e09cf888ad..ec70b6ee249 100644
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -45,6 +45,7 @@ dependencies = [
+     "openai==2.26.0",
+     "typing-extensions==4.15.0",
+     "itsdangerous==2.2.0",
++    "yt-dlp==2026.03.03",
+     "ingredient-parser-nlp==2.5.0",
+     "pint==0.25.2",
+ ]
+diff --git a/tests/integration_tests/user_recipe_tests/test_recipe_create_from_video.py b/tests/integration_tests/user_recipe_tests/test_recipe_create_from_video.py
+new file mode 100644
+index 00000000000..d54443086a5
+--- /dev/null
++++ b/tests/integration_tests/user_recipe_tests/test_recipe_create_from_video.py
+@@ -0,0 +1,188 @@
++import json
++from pathlib import Path
++
++import pytest
++from fastapi.testclient import TestClient
++
++import mealie.services.scraper.recipe_scraper as recipe_scraper_module
++from mealie.core import exceptions
++from mealie.core.config import get_app_settings
++from mealie.schema.openai.recipe import OpenAIRecipe, OpenAIRecipeIngredient, OpenAIRecipeInstruction
++from mealie.services.openai import OpenAIService
++from mealie.services.scraper.scraper_strategies import RecipeScraperOpenAITranscription
++from tests.utils import api_routes
++from tests.utils.factories import random_int, random_string
++from tests.utils.fixture_schemas import TestUser
++
++VIDEO_URL = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
++
++
++def _make_openai_recipe() -> OpenAIRecipe:
++    return OpenAIRecipe(
++        name=random_string(),
++        description=random_string(),
++        ingredients=[OpenAIRecipeIngredient(text=random_string()) for _ in range(random_int(2, 5))],
++        instructions=[OpenAIRecipeInstruction(text=random_string()) for _ in range(random_int(2, 5))],
++    )
++
++
++@pytest.fixture(autouse=True)
++def video_scraper_setup(monkeypatch: pytest.MonkeyPatch):
++    # Restrict to only the video scraper so other strategies don't interfere
++    monkeypatch.setattr(recipe_scraper_module, "DEFAULT_SCRAPER_STRATEGIES", [RecipeScraperOpenAITranscription])
++
++    # Prevent any real HTTP calls during scraping
++    async def mock_safe_scrape_html(url: str) -> str:
++        return ""
++
++    monkeypatch.setattr(recipe_scraper_module, "safe_scrape_html", mock_safe_scrape_html)
++
++
++def test_create_recipe_from_video(
++    api_client: TestClient,
++    monkeypatch: pytest.MonkeyPatch,
++    unique_user: TestUser,
++):
++    openai_recipe = _make_openai_recipe()
++
++    def mock_download_audio(self, temp_path: Path):
++        return {
++            "audio": temp_path / "mealie.mp3",
++            "subtitle": None,
++            "title": random_string(),
++            "description": random_string(),
++            "thumbnail_url": "https://example.com/thumbnail.jpg",
++            "transcription": random_string(),
++        }
++
++    async def mock_get_response(self, prompt, message, *args, **kwargs) -> OpenAIRecipe | None:
++        return openai_recipe
++
++    monkeypatch.setattr(RecipeScraperOpenAITranscription, "_download_audio", mock_download_audio)
++    monkeypatch.setattr(OpenAIService, "get_response", mock_get_response)
++
++    r = api_client.post(api_routes.recipes_create_url, json={"url": VIDEO_URL}, headers=unique_user.token)
++    assert r.status_code == 201
++
++    slug = json.loads(r.text)
++    r = api_client.get(api_routes.recipes_slug(slug), headers=unique_user.token)
++    assert r.status_code == 200
++
++    recipe = r.json()
++    assert recipe["name"] == openai_recipe.name
++    assert len(recipe["recipeIngredient"]) == len(openai_recipe.ingredients)
++    assert len(recipe["recipeInstructions"]) == len(openai_recipe.instructions)
++
++
++def test_create_recipe_from_video_uses_subtitle_over_transcription(
++    api_client: TestClient,
++    monkeypatch: pytest.MonkeyPatch,
++    unique_user: TestUser,
++    tmp_path: Path,
++):
++    openai_recipe = _make_openai_recipe()
++
++    subtitle_text = random_string()
++    subtitle_file = tmp_path / "mealie.en.vtt"
++    subtitle_file.write_text(f"WEBVTT\n\n1\n00:00:01.000 --> 00:00:03.000\n{subtitle_text}\n")
++
++    def mock_download_audio(self, temp_path: Path):
++        return {
++            "audio": temp_path / "mealie.mp3",
++            "subtitle": subtitle_file,
++            "title": random_string(),
++            "description": random_string(),
++            "thumbnail_url": None,
++            "transcription": "",
++        }
++
++    # transcribe_audio must NOT be called when a subtitle is available
++    async def mock_transcribe_audio(self, audio_file_path: Path) -> str | None:
++        raise AssertionError("transcribe_audio should not be called when subtitles are available")
++
++    async def mock_get_response(self, prompt, message, *args, **kwargs) -> OpenAIRecipe | None:
++        assert subtitle_text in message
++        return openai_recipe
++
++    monkeypatch.setattr(RecipeScraperOpenAITranscription, "_download_audio", mock_download_audio)
++    monkeypatch.setattr(OpenAIService, "transcribe_audio", mock_transcribe_audio)
++    monkeypatch.setattr(OpenAIService, "get_response", mock_get_response)
++
++    r = api_client.post(api_routes.recipes_create_url, json={"url": VIDEO_URL}, headers=unique_user.token)
++    assert r.status_code == 201
++
++
++def test_create_recipe_from_video_transcription_disabled(
++    api_client: TestClient,
++    monkeypatch: pytest.MonkeyPatch,
++    unique_user: TestUser,
++):
++    settings = get_app_settings()
++    monkeypatch.setattr(settings, "OPENAI_ENABLE_TRANSCRIPTION_SERVICES", False)
++
++    r = api_client.post(api_routes.recipes_create_url, json={"url": VIDEO_URL}, headers=unique_user.token)
++    assert r.status_code == 400
++
++
++def test_create_recipe_from_video_download_error(
++    api_client: TestClient,
++    monkeypatch: pytest.MonkeyPatch,
++    unique_user: TestUser,
++):
++    def mock_download_audio(self, temp_path: Path):
++        raise exceptions.VideoDownloadError("Mock video download error")
++
++    monkeypatch.setattr(RecipeScraperOpenAITranscription, "_download_audio", mock_download_audio)
++
++    r = api_client.post(api_routes.recipes_create_url, json={"url": VIDEO_URL}, headers=unique_user.token)
++    assert r.status_code == 400
++
++
++def test_create_recipe_from_video_transcription_error(
++    api_client: TestClient,
++    monkeypatch: pytest.MonkeyPatch,
++    unique_user: TestUser,
++):
++    def mock_download_audio(self, temp_path: Path):
++        return {
++            "audio": temp_path / "mealie.mp3",
++            "subtitle": None,
++            "title": random_string(),
++            "description": random_string(),
++            "thumbnail_url": None,
++            "transcription": "",
++        }
++
++    async def mock_transcribe_audio(self, audio_file_path: Path) -> str | None:
++        raise Exception("Mock transcribe audio exception")
++
++    monkeypatch.setattr(RecipeScraperOpenAITranscription, "_download_audio", mock_download_audio)
++    monkeypatch.setattr(OpenAIService, "transcribe_audio", mock_transcribe_audio)
++
++    r = api_client.post(api_routes.recipes_create_url, json={"url": VIDEO_URL}, headers=unique_user.token)
++    assert r.status_code == 400
++
++
++def test_create_recipe_from_video_empty_openai_response(
++    api_client: TestClient,
++    monkeypatch: pytest.MonkeyPatch,
++    unique_user: TestUser,
++):
++    def mock_download_audio(self, temp_path: Path):
++        return {
++            "audio": temp_path / "mealie.mp3",
++            "subtitle": None,
++            "title": random_string(),
++            "description": random_string(),
++            "thumbnail_url": None,
++            "transcription": random_string(),
++        }
++
++    async def mock_get_response(self, prompt, message, *args, **kwargs) -> OpenAIRecipe | None:
++        return None
++
++    monkeypatch.setattr(RecipeScraperOpenAITranscription, "_download_audio", mock_download_audio)
++    monkeypatch.setattr(OpenAIService, "get_response", mock_get_response)
++
++    r = api_client.post(api_routes.recipes_create_url, json={"url": VIDEO_URL}, headers=unique_user.token)
++    assert r.status_code == 400
+diff --git a/tests/unit_tests/services_tests/test_openai_service.py b/tests/unit_tests/services_tests/test_openai_service.py
+index 151fa46facb..6fab7ecbeb1 100644
+--- a/tests/unit_tests/services_tests/test_openai_service.py
++++ b/tests/unit_tests/services_tests/test_openai_service.py
+@@ -7,15 +7,17 @@
+ class _SettingsStub:
+     OPENAI_ENABLED = True
+     OPENAI_MODEL = "gpt-4o"
++    OPENAI_AUDIO_MODEL = "whisper-1"
+     OPENAI_WORKERS = 1
+     OPENAI_SEND_DATABASE_DATA = False
+     OPENAI_ENABLE_IMAGE_SERVICES = True
+-    OPENAI_CUSTOM_PROMPT_DIR = None
+-    OPENAI_BASE_URL = None
++    OPENAI_ENABLE_TRANSCRIPTION_SERVICES = True
++    OPENAI_CUSTOM_PROMPT_DIR: str | None = None
++    OPENAI_BASE_URL: str | None = None
+     OPENAI_API_KEY = "dummy"
+     OPENAI_REQUEST_TIMEOUT = 30
+-    OPENAI_CUSTOM_HEADERS = {}
+-    OPENAI_CUSTOM_PARAMS = {}
++    OPENAI_CUSTOM_HEADERS: dict = {}
++    OPENAI_CUSTOM_PARAMS: dict = {}
+ 
+ 
+ @pytest.fixture()
+diff --git a/uv.lock b/uv.lock
+index bc1c44ba7ac..8db554692d2 100644
+--- a/uv.lock
++++ b/uv.lock
+@@ -869,6 +869,7 @@ dependencies = [
+     { name = "typing-extensions" },
+     { name = "tzdata" },
+     { name = "uvicorn", extra = ["standard"] },
++    { name = "yt-dlp" },
+ ]
+ 
+ [package.optional-dependencies]
+@@ -944,6 +945,7 @@ requires-dist = [
+     { name = "typing-extensions", specifier = "==4.15.0" },
+     { name = "tzdata", specifier = "==2025.3" },
+     { name = "uvicorn", extras = ["standard"], specifier = "==0.41.0" },
++    { name = "yt-dlp", specifier = "==2026.3.3" },
+ ]
+ provides-extras = ["pgsql"]
+ 
+@@ -2076,3 +2078,12 @@ wheels = [
+     { url = "https://files.pythonhosted.org/packages/7d/71/abf2ebc3bbfa40f391ce1428c7168fb20582d0ff57019b69ea20fa698043/websockets-15.0.1-cp312-cp312-win_amd64.whl", hash = "sha256:fcd5cf9e305d7b8338754470cf69cf81f420459dbae8a3b40cee57417f4614a7", size = 176841, upload-time = "2025-03-05T20:02:34.498Z" },
+     { url = "https://files.pythonhosted.org/packages/fa/a8/5b41e0da817d64113292ab1f8247140aac61cbf6cfd085d6a0fa77f4984f/websockets-15.0.1-py3-none-any.whl", hash = "sha256:f7a866fbc1e97b5c617ee4116daaa09b722101d4a3c170c787450ba409f9736f", size = 169743, upload-time = "2025-03-05T20:03:39.41Z" },
+ ]
++
++[[package]]
++name = "yt-dlp"
++version = "2026.3.3"
++source = { registry = "https://pypi.org/simple" }
++sdist = { url = "https://files.pythonhosted.org/packages/66/6f/7427d23609353e5ef3470ff43ef551b8bd7b166dd4fef48957f0d0e040fe/yt_dlp-2026.3.3.tar.gz", hash = "sha256:3db7969e3a8964dc786bdebcffa2653f31123bf2a630f04a17bdafb7bbd39952", size = 3118658, upload-time = "2026-03-03T16:54:53.909Z" }
++wheels = [
++    { url = "https://files.pythonhosted.org/packages/7e/a4/8b5cd28ab87aef48ef15e74241befec3445496327db028f34147a9e0f14f/yt_dlp-2026.3.3-py3-none-any.whl", hash = "sha256:166c6e68c49ba526474bd400e0129f58aa522c2896204aa73be669c3d2f15e63", size = 3315599, upload-time = "2026-03-03T16:54:51.899Z" },
++]

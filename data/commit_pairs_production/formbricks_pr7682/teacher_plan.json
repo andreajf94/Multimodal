@@ -1,0 +1,203 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "infrastructure_integration",
+      "recommendation": "Created a separate @formbricks/jobs package to encapsulate BullMQ background job infrastructure, keeping it decoupled from the main web application while maintaining workspace integration.",
+      "rationale": "Separating job infrastructure into its own package allows for better code organization, independent versioning, and easier testing. It follows the existing monorepo pattern where shared functionality is extracted into packages (e.g., @formbricks/logger, @formbricks/types). This enables the jobs system to evolve independently while maintaining strong TypeScript integration.",
+      "alternatives_considered": [
+        "Embedding BullMQ logic directly in the web app",
+        "Creating a separate microservice",
+        "Using existing task queue libraries like Bull or Agenda"
+      ],
+      "files_affected": [
+        "packages/jobs/.eslintrc.cjs",
+        "packages/jobs/package.json",
+        "packages/jobs/src/index.ts"
+      ]
+    },
+    {
+      "dimension": "application_startup",
+      "recommendation": "Used Next.js instrumentation hooks to start BullMQ workers during application initialization, ensuring workers are only started once per server process.",
+      "rationale": "Next.js instrumentation.ts runs when the server starts, providing a reliable hook for background process initialization. This approach avoids the complexity of separate worker processes while ensuring workers are ready before API requests arrive. The singleton pattern with global state prevents duplicate worker registration in serverless environments where modules might be reloaded.",
+      "alternatives_considered": [
+        "Separate worker processes managed by PM2/supervisor",
+        "Docker container with separate worker service",
+        "Serverless functions for job processing"
+      ],
+      "files_affected": [
+        "apps/web/instrumentation-jobs.ts",
+        "apps/web/instrumentation.ts"
+      ]
+    },
+    {
+      "dimension": "configuration_management",
+      "recommendation": "Added environment-driven configuration for worker tuning with sensible defaults and test environment detection.",
+      "rationale": "Environment variables provide flexible deployment configuration without code changes. Defaulting workers to disabled in test environments prevents Redis dependency during testing. The configuration system validates REDIS_URL presence and provides typed access to worker settings through Zod schema validation.",
+      "alternatives_considered": [
+        "Hardcoded configuration",
+        "Database-stored configuration",
+        "Configuration files separate from environment variables"
+      ],
+      "files_affected": [
+        "apps/web/lib/jobs/config.ts",
+        "apps/web/lib/env.ts",
+        ".env.example"
+      ]
+    },
+    {
+      "dimension": "redis_connection_management",
+      "recommendation": "Implemented separate connection configurations for producers and workers with appropriate Redis client options for each role.",
+      "rationale": "Producers need fail-fast behavior (maxRetriesPerRequest: 1, enableOfflineQueue: false) to avoid request queuing when Redis is unavailable. Workers need blocking-safe options (maxRetriesPerRequest: null) to support BLPOP operations. Separate connection names aid in Redis monitoring and debugging.",
+      "alternatives_considered": [
+        "Single shared Redis connection",
+        "Connection pooling",
+        "Reusing existing Redis connections from other parts of the app"
+      ],
+      "files_affected": [
+        "packages/jobs/src/connection.ts"
+      ]
+    },
+    {
+      "dimension": "job_contract_design",
+      "recommendation": "Defined strongly-typed job contracts with Zod schemas and created a producer interface that abstracts BullMQ specifics, preparing for future engine changes.",
+      "rationale": "Type-safe job contracts prevent runtime errors and enable IDE autocompletion. The abstract producer interface (BackgroundJobProducer) allows switching job queue implementations without changing calling code. This is particularly important as the codebase may evolve from in-process BullMQ to external job services.",
+      "alternatives_considered": [
+        "Direct BullMQ API usage throughout the codebase",
+        "Generic job enqueue methods without type safety",
+        "Keeping job data structures as plain objects"
+      ],
+      "files_affected": [
+        "packages/jobs/src/contracts.ts",
+        "packages/jobs/src/types.ts"
+      ]
+    },
+    {
+      "dimension": "backward_compatibility",
+      "recommendation": "Maintained existing API endpoints while redefining pipeline types to use job contracts, enabling gradual migration of pipeline logic to background jobs.",
+      "rationale": "The changes export job contract types as pipeline types, allowing existing API code to continue working while the actual processing can be moved to background jobs incrementally. This minimizes risk and allows for A/B testing of the new background processing system.",
+      "alternatives_considered": [
+        "Breaking API changes requiring client updates",
+        "Maintaining duplicate type definitions",
+        "Creating entirely new API endpoints for background processing"
+      ],
+      "files_affected": [
+        "apps/web/app/api/(internal)/pipeline/types/pipelines.ts",
+        "apps/web/app/lib/types/pipelines.ts"
+      ]
+    },
+    {
+      "dimension": "testing_strategy",
+      "recommendation": "Implemented comprehensive test coverage including unit tests, integration tests with real Redis, and instrumentation tests.",
+      "rationale": "Background job systems require thorough testing due to their asynchronous nature and external dependencies (Redis). Integration tests with real Redis validate the complete flow, while unit tests ensure individual components work correctly. The test structure allows skipping integration tests when Redis is unavailable.",
+      "alternatives_considered": [
+        "Mocking Redis entirely",
+        "Only unit testing without integration tests",
+        "Relying on existing E2E tests for job validation"
+      ],
+      "files_affected": [
+        "apps/web/instrumentation-jobs.test.ts",
+        "packages/jobs/src/jobs-integration.test.ts",
+        "packages/jobs/src/connection.test.ts",
+        "packages/jobs/src/processors.test.ts",
+        "apps/web/lib/jobs/config.test.ts"
+      ]
+    },
+    {
+      "dimension": "deployment_configuration",
+      "recommendation": "Updated Docker and Helm configurations with Redis memory policies suitable for job queues and added documentation for new environment variables.",
+      "rationale": "BullMQ requires specific Redis configurations: 'maxmemory-policy noeviction' prevents job data loss when memory limits are reached, and 'appendonly yes' ensures durability. Documentation updates ensure self-hosted users understand the new configuration options and their impact.",
+      "alternatives_considered": [
+        "Default Redis configurations",
+        "Documentation in separate README files",
+        "Configuration via code rather than Docker/Helm"
+      ],
+      "files_affected": [
+        "docker-compose.dev.yml",
+        "docker/docker-compose.yml",
+        "charts/formbricks/values.yaml",
+        "docs/self-hosting/configuration/environment-variables.mdx"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Create @formbricks/jobs package with BullMQ foundation",
+      "description": "Establish the core jobs infrastructure package with connection management, queue operations, job definitions, and processors. This provides the foundation for all background job processing in Formbricks.",
+      "files_to_modify": [],
+      "files_to_create": [
+        "packages/jobs/.eslintrc.cjs",
+        "packages/jobs/package.json",
+        "packages/jobs/src/connection.test.ts",
+        "packages/jobs/src/connection.ts",
+        "packages/jobs/src/constants.ts",
+        "packages/jobs/src/contracts.ts",
+        "packages/jobs/src/definitions.ts",
+        "packages/jobs/src/index.ts",
+        "packages/jobs/src/jobs-integration.test.ts",
+        "packages/jobs/src/processors.test.ts",
+        "packages/jobs/src/processors/registry.ts",
+        "packages/jobs/src/processors/response-pipeline.ts",
+        "packages/jobs/src/processors/test-log.ts",
+        "packages/jobs/src/queue.test.ts",
+        "packages/jobs/src/queue.ts",
+        "packages/jobs/src/runtime.test.ts"
+      ],
+      "estimated_effort": "large"
+    },
+    {
+      "id": "T-002",
+      "title": "Integrate jobs runtime with Next.js application startup",
+      "description": "Connect the jobs package to the web application using Next.js instrumentation hooks, ensuring workers start automatically with the server and follow singleton patterns to prevent duplicate registration.",
+      "files_to_modify": [
+        "apps/web/instrumentation.ts",
+        "apps/web/next.config.mjs",
+        "apps/web/package.json"
+      ],
+      "files_to_create": [
+        "apps/web/instrumentation-jobs.test.ts",
+        "apps/web/instrumentation-jobs.ts"
+      ],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-003",
+      "title": "Add environment configuration and documentation",
+      "description": "Implement environment variable configuration for worker tuning, update documentation, and configure Redis for job queue usage in Docker and Kubernetes deployments.",
+      "files_to_modify": [
+        ".env.example",
+        "apps/web/lib/env.ts",
+        "charts/formbricks/values.yaml",
+        "docker-compose.dev.yml",
+        "docker/docker-compose.yml",
+        "docs/docs.json",
+        "docs/self-hosting/configuration/environment-variables.mdx"
+      ],
+      "files_to_create": [
+        "apps/web/lib/jobs/config.test.ts",
+        "apps/web/lib/jobs/config.ts"
+      ],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-004",
+      "title": "Maintain API compatibility while preparing for pipeline migration",
+      "description": "Update pipeline type definitions to use job contracts while keeping existing API signatures unchanged, enabling gradual migration of pipeline processing to background jobs.",
+      "files_to_modify": [
+        "apps/web/app/api/(internal)/pipeline/types/pipelines.ts",
+        "apps/web/app/lib/types/pipelines.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation establishes a robust BullMQ-based background job infrastructure within Formbricks' monorepo while maintaining backward compatibility and preparing for future migration of pipeline operations. The architecture follows a modular approach with clear separation of concerns: a dedicated @formbricks/jobs package encapsulates all BullMQ logic, providing connection management, queue operations, job definitions, and processors.\n\nKey patterns include the use of Next.js instrumentation hooks for worker startup, ensuring workers begin automatically with the server while following singleton patterns to prevent duplicate registration. Environment-driven configuration allows flexible deployment tuning, with sensible defaults that disable workers in test environments to avoid Redis dependencies. The system implements strongly-typed job contracts using Zod schemas, creating an abstract producer interface that decouples calling code from BullMQ specifics, enabling potential future migration to different job queue implementations.\n\nThe changes integrate seamlessly with the existing codebase by maintaining API compatibility\u2014pipeline type definitions now reference job contracts, allowing existing API endpoints to continue functioning while the actual processing can be moved to background jobs incrementally. Comprehensive testing includes unit tests, integration tests with real Redis, and instrumentation tests, ensuring reliability of the asynchronous job processing system. Deployment configurations were updated with appropriate Redis memory policies for job queues, and documentation was added to guide self-hosting users through the new environment variables.",
+  "source_pr": "https://github.com/formbricks/formbricks/pull/7682",
+  "before_sha": "87bcad2b201b81a0baaf3b6f7ca409c426ee963c",
+  "after_sha": "ffe9df45914124b6040babb1372a7204b8cade9e",
+  "diff_stats": {
+    "additions": 2293,
+    "deletions": 27,
+    "files_changed": 40
+  }
+}

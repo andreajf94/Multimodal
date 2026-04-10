@@ -1,0 +1,11 @@
+{
+  "feature_name": "Rate Limit Error Message Fix",
+  "description": "Update the rate limit error message calculation to prevent negative wait times from being displayed. Currently, when the rate limit reset timestamp is in the past, the computed wait time can become negative, resulting in confusing error messages. Ensure the wait time is clamped to a minimum of 0 seconds for clear user communication.",
+  "functional_requirements": [
+    "Modify the wait time calculation in the rate limit error function to never return a negative value",
+    "When the reset timestamp is in the past, display '0 seconds' instead of a negative number",
+    "Maintain all existing error formatting and messaging structure while only adjusting the wait time calculation"
+  ],
+  "project_name": "cal.com",
+  "source_pr": "https://github.com/calcom/cal.com/pull/28765"
+}

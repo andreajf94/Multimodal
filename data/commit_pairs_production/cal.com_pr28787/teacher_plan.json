@@ -1,0 +1,110 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "testing",
+      "recommendation": "Replaced hardcoded CalendarServiceMap mock with a Proxy-based implementation that intercepts all property accesses",
+      "rationale": "The previous hardcoded mock only handled specific calendar services (googlecalendar, office365calendar, applecalendar, caldavcalendar), leaving other services like feishu and lark unmocked. These real modules contain top-level async fetch calls (getAppAccessToken) that trigger 'Closing rpc while fetch was pending' errors when Vitest workers shut down. The Proxy ensures ANY calendar service key is automatically mocked, preventing real module imports entirely.",
+      "alternatives_considered": [
+        "Adding more hardcoded entries to the mock for each calendar service",
+        "Using a factory function that returns mocks on demand",
+        "Modifying the real calendar service modules to avoid async initialization"
+      ],
+      "files_affected": [
+        "packages/testing/src/lib/bookingScenario/bookingScenario.ts"
+      ]
+    },
+    {
+      "dimension": "dependency_injection",
+      "recommendation": "Added explicit mock for OrganizationRepository.container to prevent deep transitive import chains",
+      "rationale": "InstantBookingCreateService \u2192 getBookingFields \u2192 workflows/types \u2192 routing-forms \u2192 webhooks DI \u2192 eventTypes \u2192 OrganizationRepository.container creates a complex import chain that triggers Vitest module-resolution RPC calls. These RPCs can still be in flight when the worker shuts down, causing the same 'Closing rpc while fetch was pending' errors. Mocking this container breaks the import chain at the source.",
+      "alternatives_considered": [
+        "Refactoring the import chain to avoid deep dependencies",
+        "Using module mocking at different points in the chain",
+        "Adding delays or cleanup hooks in test teardown"
+      ],
+      "files_affected": [
+        "packages/features/bookings/lib/service/InstantBookingCreateService.test.ts"
+      ]
+    },
+    {
+      "dimension": "performance",
+      "recommendation": "Created a shared mock registry (calendarServiceConstructorMocks) accessible to both vi.mock factory and mockCalendar function",
+      "rationale": "The Proxy-based CalendarServiceMap and the mockCalendar function need to coordinate their mocks. The shared registry ensures that when mockCalendar is called for a specific calendar service, it can retrieve or create the same mock constructor that the Proxy returns. This maintains consistency between the module-level mock and test-specific mock implementations.",
+      "alternatives_considered": [
+        "Having separate mock instances that don't coordinate",
+        "Using global variables instead of module-scoped registry",
+        "Making the Proxy dynamically create mocks without coordination"
+      ],
+      "files_affected": [
+        "packages/testing/src/lib/bookingScenario/bookingScenario.ts"
+      ]
+    },
+    {
+      "dimension": "testing",
+      "recommendation": "Placed the CalendarServiceMap vi.mock directly in the test file rather than relying solely on the shared bookingScenario mock",
+      "rationale": "Vitest's module hoisting guarantees that mocks defined in test files are processed before any transitive imports resolve the real module. If the mock was only in bookingScenario.ts (which is imported), real modules might still be loaded during the import resolution phase. Having the mock in the test file ensures it's active from the very beginning of test execution.",
+      "alternatives_considered": [
+        "Relying only on the shared mock in bookingScenario.ts",
+        "Using global setup files for all mocks",
+        "Configuring Vitest to always mock certain modules"
+      ],
+      "files_affected": [
+        "packages/features/bookings/lib/service/InstantBookingCreateService.test.ts"
+      ]
+    },
+    {
+      "dimension": "code_organization",
+      "recommendation": "Refactored mockCalendar to use the shared mock registry instead of dynamically importing calendar.services.generated",
+      "rationale": "The original mockCalendar function dynamically imported the real CalendarServiceMap module, which could trigger the same problematic async operations. By using the shared mock registry directly, we avoid loading any real calendar service modules, even indirectly through the import statement.",
+      "alternatives_considered": [
+        "Keeping the dynamic import but catching errors",
+        "Creating a separate mock system just for mockCalendar",
+        "Passing mock constructors as parameters to mockCalendar"
+      ],
+      "files_affected": [
+        "packages/testing/src/lib/bookingScenario/bookingScenario.ts"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Implement Proxy-based CalendarServiceMap mock for test stability",
+      "description": "Replace hardcoded calendar service mocks with a Proxy handler that intercepts all property accesses, preventing real calendar service modules from being imported and triggering async operations that cause Vitest worker shutdown errors",
+      "files_to_modify": [
+        "packages/testing/src/lib/bookingScenario/bookingScenario.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-002",
+      "title": "Add OrganizationRepository.container mock to prevent deep import chain issues",
+      "description": "Mock the OrganizationRepository container to break a complex transitive import chain that triggers Vitest module-resolution RPC calls during test teardown",
+      "files_to_modify": [
+        "packages/features/bookings/lib/service/InstantBookingCreateService.test.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-003",
+      "title": "Ensure test file has direct vi.mock for CalendarServiceMap",
+      "description": "Add CalendarServiceMap vi.mock directly in InstantBookingCreateService.test.ts to guarantee Vitest hoists it before any transitive imports resolve real modules",
+      "files_to_modify": [
+        "packages/features/bookings/lib/service/InstantBookingCreateService.test.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The changes address flaky test failures in CI caused by Vitest worker shutdown errors. The core issue was that real calendar service modules (like feishu, lark) contain top-level async fetch calls that trigger 'Closing rpc while fetch was pending' errors when workers terminate. The solution implements a two-pronged approach: first, a Proxy-based CalendarServiceMap mock that intercepts ALL property accesses, ensuring no real calendar service modules are ever imported. This replaces the previous hardcoded mock that only covered specific services. Second, an explicit mock for OrganizationRepository.container breaks a deep transitive import chain that was triggering module-resolution RPC calls during teardown.\n\nKey patterns used include the Proxy pattern for dynamic property interception, a shared mock registry for coordination between module-level mocks and test-specific mock functions, and strategic placement of vi.mock calls directly in test files to leverage Vitest's hoisting behavior. The implementation maintains backward compatibility by preserving the same mockCalendar function interface while changing its internal implementation to use the shared mock registry instead of dynamic imports.\n\nThe changes integrate with the existing codebase by modifying the shared testing utilities in bookingScenario.ts while also adding specific mocks in the InstantBookingCreateService test file. This layered approach ensures both general test stability across all tests using calendar mocking and specific fixes for the problematic test case. The solution is defensive, preventing not just known problematic imports but any future calendar service additions through the Proxy's catch-all behavior.",
+  "source_pr": "https://github.com/calcom/cal.com/pull/28787",
+  "before_sha": "77eb4c80bf77167de07ecad3282860ba5c6d19e5",
+  "after_sha": "dcbb417aec9c37eb995022a40d4408b19994ccf4",
+  "diff_stats": {
+    "additions": 192,
+    "deletions": 166,
+    "files_changed": 2
+  }
+}

@@ -1,0 +1,80 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "error_handling",
+      "recommendation": "Added graceful error handling for AutomationNodeDoesNotExist exceptions in the dispatch_node method to prevent crashes when nodes are deleted between queuing and execution",
+      "rationale": "In an asynchronous task system, there's a race condition where a node can be deleted after being queued for dispatch but before the Celery task executes. Previously, get_node() would raise an uncaught AutomationNodeDoesNotExist exception, causing the task to crash. The fix catches this specific exception, logs a warning, and returns None to exit gracefully.",
+      "alternatives_considered": [
+        "Using a try-except block around the entire method (too broad, could hide other errors)",
+        "Adding a node.exists() check before calling get_node() (would still need exception handling for race conditions)",
+        "Implementing a soft-delete pattern for nodes (would require significant architectural changes)"
+      ],
+      "files_affected": [
+        "backend/src/baserow/contrib/automation/nodes/handler.py"
+      ]
+    },
+    {
+      "dimension": "logging",
+      "recommendation": "Added structured warning logs with clear error messages when nodes are not found during dispatch",
+      "rationale": "The warning logs provide actionable information for debugging while avoiding noise. The message includes the node ID and explains the likely cause (deletion before task execution), helping developers understand this is a race condition rather than a bug. This maintains observability without crashing the system.",
+      "alternatives_considered": [
+        "Using error-level logging (too severe for an expected race condition)",
+        "Silently returning None without logging (would make debugging difficult)",
+        "Creating a new metric or alert for this scenario (over-engineering for a rare condition)"
+      ],
+      "files_affected": [
+        "backend/src/baserow/contrib/automation/nodes/handler.py"
+      ]
+    },
+    {
+      "dimension": "testing",
+      "recommendation": "Added a test that simulates the race condition by deleting a node before dispatch and verifying graceful handling",
+      "rationale": "The test validates both the main node lookup and the simulate_until_node lookup paths. It uses mocking to verify the warning log is called with the expected message. This ensures the fix works correctly and prevents regression. The test is marked with @pytest.mark.django_db since it needs database access.",
+      "alternatives_considered": [
+        "Testing only the main node path (would miss the simulate_until_node edge case)",
+        "Using real Celery tasks in the test (too slow and complex for a unit test)",
+        "Creating integration tests with actual task queues (overkill for this specific fix)"
+      ],
+      "files_affected": [
+        "backend/tests/baserow/contrib/automation/nodes/test_node_dispatch_async.py"
+      ]
+    },
+    {
+      "dimension": "documentation",
+      "recommendation": "Added a changelog entry documenting the bug fix with clear description and domain context",
+      "rationale": "The changelog follows the project's established format with type: 'bug', clear message explaining the race condition, and domain: 'automation'. This helps users and developers understand what was fixed without needing to dig through code. The entry is placed in the unreleased section for proper version tracking.",
+      "alternatives_considered": [
+        "Adding code comments only (wouldn't appear in release notes)",
+        "Creating a separate documentation page (too heavy for a single bug fix)",
+        "Skipping documentation entirely (would make tracking changes difficult)"
+      ],
+      "files_affected": [
+        "changelog/entries/unreleased/bug/fixed_a_bug_that_caused_a_crash_due_to_a_race_condition_that.json"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Graceful handling of deleted nodes in automation dispatch",
+      "description": "Implement error handling to prevent crashes when automation nodes are deleted between being queued for dispatch and the dispatch task executing",
+      "files_to_modify": [
+        "backend/src/baserow/contrib/automation/nodes/handler.py",
+        "backend/tests/baserow/contrib/automation/nodes/test_node_dispatch_async.py"
+      ],
+      "files_to_create": [
+        "changelog/entries/unreleased/bug/fixed_a_bug_that_caused_a_crash_due_to_a_race_condition_that.json"
+      ],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation addresses a race condition in Baserow's automation system where nodes could be deleted after being queued for dispatch but before the asynchronous task executes. Previously, this would cause unhandled AutomationNodeDoesNotExist exceptions and crash the dispatch task.\n\nThe fix wraps both the main node lookup and the simulate_until_node lookup in try-except blocks that catch AutomationNodeDoesNotExist. When caught, the system logs a clear warning message explaining the likely cause (node deletion before task execution) and returns None to exit gracefully. This approach maintains the existing method signature and return behavior while preventing crashes.\n\nThe solution follows defensive programming principles and integrates well with the existing Django/Celery architecture. The error message is logged at warning level to provide observability without being overly noisy. A comprehensive test validates both code paths, and a changelog entry documents the fix for users. This minimal change solves the race condition without requiring architectural modifications to the task queuing system.",
+  "source_pr": "https://github.com/baserow/baserow/pull/5051",
+  "before_sha": "d17c29291696491f582dd7fecc27ac4f8dc588e9",
+  "after_sha": "8d9e3dc8ffa96b289be061f7eb56db834fbe9b1f",
+  "diff_stats": {
+    "additions": 55,
+    "deletions": 5,
+    "files_changed": 3
+  }
+}

@@ -1,0 +1,94 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "ui_ux_design",
+      "recommendation": "Enhanced the merge confirmation dialog to display additional document metadata (correspondent, creation date, page count) alongside titles to help users distinguish between similar documents",
+      "rationale": "The original implementation only showed document titles, which could be ambiguous when merging similarly named documents. By adding correspondent name, creation date, and page count, users can make more informed decisions without needing to cross-reference other windows. This reduces user error and improves the merge workflow efficiency.",
+      "alternatives_considered": [
+        "Adding tooltips with document details instead of inline display",
+        "Creating a separate preview panel within the dialog",
+        "Adding document thumbnails or icons",
+        "Keeping the minimal interface and relying on users to check details elsewhere"
+      ],
+      "files_affected": [
+        "src-ui/src/app/components/common/confirm-dialog/merge-confirm-dialog/merge-confirm-dialog.component.html"
+      ]
+    },
+    {
+      "dimension": "data_modeling",
+      "recommendation": "Changed from tracking document IDs to full document objects in the component to access metadata without additional API calls",
+      "rationale": "The original implementation stored only document IDs and fetched document details via a getDocument() method. By storing full Document objects, we can directly access metadata like correspondent, created date, and page_count without additional service calls or complex data fetching logic. This simplifies the template and improves performance by leveraging data already available in the component.",
+      "alternatives_considered": [
+        "Keeping document IDs and adding a separate service method to fetch metadata",
+        "Creating a lightweight interface with only needed metadata",
+        "Using a document cache service to retrieve details on demand"
+      ],
+      "files_affected": [
+        "src-ui/src/app/components/common/confirm-dialog/merge-confirm-dialog/merge-confirm-dialog.component.html",
+        "src-ui/src/app/components/common/confirm-dialog/merge-confirm-dialog/merge-confirm-dialog.component.ts"
+      ]
+    },
+    {
+      "dimension": "component_architecture",
+      "recommendation": "Added Angular pipes (AsyncPipe, CorrespondentNamePipe, CustomDatePipe) to handle data transformation in the template",
+      "rationale": "Using Angular pipes follows the framework's best practices for data transformation and formatting. CorrespondentNamePipe handles the async nature of correspondent name resolution, CustomDatePipe formats dates consistently with the rest of the application, and AsyncPipe manages observable subscriptions automatically. This keeps the component logic clean and leverages existing application patterns.",
+      "alternatives_considered": [
+        "Implementing formatting logic directly in the component class",
+        "Creating new methods in the component for each transformation",
+        "Using template expressions with direct property access"
+      ],
+      "files_affected": [
+        "src-ui/src/app/components/common/confirm-dialog/merge-confirm-dialog/merge-confirm-dialog.component.ts"
+      ]
+    },
+    {
+      "dimension": "layout_design",
+      "recommendation": "Used Bootstrap utility classes (d-flex, align-items-center, flex-column, text-muted) to create a clean, responsive layout that maintains the existing dialog structure",
+      "rationale": "The layout uses Bootstrap's flexbox utilities to create a vertical stack of document details while maintaining alignment with the drag handle. The correspondent name is emphasized with bold text, while secondary details (date and page count) are shown in muted text below. This hierarchical presentation ensures important information is visible without overcrowding the interface.",
+      "alternatives_considered": [
+        "Using a table layout for document details",
+        "Adding icons for each metadata type",
+        "Creating a multi-column layout within each list item",
+        "Using a card-based design instead of list items"
+      ],
+      "files_affected": [
+        "src-ui/src/app/components/common/confirm-dialog/merge-confirm-dialog/merge-confirm-dialog.component.html"
+      ]
+    },
+    {
+      "dimension": "internationalization",
+      "recommendation": "Used Angular's pluralization for page count display to handle singular/plural cases correctly",
+      "rationale": "The implementation uses Angular's built-in pluralization syntax (`{document.page_count, plural, =1 {One page} other {{{document.page_count}} pages}}`) to properly display 'One page' for single-page documents and 'X pages' for multi-page documents. This provides better user experience and follows internationalization best practices.",
+      "alternatives_considered": [
+        "Hardcoding 'pages' regardless of count",
+        "Using a conditional (ngIf) to check page_count === 1",
+        "Creating a custom pipe for page count formatting"
+      ],
+      "files_affected": [
+        "src-ui/src/app/components/common/confirm-dialog/merge-confirm-dialog/merge-confirm-dialog.component.html"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Enhance Merge Dialog Document Display",
+      "description": "Update the merge confirmation dialog to show additional document metadata (correspondent, creation date, page count) alongside document titles to help users distinguish between similar documents during merge operations",
+      "files_to_modify": [
+        "src-ui/src/app/components/common/confirm-dialog/merge-confirm-dialog/merge-confirm-dialog.component.html",
+        "src-ui/src/app/components/common/confirm-dialog/merge-confirm-dialog/merge-confirm-dialog.component.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation enhances the document merge confirmation dialog by adding crucial metadata to help users distinguish between similarly named documents. The key change was shifting from tracking document IDs to full Document objects, allowing direct access to metadata like correspondent, creation date, and page count without additional API calls.\n\nThe HTML template was updated to display document details in a clean, hierarchical layout using Bootstrap flexbox utilities. The correspondent name (when available) is shown in bold before the title, followed by the creation date formatted consistently with the rest of the application. Page count is displayed with proper pluralization handling using Angular's i18n pluralization syntax.\n\nThe TypeScript component was updated to import and use existing Angular pipes (CorrespondentNamePipe, CustomDatePipe, AsyncPipe) for data transformation, following the framework's best practices. This approach leverages existing application patterns and keeps the component logic clean. The drag-and-drop functionality was preserved by updating the template to track documents by their ID property instead of the raw documentID value. The implementation maintains backward compatibility while significantly improving the user experience for document merging operations.",
+  "source_pr": "https://github.com/paperless-ngx/paperless-ngx/pull/12271",
+  "before_sha": "2cdb1424efb1dc0fc7e988a7a1b9473ecf5eb9f2",
+  "after_sha": "2b288c094d2632da846d79d91fd83689c1d29744",
+  "diff_stats": {
+    "additions": 21,
+    "deletions": 3,
+    "files_changed": 2
+  }
+}

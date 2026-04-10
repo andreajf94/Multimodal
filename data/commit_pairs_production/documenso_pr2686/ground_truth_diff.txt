@@ -1,0 +1,1060 @@
+diff --git a/apps/remix/app/components/dialogs/document-delete-dialog.tsx b/apps/remix/app/components/dialogs/document-delete-dialog.tsx
+deleted file mode 100644
+index a802387ef1..0000000000
+--- a/apps/remix/app/components/dialogs/document-delete-dialog.tsx
++++ /dev/null
+@@ -1,201 +0,0 @@
+-import { useEffect, useState } from 'react';
+-
+-import { msg } from '@lingui/core/macro';
+-import { useLingui } from '@lingui/react';
+-import { Trans } from '@lingui/react/macro';
+-import { DocumentStatus } from '@prisma/client';
+-import { P, match } from 'ts-pattern';
+-
+-import { useLimits } from '@documenso/ee/server-only/limits/provider/client';
+-import { trpc as trpcReact } from '@documenso/trpc/react';
+-import { Alert, AlertDescription } from '@documenso/ui/primitives/alert';
+-import { Button } from '@documenso/ui/primitives/button';
+-import {
+-  Dialog,
+-  DialogContent,
+-  DialogDescription,
+-  DialogFooter,
+-  DialogHeader,
+-  DialogTitle,
+-} from '@documenso/ui/primitives/dialog';
+-import { Input } from '@documenso/ui/primitives/input';
+-import { useToast } from '@documenso/ui/primitives/use-toast';
+-
+-type DocumentDeleteDialogProps = {
+-  id: number;
+-  open: boolean;
+-  onOpenChange: (_open: boolean) => void;
+-  onDelete?: () => Promise<void> | void;
+-  status: DocumentStatus;
+-  documentTitle: string;
+-  canManageDocument: boolean;
+-};
+-
+-export const DocumentDeleteDialog = ({
+-  id,
+-  open,
+-  onOpenChange,
+-  onDelete,
+-  status,
+-  documentTitle,
+-  canManageDocument,
+-}: DocumentDeleteDialogProps) => {
+-  const { toast } = useToast();
+-  const { refreshLimits } = useLimits();
+-  const { _ } = useLingui();
+-
+-  const deleteMessage = msg`delete`;
+-
+-  const [inputValue, setInputValue] = useState('');
+-  const [isDeleteEnabled, setIsDeleteEnabled] = useState(status === DocumentStatus.DRAFT);
+-
+-  const { mutateAsync: deleteDocument, isPending } = trpcReact.document.delete.useMutation({
+-    onSuccess: async () => {
+-      void refreshLimits();
+-
+-      toast({
+-        title: _(msg`Document deleted`),
+-        description: _(msg`"${documentTitle}" has been successfully deleted`),
+-        duration: 5000,
+-      });
+-
+-      await onDelete?.();
+-
+-      onOpenChange(false);
+-    },
+-    onError: () => {
+-      toast({
+-        title: _(msg`Something went wrong`),
+-        description: _(msg`This document could not be deleted at this time. Please try again.`),
+-        variant: 'destructive',
+-        duration: 7500,
+-      });
+-    },
+-  });
+-
+-  useEffect(() => {
+-    if (open) {
+-      setInputValue('');
+-      setIsDeleteEnabled(status === DocumentStatus.DRAFT);
+-    }
+-  }, [open, status]);
+-
+-  const onInputChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+-    setInputValue(event.target.value);
+-    setIsDeleteEnabled(event.target.value === _(deleteMessage));
+-  };
+-
+-  return (
+-    <Dialog open={open} onOpenChange={(value) => !isPending && onOpenChange(value)}>
+-      <DialogContent>
+-        <DialogHeader>
+-          <DialogTitle>
+-            <Trans>Are you sure?</Trans>
+-          </DialogTitle>
+-
+-          <DialogDescription>
+-            {canManageDocument ? (
+-              <Trans>
+-                You are about to delete <strong>"{documentTitle}"</strong>
+-              </Trans>
+-            ) : (
+-              <Trans>
+-                You are about to hide <strong>"{documentTitle}"</strong>
+-              </Trans>
+-            )}
+-          </DialogDescription>
+-        </DialogHeader>
+-
+-        {canManageDocument ? (
+-          <Alert variant="warning" className="-mt-1">
+-            {match(status)
+-              .with(DocumentStatus.DRAFT, () => (
+-                <AlertDescription>
+-                  <Trans>
+-                    Please note that this action is <strong>irreversible</strong>. Once confirmed,
+-                    this document will be permanently deleted.
+-                  </Trans>
+-                </AlertDescription>
+-              ))
+-              .with(DocumentStatus.PENDING, () => (
+-                <AlertDescription>
+-                  <p>
+-                    <Trans>
+-                      Please note that this action is <strong>irreversible</strong>.
+-                    </Trans>
+-                  </p>
+-
+-                  <p className="mt-1">
+-                    <Trans>Once confirmed, the following will occur:</Trans>
+-                  </p>
+-
+-                  <ul className="mt-0.5 list-inside list-disc">
+-                    <li>
+-                      <Trans>Document will be permanently deleted</Trans>
+-                    </li>
+-                    <li>
+-                      <Trans>Document signing process will be cancelled</Trans>
+-                    </li>
+-                    <li>
+-                      <Trans>All inserted signatures will be voided</Trans>
+-                    </li>
+-                    <li>
+-                      <Trans>All recipients will be notified</Trans>
+-                    </li>
+-                  </ul>
+-                </AlertDescription>
+-              ))
+-              .with(P.union(DocumentStatus.COMPLETED, DocumentStatus.REJECTED), () => (
+-                <AlertDescription>
+-                  <p>
+-                    <Trans>By deleting this document, the following will occur:</Trans>
+-                  </p>
+-
+-                  <ul className="mt-0.5 list-inside list-disc">
+-                    <li>
+-                      <Trans>The document will be hidden from your account</Trans>
+-                    </li>
+-                    <li>
+-                      <Trans>Recipients will still retain their copy of the document</Trans>
+-                    </li>
+-                  </ul>
+-                </AlertDescription>
+-              ))
+-              .exhaustive()}
+-          </Alert>
+-        ) : (
+-          <Alert variant="warning" className="-mt-1">
+-            <AlertDescription>
+-              <Trans>Please contact support if you would like to revert this action.</Trans>
+-            </AlertDescription>
+-          </Alert>
+-        )}
+-
+-        {status !== DocumentStatus.DRAFT && canManageDocument && (
+-          <Input
+-            type="text"
+-            value={inputValue}
+-            onChange={onInputChange}
+-            placeholder={_(msg`Please type ${`'${_(deleteMessage)}'`} to confirm`)}
+-          />
+-        )}
+-
+-        <DialogFooter>
+-          <Button type="button" variant="secondary" onClick={() => onOpenChange(false)}>
+-            <Trans>Cancel</Trans>
+-          </Button>
+-
+-          <Button
+-            type="button"
+-            loading={isPending}
+-            onClick={() => void deleteDocument({ documentId: id })}
+-            disabled={!isDeleteEnabled && canManageDocument}
+-            variant="destructive"
+-          >
+-            {canManageDocument ? _(msg`Delete`) : _(msg`Hide`)}
+-          </Button>
+-        </DialogFooter>
+-      </DialogContent>
+-    </Dialog>
+-  );
+-};
+diff --git a/apps/remix/app/components/dialogs/document-duplicate-dialog.tsx b/apps/remix/app/components/dialogs/document-duplicate-dialog.tsx
+deleted file mode 100644
+index 9b7c824041..0000000000
+--- a/apps/remix/app/components/dialogs/document-duplicate-dialog.tsx
++++ /dev/null
+@@ -1,103 +0,0 @@
+-import { msg } from '@lingui/core/macro';
+-import { useLingui } from '@lingui/react';
+-import { Trans } from '@lingui/react/macro';
+-import { useNavigate } from 'react-router';
+-
+-import { formatDocumentsPath } from '@documenso/lib/utils/teams';
+-import { trpc as trpcReact } from '@documenso/trpc/react';
+-import { Button } from '@documenso/ui/primitives/button';
+-import {
+-  Dialog,
+-  DialogContent,
+-  DialogFooter,
+-  DialogHeader,
+-  DialogTitle,
+-} from '@documenso/ui/primitives/dialog';
+-import { useToast } from '@documenso/ui/primitives/use-toast';
+-
+-import { useCurrentTeam } from '~/providers/team';
+-
+-type DocumentDuplicateDialogProps = {
+-  id: string;
+-  token?: string;
+-  open: boolean;
+-  onOpenChange: (_open: boolean) => void;
+-};
+-
+-export const DocumentDuplicateDialog = ({
+-  id,
+-  token,
+-  open,
+-  onOpenChange,
+-}: DocumentDuplicateDialogProps) => {
+-  const navigate = useNavigate();
+-
+-  const { toast } = useToast();
+-  const { _ } = useLingui();
+-
+-  const team = useCurrentTeam();
+-
+-  const documentsPath = formatDocumentsPath(team.url);
+-
+-  const { mutateAsync: duplicateEnvelope, isPending: isDuplicating } =
+-    trpcReact.envelope.duplicate.useMutation({
+-      onSuccess: async ({ id }) => {
+-        toast({
+-          title: _(msg`Document Duplicated`),
+-          description: _(msg`Your document has been successfully duplicated.`),
+-          duration: 5000,
+-        });
+-
+-        await navigate(`${documentsPath}/${id}/edit`);
+-        onOpenChange(false);
+-      },
+-    });
+-
+-  const onDuplicate = async () => {
+-    try {
+-      await duplicateEnvelope({ envelopeId: id });
+-    } catch {
+-      toast({
+-        title: _(msg`Something went wrong`),
+-        description: _(msg`This document could not be duplicated at this time. Please try again.`),
+-        variant: 'destructive',
+-        duration: 7500,
+-      });
+-    }
+-  };
+-
+-  return (
+-    <Dialog open={open} onOpenChange={(value) => !isDuplicating && onOpenChange(value)}>
+-      <DialogContent>
+-        <DialogHeader>
+-          <DialogTitle>
+-            <Trans>Duplicate</Trans>
+-          </DialogTitle>
+-        </DialogHeader>
+-
+-        <DialogFooter>
+-          <div className="flex w-full flex-1 flex-nowrap gap-4">
+-            <Button
+-              type="button"
+-              variant="secondary"
+-              onClick={() => onOpenChange(false)}
+-              className="flex-1"
+-            >
+-              <Trans>Cancel</Trans>
+-            </Button>
+-
+-            <Button
+-              type="button"
+-              disabled={isDuplicating}
+-              loading={isDuplicating}
+-              onClick={onDuplicate}
+-              className="flex-1"
+-            >
+-              <Trans>Duplicate</Trans>
+-            </Button>
+-          </div>
+-        </DialogFooter>
+-      </DialogContent>
+-    </Dialog>
+-  );
+-};
+diff --git a/apps/remix/app/components/dialogs/envelope-delete-dialog.tsx b/apps/remix/app/components/dialogs/envelope-delete-dialog.tsx
+index 2975643f61..3a8cf7deaf 100644
+--- a/apps/remix/app/components/dialogs/envelope-delete-dialog.tsx
++++ b/apps/remix/app/components/dialogs/envelope-delete-dialog.tsx
+@@ -52,13 +52,23 @@ export const EnvelopeDeleteDialog = ({
+   const [inputValue, setInputValue] = useState('');
+   const [isDeleteEnabled, setIsDeleteEnabled] = useState(status === DocumentStatus.DRAFT);
+ 
++  const isDocument = type === EnvelopeType.DOCUMENT;
++
+   const { mutateAsync: deleteEnvelope, isPending } = trpcReact.envelope.delete.useMutation({
+     onSuccess: async () => {
+       void refreshLimits();
+ 
+       toast({
+-        title: t`Document deleted`,
+-        description: t`"${title}" has been successfully deleted`,
++        title: canManageDocument
++          ? isDocument
++            ? t`Document deleted`
++            : t`Template deleted`
++          : isDocument
++            ? t`Document hidden`
++            : t`Template hidden`,
++        description: canManageDocument
++          ? t`"${title}" has been successfully deleted`
++          : t`"${title}" has been successfully hidden`,
+         duration: 5000,
+       });
+ 
+@@ -69,7 +79,9 @@ export const EnvelopeDeleteDialog = ({
+     onError: () => {
+       toast({
+         title: t`Something went wrong`,
+-        description: t`This document could not be deleted at this time. Please try again.`,
++        description: isDocument
++          ? t`This document could not be deleted at this time. Please try again.`
++          : t`This template could not be deleted at this time. Please try again.`,
+         variant: 'destructive',
+         duration: 7500,
+       });
+diff --git a/apps/remix/app/components/dialogs/envelope-duplicate-dialog.tsx b/apps/remix/app/components/dialogs/envelope-duplicate-dialog.tsx
+index b327a15497..88274c0fa2 100644
+--- a/apps/remix/app/components/dialogs/envelope-duplicate-dialog.tsx
++++ b/apps/remix/app/components/dialogs/envelope-duplicate-dialog.tsx
+@@ -1,7 +1,6 @@
+ import { useState } from 'react';
+ 
+-import { useLingui } from '@lingui/react/macro';
+-import { Trans } from '@lingui/react/macro';
++import { Trans, useLingui } from '@lingui/react/macro';
+ import { EnvelopeType } from '@prisma/client';
+ import { useNavigate } from 'react-router';
+ 
+@@ -10,6 +9,7 @@ import { trpc } from '@documenso/trpc/react';
+ import { Button } from '@documenso/ui/primitives/button';
+ import {
+   Dialog,
++  DialogClose,
+   DialogContent,
+   DialogDescription,
+   DialogFooter,
+@@ -41,19 +41,20 @@ export const EnvelopeDuplicateDialog = ({
+ 
+   const team = useCurrentTeam();
+ 
++  const isDocument = envelopeType === EnvelopeType.DOCUMENT;
++
+   const { mutateAsync: duplicateEnvelope, isPending: isDuplicating } =
+     trpc.envelope.duplicate.useMutation({
+       onSuccess: async ({ id }) => {
+         toast({
+-          title: t`Envelope Duplicated`,
+-          description: t`Your envelope has been successfully duplicated.`,
++          title: isDocument ? t`Document Duplicated` : t`Template Duplicated`,
++          description: isDocument
++            ? t`Your document has been successfully duplicated.`
++            : t`Your template has been successfully duplicated.`,
+           duration: 5000,
+         });
+ 
+-        const path =
+-          envelopeType === EnvelopeType.DOCUMENT
+-            ? formatDocumentsPath(team.url)
+-            : formatTemplatesPath(team.url);
++        const path = isDocument ? formatDocumentsPath(team.url) : formatTemplatesPath(team.url);
+ 
+         await navigate(`${path}/${id}/edit`);
+         setOpen(false);
+@@ -66,7 +67,9 @@ export const EnvelopeDuplicateDialog = ({
+     } catch {
+       toast({
+         title: t`Something went wrong`,
+-        description: t`This document could not be duplicated at this time. Please try again.`,
++        description: isDocument
++          ? t`This document could not be duplicated at this time. Please try again.`
++          : t`This template could not be duplicated at this time. Please try again.`,
+         variant: 'destructive',
+         duration: 7500,
+       });
+@@ -78,30 +81,25 @@ export const EnvelopeDuplicateDialog = ({
+       {trigger && <DialogTrigger asChild>{trigger}</DialogTrigger>}
+ 
+       <DialogContent>
+-        {envelopeType === EnvelopeType.DOCUMENT ? (
+-          <DialogHeader>
+-            <DialogTitle>
+-              <Trans>Duplicate Document</Trans>
+-            </DialogTitle>
+-            <DialogDescription>
++        <DialogHeader>
++          <DialogTitle>
++            {isDocument ? <Trans>Duplicate Document</Trans> : <Trans>Duplicate Template</Trans>}
++          </DialogTitle>
++          <DialogDescription>
++            {isDocument ? (
+               <Trans>This document will be duplicated.</Trans>
+-            </DialogDescription>
+-          </DialogHeader>
+-        ) : (
+-          <DialogHeader>
+-            <DialogTitle>
+-              <Trans>Duplicate Template</Trans>
+-            </DialogTitle>
+-            <DialogDescription>
++            ) : (
+               <Trans>This template will be duplicated.</Trans>
+-            </DialogDescription>
+-          </DialogHeader>
+-        )}
++            )}
++          </DialogDescription>
++        </DialogHeader>
+ 
+         <DialogFooter>
+-          <Button type="button" variant="secondary" disabled={isDuplicating}>
+-            <Trans>Cancel</Trans>
+-          </Button>
++          <DialogClose asChild>
++            <Button type="button" variant="secondary" disabled={isDuplicating}>
++              <Trans>Cancel</Trans>
++            </Button>
++          </DialogClose>
+ 
+           <Button type="button" loading={isDuplicating} onClick={onDuplicate}>
+             <Trans>Duplicate</Trans>
+diff --git a/apps/remix/app/components/dialogs/template-delete-dialog.tsx b/apps/remix/app/components/dialogs/template-delete-dialog.tsx
+deleted file mode 100644
+index 7f821d4a3c..0000000000
+--- a/apps/remix/app/components/dialogs/template-delete-dialog.tsx
++++ /dev/null
+@@ -1,93 +0,0 @@
+-import { msg } from '@lingui/core/macro';
+-import { useLingui } from '@lingui/react';
+-import { Trans } from '@lingui/react/macro';
+-
+-import { trpc as trpcReact } from '@documenso/trpc/react';
+-import { Button } from '@documenso/ui/primitives/button';
+-import {
+-  Dialog,
+-  DialogContent,
+-  DialogDescription,
+-  DialogFooter,
+-  DialogHeader,
+-  DialogTitle,
+-} from '@documenso/ui/primitives/dialog';
+-import { useToast } from '@documenso/ui/primitives/use-toast';
+-
+-type TemplateDeleteDialogProps = {
+-  id: number;
+-  open: boolean;
+-  onOpenChange: (_open: boolean) => void;
+-  onDelete?: () => Promise<void> | void;
+-};
+-
+-export const TemplateDeleteDialog = ({
+-  id,
+-  open,
+-  onOpenChange,
+-  onDelete,
+-}: TemplateDeleteDialogProps) => {
+-  const { _ } = useLingui();
+-  const { toast } = useToast();
+-
+-  const { mutateAsync: deleteTemplate, isPending } = trpcReact.template.deleteTemplate.useMutation({
+-    onSuccess: async () => {
+-      await onDelete?.();
+-
+-      toast({
+-        title: _(msg`Template deleted`),
+-        description: _(msg`Your template has been successfully deleted.`),
+-        duration: 5000,
+-      });
+-
+-      onOpenChange(false);
+-    },
+-    onError: () => {
+-      toast({
+-        title: _(msg`Something went wrong`),
+-        description: _(msg`This template could not be deleted at this time. Please try again.`),
+-        variant: 'destructive',
+-        duration: 7500,
+-      });
+-    },
+-  });
+-
+-  return (
+-    <Dialog open={open} onOpenChange={(value) => !isPending && onOpenChange(value)}>
+-      <DialogContent>
+-        <DialogHeader>
+-          <DialogTitle>
+-            <Trans>Do you want to delete this template?</Trans>
+-          </DialogTitle>
+-
+-          <DialogDescription>
+-            <Trans>
+-              Please note that this action is irreversible. Once confirmed, your template will be
+-              permanently deleted.
+-            </Trans>
+-          </DialogDescription>
+-        </DialogHeader>
+-
+-        <DialogFooter>
+-          <Button
+-            type="button"
+-            variant="secondary"
+-            disabled={isPending}
+-            onClick={() => onOpenChange(false)}
+-          >
+-            <Trans>Cancel</Trans>
+-          </Button>
+-
+-          <Button
+-            type="button"
+-            variant="destructive"
+-            loading={isPending}
+-            onClick={async () => deleteTemplate({ templateId: id })}
+-          >
+-            <Trans>Delete</Trans>
+-          </Button>
+-        </DialogFooter>
+-      </DialogContent>
+-    </Dialog>
+-  );
+-};
+diff --git a/apps/remix/app/components/dialogs/template-duplicate-dialog.tsx b/apps/remix/app/components/dialogs/template-duplicate-dialog.tsx
+deleted file mode 100644
+index 1e999129fd..0000000000
+--- a/apps/remix/app/components/dialogs/template-duplicate-dialog.tsx
++++ /dev/null
+@@ -1,89 +0,0 @@
+-import { msg } from '@lingui/core/macro';
+-import { useLingui } from '@lingui/react';
+-import { Trans } from '@lingui/react/macro';
+-
+-import { trpc as trpcReact } from '@documenso/trpc/react';
+-import { Button } from '@documenso/ui/primitives/button';
+-import {
+-  Dialog,
+-  DialogContent,
+-  DialogDescription,
+-  DialogFooter,
+-  DialogHeader,
+-  DialogTitle,
+-} from '@documenso/ui/primitives/dialog';
+-import { useToast } from '@documenso/ui/primitives/use-toast';
+-
+-type TemplateDuplicateDialogProps = {
+-  id: number;
+-  open: boolean;
+-  onOpenChange: (_open: boolean) => void;
+-};
+-
+-export const TemplateDuplicateDialog = ({
+-  id,
+-  open,
+-  onOpenChange,
+-}: TemplateDuplicateDialogProps) => {
+-  const { _ } = useLingui();
+-  const { toast } = useToast();
+-
+-  const { mutateAsync: duplicateTemplate, isPending } =
+-    trpcReact.template.duplicateTemplate.useMutation({
+-      onSuccess: () => {
+-        toast({
+-          title: _(msg`Template duplicated`),
+-          description: _(msg`Your template has been duplicated successfully.`),
+-          duration: 5000,
+-        });
+-
+-        onOpenChange(false);
+-      },
+-      onError: () => {
+-        toast({
+-          title: _(msg`Error`),
+-          description: _(msg`An error occurred while duplicating template.`),
+-          variant: 'destructive',
+-        });
+-      },
+-    });
+-
+-  return (
+-    <Dialog open={open} onOpenChange={(value) => !isPending && onOpenChange(value)}>
+-      <DialogContent>
+-        <DialogHeader>
+-          <DialogTitle>
+-            <Trans>Do you want to duplicate this template?</Trans>
+-          </DialogTitle>
+-
+-          <DialogDescription className="pt-2">
+-            <Trans>Your template will be duplicated.</Trans>
+-          </DialogDescription>
+-        </DialogHeader>
+-
+-        <DialogFooter>
+-          <Button
+-            type="button"
+-            disabled={isPending}
+-            variant="secondary"
+-            onClick={() => onOpenChange(false)}
+-          >
+-            <Trans>Cancel</Trans>
+-          </Button>
+-
+-          <Button
+-            type="button"
+-            loading={isPending}
+-            onClick={async () =>
+-              duplicateTemplate({
+-                templateId: id,
+-              })
+-            }
+-          >
+-            <Trans>Duplicate</Trans>
+-          </Button>
+-        </DialogFooter>
+-      </DialogContent>
+-    </Dialog>
+-  );
+-};
+diff --git a/apps/remix/app/components/general/document/document-page-view-dropdown.tsx b/apps/remix/app/components/general/document/document-page-view-dropdown.tsx
+index 69d85148b7..1cd7c8dcbc 100644
+--- a/apps/remix/app/components/general/document/document-page-view-dropdown.tsx
++++ b/apps/remix/app/components/general/document/document-page-view-dropdown.tsx
+@@ -1,7 +1,7 @@
+ import { useState } from 'react';
+ 
+ import { Trans } from '@lingui/react/macro';
+-import { DocumentStatus } from '@prisma/client';
++import { DocumentStatus, EnvelopeType } from '@prisma/client';
+ import {
+   Copy,
+   Download,
+@@ -34,10 +34,10 @@ import {
+   DropdownMenuTrigger,
+ } from '@documenso/ui/primitives/dropdown-menu';
+ 
+-import { DocumentDeleteDialog } from '~/components/dialogs/document-delete-dialog';
+-import { DocumentDuplicateDialog } from '~/components/dialogs/document-duplicate-dialog';
+ import { DocumentResendDialog } from '~/components/dialogs/document-resend-dialog';
++import { EnvelopeDeleteDialog } from '~/components/dialogs/envelope-delete-dialog';
+ import { EnvelopeDownloadDialog } from '~/components/dialogs/envelope-download-dialog';
++import { EnvelopeDuplicateDialog } from '~/components/dialogs/envelope-duplicate-dialog';
+ import { EnvelopeRenameDialog } from '~/components/dialogs/envelope-rename-dialog';
+ import { EnvelopeSaveAsTemplateDialog } from '~/components/dialogs/envelope-save-as-template-dialog';
+ import { DocumentRecipientLinkCopyDialog } from '~/components/general/document/document-recipient-link-copy-dialog';
+@@ -55,8 +55,6 @@ export const DocumentPageViewDropdown = ({ envelope }: DocumentPageViewDropdownP
+ 
+   const trpcUtils = trpcReact.useUtils();
+ 
+-  const [isDeleteDialogOpen, setDeleteDialogOpen] = useState(false);
+-  const [isDuplicateDialogOpen, setDuplicateDialogOpen] = useState(false);
+   const [isRenameDialogOpen, setRenameDialogOpen] = useState(false);
+ 
+   const recipient = envelope.recipients.find((recipient) => recipient.email === user.email);
+@@ -124,10 +122,18 @@ export const DocumentPageViewDropdown = ({ envelope }: DocumentPageViewDropdownP
+           </Link>
+         </DropdownMenuItem>
+ 
+-        <DropdownMenuItem onClick={() => setDuplicateDialogOpen(true)}>
+-          <Copy className="mr-2 h-4 w-4" />
+-          <Trans>Duplicate</Trans>
+-        </DropdownMenuItem>
++        <EnvelopeDuplicateDialog
++          envelopeId={envelope.id}
++          envelopeType={EnvelopeType.DOCUMENT}
++          trigger={
++            <DropdownMenuItem asChild onSelect={(e) => e.preventDefault()}>
++              <div>
++                <Copy className="mr-2 h-4 w-4" />
++                <Trans>Duplicate</Trans>
++              </div>
++            </DropdownMenuItem>
++          }
++        />
+ 
+         <EnvelopeSaveAsTemplateDialog
+           envelopeId={envelope.id}
+@@ -141,10 +147,24 @@ export const DocumentPageViewDropdown = ({ envelope }: DocumentPageViewDropdownP
+           }
+         />
+ 
+-        <DropdownMenuItem onClick={() => setDeleteDialogOpen(true)} disabled={isDeleted}>
+-          <Trash2 className="mr-2 h-4 w-4" />
+-          <Trans>Delete</Trans>
+-        </DropdownMenuItem>
++        <EnvelopeDeleteDialog
++          id={envelope.id}
++          type={EnvelopeType.DOCUMENT}
++          status={envelope.status}
++          title={envelope.title}
++          canManageDocument={canManageDocument}
++          onDelete={() => {
++            void navigate(documentsPath);
++          }}
++          trigger={
++            <DropdownMenuItem asChild disabled={isDeleted} onSelect={(e) => e.preventDefault()}>
++              <div>
++                <Trash2 className="mr-2 h-4 w-4" />
++                <Trans>Delete</Trans>
++              </div>
++            </DropdownMenuItem>
++          }
++        />
+ 
+         <DropdownMenuLabel>
+           <Trans>Share</Trans>
+@@ -187,27 +207,6 @@ export const DocumentPageViewDropdown = ({ envelope }: DocumentPageViewDropdownP
+         />
+       </DropdownMenuContent>
+ 
+-      <DocumentDeleteDialog
+-        id={mapSecondaryIdToDocumentId(envelope.secondaryId)}
+-        status={envelope.status}
+-        documentTitle={envelope.title}
+-        open={isDeleteDialogOpen}
+-        canManageDocument={canManageDocument}
+-        onOpenChange={setDeleteDialogOpen}
+-        onDelete={() => {
+-          void navigate(documentsPath);
+-        }}
+-      />
+-
+-      {isDuplicateDialogOpen && (
+-        <DocumentDuplicateDialog
+-          id={envelope.id}
+-          token={recipient?.token}
+-          open={isDuplicateDialogOpen}
+-          onOpenChange={setDuplicateDialogOpen}
+-        />
+-      )}
+-
+       <EnvelopeRenameDialog
+         id={envelope.id}
+         initialTitle={envelope.title}
+diff --git a/apps/remix/app/components/tables/documents-table-action-dropdown.tsx b/apps/remix/app/components/tables/documents-table-action-dropdown.tsx
+index 295f6bba23..b3bea40602 100644
+--- a/apps/remix/app/components/tables/documents-table-action-dropdown.tsx
++++ b/apps/remix/app/components/tables/documents-table-action-dropdown.tsx
+@@ -36,9 +36,9 @@ import {
+   DropdownMenuTrigger,
+ } from '@documenso/ui/primitives/dropdown-menu';
+ 
+-import { DocumentDeleteDialog } from '~/components/dialogs/document-delete-dialog';
+-import { DocumentDuplicateDialog } from '~/components/dialogs/document-duplicate-dialog';
+ import { DocumentResendDialog } from '~/components/dialogs/document-resend-dialog';
++import { EnvelopeDeleteDialog } from '~/components/dialogs/envelope-delete-dialog';
++import { EnvelopeDuplicateDialog } from '~/components/dialogs/envelope-duplicate-dialog';
+ import { EnvelopeSaveAsTemplateDialog } from '~/components/dialogs/envelope-save-as-template-dialog';
+ import { DocumentRecipientLinkCopyDialog } from '~/components/general/document/document-recipient-link-copy-dialog';
+ import { useCurrentTeam } from '~/providers/team';
+@@ -61,8 +61,6 @@ export const DocumentsTableActionDropdown = ({
+   const { _ } = useLingui();
+   const trpcUtils = trpcReact.useUtils();
+ 
+-  const [isDeleteDialogOpen, setDeleteDialogOpen] = useState(false);
+-  const [isDuplicateDialogOpen, setDuplicateDialogOpen] = useState(false);
+   const [isRenameDialogOpen, setRenameDialogOpen] = useState(false);
+ 
+   const recipient = findRecipientByEmail({
+@@ -164,10 +162,18 @@ export const DocumentsTableActionDropdown = ({
+           }
+         />
+ 
+-        <DropdownMenuItem onClick={() => setDuplicateDialogOpen(true)}>
+-          <Copy className="mr-2 h-4 w-4" />
+-          <Trans>Duplicate</Trans>
+-        </DropdownMenuItem>
++        <EnvelopeDuplicateDialog
++          envelopeId={row.envelopeId}
++          envelopeType={EnvelopeType.DOCUMENT}
++          trigger={
++            <DropdownMenuItem asChild onSelect={(e) => e.preventDefault()}>
++              <div>
++                <Copy className="mr-2 h-4 w-4" />
++                <Trans>Duplicate</Trans>
++              </div>
++            </DropdownMenuItem>
++          }
++        />
+ 
+         <EnvelopeSaveAsTemplateDialog
+           envelopeId={row.envelopeId}
+@@ -194,10 +200,21 @@ export const DocumentsTableActionDropdown = ({
+           Void
+         </DropdownMenuItem> */}
+ 
+-        <DropdownMenuItem onClick={() => setDeleteDialogOpen(true)}>
+-          <Trash2 className="mr-2 h-4 w-4" />
+-          {canManageDocument ? _(msg`Delete`) : _(msg`Hide`)}
+-        </DropdownMenuItem>
++        <EnvelopeDeleteDialog
++          id={row.envelopeId}
++          type={EnvelopeType.DOCUMENT}
++          status={row.status}
++          title={row.title}
++          canManageDocument={canManageDocument}
++          trigger={
++            <DropdownMenuItem asChild onSelect={(e) => e.preventDefault()}>
++              <div>
++                <Trash2 className="mr-2 h-4 w-4" />
++                {canManageDocument ? _(msg`Delete`) : _(msg`Hide`)}
++              </div>
++            </DropdownMenuItem>
++          }
++        />
+ 
+         <DropdownMenuLabel>
+           <Trans>Share</Trans>
+@@ -233,22 +250,6 @@ export const DocumentsTableActionDropdown = ({
+         />
+       </DropdownMenuContent>
+ 
+-      <DocumentDeleteDialog
+-        id={row.id}
+-        status={row.status}
+-        documentTitle={row.title}
+-        open={isDeleteDialogOpen}
+-        onOpenChange={setDeleteDialogOpen}
+-        canManageDocument={canManageDocument}
+-      />
+-
+-      <DocumentDuplicateDialog
+-        id={row.envelopeId}
+-        token={recipient?.token}
+-        open={isDuplicateDialogOpen}
+-        onOpenChange={setDuplicateDialogOpen}
+-      />
+-
+       <EnvelopeRenameDialog
+         id={row.envelopeId}
+         initialTitle={row.title}
+diff --git a/apps/remix/app/components/tables/templates-table-action-dropdown.tsx b/apps/remix/app/components/tables/templates-table-action-dropdown.tsx
+index 327b2854ab..cef513e4a7 100644
+--- a/apps/remix/app/components/tables/templates-table-action-dropdown.tsx
++++ b/apps/remix/app/components/tables/templates-table-action-dropdown.tsx
+@@ -1,7 +1,12 @@
+ import { useState } from 'react';
+ 
+ import { Trans } from '@lingui/react/macro';
+-import type { Recipient, TemplateDirectLink } from '@prisma/client';
++import {
++  DocumentStatus,
++  EnvelopeType,
++  type Recipient,
++  type TemplateDirectLink,
++} from '@prisma/client';
+ import {
+   Copy,
+   Edit,
+@@ -23,11 +28,11 @@ import {
+   DropdownMenuTrigger,
+ } from '@documenso/ui/primitives/dropdown-menu';
+ 
++import { EnvelopeDeleteDialog } from '../dialogs/envelope-delete-dialog';
++import { EnvelopeDuplicateDialog } from '../dialogs/envelope-duplicate-dialog';
+ import { EnvelopeRenameDialog } from '../dialogs/envelope-rename-dialog';
+ import { TemplateBulkSendDialog } from '../dialogs/template-bulk-send-dialog';
+-import { TemplateDeleteDialog } from '../dialogs/template-delete-dialog';
+ import { TemplateDirectLinkDialog } from '../dialogs/template-direct-link-dialog';
+-import { TemplateDuplicateDialog } from '../dialogs/template-duplicate-dialog';
+ import { TemplateMoveToFolderDialog } from '../dialogs/template-move-to-folder-dialog';
+ 
+ export type TemplatesTableActionDropdownProps = {
+@@ -54,8 +59,6 @@ export const TemplatesTableActionDropdown = ({
+ }: TemplatesTableActionDropdownProps) => {
+   const trpcUtils = trpcReact.useUtils();
+ 
+-  const [isDeleteDialogOpen, setDeleteDialogOpen] = useState(false);
+-  const [isDuplicateDialogOpen, setDuplicateDialogOpen] = useState(false);
+   const [isRenameDialogOpen, setRenameDialogOpen] = useState(false);
+   const [isMoveToFolderDialogOpen, setMoveToFolderDialogOpen] = useState(false);
+ 
+@@ -87,10 +90,20 @@ export const TemplatesTableActionDropdown = ({
+           </DropdownMenuItem>
+         )}
+ 
+-        <DropdownMenuItem disabled={!canMutate} onClick={() => setDuplicateDialogOpen(true)}>
+-          <Copy className="mr-2 h-4 w-4" />
+-          <Trans>Duplicate</Trans>
+-        </DropdownMenuItem>
++        {canMutate && (
++          <EnvelopeDuplicateDialog
++            envelopeId={row.envelopeId}
++            envelopeType={EnvelopeType.TEMPLATE}
++            trigger={
++              <DropdownMenuItem asChild onSelect={(e) => e.preventDefault()}>
++                <div>
++                  <Copy className="mr-2 h-4 w-4" />
++                  <Trans>Duplicate</Trans>
++                </div>
++              </DropdownMenuItem>
++            }
++          />
++        )}
+ 
+         {canMutate && (
+           <TemplateDirectLinkDialog
+@@ -127,25 +140,26 @@ export const TemplatesTableActionDropdown = ({
+           />
+         )}
+ 
+-        <DropdownMenuItem disabled={!canMutate} onClick={() => setDeleteDialogOpen(true)}>
+-          <Trash2 className="mr-2 h-4 w-4" />
+-          <Trans>Delete</Trans>
+-        </DropdownMenuItem>
++        {canMutate && (
++          <EnvelopeDeleteDialog
++            id={row.envelopeId}
++            type={EnvelopeType.TEMPLATE}
++            status={DocumentStatus.DRAFT}
++            title={row.title}
++            canManageDocument={canMutate}
++            onDelete={onDelete}
++            trigger={
++              <DropdownMenuItem asChild onSelect={(e) => e.preventDefault()}>
++                <div>
++                  <Trash2 className="mr-2 h-4 w-4" />
++                  <Trans>Delete</Trans>
++                </div>
++              </DropdownMenuItem>
++            }
++          />
++        )}
+       </DropdownMenuContent>
+ 
+-      <TemplateDuplicateDialog
+-        id={row.id}
+-        open={isDuplicateDialogOpen}
+-        onOpenChange={setDuplicateDialogOpen}
+-      />
+-
+-      <TemplateDeleteDialog
+-        id={row.id}
+-        open={isDeleteDialogOpen}
+-        onOpenChange={setDeleteDialogOpen}
+-        onDelete={onDelete}
+-      />
+-
+       <TemplateMoveToFolderDialog
+         templateId={row.id}
+         templateTitle={row.title}
+diff --git a/packages/app-tests/e2e/envelope-editor-v2/envelope-actions.spec.ts b/packages/app-tests/e2e/envelope-editor-v2/envelope-actions.spec.ts
+index 155686de99..1751f3fccb 100644
+--- a/packages/app-tests/e2e/envelope-editor-v2/envelope-actions.spec.ts
++++ b/packages/app-tests/e2e/envelope-editor-v2/envelope-actions.spec.ts
+@@ -296,7 +296,7 @@ test.describe('document editor', () => {
+     await page.getByRole('button', { name: 'Duplicate' }).click();
+ 
+     // Assert toast appears.
+-    await expectToastTextToBeVisible(page, 'Envelope Duplicated');
++    await expectToastTextToBeVisible(page, 'Document Duplicated');
+ 
+     // The page should have navigated to the new document's edit page.
+     await expect(page).toHaveURL(/\/documents\/.*\/edit/);
+@@ -422,7 +422,7 @@ test.describe('template editor', () => {
+     await page.getByRole('button', { name: 'Duplicate' }).click();
+ 
+     // Assert toast appears.
+-    await expectToastTextToBeVisible(page, 'Envelope Duplicated');
++    await expectToastTextToBeVisible(page, 'Template Duplicated');
+ 
+     // The page should have navigated to the new template's edit page.
+     await expect(page).toHaveURL(/\/templates\/.*\/edit/);
+diff --git a/packages/app-tests/e2e/templates/manage-templates.spec.ts b/packages/app-tests/e2e/templates/manage-templates.spec.ts
+index 4081c3e6d1..171c44a8bb 100644
+--- a/packages/app-tests/e2e/templates/manage-templates.spec.ts
++++ b/packages/app-tests/e2e/templates/manage-templates.spec.ts
+@@ -117,7 +117,13 @@ test('[TEMPLATES]: duplicate template', async ({ page }) => {
+   await expect(page.getByRole('menuitem', { name: 'Duplicate' })).toBeVisible();
+   await page.getByRole('menuitem', { name: 'Duplicate' }).click();
+   await page.getByRole('button', { name: 'Duplicate' }).click();
+-  await expect(page.getByText('Template duplicated').first()).toBeVisible();
++  await expect(page.getByText('Template Duplicated').first()).toBeVisible();
++
++  // The dialog should navigate to the new template's edit page.
++  await page.waitForURL(/\/templates\/.*\/edit/);
++
++  // Navigate back to the templates list and verify the count is now 2.
++  await page.goto(`/t/${team.url}/templates`);
+   await expect(page.getByTestId('data-table-count')).toContainText('Showing 2 results');
+ });
+ 
+diff --git a/packages/ui/components/document/document-share-button.tsx b/packages/ui/components/document/document-share-button.tsx
+index c04cb28d36..96ec7f0106 100644
+--- a/packages/ui/components/document/document-share-button.tsx
++++ b/packages/ui/components/document/document-share-button.tsx
+@@ -9,6 +9,7 @@ import { FaXTwitter } from 'react-icons/fa6';
+ 
+ import { useCopyShareLink } from '@documenso/lib/client-only/hooks/use-copy-share-link';
+ import { NEXT_PUBLIC_WEBAPP_URL } from '@documenso/lib/constants/app';
++import { DO_NOT_INVALIDATE_QUERY_ON_MUTATION } from '@documenso/lib/constants/trpc';
+ import { generateTwitterIntent } from '@documenso/lib/universal/generate-twitter-intent';
+ import { trpc } from '@documenso/trpc/react';
+ 
+@@ -60,7 +61,9 @@ export const DocumentShareButton = ({
+     mutateAsync: createOrGetShareLink,
+     data: shareLink,
+     isPending: isCreatingOrGettingShareLink,
+-  } = trpc.document.share.useMutation();
++  } = trpc.document.share.useMutation({
++    ...DO_NOT_INVALIDATE_QUERY_ON_MUTATION,
++  });
+ 
+   const isLoading = isCreatingOrGettingShareLink || isCopyingShareLink;
+ 
+@@ -138,7 +141,7 @@ export const DocumentShareButton = ({
+ 
+       <DialogContent position="end">
+         <DialogHeader>
+-          <DialogTitle>
++          <DialogTitle className="w-full max-w-full whitespace-pre-line break-words">
+             <Trans>Share your signing experience!</Trans>
+           </DialogTitle>
+ 
+@@ -166,7 +169,7 @@ export const DocumentShareButton = ({
+             </span>
+             <div
+               className={cn(
+-                'bg-muted/40 mt-4 aspect-[1200/630] overflow-hidden rounded-lg border',
++                'mt-4 aspect-[1200/630] overflow-hidden rounded-lg border bg-muted/40',
+                 {
+                   'animate-pulse': !shareLink?.slug,
+                 },

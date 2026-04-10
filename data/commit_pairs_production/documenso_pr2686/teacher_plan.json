@@ -1,0 +1,128 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "component_consolidation",
+      "recommendation": "Removed duplicate dialog components (document-delete-dialog, document-duplicate-dialog, template-delete-dialog, template-duplicate-dialog) and consolidated functionality into envelope-delete-dialog and envelope-duplicate-dialog components",
+      "rationale": "The envelope abstraction already existed in the codebase (EnvelopeType enum with DOCUMENT and TEMPLATE values). By consolidating duplicate components, we reduce code duplication, simplify maintenance, and ensure consistent behavior across document and template operations. The envelope components were already designed to handle both types through the `type` prop.",
+      "alternatives_considered": [
+        "Keeping separate components for documents and templates",
+        "Creating a single generic dialog with conditional rendering",
+        "Using higher-order components to wrap type-specific logic"
+      ],
+      "files_affected": [
+        "apps/remix/app/components/dialogs/document-delete-dialog.tsx",
+        "apps/remix/app/components/dialogs/document-duplicate-dialog.tsx",
+        "apps/remix/app/components/dialogs/template-delete-dialog.tsx",
+        "apps/remix/app/components/dialogs/template-duplicate-dialog.tsx",
+        "apps/remix/app/components/dialogs/envelope-delete-dialog.tsx",
+        "apps/remix/app/components/dialogs/envelope-duplicate-dialog.tsx"
+      ]
+    },
+    {
+      "dimension": "api_design",
+      "recommendation": "Updated envelope dialogs to use envelope-specific tRPC mutations (envelope.delete and envelope.duplicate) instead of document/template-specific mutations",
+      "rationale": "The backend already had envelope-level mutations that could handle both document and template operations. This aligns with the frontend consolidation and ensures a single source of truth for envelope operations. The envelope mutations accept an envelopeId and handle type-specific logic server-side.",
+      "alternatives_considered": [
+        "Keeping separate document.delete and template.deleteTemplate mutations",
+        "Creating a new unified mutation endpoint",
+        "Using conditional client-side routing to different mutations"
+      ],
+      "files_affected": [
+        "apps/remix/app/components/dialogs/envelope-delete-dialog.tsx",
+        "apps/remix/app/components/dialogs/envelope-duplicate-dialog.tsx"
+      ]
+    },
+    {
+      "dimension": "ui_ux",
+      "recommendation": "Fixed share dialog auto-closing issue by adding DO_NOT_INVALIDATE_QUERY_ON_MUTATION to the share mutation and improving dialog content styling",
+      "rationale": "The share dialog was closing because tRPC query invalidation was causing component re-renders. By preventing automatic query invalidation on the share mutation, we maintain the dialog state. Additionally, improved the title styling with better text wrapping to handle long document titles.",
+      "alternatives_considered": [
+        "Managing dialog state locally without tRPC state changes",
+        "Using a different state management approach for share links",
+        "Implementing a debounced mutation pattern"
+      ],
+      "files_affected": [
+        "packages/ui/components/document/document-share-button.tsx"
+      ]
+    },
+    {
+      "dimension": "testing",
+      "recommendation": "Updated end-to-end tests to reflect new toast messages and dialog behavior after consolidation",
+      "rationale": "Test assertions needed to be updated because toast messages changed from 'Envelope Duplicated' to type-specific messages ('Document Duplicated' or 'Template Duplicated'). This ensures tests accurately reflect user-facing text changes and maintain test reliability.",
+      "alternatives_considered": [
+        "Keeping old test assertions and updating toast messages to match",
+        "Creating generic toast messages that work for both document and template",
+        "Removing toast message assertions entirely"
+      ],
+      "files_affected": [
+        "packages/app-tests/e2e/envelope-editor-v2/envelope-actions.spec.ts",
+        "packages/app-tests/e2e/templates/manage-templates.spec.ts"
+      ]
+    },
+    {
+      "dimension": "component_integration",
+      "recommendation": "Updated dropdown components to use the new envelope dialogs with proper trigger integration using DropdownMenuItem asChild pattern",
+      "rationale": "Dropdown menu items need to trigger dialogs while maintaining proper accessibility and event handling. The asChild pattern allows the dialog trigger to be rendered as a child of DropdownMenuItem, ensuring proper menu behavior while enabling dialog functionality. This maintains the existing dropdown UX while switching to consolidated dialogs.",
+      "alternatives_considered": [
+        "Creating separate dialog trigger buttons outside dropdowns",
+        "Using imperative dialog opening via refs",
+        "Redesigning the entire dropdown-dialog interaction pattern"
+      ],
+      "files_affected": [
+        "apps/remix/app/components/general/document/document-page-view-dropdown.tsx",
+        "apps/remix/app/components/tables/documents-table-action-dropdown.tsx",
+        "apps/remix/app/components/tables/templates-table-action-dropdown.tsx"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Consolidate duplicate dialog components",
+      "description": "Remove old document and template delete/duplicate dialogs and update all references to use envelope dialogs instead",
+      "files_to_modify": [
+        "apps/remix/app/components/dialogs/document-delete-dialog.tsx",
+        "apps/remix/app/components/dialogs/document-duplicate-dialog.tsx",
+        "apps/remix/app/components/dialogs/template-delete-dialog.tsx",
+        "apps/remix/app/components/dialogs/template-duplicate-dialog.tsx",
+        "apps/remix/app/components/dialogs/envelope-delete-dialog.tsx",
+        "apps/remix/app/components/dialogs/envelope-duplicate-dialog.tsx",
+        "apps/remix/app/components/general/document/document-page-view-dropdown.tsx",
+        "apps/remix/app/components/tables/documents-table-action-dropdown.tsx",
+        "apps/remix/app/components/tables/templates-table-action-dropdown.tsx"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-002",
+      "title": "Fix share dialog auto-closing issue",
+      "description": "Prevent share dialog from closing automatically by managing tRPC query invalidation and improving dialog styling",
+      "files_to_modify": [
+        "packages/ui/components/document/document-share-button.tsx"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-003",
+      "title": "Update end-to-end tests for dialog consolidation",
+      "description": "Update test assertions to reflect new toast messages and dialog behavior after component consolidation",
+      "files_to_modify": [
+        "packages/app-tests/e2e/envelope-editor-v2/envelope-actions.spec.ts",
+        "packages/app-tests/e2e/templates/manage-templates.spec.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation consolidates duplicate dialog components by leveraging the existing envelope abstraction in the codebase. Instead of maintaining separate delete and duplicate dialogs for documents and templates, we now use unified envelope-delete-dialog and envelope-duplicate-dialog components that handle both types through the EnvelopeType enum (DOCUMENT or TEMPLATE). This reduces code duplication from 6 dialog components down to 2, simplifying maintenance and ensuring consistent behavior.\n\nThe envelope dialogs were enhanced to provide type-specific messaging and behavior. For example, the delete dialog now shows 'Document deleted' vs 'Template deleted' based on the envelope type, and similar adjustments were made for duplicate operations. All dropdown components that previously used the old dialogs were updated to use the new envelope dialogs with proper trigger integration using the asChild pattern for DropdownMenuItem components.\n\nA critical fix was also implemented for the share dialog auto-closing issue. The problem was caused by tRPC query invalidation triggering component re-renders. By adding DO_NOT_INVALIDATE_QUERY_ON_MUTATION to the share mutation configuration, we prevent automatic query invalidation that was causing the dialog to close. Additionally, the share dialog title styling was improved with better text wrapping to handle long document titles. End-to-end tests were updated to reflect the new toast messages, ensuring test reliability matches the new user-facing text.",
+  "source_pr": "https://github.com/documenso/documenso/pull/2686",
+  "before_sha": "283334921b61a95acceb7dbb84f88d3d41bb9bb8",
+  "after_sha": "6d7bd212bf890678b8fe040bb4292748addf4daf",
+  "diff_stats": {
+    "additions": 159,
+    "deletions": 612,
+    "files_changed": 12
+  }
+}

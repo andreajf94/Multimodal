@@ -1,0 +1,114 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "data_migration_design",
+      "recommendation": "Implemented a multi-step, transactional migration script that identifies development environments with user data and promotes them to standalone workspaces",
+      "rationale": "The migration follows a clear sequence: 1) Find dev environments with real data, 2) Plan new workspace creation with unique naming, 3) Execute the migration in logical steps, 4) Verify results, 5) Clean up. This ensures data integrity and provides auditability at each stage. Using raw SQL queries instead of Prisma ORM ensures performance and avoids N+1 queries during bulk operations.",
+      "alternatives_considered": [
+        "Using Prisma ORM for data manipulation",
+        "Creating a separate service instead of a migration script",
+        "Leaving dev environments as-is with data"
+      ],
+      "files_affected": [
+        "packages/database/migration/20260401000001_promote_dev_environments/migration.ts"
+      ]
+    },
+    {
+      "dimension": "database_schema_evolution",
+      "recommendation": "Renamed an existing migration file to maintain chronological ordering and added a new migration with proper sequencing",
+      "rationale": "The existing backfill migration was renamed from 20260401000001 to 20260401000002 to make room for the new promotion migration at position 000001. This ensures migrations run in the correct order: first promote dev environments, then backfill workspace IDs. The timestamp-based naming convention (YYYYMMDDHHMMSS) maintains chronological execution order.",
+      "alternatives_considered": [
+        "Modifying the existing migration instead of creating a new one",
+        "Using a different naming scheme",
+        "Combining both operations into a single migration"
+      ],
+      "files_affected": [
+        "packages/database/migration/20260401000001_backfill_workspace_id/migration.ts",
+        "packages/database/migration/20260401000002_backfill_workspace_id/migration.ts"
+      ]
+    },
+    {
+      "dimension": "data_integrity_and_foreign_keys",
+      "recommendation": "Implemented special handling for Language/SurveyLanguage relationships and excluded ContactAttributeKey from data detection logic",
+      "rationale": "Language records are workspace-scoped, so when moving surveys to a new workspace, their associated Language records must be recreated or remapped. The migration uses ON CONFLICT DO NOTHING to handle duplicate language codes and updates SurveyLanguage junction table accordingly. ContactAttributeKey was excluded from data detection because every environment automatically gets 5 default rows (userId, email, firstName, lastName, language), which don't indicate real user data.",
+      "alternatives_considered": [
+        "Cascading deletion of Language records",
+        "Creating new Language records unconditionally",
+        "Including ContactAttributeKey in data detection"
+      ],
+      "files_affected": [
+        "packages/database/migration/20260401000001_promote_dev_environments/migration.ts"
+      ]
+    },
+    {
+      "dimension": "error_handling_and_rollback",
+      "recommendation": "Implemented comprehensive verification steps and idempotent execution with early returns",
+      "rationale": "The migration includes a verification step that checks: 1) Environment now points to correct workspace, 2) Environment type changed to 'production', 3) New workspace has exactly one environment. If verification fails, the transaction rolls back. The migration is idempotent - if no dev environments with data exist, it logs and returns early. Detailed logging at each step provides auditability.",
+      "alternatives_considered": [
+        "Skipping verification for performance",
+        "Manual verification after migration",
+        "Continuing on partial failures"
+      ],
+      "files_affected": [
+        "packages/database/migration/20260401000001_promote_dev_environments/migration.ts"
+      ]
+    },
+    {
+      "dimension": "naming_and_collision_handling",
+      "recommendation": "Implemented intelligent workspace naming with collision detection and sequential suffixing",
+      "rationale": "New workspaces are named using pattern 'Original Workspace (Dev)' with automatic suffixing (Dev 2, Dev 3, etc.) when names collide within the same organization. The migration pre-fetches all existing workspace names per organization to avoid race conditions and limits attempts to 100 before throwing an error. This ensures predictable, unique names without manual intervention.",
+      "alternatives_considered": [
+        "Using UUIDs for workspace names",
+        "Appending random strings",
+        "Requiring manual name specification"
+      ],
+      "files_affected": [
+        "packages/database/migration/20260401000001_promote_dev_environments/migration.ts"
+      ]
+    },
+    {
+      "dimension": "performance_and_scalability",
+      "recommendation": "Used batched operations and avoided the 32,767 bind variable limit with subqueries",
+      "rationale": "The migration uses subqueries instead of IN(...) clauses with many bind variables to avoid PostgreSQL's 32,767 bind variable limit. Operations are batched per plan rather than attempting to process all records in single queries, balancing performance with transaction size. Raw SQL queries are optimized for the specific data patterns rather than using generic ORM operations.",
+      "alternatives_considered": [
+        "Single massive UPDATE statements",
+        "Using Prisma's updateMany",
+        "Processing records one-by-one"
+      ],
+      "files_affected": [
+        "packages/database/migration/20260401000001_promote_dev_environments/migration.ts"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Create Dev Environment Promotion Migration",
+      "description": "Implement data migration that identifies development environments containing user data and promotes each to its own standalone workspace with proper data transfer and foreign key remapping",
+      "files_to_modify": [],
+      "files_to_create": [
+        "packages/database/migration/20260401000001_promote_dev_environments/migration.ts"
+      ],
+      "estimated_effort": "large"
+    },
+    {
+      "id": "T-002",
+      "title": "Reorder Existing Migration Sequence",
+      "description": "Rename existing backfill migration to maintain chronological execution order, ensuring promotion happens before workspace ID backfilling",
+      "files_to_modify": [
+        "packages/database/migration/20260401000001_backfill_workspace_id/migration.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation creates a comprehensive data migration that addresses the technical debt of development environments containing production-like data. The migration follows a carefully sequenced 8-step process: 1) Identify dev environments with real user data (excluding system defaults), 2) Build migration plans with unique workspace naming, 3) Create new workspaces copying all settings, 4) Promote environments to production within new workspaces, 5) Copy team assignments, 6) Handle Language/SurveyLanguage foreign key remapping, 7) Verify migration success, and 8) Clean up remaining empty dev environments.\n\nKey design patterns include: Transactional execution ensuring all-or-nothing migration, idempotent design with early return when no work is needed, comprehensive verification with detailed error messages, and intelligent naming collision resolution. The migration preserves existing environment IDs to maintain API key and SDK compatibility while changing workspace relationships.\n\nThe implementation integrates with the existing migration runner framework, uses raw SQL for performance, and includes extensive logging for auditability. By renaming the existing backfill migration, the system maintains proper execution order where environment promotion happens before workspace ID backfilling, ensuring data consistency throughout the migration process.",
+  "source_pr": "https://github.com/formbricks/formbricks/pull/7668",
+  "before_sha": "01ee015086365c786c388b8d912f0dd5a371d1fb",
+  "after_sha": "bb73b79c2b087b80fab89b5967d987425f85e1ae",
+  "diff_stats": {
+    "additions": 301,
+    "deletions": 1,
+    "files_changed": 2
+  }
+}

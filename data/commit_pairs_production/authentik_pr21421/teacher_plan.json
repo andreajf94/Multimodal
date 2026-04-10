@@ -1,0 +1,142 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "api_design",
+      "recommendation": "Added `allow_null=True` to policy binding serializer fields to support nullable binding objects",
+      "rationale": "The Django REST Framework serializer fields for `policy_obj`, `group_obj`, and `user_obj` were marked as read-only but not nullable. When a policy binding exists without an associated policy, group, or user, the serializer should return null instead of failing or omitting the field. This aligns with the database model where foreign keys can be null.",
+      "alternatives_considered": [
+        "Removing the fields entirely when null",
+        "Creating separate serializers for bound vs unbound policies",
+        "Using conditional serialization based on foreign key existence"
+      ],
+      "files_affected": [
+        "authentik/policies/api/bindings.py"
+      ]
+    },
+    {
+      "dimension": "api_design",
+      "recommendation": "Changed SAML metadata endpoint to return 404 instead of empty metadata when provider has no associated application",
+      "rationale": "A SAML provider without an associated application cannot generate valid metadata. Returning a 404 (Not Found) is more semantically correct than returning empty metadata, as it clearly indicates the resource doesn't exist in a valid state. This also prevents clients from receiving misleading empty metadata.",
+      "alternatives_considered": [
+        "Returning empty metadata with a warning flag",
+        "Returning 400 Bad Request",
+        "Returning 204 No Content"
+      ],
+      "files_affected": [
+        "authentik/providers/saml/api/providers.py",
+        "authentik/providers/saml/tests/test_api.py"
+      ]
+    },
+    {
+      "dimension": "data_modeling",
+      "recommendation": "Updated OpenAPI schema to mark binding object fields as nullable and removed read-only constraints from SAML metadata fields",
+      "rationale": "The schema must accurately reflect the API's behavior. Adding `nullable: true` to the binding object fields ensures generated clients properly handle null values. Removing `readOnly: true` from SAML metadata fields allows them to be used in both request and response contexts, providing flexibility for future API extensions.",
+      "alternatives_considered": [
+        "Creating separate schemas for nullable vs non-nullable cases",
+        "Using oneOf/anyOf schema composition",
+        "Keeping read-only constraints and creating separate input schemas"
+      ],
+      "files_affected": [
+        "schema.yml"
+      ]
+    },
+    {
+      "dimension": "client_sdk_consistency",
+      "recommendation": "Updated all client SDKs (Go, Rust, TypeScript) to use nullable types for binding objects",
+      "rationale": "Client SDKs must match the server API's contract. Using nullable types (NullablePolicy, Option<Policy>, Policy | null) ensures proper serialization/deserialization when binding objects are null. This prevents runtime errors in client applications when dealing with unbound policies.",
+      "alternatives_considered": [
+        "Creating separate model classes for bound vs unbound policies",
+        "Using union types with discriminated unions",
+        "Using optional fields with default values"
+      ],
+      "files_affected": [
+        "packages/client-go/model_device_user_binding.go",
+        "packages/client-go/model_policy_binding.go",
+        "packages/client-rust/src/models/device_user_binding.rs",
+        "packages/client-rust/src/models/policy_binding.rs",
+        "packages/client-ts/src/models/DeviceUserBinding.ts",
+        "packages/client-ts/src/models/PolicyBinding.ts"
+      ]
+    },
+    {
+      "dimension": "client_sdk_consistency",
+      "recommendation": "Made SAML metadata download_url optional across all client SDKs",
+      "rationale": "The download_url field should be optional in client models since it's nullable in the API. This ensures clients don't fail validation when the field is missing or null. The Go client now uses omitempty, Rust uses Option<Option<String>> with double_option, and TypeScript makes it optional.",
+      "alternatives_considered": [
+        "Keeping it required but allowing null",
+        "Creating separate response types with/without download_url",
+        "Using default empty string values"
+      ],
+      "files_affected": [
+        "packages/client-go/model_saml_metadata.go",
+        "packages/client-rust/src/models/saml_metadata.rs",
+        "packages/client-ts/src/models/SAMLMetadata.ts"
+      ]
+    },
+    {
+      "dimension": "frontend_error_handling",
+      "recommendation": "Updated BoundPoliciesList to check binding objects instead of foreign key IDs for conditional rendering",
+      "rationale": "The frontend was checking `item.policy`, `item.group`, and `item.user` (foreign key IDs) to determine which edit button to show. Since these IDs might exist even when the related objects don't (due to null binding objects), we now check `item.policyObj`, `item.groupObj`, and `item.userObj` directly. This ensures the UI only shows edit buttons when the actual object data is available.",
+      "alternatives_considered": [
+        "Keeping ID checks and adding null checks on objects",
+        "Creating separate UI components for each binding type",
+        "Disabling edit buttons instead of hiding them"
+      ],
+      "files_affected": [
+        "web/src/admin/policies/BoundPoliciesList.ts"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Policy Binding Nullability API Fix",
+      "description": "Update Django REST Framework serializers and API endpoints to properly handle nullable binding objects for policies, groups, and users",
+      "files_to_modify": [
+        "authentik/policies/api/bindings.py",
+        "authentik/providers/saml/api/providers.py",
+        "authentik/providers/saml/tests/test_api.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-002",
+      "title": "Client SDK Nullability Updates",
+      "description": "Update all client SDKs (Go, Rust, TypeScript) to support nullable binding objects and optional SAML metadata fields",
+      "files_to_modify": [
+        "packages/client-go/model_device_user_binding.go",
+        "packages/client-go/model_policy_binding.go",
+        "packages/client-go/model_saml_metadata.go",
+        "packages/client-rust/src/models/device_user_binding.rs",
+        "packages/client-rust/src/models/policy_binding.rs",
+        "packages/client-rust/src/models/saml_metadata.rs",
+        "packages/client-ts/src/models/DeviceUserBinding.ts",
+        "packages/client-ts/src/models/PolicyBinding.ts",
+        "packages/client-ts/src/models/SAMLMetadata.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "large"
+    },
+    {
+      "id": "T-003",
+      "title": "Schema and Frontend Consistency",
+      "description": "Update OpenAPI schema and web interface to reflect nullable binding objects and fix UI conditional logic",
+      "files_to_modify": [
+        "schema.yml",
+        "web/src/admin/policies/BoundPoliciesList.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation addresses the policy binding nullability issue through a comprehensive, multi-layered approach that ensures consistency across the entire stack. Starting with the Django REST Framework serializers, we added `allow_null=True` to the `policy_obj`, `group_obj`, and `user_obj` fields in the PolicyBindingSerializer, allowing the API to properly serialize null values when foreign key relationships don't exist. This foundational change required corresponding updates to the OpenAPI schema to mark these fields as nullable, ensuring accurate API documentation and client generation.\n\nThe client SDK updates were the most extensive part of the implementation, requiring changes across three different languages (Go, Rust, TypeScript) to maintain consistency. Each SDK now properly handles nullable binding objects: Go uses NullablePolicy wrapper types with appropriate getter/setter methods, Rust uses Option<Policy> with serde deserialization attributes, and TypeScript uses union types (Policy | null). The SAML metadata endpoint was also improved to return 404 instead of empty metadata when a provider lacks an associated application, providing clearer error semantics.\n\nFinally, the web interface was updated to check the binding objects themselves (`policyObj`, `groupObj`, `userObj`) rather than their foreign key IDs when determining which edit buttons to display. This prevents UI errors when binding objects are null. The changes follow a consistent pattern throughout the codebase, ensuring that unbound policies are handled gracefully at every layer from database to API to client applications.",
+  "source_pr": "https://github.com/goauthentik/authentik/pull/21421",
+  "before_sha": "c4627de55e6f91cee53c18914e238ebc46f25b74",
+  "after_sha": "2b8313ee918ceaba3e33bf5eddd509bafe2eb48c",
+  "diff_stats": {
+    "additions": 152,
+    "deletions": 111,
+    "files_changed": 14
+  }
+}

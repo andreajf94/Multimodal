@@ -1,0 +1,78 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "testing",
+      "recommendation": "Added explicit waiting for initial schedule data before month navigation to prevent race conditions in column layout tests",
+      "rationale": "The column layout test was failing intermittently because it would click the month increment button and immediately try to select time slots before the new month's schedule data had loaded from the API. This caused the booking confirmation button to become permanently disabled. By waiting for the initial schedule data (visible as enabled days in the date picker) before clicking the increment button, and then waiting for the specific API response triggered by the month change, we ensure the UI is in a stable state before interacting with time slots.",
+      "alternatives_considered": [
+        "Increasing global timeouts (would mask the problem but not fix it)",
+        "Adding random delays (unreliable and slows down tests)",
+        "Rewriting the test to not use column layout (would avoid the issue but not test the actual feature)"
+      ],
+      "files_affected": [
+        "apps/web/playwright/lib/testUtils.ts"
+      ]
+    },
+    {
+      "dimension": "api_design",
+      "recommendation": "Used Playwright's waitForResponse API to intercept and wait for specific schedule API calls",
+      "rationale": "The getSchedule API endpoint is called when the month changes in the booking UI. By using waitForResponse with a filter that checks for URLs containing 'getSchedule' and status 200, we can precisely wait for the data that the UI needs to render available time slots. This is more reliable than waiting for arbitrary time periods or DOM elements that might appear before data is ready.",
+      "alternatives_considered": [
+        "Waiting for a specific DOM element that appears after data loads (less precise)",
+        "Polling for data attributes on time slots (more complex implementation)",
+        "Using network idle events (too broad and unreliable)"
+      ],
+      "files_affected": [
+        "apps/web/playwright/lib/testUtils.ts"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Added fallback behavior for Frame contexts where waitForResponse is not available",
+      "rationale": "The selectFirstAvailableTimeSlotNextMonth function accepts both Page and Frame objects. Since Frame doesn't have the waitForResponse method, we added a conditional check: if 'waitForResponse' exists in page (meaning it's a Page object), we use it; otherwise, we resolve immediately with Promise.resolve(). This ensures the function works in both contexts without breaking existing tests.",
+      "alternatives_considered": [
+        "Creating separate functions for Page and Frame contexts (would duplicate code)",
+        "Only supporting Page objects (would break tests using Frames)",
+        "Using try-catch with type assertion (less clean and type-safe)"
+      ],
+      "files_affected": [
+        "apps/web/playwright/lib/testUtils.ts"
+      ]
+    },
+    {
+      "dimension": "code_quality",
+      "recommendation": "Reorganized imports in booking-pages.e2e.ts to follow consistent ordering",
+      "rationale": "The imports were reordered to group external dependencies first (WEBAPP_URL, generateHashedLink, etc.), then internal test utilities, and finally test framework imports. This follows the project's established import ordering patterns and improves code readability. While not directly related to the test stabilization, it maintains code quality standards.",
+      "alternatives_considered": [
+        "Leaving imports as-is (would create inconsistency)",
+        "Using automated import sorting tools (not applied in this change)",
+        "Grouping by functionality rather than source (less conventional for this codebase)"
+      ],
+      "files_affected": [
+        "apps/web/playwright/booking-pages.e2e.ts"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Fix column layout E2E test race condition",
+      "description": "Stabilize the 'Book on column layout' E2E test by eliminating race conditions when switching months. The test was failing intermittently because it tried to select time slots before the new month's schedule data loaded, causing the booking confirmation button to become permanently disabled.",
+      "files_to_modify": [
+        "apps/web/playwright/booking-pages.e2e.ts",
+        "apps/web/playwright/lib/testUtils.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The changes address a race condition in the column layout E2E test by implementing a two-phase waiting strategy in the test utility functions. First, we wait for the initial schedule data to load (visible as enabled days in the date picker) before clicking the month increment button. This ensures we're starting from a known stable state. Second, we use Playwright's waitForResponse API to intercept and wait for the specific getSchedule API call triggered by the month change, ensuring the new month's data is fully loaded before attempting to select time slots.\n\nThe key insight was that the race condition occurred because the test would click time slots that were still rendering data from the previous month, causing the quick availability check to fail and permanently disable the confirm button. By precisely synchronizing with the API calls that drive the UI state, we eliminate the flakiness while maintaining test speed.\n\nThe implementation also includes thoughtful error handling for different execution contexts (Page vs Frame) and maintains code quality standards through import reorganization. This approach follows the project's testing best practices by being specific about what we're waiting for rather than using arbitrary delays, making the tests both more reliable and faster in the common case.",
+  "source_pr": "https://github.com/calcom/cal.com/pull/28682",
+  "before_sha": "78ddc1b2ae97e6a90e4b27445c1f2d5eacf0ef9f",
+  "after_sha": "77b2be13b24cb2f7da624f66ae4c45e467ae90c8",
+  "diff_stats": {
+    "additions": 32,
+    "deletions": 10,
+    "files_changed": 2
+  }
+}

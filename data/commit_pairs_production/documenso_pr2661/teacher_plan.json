@@ -1,0 +1,147 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "api_design",
+      "recommendation": "Created a new tRPC mutation `saveAsTemplate` with dedicated type definitions instead of extending existing duplicate functionality",
+      "rationale": "The save-as-template feature has distinct business logic (converting documents to templates with configurable options) that differs from simple duplication. Creating a separate endpoint provides better type safety, clearer API contracts, and allows for specific validation rules (e.g., only documents can be saved as templates).",
+      "alternatives_considered": [
+        "Extending the existing duplicateEnvelope mutation with flags",
+        "Creating a generic 'transform' endpoint"
+      ],
+      "files_affected": [
+        "packages/trpc/server/envelope-router/save-as-template.ts",
+        "packages/trpc/server/envelope-router/save-as-template.types.ts"
+      ]
+    },
+    {
+      "dimension": "data_modeling",
+      "recommendation": "Extended the existing `duplicateEnvelope` function with configurable options for template conversion, recipient inclusion, and field inclusion",
+      "rationale": "Reusing the proven envelope duplication logic ensures consistency with existing document/template creation patterns while adding flexibility. The function now accepts `overrides` parameter to control whether to duplicate as template and what data to include, maintaining backward compatibility for existing duplication use cases.",
+      "alternatives_considered": [
+        "Creating a completely separate template creation function",
+        "Implementing template-specific database operations"
+      ],
+      "files_affected": [
+        "packages/lib/server-only/envelope/duplicate-envelope.ts"
+      ]
+    },
+    {
+      "dimension": "ui_component_design",
+      "recommendation": "Created a reusable dialog component `EnvelopeSaveAsTemplateDialog` that can be triggered from multiple UI contexts",
+      "rationale": "A single, consistent dialog component ensures uniform user experience across different entry points (document table, page view, editor sidebar). The component handles form state, validation, and API calls internally, making it easy to integrate anywhere in the UI.",
+      "alternatives_considered": [
+        "Creating separate dialog implementations for each context",
+        "Using inline forms without dialog components"
+      ],
+      "files_affected": [
+        "apps/remix/app/components/dialogs/envelope-save-as-template-dialog.tsx"
+      ]
+    },
+    {
+      "dimension": "feature_flags_configuration",
+      "recommendation": "Added `allowSaveAsTemplate` to the envelope editor configuration schema and default configurations",
+      "rationale": "Following the established pattern of feature flags in the editor settings ensures the feature can be controlled per-context (e.g., disabled in embedded environments). This maintains consistency with existing features like duplication and distribution.",
+      "alternatives_considered": [
+        "Hardcoding the feature availability",
+        "Creating a separate configuration system"
+      ],
+      "files_affected": [
+        "packages/lib/types/envelope-editor.ts",
+        "packages/lib/utils/embed-config.ts"
+      ]
+    },
+    {
+      "dimension": "testing_strategy",
+      "recommendation": "Created comprehensive E2E tests covering all user interaction paths and edge cases including ID generation validation",
+      "rationale": "The feature has multiple entry points and configurable options, requiring thorough testing of user flows. Tests verify correct template ID generation (critical for data integrity), proper handling of recipient/field inclusion options, and functionality across different UI contexts.",
+      "alternatives_considered": [
+        "Unit tests only",
+        "Manual testing without automation"
+      ],
+      "files_affected": [
+        "packages/app-tests/e2e/envelope-editor-v2/envelope-save-as-template.spec.ts"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Implemented validation to ensure only documents can be saved as templates, with proper error messages",
+      "rationale": "Prevents invalid state transitions (e.g., templates can't be saved as templates) and provides clear user feedback. The validation occurs both in the tRPC mutation and the underlying duplication function.",
+      "alternatives_considered": [
+        "Allowing any envelope type to be saved as template",
+        "Silently failing with generic errors"
+      ],
+      "files_affected": [
+        "packages/lib/server-only/envelope/duplicate-envelope.ts"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Backend: Save as Template API Implementation",
+      "description": "Implement the core backend functionality for converting documents to templates with configurable options",
+      "files_to_modify": [
+        "packages/lib/server-only/envelope/duplicate-envelope.ts",
+        "packages/trpc/server/envelope-router/router.ts"
+      ],
+      "files_to_create": [
+        "packages/trpc/server/envelope-router/save-as-template.ts",
+        "packages/trpc/server/envelope-router/save-as-template.types.ts"
+      ],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-002",
+      "title": "Frontend: Save as Template Dialog Component",
+      "description": "Create a reusable dialog component for template creation with recipient and field inclusion options",
+      "files_to_modify": [],
+      "files_to_create": [
+        "apps/remix/app/components/dialogs/envelope-save-as-template-dialog.tsx"
+      ],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-003",
+      "title": "UI Integration: Multiple Entry Points",
+      "description": "Integrate the save-as-template feature into document table, page view, and envelope editor interfaces",
+      "files_to_modify": [
+        "apps/remix/app/components/general/document/document-page-view-dropdown.tsx",
+        "apps/remix/app/components/general/envelope-editor/envelope-editor.tsx",
+        "apps/remix/app/components/tables/documents-table-action-dropdown.tsx"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-004",
+      "title": "Configuration: Feature Flags and Type Definitions",
+      "description": "Extend configuration schemas to support save-as-template feature flagging",
+      "files_to_modify": [
+        "packages/lib/types/envelope-editor.ts",
+        "packages/lib/utils/embed-config.ts",
+        "apps/remix/app/routes/embed+/playground.tsx"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-005",
+      "title": "Testing: Comprehensive E2E Test Suite",
+      "description": "Create end-to-end tests covering all user interaction paths and edge cases",
+      "files_to_modify": [],
+      "files_to_create": [
+        "packages/app-tests/e2e/envelope-editor-v2/envelope-save-as-template.spec.ts"
+      ],
+      "estimated_effort": "large"
+    }
+  ],
+  "implementation_summary": "The implementation follows a layered approach that leverages existing patterns in the codebase while introducing new functionality. At the core, the existing `duplicateEnvelope` function was extended with configurable options (`duplicateAsTemplate`, `includeRecipients`, `includeFields`) to handle template conversion while maintaining backward compatibility. This reuse ensures consistency with document/template creation workflows and database operations.\n\nA new tRPC mutation `saveAsTemplate` was created with dedicated type definitions, providing a clean API contract for the frontend. The mutation validates that only documents can be converted to templates and properly handles the template ID generation using the template counter (not document counter), which is critical for data integrity.\n\nOn the frontend, a reusable dialog component `EnvelopeSaveAsTemplateDialog` was implemented with form controls for recipient and field inclusion. This component follows the established UI patterns and integrates seamlessly into three key user interfaces: the documents table action dropdown, document page view dropdown, and envelope editor sidebar. The feature is properly gated with configuration flags (`allowSaveAsTemplate`) following the existing feature flag pattern, ensuring it can be disabled in embedded contexts.\n\nComprehensive E2E tests were created to validate all user interaction paths, including critical verification of template ID generation. The tests cover the editor sidebar, documents table, and document page view contexts, ensuring the feature works correctly across the application. The implementation maintains consistency with the codebase's architectural patterns while delivering a flexible, user-friendly template creation feature.",
+  "source_pr": "https://github.com/documenso/documenso/pull/2661",
+  "before_sha": "74d79dc6b2df5b8f423c500aff6037530b94ce42",
+  "after_sha": "e3b7a9e7cb7185ed3aee34f8f4443d10129de9d6",
+  "diff_stats": {
+    "additions": 851,
+    "deletions": 43,
+    "files_changed": 12
+  }
+}

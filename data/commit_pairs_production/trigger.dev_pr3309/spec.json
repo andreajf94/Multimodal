@@ -1,0 +1,13 @@
+{
+  "feature_name": "TaskRun Database Optimization",
+  "description": "Remove unnecessary database constraints and indexes from the TaskRun table to improve write performance and simplify the schema. This cleanup is possible because all run listing operations now use ClickHouse instead of querying Postgres directly.",
+  "functional_requirements": [
+    "Drop all foreign key constraints on the TaskRun table to eliminate write overhead while maintaining data integrity through application logic",
+    "Remove the PostgresRunsRepository implementation and its associated feature flag since all run listing operations now use ClickHouse",
+    "Drop three redundant indexes that were only used by the deprecated Postgres query path: the runtimeEnvironmentId cursor pagination index, the scheduleId index, and the rootTaskRunId index",
+    "Ensure all database changes use CONCURRENTLY IF EXISTS to avoid table locks during deployment",
+    "Update the feature flag system to remove references to the deprecated runsListRepository flag"
+  ],
+  "project_name": "trigger.dev",
+  "source_pr": "https://github.com/triggerdotdev/trigger.dev/pull/3309"
+}

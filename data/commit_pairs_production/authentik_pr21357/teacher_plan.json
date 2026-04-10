@@ -1,0 +1,111 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "dependency_management",
+      "recommendation": "Added sqlx as a workspace dependency with PostgreSQL-specific features enabled",
+      "rationale": "The sqlx crate provides async, compile-time checked SQL queries with PostgreSQL support. Adding it as a workspace dependency ensures consistent versioning across all packages. The specific features (postgres, derive, macros, uuid, chrono, ipnet, json) were selected to support the database operations needed for authentik while keeping the dependency tree minimal.",
+      "alternatives_considered": [
+        "Using raw database drivers directly",
+        "Using a different ORM like diesel",
+        "Implementing custom connection pooling"
+      ],
+      "files_affected": [
+        "Cargo.toml",
+        "Cargo.lock"
+      ]
+    },
+    {
+      "dimension": "feature_gating",
+      "recommendation": "Made the db module conditional on the 'core' feature flag in ak-common",
+      "rationale": "This allows consumers of ak-common to opt into database functionality only when needed. The 'core' feature was chosen as the gate since database operations are fundamental to the core functionality of authentik. This prevents pulling in sqlx dependencies for packages that don't need database access.",
+      "alternatives_considered": [
+        "Always including db module",
+        "Creating a separate database-specific package",
+        "Using runtime feature detection"
+      ],
+      "files_affected": [
+        "packages/ak-common/Cargo.toml",
+        "packages/ak-common/src/lib.rs"
+      ]
+    },
+    {
+      "dimension": "connection_management",
+      "recommendation": "Implemented a singleton database pool with OnceLock for thread-safe initialization",
+      "rationale": "Using OnceLock ensures the database pool is initialized exactly once and provides safe concurrent access. This pattern follows Rust's ownership model while providing global access to the connection pool. The pool is configured with connection limits (min 1, max 4) and health checks to maintain database reliability.",
+      "alternatives_considered": [
+        "Passing pool instances through dependency injection",
+        "Using Arc<Mutex<PgPool>>",
+        "Creating new pools for each component"
+      ],
+      "files_affected": [
+        "packages/ak-common/src/db.rs"
+      ]
+    },
+    {
+      "dimension": "configuration_handling",
+      "recommendation": "Implemented dynamic reconfiguration of database connections when config changes",
+      "rationale": "The database watcher task listens for config change events and updates connection options without restarting the application. This is critical for production environments where database credentials or SSL settings might need to be rotated. The solution uses the existing arbiter pattern for event-driven architecture.",
+      "alternatives_considered": [
+        "Requiring application restart for config changes",
+        "Periodic polling of config",
+        "Manual reconnection triggers"
+      ],
+      "files_affected": [
+        "packages/ak-common/src/db.rs"
+      ]
+    },
+    {
+      "dimension": "testing_strategy",
+      "recommendation": "Added comprehensive unit tests covering initialization, queries, config updates, and connection creation",
+      "rationale": "Tests verify that the database utilities work correctly with the actual configuration system and can handle dynamic changes. The tests use the existing config initialization pattern and verify both pool and individual connection functionality. Each test sets up the proper environment by changing to the project root directory.",
+      "alternatives_considered": [
+        "Integration tests only",
+        "Mock-based testing",
+        "No testing for config updates"
+      ],
+      "files_affected": [
+        "packages/ak-common/src/db.rs"
+      ]
+    },
+    {
+      "dimension": "ci_cd_integration",
+      "recommendation": "Updated CI workflow to include runtime dependencies for database tests",
+      "rationale": "The database tests require a running PostgreSQL instance, so the CI configuration needed to include 'runtime' dependencies alongside 'rust'. This ensures tests can actually connect to a database and verify the functionality works end-to-end.",
+      "alternatives_considered": [
+        "Mocking database in CI",
+        "Skipping database tests in CI",
+        "Using SQLite for testing"
+      ],
+      "files_affected": [
+        ".github/workflows/ci-main.yml"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Add sqlx dependency and database utilities module",
+      "description": "Added sqlx as a workspace dependency and created a new db module in ak-common package with connection pooling, configuration management, and testing",
+      "files_to_modify": [
+        "Cargo.toml",
+        "Cargo.lock",
+        "packages/ak-common/Cargo.toml",
+        "packages/ak-common/src/lib.rs",
+        ".github/workflows/ci-main.yml"
+      ],
+      "files_to_create": [
+        "packages/ak-common/src/db.rs"
+      ],
+      "estimated_effort": "medium"
+    }
+  ],
+  "implementation_summary": "The implementation creates a new database utilities module within the ak-common package that provides shared PostgreSQL functionality for the entire codebase. The core design centers around a singleton connection pool managed by OnceLock, ensuring thread-safe initialization and access. The module integrates deeply with the existing configuration system, supporting dynamic reconfiguration through an event-driven watcher that listens for config changes via the arbiter pattern.\n\nKey architectural patterns include feature gating (the db module is only available when the 'core' feature is enabled), comprehensive error handling using eyre::Result, and integration with the existing authentik configuration structure for PostgreSQL settings. The implementation follows Rust best practices with proper ownership management, async/await patterns, and compile-time type checking through sqlx's macro system.\n\nThe solution is designed to be reusable across different services while maintaining the existing codebase patterns. It includes thorough unit tests that verify initialization, query execution, configuration updates, and individual connection creation. The CI pipeline was updated to ensure database tests can run with proper runtime dependencies, maintaining the project's testing rigor.",
+  "source_pr": "https://github.com/goauthentik/authentik/pull/21357",
+  "before_sha": "dedbbee55cdac8e56cbeabca54d4a794112d3a48",
+  "after_sha": "0dbd6a68b6c75efdf4e15839df60991cf2fca3ac",
+  "diff_stats": {
+    "additions": 1016,
+    "deletions": 11,
+    "files_changed": 6
+  }
+}

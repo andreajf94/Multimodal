@@ -1,0 +1,1098 @@
+diff --git a/apps/remix/app/components/general/admin-details.tsx b/apps/remix/app/components/general/admin-details.tsx
+new file mode 100644
+index 0000000000..49698bbf4b
+--- /dev/null
++++ b/apps/remix/app/components/general/admin-details.tsx
+@@ -0,0 +1,45 @@
++import type { ReactNode } from 'react';
++
++import { cn } from '@documenso/ui/lib/utils';
++
++export type DetailsCardProps = {
++  label: ReactNode;
++  action?: ReactNode;
++  children: ReactNode;
++};
++
++export const DetailsCard = ({ label, action, children }: DetailsCardProps) => {
++  return (
++    <div className="rounded-md border bg-muted/30 px-3 py-2">
++      <div className="flex min-h-9 items-center justify-between gap-3">
++        <span className="text-muted-foreground">{label}</span>
++        {action ?? null}
++      </div>
++      <div className="mt-2 min-h-9">{children}</div>
++    </div>
++  );
++};
++
++export type DetailsValueProps = {
++  children: ReactNode;
++  isMono?: boolean;
++  isSelectable?: boolean;
++};
++
++export const DetailsValue = ({
++  children,
++  isMono = true,
++  isSelectable = false,
++}: DetailsValueProps) => {
++  return (
++    <div
++      className={cn(
++        'flex min-h-10 items-center break-all rounded-md bg-muted px-3 py-2 text-xs text-muted-foreground',
++        isMono && 'font-mono',
++        isSelectable && 'select-all',
++      )}
++    >
++      {children}
++    </div>
++  );
++};
+diff --git a/apps/remix/app/components/general/admin-global-settings-section.tsx b/apps/remix/app/components/general/admin-global-settings-section.tsx
+new file mode 100644
+index 0000000000..c6e07c0f23
+--- /dev/null
++++ b/apps/remix/app/components/general/admin-global-settings-section.tsx
+@@ -0,0 +1,163 @@
++import type { MessageDescriptor } from '@lingui/core';
++import { msg } from '@lingui/core/macro';
++import { useLingui } from '@lingui/react';
++import { Trans } from '@lingui/react/macro';
++import type { OrganisationGlobalSettings, TeamGlobalSettings } from '@prisma/client';
++
++import { DOCUMENT_VISIBILITY } from '@documenso/lib/constants/document-visibility';
++import {
++  type TDocumentEmailSettings,
++  ZDocumentEmailSettingsSchema,
++} from '@documenso/lib/types/document-email';
++
++import { DetailsCard, DetailsValue } from '~/components/general/admin-details';
++
++const EMAIL_SETTINGS_LABELS: Record<keyof TDocumentEmailSettings, MessageDescriptor> = {
++  recipientSigningRequest: msg`Recipient signing request`,
++  recipientRemoved: msg`Recipient removed`,
++  recipientSigned: msg`Recipient signed`,
++  documentPending: msg`Document pending`,
++  documentCompleted: msg`Document completed`,
++  documentDeleted: msg`Document deleted`,
++  ownerDocumentCompleted: msg`Owner document completed`,
++  ownerRecipientExpired: msg`Owner recipient expired`,
++  ownerDocumentCreated: msg`Owner document created`,
++};
++
++const emailSettingsKeys = Object.keys(EMAIL_SETTINGS_LABELS) as (keyof TDocumentEmailSettings)[];
++
++type AdminGlobalSettingsSectionProps = {
++  settings: TeamGlobalSettings | OrganisationGlobalSettings | null;
++  isTeam?: boolean;
++};
++
++export const AdminGlobalSettingsSection = ({
++  settings,
++  isTeam = false,
++}: AdminGlobalSettingsSectionProps) => {
++  const { _ } = useLingui();
++  const notSetLabel = isTeam ? <Trans>Inherited</Trans> : <Trans>Not set</Trans>;
++
++  if (!settings) {
++    return null;
++  }
++
++  const textValue = (value: string | null | undefined) => {
++    if (value === null || value === undefined) {
++      return notSetLabel;
++    }
++
++    return value;
++  };
++
++  const brandingTextValue = (value: string | null | undefined) => {
++    if (value === null || value === undefined || value.trim() === '') {
++      return notSetLabel;
++    }
++
++    return value;
++  };
++
++  const booleanValue = (value: boolean | null | undefined) => {
++    if (value === null || value === undefined) {
++      return notSetLabel;
++    }
++
++    return value ? <Trans>Enabled</Trans> : <Trans>Disabled</Trans>;
++  };
++
++  const parsedEmailSettings = ZDocumentEmailSettingsSchema.safeParse(
++    settings.emailDocumentSettings,
++  );
++
++  return (
++    <div className="grid grid-cols-1 gap-3 text-sm sm:grid-cols-2 lg:grid-cols-3">
++      <DetailsCard label={<Trans>Document visibility</Trans>}>
++        <DetailsValue>
++          {settings.documentVisibility != null
++            ? _(DOCUMENT_VISIBILITY[settings.documentVisibility].value)
++            : notSetLabel}
++        </DetailsValue>
++      </DetailsCard>
++
++      <DetailsCard label={<Trans>Document language</Trans>}>
++        <DetailsValue>{textValue(settings.documentLanguage)}</DetailsValue>
++      </DetailsCard>
++
++      <DetailsCard label={<Trans>Document timezone</Trans>}>
++        <DetailsValue>{textValue(settings.documentTimezone)}</DetailsValue>
++      </DetailsCard>
++
++      <DetailsCard label={<Trans>Date format</Trans>}>
++        <DetailsValue>{textValue(settings.documentDateFormat)}</DetailsValue>
++      </DetailsCard>
++
++      <DetailsCard label={<Trans>Include sender details</Trans>}>
++        <DetailsValue>{booleanValue(settings.includeSenderDetails)}</DetailsValue>
++      </DetailsCard>
++
++      <DetailsCard label={<Trans>Include signing certificate</Trans>}>
++        <DetailsValue>{booleanValue(settings.includeSigningCertificate)}</DetailsValue>
++      </DetailsCard>
++
++      <DetailsCard label={<Trans>Include audit log</Trans>}>
++        <DetailsValue>{booleanValue(settings.includeAuditLog)}</DetailsValue>
++      </DetailsCard>
++
++      <DetailsCard label={<Trans>Delegate document ownership</Trans>}>
++        <DetailsValue>{booleanValue(settings.delegateDocumentOwnership)}</DetailsValue>
++      </DetailsCard>
++
++      <DetailsCard label={<Trans>Typed signature</Trans>}>
++        <DetailsValue>{booleanValue(settings.typedSignatureEnabled)}</DetailsValue>
++      </DetailsCard>
++
++      <DetailsCard label={<Trans>Upload signature</Trans>}>
++        <DetailsValue>{booleanValue(settings.uploadSignatureEnabled)}</DetailsValue>
++      </DetailsCard>
++
++      <DetailsCard label={<Trans>Draw signature</Trans>}>
++        <DetailsValue>{booleanValue(settings.drawSignatureEnabled)}</DetailsValue>
++      </DetailsCard>
++
++      <DetailsCard label={<Trans>Branding</Trans>}>
++        <DetailsValue>{booleanValue(settings.brandingEnabled)}</DetailsValue>
++      </DetailsCard>
++
++      <DetailsCard label={<Trans>Branding logo</Trans>}>
++        <DetailsValue>{brandingTextValue(settings.brandingLogo)}</DetailsValue>
++      </DetailsCard>
++
++      <DetailsCard label={<Trans>Branding URL</Trans>}>
++        <DetailsValue>{brandingTextValue(settings.brandingUrl)}</DetailsValue>
++      </DetailsCard>
++
++      <DetailsCard label={<Trans>Branding company details</Trans>}>
++        <DetailsValue>{brandingTextValue(settings.brandingCompanyDetails)}</DetailsValue>
++      </DetailsCard>
++
++      <DetailsCard label={<Trans>Email reply-to</Trans>}>
++        <DetailsValue>{textValue(settings.emailReplyTo)}</DetailsValue>
++      </DetailsCard>
++
++      {isTeam && parsedEmailSettings.success && (
++        <DetailsCard label={<Trans>Email document settings</Trans>}>
++          <div className="mt-1 space-y-1 pb-2 pr-3 text-xs">
++            {emailSettingsKeys.map((key) => (
++              <div key={key} className="flex items-center justify-between gap-2">
++                <span className="text-muted-foreground">{_(EMAIL_SETTINGS_LABELS[key])}</span>
++                <span>
++                  {parsedEmailSettings.data[key] ? <Trans>On</Trans> : <Trans>Off</Trans>}
++                </span>
++              </div>
++            ))}
++          </div>
++        </DetailsCard>
++      )}
++
++      <DetailsCard label={<Trans>AI features</Trans>}>
++        <DetailsValue>{booleanValue(settings.aiFeaturesEnabled)}</DetailsValue>
++      </DetailsCard>
++    </div>
++  );
++};
+diff --git a/apps/remix/app/components/tables/organisation-insights-table.tsx b/apps/remix/app/components/tables/organisation-insights-table.tsx
+index 6304e0b506..5d6c5dc446 100644
+--- a/apps/remix/app/components/tables/organisation-insights-table.tsx
++++ b/apps/remix/app/components/tables/organisation-insights-table.tsx
+@@ -62,7 +62,14 @@ export const OrganisationInsightsTable = ({
+     {
+       header: _(msg`Team Name`),
+       accessorKey: 'name',
+-      cell: ({ row }) => <span className="block max-w-full truncate">{row.getValue('name')}</span>,
++      cell: ({ row }) => (
++        <Link
++          className="block max-w-full truncate hover:underline"
++          to={`/admin/teams/${row.original.id}`}
++        >
++          {row.getValue('name')}
++        </Link>
++      ),
+       size: 240,
+     },
+     {
+@@ -276,12 +283,12 @@ const SummaryCard = ({
+   value: number;
+   subtitle?: string;
+ }) => (
+-  <div className="bg-card flex items-start gap-x-2 rounded-lg border px-4 py-3">
+-    <Icon className="text-muted-foreground h-4 w-4 items-start" />
++  <div className="flex items-start gap-x-2 rounded-lg border bg-card px-4 py-3">
++    <Icon className="h-4 w-4 items-start text-muted-foreground" />
+     <div className="-mt-0.5 space-y-2">
+-      <p className="text-muted-foreground text-sm font-medium">{title}</p>
++      <p className="text-sm font-medium text-muted-foreground">{title}</p>
+       <p className="text-2xl font-bold">{value}</p>
+-      {subtitle && <p className="text-muted-foreground text-xs">{subtitle}</p>}
++      {subtitle && <p className="text-xs text-muted-foreground">{subtitle}</p>}
+     </div>
+   </div>
+ );
+diff --git a/apps/remix/app/components/tables/organisation-teams-table.tsx b/apps/remix/app/components/tables/organisation-teams-table.tsx
+index ff5085a93e..73632814fe 100644
+--- a/apps/remix/app/components/tables/organisation-teams-table.tsx
++++ b/apps/remix/app/components/tables/organisation-teams-table.tsx
+@@ -64,7 +64,7 @@ export const OrganisationTeamsTable = () => {
+               avatarClass="h-12 w-12"
+               avatarFallback={row.original.name.slice(0, 1).toUpperCase()}
+               primaryText={
+-                <span className="text-foreground/80 font-semibold">{row.original.name}</span>
++                <span className="font-semibold text-foreground/80">{row.original.name}</span>
+               }
+               secondaryText={`${NEXT_PUBLIC_WEBAPP_URL()}/t/${row.original.url}`}
+             />
+diff --git a/apps/remix/app/routes/_authenticated+/admin+/organisation-insights.$id.tsx b/apps/remix/app/routes/_authenticated+/admin+/organisation-insights.$id.tsx
+index e53cc04ff7..7fb0b1f243 100644
+--- a/apps/remix/app/routes/_authenticated+/admin+/organisation-insights.$id.tsx
++++ b/apps/remix/app/routes/_authenticated+/admin+/organisation-insights.$id.tsx
+@@ -54,6 +54,7 @@ export default function OrganisationInsights({ loaderData }: Route.ComponentProp
+           </Link>
+         </Button>
+       </div>
++
+       <div className="mt-8">
+         <OrganisationInsightsTable
+           insights={insights}
+diff --git a/apps/remix/app/routes/_authenticated+/admin+/organisations.$id.tsx b/apps/remix/app/routes/_authenticated+/admin+/organisations.$id.tsx
+index 9e9dfaeeac..f3fc58aae7 100644
+--- a/apps/remix/app/routes/_authenticated+/admin+/organisations.$id.tsx
++++ b/apps/remix/app/routes/_authenticated+/admin+/organisations.$id.tsx
+@@ -2,11 +2,12 @@ import { useMemo } from 'react';
+ 
+ import { zodResolver } from '@hookform/resolvers/zod';
+ import { msg } from '@lingui/core/macro';
+-import { useLingui } from '@lingui/react/macro';
+-import { Trans } from '@lingui/react/macro';
++import { Trans, useLingui } from '@lingui/react/macro';
++import { OrganisationMemberRole } from '@prisma/client';
+ import { ExternalLinkIcon, InfoIcon, Loader } from 'lucide-react';
+ import { useForm } from 'react-hook-form';
+ import { Link, useNavigate } from 'react-router';
++import { match } from 'ts-pattern';
+ import type { z } from 'zod';
+ 
+ import { NEXT_PUBLIC_WEBAPP_URL } from '@documenso/lib/constants/app';
+@@ -15,9 +16,16 @@ import { AppError } from '@documenso/lib/errors/app-error';
+ import { LicenseClient } from '@documenso/lib/server-only/license/license-client';
+ import type { TLicenseClaim } from '@documenso/lib/types/license';
+ import { SUBSCRIPTION_CLAIM_FEATURE_FLAGS } from '@documenso/lib/types/subscription';
++import { getHighestOrganisationRoleInGroup } from '@documenso/lib/utils/organisations';
+ import { trpc } from '@documenso/trpc/react';
+ import type { TGetAdminOrganisationResponse } from '@documenso/trpc/server/admin-router/get-admin-organisation.types';
+ import { ZUpdateAdminOrganisationRequestSchema } from '@documenso/trpc/server/admin-router/update-admin-organisation.types';
++import {
++  Accordion,
++  AccordionContent,
++  AccordionItem,
++  AccordionTrigger,
++} from '@documenso/ui/primitives/accordion';
+ import { Alert, AlertDescription, AlertTitle } from '@documenso/ui/primitives/alert';
+ import { Badge } from '@documenso/ui/primitives/badge';
+ import { Button } from '@documenso/ui/primitives/button';
+@@ -37,6 +45,8 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@documenso/ui/primitive
+ import { useToast } from '@documenso/ui/primitives/use-toast';
+ 
+ import { AdminOrganisationMemberUpdateDialog } from '~/components/dialogs/admin-organisation-member-update-dialog';
++import { DetailsCard, DetailsValue } from '~/components/general/admin-details';
++import { AdminGlobalSettingsSection } from '~/components/general/admin-global-settings-section';
+ import { GenericErrorLayout } from '~/components/general/generic-error-layout';
+ import { SettingsHeader } from '~/components/general/settings-header';
+ 
+@@ -56,7 +66,7 @@ export default function OrganisationGroupSettingsPage({
+ }: Route.ComponentProps) {
+   const { licenseFlags } = loaderData;
+ 
+-  const { t, i18n } = useLingui();
++  const { i18n, t } = useLingui();
+   const { toast } = useToast();
+ 
+   const navigate = useNavigate();
+@@ -92,35 +102,102 @@ export default function OrganisationGroupSettingsPage({
+       {
+         header: t`Team`,
+         accessorKey: 'name',
++        cell: ({ row }) => (
++          <Link className="font-medium hover:underline" to={`/admin/teams/${row.original.id}`}>
++            {row.original.name}
++          </Link>
++        ),
++      },
++      {
++        header: t`Team ID`,
++        accessorKey: 'id',
++        cell: ({ row }) => (
++          <span className="font-mono text-xs text-muted-foreground">{row.original.id}</span>
++        ),
+       },
+       {
+         header: t`Team url`,
+         accessorKey: 'url',
++        cell: ({ row }) => <span className="font-mono text-xs">{row.original.url}</span>,
++      },
++      {
++        header: t`Created`,
++        accessorKey: 'createdAt',
++        cell: ({ row }) => {
++          return (
++            <span className="whitespace-nowrap font-mono text-xs text-muted-foreground">
++              {i18n.date(row.original.createdAt)}
++            </span>
++          );
++        },
+       },
+     ] satisfies DataTableColumnDef<TGetAdminOrganisationResponse['teams'][number]>[];
+-  }, [t]);
++  }, [i18n, t]);
+ 
+   const organisationMembersColumns = useMemo(() => {
+     return [
+       {
+         header: t`Member`,
+         cell: ({ row }) => (
+-          <div className="flex items-center gap-2">
+-            <Link to={`/admin/users/${row.original.user.id}`}>{row.original.user.name}</Link>
+-            {row.original.user.id === organisation?.ownerUserId && (
+-              <Badge>
+-                <Trans>Owner</Trans>
+-              </Badge>
++          <div className="space-y-1">
++            <Link
++              className="font-medium hover:underline"
++              to={`/admin/users/${row.original.user.id}`}
++            >
++              {row.original.user.name ?? row.original.user.email}
++            </Link>
++            {row.original.user.name && (
++              <div className="font-mono text-xs text-muted-foreground">
++                {row.original.user.email}
++              </div>
+             )}
+           </div>
+         ),
+       },
+       {
+-        header: t`Email`,
++        header: t`User ID`,
++        accessorKey: 'userId',
+         cell: ({ row }) => (
+-          <Link to={`/admin/users/${row.original.user.id}`}>{row.original.user.email}</Link>
++          <span className="font-mono text-xs text-muted-foreground">{row.original.userId}</span>
+         ),
+       },
++      {
++        header: t`Role`,
++        cell: ({ row }) => {
++          if (!organisation) {
++            return null;
++          }
++
++          const isOwner = row.original.userId === organisation.ownerUserId;
++
++          if (isOwner) {
++            return <Badge>{t`Owner`}</Badge>;
++          }
++
++          const highestRole = getHighestOrganisationRoleInGroup(
++            row.original.organisationGroupMembers.map((ogm) => ogm.group),
++          );
++
++          const roleLabel = match(highestRole)
++            .with(OrganisationMemberRole.ADMIN, () => t`Admin`)
++            .with(OrganisationMemberRole.MANAGER, () => t`Manager`)
++            .with(OrganisationMemberRole.MEMBER, () => t`Member`)
++            .exhaustive();
++
++          return <Badge variant="secondary">{roleLabel}</Badge>;
++        },
++      },
++      {
++        header: t`Joined`,
++        accessorKey: 'createdAt',
++        cell: ({ row }) => {
++          return (
++            <span className="whitespace-nowrap font-mono text-xs text-muted-foreground">
++              {i18n.date(row.original.createdAt)}
++            </span>
++          );
++        },
++      },
+       {
+         header: t`Actions`,
+         cell: ({ row }) => {
+@@ -143,7 +220,7 @@ export default function OrganisationGroupSettingsPage({
+         },
+       },
+     ] satisfies DataTableColumnDef<TGetAdminOrganisationResponse['members'][number]>[];
+-  }, [organisation, t]);
++  }, [organisation, i18n, t]);
+ 
+   if (isLoadingOrganisation) {
+     return (
+@@ -191,6 +268,61 @@ export default function OrganisationGroupSettingsPage({
+ 
+       <GenericOrganisationAdminForm organisation={organisation} />
+ 
++      <div className="mt-6 rounded-lg border p-4">
++        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
++          <div>
++            <p className="text-sm font-medium">
++              <Trans>Organisation usage</Trans>
++            </p>
++            <p className="mt-1 text-sm text-muted-foreground">
++              <Trans>Current usage against organisation limits.</Trans>
++            </p>
++          </div>
++        </div>
++
++        <div className="mt-4 grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
++          <DetailsCard label={<Trans>Members</Trans>}>
++            <DetailsValue>
++              {organisation.members.length} /{' '}
++              {organisation.organisationClaim.memberCount === 0
++                ? t`Unlimited`
++                : organisation.organisationClaim.memberCount}
++            </DetailsValue>
++          </DetailsCard>
++
++          <DetailsCard label={<Trans>Teams</Trans>}>
++            <DetailsValue>
++              {organisation.teams.length} /{' '}
++              {organisation.organisationClaim.teamCount === 0
++                ? t`Unlimited`
++                : organisation.organisationClaim.teamCount}
++            </DetailsValue>
++          </DetailsCard>
++        </div>
++      </div>
++
++      <div className="mt-6 rounded-lg border p-4">
++        <Accordion type="single" collapsible>
++          <AccordionItem value="global-settings" className="border-b-0">
++            <AccordionTrigger className="py-0">
++              <div className="text-left">
++                <p className="text-sm font-medium">
++                  <Trans>Global Settings</Trans>
++                </p>
++                <p className="mt-1 text-sm font-normal text-muted-foreground">
++                  <Trans>Default settings applied to this organisation.</Trans>
++                </p>
++              </div>
++            </AccordionTrigger>
++            <AccordionContent>
++              <div className="mt-4">
++                <AdminGlobalSettingsSection settings={organisation.organisationGlobalSettings} />
++              </div>
++            </AccordionContent>
++          </AccordionItem>
++        </Accordion>
++      </div>
++
+       <SettingsHeader
+         title={t`Manage subscription`}
+         subtitle={t`Manage the ${organisation.name} organisation subscription`}
+diff --git a/apps/remix/app/routes/_authenticated+/admin+/teams.$id.tsx b/apps/remix/app/routes/_authenticated+/admin+/teams.$id.tsx
+new file mode 100644
+index 0000000000..0f320ee073
+--- /dev/null
++++ b/apps/remix/app/routes/_authenticated+/admin+/teams.$id.tsx
+@@ -0,0 +1,317 @@
++import { useMemo } from 'react';
++
++import { msg } from '@lingui/core/macro';
++import { useLingui } from '@lingui/react';
++import { Trans } from '@lingui/react/macro';
++import { CopyIcon } from 'lucide-react';
++import { Link } from 'react-router';
++
++import { ORGANISATION_MEMBER_ROLE_MAP } from '@documenso/lib/constants/organisations-translations';
++import { TEAM_MEMBER_ROLE_MAP } from '@documenso/lib/constants/teams-translations';
++import { trpc } from '@documenso/trpc/react';
++import type { TGetAdminTeamResponse } from '@documenso/trpc/server/admin-router/get-admin-team.types';
++import {
++  Accordion,
++  AccordionContent,
++  AccordionItem,
++  AccordionTrigger,
++} from '@documenso/ui/primitives/accordion';
++import { Badge } from '@documenso/ui/primitives/badge';
++import { Button } from '@documenso/ui/primitives/button';
++import { DataTable, type DataTableColumnDef } from '@documenso/ui/primitives/data-table';
++import { SpinnerBox } from '@documenso/ui/primitives/spinner';
++import { useToast } from '@documenso/ui/primitives/use-toast';
++
++import { DetailsCard, DetailsValue } from '~/components/general/admin-details';
++import { AdminGlobalSettingsSection } from '~/components/general/admin-global-settings-section';
++import { GenericErrorLayout } from '~/components/general/generic-error-layout';
++import { SettingsHeader } from '~/components/general/settings-header';
++
++import type { Route } from './+types/teams.$id';
++
++export default function AdminTeamPage({ params }: Route.ComponentProps) {
++  const { _, i18n } = useLingui();
++  const { toast } = useToast();
++
++  const teamId = Number(params.id);
++
++  const { data: team, isLoading } = trpc.admin.team.get.useQuery(
++    {
++      teamId,
++    },
++    {
++      enabled: Number.isFinite(teamId) && teamId > 0,
++    },
++  );
++
++  const onCopyToClipboard = async (text: string) => {
++    await navigator.clipboard.writeText(text);
++
++    toast({
++      title: _(msg`Copied to clipboard`),
++    });
++  };
++
++  const teamMembersColumns = useMemo(() => {
++    return [
++      {
++        header: _(msg`Member`),
++        cell: ({ row }) => (
++          <div className="space-y-1">
++            <Link
++              className="font-medium hover:underline"
++              to={`/admin/users/${row.original.user.id}`}
++            >
++              {row.original.user.name ?? row.original.user.email}
++            </Link>
++            {row.original.user.name && (
++              <div className="font-mono text-xs text-muted-foreground">
++                {row.original.user.email}
++              </div>
++            )}
++          </div>
++        ),
++      },
++      {
++        header: _(msg`User ID`),
++        accessorKey: 'userId',
++      },
++      {
++        header: _(msg`Team role`),
++        accessorKey: 'teamRole',
++        cell: ({ row }) => (
++          <Badge variant="secondary">{_(TEAM_MEMBER_ROLE_MAP[row.original.teamRole])}</Badge>
++        ),
++      },
++      {
++        header: _(msg`Organisation role`),
++        accessorKey: 'organisationRole',
++        cell: ({ row }) => {
++          const isOwner = row.original.userId === team?.organisation.ownerUserId;
++
++          if (isOwner) {
++            return <Badge>{_(msg`Owner`)}</Badge>;
++          }
++
++          return (
++            <Badge variant="secondary">
++              {_(ORGANISATION_MEMBER_ROLE_MAP[row.original.organisationRole])}
++            </Badge>
++          );
++        },
++      },
++      {
++        header: _(msg`Joined`),
++        accessorKey: 'createdAt',
++        cell: ({ row }) => i18n.date(row.original.createdAt),
++      },
++    ] satisfies DataTableColumnDef<TGetAdminTeamResponse['teamMembers'][number]>[];
++  }, [team, _, i18n]);
++
++  const pendingInvitesColumns = useMemo(() => {
++    return [
++      {
++        header: _(msg`Email`),
++        accessorKey: 'email',
++      },
++      {
++        header: _(msg`Role`),
++        accessorKey: 'organisationRole',
++        cell: ({ row }) => _(ORGANISATION_MEMBER_ROLE_MAP[row.original.organisationRole]),
++      },
++      {
++        header: _(msg`Invited`),
++        accessorKey: 'createdAt',
++        cell: ({ row }) => i18n.date(row.original.createdAt),
++      },
++    ] satisfies DataTableColumnDef<TGetAdminTeamResponse['pendingInvites'][number]>[];
++  }, [_, i18n]);
++
++  if (!Number.isFinite(teamId) || teamId <= 0) {
++    return (
++      <GenericErrorLayout
++        errorCode={404}
++        errorCodeMap={{
++          404: {
++            heading: msg`Team not found`,
++            subHeading: msg`404 Team not found`,
++            message: msg`The team you are looking for may have been removed, renamed or may have never existed.`,
++          },
++        }}
++        primaryButton={
++          <Button asChild>
++            <Link to={`/admin/organisations`}>
++              <Trans>Go back</Trans>
++            </Link>
++          </Button>
++        }
++        secondaryButton={null}
++      />
++    );
++  }
++
++  if (isLoading) {
++    return <SpinnerBox className="py-32" />;
++  }
++
++  if (!team) {
++    return (
++      <GenericErrorLayout
++        errorCode={404}
++        errorCodeMap={{
++          404: {
++            heading: msg`Team not found`,
++            subHeading: msg`404 Team not found`,
++            message: msg`The team you are looking for may have been removed, renamed or may have never existed.`,
++          },
++        }}
++        primaryButton={
++          <Button asChild>
++            <Link to={`/admin/organisations`}>
++              <Trans>Go back</Trans>
++            </Link>
++          </Button>
++        }
++        secondaryButton={null}
++      />
++    );
++  }
++
++  return (
++    <div>
++      <SettingsHeader title={_(msg`Manage team`)} subtitle={_(msg`Manage the ${team.name} team`)}>
++        <Button variant="outline" asChild>
++          <Link to={`/admin/organisations/${team.organisation.id}`}>
++            <Trans>Manage organisation</Trans>
++          </Link>
++        </Button>
++      </SettingsHeader>
++
++      <div className="mt-8 rounded-lg border p-4">
++        <div>
++          <p className="text-sm font-medium">
++            <Trans>Team details</Trans>
++          </p>
++          <p className="mt-1 text-sm text-muted-foreground">
++            <Trans>Key identifiers and relationships for this team.</Trans>
++          </p>
++        </div>
++
++        <div className="mt-4 grid grid-cols-1 gap-3 text-sm sm:grid-cols-2 lg:grid-cols-3">
++          <DetailsCard
++            label={<Trans>Team ID</Trans>}
++            action={
++              <Button
++                type="button"
++                variant="outline"
++                size="sm"
++                className="h-8 w-8 shrink-0 p-0"
++                onClick={() => void onCopyToClipboard(String(team.id))}
++                title={_(msg`Copy team ID`)}
++              >
++                <CopyIcon className="h-4 w-4" />
++              </Button>
++            }
++          >
++            <DetailsValue isSelectable>{team.id}</DetailsValue>
++          </DetailsCard>
++
++          <DetailsCard label={<Trans>Team URL</Trans>}>
++            <DetailsValue isSelectable>{team.url}</DetailsValue>
++          </DetailsCard>
++
++          <DetailsCard label={<Trans>Created</Trans>}>
++            <DetailsValue>{i18n.date(team.createdAt)}</DetailsValue>
++          </DetailsCard>
++
++          <DetailsCard label={<Trans>Members</Trans>}>
++            <DetailsValue>{team.memberCount}</DetailsValue>
++          </DetailsCard>
++
++          <DetailsCard
++            label={<Trans>Organisation ID</Trans>}
++            action={
++              <Button
++                type="button"
++                variant="outline"
++                size="sm"
++                className="h-8 w-8 shrink-0 p-0"
++                onClick={() => void onCopyToClipboard(team.organisation.id)}
++                title={_(msg`Copy organisation ID`)}
++              >
++                <CopyIcon className="h-4 w-4" />
++              </Button>
++            }
++          >
++            <DetailsValue isSelectable>{team.organisation.id}</DetailsValue>
++          </DetailsCard>
++
++          {team.teamEmail && (
++            <>
++              <DetailsCard label={<Trans>Team email</Trans>}>
++                <DetailsValue isSelectable>{team.teamEmail.email}</DetailsValue>
++              </DetailsCard>
++
++              <DetailsCard label={<Trans>Team email name</Trans>}>
++                <DetailsValue>{team.teamEmail.name}</DetailsValue>
++              </DetailsCard>
++            </>
++          )}
++        </div>
++      </div>
++
++      {team.teamGlobalSettings && (
++        <div className="mt-8 rounded-lg border p-4">
++          <Accordion type="single" collapsible>
++            <AccordionItem value="global-settings" className="border-b-0">
++              <AccordionTrigger className="py-0">
++                <div className="text-left">
++                  <p className="text-sm font-medium">
++                    <Trans>Global Settings</Trans>
++                  </p>
++                  <p className="mt-1 text-sm font-normal text-muted-foreground">
++                    <Trans>
++                      Default settings applied to this team. Inherited values come from the
++                      organisation.
++                    </Trans>
++                  </p>
++                </div>
++              </AccordionTrigger>
++              <AccordionContent>
++                <div className="mt-4">
++                  <AdminGlobalSettingsSection settings={team.teamGlobalSettings} isTeam />
++                </div>
++              </AccordionContent>
++            </AccordionItem>
++          </Accordion>
++        </div>
++      )}
++
++      <div className="mt-8">
++        <p className="text-sm font-medium">
++          <Trans>Team Members</Trans>
++        </p>
++        <p className="mt-1 text-sm text-muted-foreground">
++          <Trans>Members that currently belong to this team.</Trans>
++        </p>
++
++        <div className="mt-4">
++          <DataTable columns={teamMembersColumns} data={team.teamMembers} />
++        </div>
++      </div>
++
++      <div className="mt-8">
++        <p className="text-sm font-medium">
++          <Trans>Pending Organisation Invites</Trans>
++        </p>
++        <p className="mt-1 text-sm text-muted-foreground">
++          <Trans>Organisation-level pending invites for this team's parent organisation.</Trans>
++        </p>
++
++        <div className="mt-4">
++          <DataTable columns={pendingInvitesColumns} data={team.pendingInvites} />
++        </div>
++      </div>
++    </div>
++  );
++}
+diff --git a/packages/trpc/server/admin-router/get-admin-team.ts b/packages/trpc/server/admin-router/get-admin-team.ts
+new file mode 100644
+index 0000000000..00d67a3288
+--- /dev/null
++++ b/packages/trpc/server/admin-router/get-admin-team.ts
+@@ -0,0 +1,131 @@
++import { OrganisationMemberInviteStatus } from '@prisma/client';
++
++import { AppError, AppErrorCode } from '@documenso/lib/errors/app-error';
++import { getHighestOrganisationRoleInGroup } from '@documenso/lib/utils/organisations';
++import { getHighestTeamRoleInGroup } from '@documenso/lib/utils/teams';
++import { prisma } from '@documenso/prisma';
++
++import { adminProcedure } from '../trpc';
++import { ZGetAdminTeamRequestSchema, ZGetAdminTeamResponseSchema } from './get-admin-team.types';
++
++export const getAdminTeamRoute = adminProcedure
++  .input(ZGetAdminTeamRequestSchema)
++  .output(ZGetAdminTeamResponseSchema)
++  .query(async ({ input, ctx }) => {
++    const { teamId } = input;
++
++    ctx.logger.info({
++      input: {
++        teamId,
++      },
++    });
++
++    const team = await prisma.team.findUnique({
++      where: {
++        id: teamId,
++      },
++      include: {
++        organisation: {
++          select: {
++            id: true,
++            name: true,
++            url: true,
++            ownerUserId: true,
++          },
++        },
++        teamEmail: true,
++        teamGlobalSettings: true,
++      },
++    });
++
++    if (!team) {
++      throw new AppError(AppErrorCode.NOT_FOUND, {
++        message: 'Team not found',
++      });
++    }
++
++    const [teamMembers, pendingInvites] = await Promise.all([
++      prisma.organisationMember.findMany({
++        where: {
++          organisationId: team.organisationId,
++          organisationGroupMembers: {
++            some: {
++              group: {
++                teamGroups: {
++                  some: {
++                    teamId,
++                  },
++                },
++              },
++            },
++          },
++        },
++        orderBy: {
++          createdAt: 'desc',
++        },
++        select: {
++          id: true,
++          userId: true,
++          createdAt: true,
++          organisationGroupMembers: {
++            include: {
++              group: {
++                include: {
++                  teamGroups: {
++                    where: {
++                      teamId,
++                    },
++                  },
++                },
++              },
++            },
++          },
++          user: {
++            select: {
++              id: true,
++              email: true,
++              name: true,
++            },
++          },
++        },
++      }),
++      // Invites are organisation-scoped in the schema (no team relation), so this is intentionally
++      // all pending invites for the team's parent organisation.
++      prisma.organisationMemberInvite.findMany({
++        where: {
++          organisationId: team.organisationId,
++          status: OrganisationMemberInviteStatus.PENDING,
++        },
++        orderBy: {
++          createdAt: 'desc',
++        },
++        select: {
++          id: true,
++          email: true,
++          createdAt: true,
++          organisationRole: true,
++          status: true,
++        },
++      }),
++    ]);
++
++    const mappedTeamMembers = teamMembers.map((teamMember) => {
++      const groups = teamMember.organisationGroupMembers.map(({ group }) => group);
++
++      return {
++        id: teamMember.id,
++        userId: teamMember.userId,
++        createdAt: teamMember.createdAt,
++        user: teamMember.user,
++        teamRole: getHighestTeamRoleInGroup(groups.flatMap((group) => group.teamGroups)),
++        organisationRole: getHighestOrganisationRoleInGroup(groups),
++      };
++    });
++
++    return {
++      ...team,
++      memberCount: mappedTeamMembers.length,
++      teamMembers: mappedTeamMembers,
++      pendingInvites,
++    };
++  });
+diff --git a/packages/trpc/server/admin-router/get-admin-team.types.ts b/packages/trpc/server/admin-router/get-admin-team.types.ts
+new file mode 100644
+index 0000000000..e57e704893
+--- /dev/null
++++ b/packages/trpc/server/admin-router/get-admin-team.types.ts
+@@ -0,0 +1,52 @@
++import { z } from 'zod';
++
++import { OrganisationMemberRoleSchema } from '@documenso/prisma/generated/zod/inputTypeSchemas/OrganisationMemberRoleSchema';
++import { TeamMemberRoleSchema } from '@documenso/prisma/generated/zod/inputTypeSchemas/TeamMemberRoleSchema';
++import OrganisationMemberInviteSchema from '@documenso/prisma/generated/zod/modelSchema/OrganisationMemberInviteSchema';
++import OrganisationMemberSchema from '@documenso/prisma/generated/zod/modelSchema/OrganisationMemberSchema';
++import OrganisationSchema from '@documenso/prisma/generated/zod/modelSchema/OrganisationSchema';
++import TeamEmailSchema from '@documenso/prisma/generated/zod/modelSchema/TeamEmailSchema';
++import TeamGlobalSettingsSchema from '@documenso/prisma/generated/zod/modelSchema/TeamGlobalSettingsSchema';
++import TeamSchema from '@documenso/prisma/generated/zod/modelSchema/TeamSchema';
++import UserSchema from '@documenso/prisma/generated/zod/modelSchema/UserSchema';
++
++export const ZGetAdminTeamRequestSchema = z.object({
++  teamId: z.number().min(1),
++});
++
++export const ZGetAdminTeamResponseSchema = TeamSchema.extend({
++  organisation: OrganisationSchema.pick({
++    id: true,
++    name: true,
++    url: true,
++    ownerUserId: true,
++  }),
++  teamEmail: TeamEmailSchema.nullable(),
++  teamGlobalSettings: TeamGlobalSettingsSchema.nullable(),
++  memberCount: z.number(),
++  teamMembers: OrganisationMemberSchema.pick({
++    id: true,
++    userId: true,
++    createdAt: true,
++  })
++    .extend({
++      user: UserSchema.pick({
++        id: true,
++        email: true,
++        name: true,
++      }),
++      teamRole: TeamMemberRoleSchema,
++      organisationRole: OrganisationMemberRoleSchema,
++    })
++    .array(),
++  pendingInvites: OrganisationMemberInviteSchema.pick({
++    id: true,
++    email: true,
++    createdAt: true,
++    organisationRole: true,
++    status: true,
++  }).array(),
++});
++
++export type TGetAdminTeamRequest = z.infer<typeof ZGetAdminTeamRequestSchema>;
++export type TGetAdminTeamResponse = z.infer<typeof ZGetAdminTeamResponseSchema>;
+diff --git a/packages/trpc/server/admin-router/router.ts b/packages/trpc/server/admin-router/router.ts
+index 7f8c231d27..48e75b31fd 100644
+--- a/packages/trpc/server/admin-router/router.ts
++++ b/packages/trpc/server/admin-router/router.ts
+@@ -17,6 +17,7 @@ import { findSubscriptionClaimsRoute } from './find-subscription-claims';
+ import { findUnsealedDocumentsRoute } from './find-unsealed-documents';
+ import { findUserTeamsRoute } from './find-user-teams';
+ import { getAdminOrganisationRoute } from './get-admin-organisation';
++import { getAdminTeamRoute } from './get-admin-team';
+ import { getEmailDomainRoute } from './get-email-domain';
+ import { getUserRoute } from './get-user';
+ import { promoteMemberToOwnerRoute } from './promote-member-to-owner';
+@@ -82,5 +83,8 @@ export const adminRouter = router({
+     get: getEmailDomainRoute,
+     reregister: reregisterEmailDomainRoute,
+   },
++  team: {
++    get: getAdminTeamRoute,
++  },
+   updateSiteSetting: updateSiteSettingRoute,
+ });
+diff --git a/packages/ui/primitives/select.tsx b/packages/ui/primitives/select.tsx
+index ab572d5a5c..bf7883f75b 100644
+--- a/packages/ui/primitives/select.tsx
++++ b/packages/ui/primitives/select.tsx
+@@ -23,7 +23,7 @@ const SelectTrigger = React.forwardRef<
+   <SelectPrimitive.Trigger
+     ref={ref}
+     className={cn(
+-      'border-input ring-offset-background placeholder:text-muted-foreground focus:ring-ring flex h-10 w-full items-center justify-between rounded-md border bg-transparent px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50',
++      'flex h-10 w-full items-center justify-between rounded-md border border-input bg-transparent px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50',
+       className,
+     )}
+     disabled={loading || props.disabled}
+@@ -56,7 +56,7 @@ const SelectContent = React.forwardRef<
+     <SelectPrimitive.Content
+       ref={ref}
+       className={cn(
+-        'bg-popover text-popover-foreground animate-in fade-in-80 relative z-[1001] min-w-[8rem] overflow-hidden rounded-md border shadow-md',
++        'relative z-[1001] min-w-[8rem] overflow-hidden rounded-md border bg-popover text-popover-foreground shadow-md animate-in fade-in-80',
+         position === 'popper' && 'translate-y-1',
+         className,
+       )}
+@@ -98,7 +98,7 @@ const SelectItem = React.forwardRef<
+   <SelectPrimitive.Item
+     ref={ref}
+     className={cn(
+-      'focus:bg-accent focus:text-accent-foreground relative flex w-full cursor-default select-none items-center rounded-sm py-1.5 pl-8 pr-2 text-sm outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50',
++      'relative flex w-full cursor-default select-none items-center rounded-sm py-1.5 pl-8 pr-2 text-sm outline-none focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50',
+       className,
+     )}
+     {...props}
+@@ -121,7 +121,7 @@ const SelectSeparator = React.forwardRef<
+ >(({ className, ...props }, ref) => (
+   <SelectPrimitive.Separator
+     ref={ref}
+-    className={cn('bg-muted -mx-1 my-1 h-px', className)}
++    className={cn('-mx-1 my-1 h-px bg-muted', className)}
+     {...props}
+   />
+ ));

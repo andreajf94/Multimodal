@@ -1,0 +1,329 @@
+diff --git a/src/documents/management/commands/base.py b/src/documents/management/commands/base.py
+index a2b0880f5e..1d76460c06 100644
+--- a/src/documents/management/commands/base.py
++++ b/src/documents/management/commands/base.py
+@@ -304,7 +304,7 @@ def _create_progress(self, description: str) -> Progress:
+ 
+         Progress output is directed to stderr to match the convention that
+         progress bars are transient UI feedback, not command output. This
+-        mirrors tqdm's default behavior and prevents progress bar rendering
++        mirrors the convention that progress bars are transient UI feedback and prevents progress bar rendering
+         from interfering with stdout-based assertions in tests or piped
+         command output.
+ 
+diff --git a/src/documents/management/commands/document_archiver.py b/src/documents/management/commands/document_archiver.py
+index 5926319f43..bd34843211 100644
+--- a/src/documents/management/commands/document_archiver.py
++++ b/src/documents/management/commands/document_archiver.py
+@@ -17,6 +17,7 @@ class Command(PaperlessCommand):
+         "modified) after their initial import."
+     )
+ 
++    supports_progress_bar = True
+     supports_multiprocessing = True
+ 
+     def add_arguments(self, parser):
+diff --git a/src/documents/management/commands/document_exporter.py b/src/documents/management/commands/document_exporter.py
+index 1ca4fef171..b8ccca0aba 100644
+--- a/src/documents/management/commands/document_exporter.py
++++ b/src/documents/management/commands/document_exporter.py
+@@ -7,7 +7,6 @@
+ from pathlib import Path
+ from typing import TYPE_CHECKING
+ 
+-import tqdm
+ from allauth.mfa.models import Authenticator
+ from allauth.socialaccount.models import SocialAccount
+ from allauth.socialaccount.models import SocialApp
+@@ -18,7 +17,6 @@
+ from django.contrib.auth.models import User
+ from django.contrib.contenttypes.models import ContentType
+ from django.core import serializers
+-from django.core.management.base import BaseCommand
+ from django.core.management.base import CommandError
+ from django.core.serializers.json import DjangoJSONEncoder
+ from django.db import transaction
+@@ -37,6 +35,7 @@
+ 
+ from documents.file_handling import delete_empty_directories
+ from documents.file_handling import generate_filename
++from documents.management.commands.base import PaperlessCommand
+ from documents.management.commands.mixins import CryptMixin
+ from documents.models import Correspondent
+ from documents.models import CustomField
+@@ -161,14 +160,18 @@ def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+             self.close()
+ 
+ 
+-class Command(CryptMixin, BaseCommand):
++class Command(CryptMixin, PaperlessCommand):
+     help = (
+         "Decrypt and rename all files in our collection into a given target "
+         "directory.  And include a manifest file containing document data for "
+         "easy import."
+     )
+ 
++    supports_progress_bar = True
++    supports_multiprocessing = False
++
+     def add_arguments(self, parser) -> None:
++        super().add_arguments(parser)
+         parser.add_argument("target")
+ 
+         parser.add_argument(
+@@ -275,13 +278,6 @@ def add_arguments(self, parser) -> None:
+             help="If set, only the database will be imported, not files",
+         )
+ 
+-        parser.add_argument(
+-            "--no-progress-bar",
+-            default=False,
+-            action="store_true",
+-            help="If set, the progress bar will not be shown",
+-        )
+-
+         parser.add_argument(
+             "--passphrase",
+             help="If provided, is used to encrypt sensitive data in the export",
+@@ -310,7 +306,6 @@ def handle(self, *args, **options) -> None:
+         self.no_thumbnail: bool = options["no_thumbnail"]
+         self.zip_export: bool = options["zip"]
+         self.data_only: bool = options["data_only"]
+-        self.no_progress_bar: bool = options["no_progress_bar"]
+         self.passphrase: str | None = options.get("passphrase")
+         self.batch_size: int = options["batch_size"]
+ 
+@@ -451,10 +446,12 @@ def dump(self) -> None:
+             }
+ 
+             # 3. Export files from each document
+-            for document_dict in tqdm.tqdm(
+-                document_manifest,
+-                total=len(document_manifest),
+-                disable=self.no_progress_bar,
++            for index, document_dict in enumerate(
++                self.track(
++                    document_manifest,
++                    description="Exporting documents...",
++                    total=len(document_manifest),
++                ),
+             ):
+                 document = document_map[document_dict["pk"]]
+ 
+diff --git a/src/documents/management/commands/document_fuzzy_match.py b/src/documents/management/commands/document_fuzzy_match.py
+index 5d10d80085..60d00f9cc3 100644
+--- a/src/documents/management/commands/document_fuzzy_match.py
++++ b/src/documents/management/commands/document_fuzzy_match.py
+@@ -40,6 +40,7 @@ def _process_and_match(work: _WorkPackage) -> _WorkResult:
+ class Command(PaperlessCommand):
+     help = "Searches for documents where the content almost matches"
+ 
++    supports_progress_bar = True
+     supports_multiprocessing = True
+ 
+     def add_arguments(self, parser):
+diff --git a/src/documents/management/commands/document_importer.py b/src/documents/management/commands/document_importer.py
+index 5cd7435902..cd3cb7afc7 100644
+--- a/src/documents/management/commands/document_importer.py
++++ b/src/documents/management/commands/document_importer.py
+@@ -8,14 +8,12 @@
+ from zipfile import ZipFile
+ from zipfile import is_zipfile
+ 
+-import tqdm
+ from django.conf import settings
+ from django.contrib.auth.models import Permission
+ from django.contrib.auth.models import User
+ from django.contrib.contenttypes.models import ContentType
+ from django.core.exceptions import FieldDoesNotExist
+ from django.core.management import call_command
+-from django.core.management.base import BaseCommand
+ from django.core.management.base import CommandError
+ from django.core.serializers.base import DeserializationError
+ from django.db import IntegrityError
+@@ -25,6 +23,7 @@
+ from filelock import FileLock
+ 
+ from documents.file_handling import create_source_path_directory
++from documents.management.commands.base import PaperlessCommand
+ from documents.management.commands.mixins import CryptMixin
+ from documents.models import Correspondent
+ from documents.models import CustomField
+@@ -57,22 +56,19 @@ def disable_signal(sig, receiver, sender, *, weak: bool | None = None) -> Genera
+         sig.connect(receiver=receiver, sender=sender, **kwargs)
+ 
+ 
+-class Command(CryptMixin, BaseCommand):
++class Command(CryptMixin, PaperlessCommand):
+     help = (
+         "Using a manifest.json file, load the data from there, and import the "
+         "documents it refers to."
+     )
+ 
++    supports_progress_bar = True
++    supports_multiprocessing = False
++
+     def add_arguments(self, parser) -> None:
++        super().add_arguments(parser)
+         parser.add_argument("source")
+ 
+-        parser.add_argument(
+-            "--no-progress-bar",
+-            default=False,
+-            action="store_true",
+-            help="If set, the progress bar will not be shown",
+-        )
+-
+         parser.add_argument(
+             "--data-only",
+             default=False,
+@@ -231,7 +227,6 @@ def handle(self, *args, **options) -> None:
+ 
+         self.source = Path(options["source"]).resolve()
+         self.data_only: bool = options["data_only"]
+-        self.no_progress_bar: bool = options["no_progress_bar"]
+         self.passphrase: str | None = options.get("passphrase")
+         self.version: str | None = None
+         self.salt: str | None = None
+@@ -365,7 +360,7 @@ def _import_files_from_manifest(self) -> None:
+             filter(lambda r: r["model"] == "documents.document", self.manifest),
+         )
+ 
+-        for record in tqdm.tqdm(manifest_documents, disable=self.no_progress_bar):
++        for record in self.track(manifest_documents, description="Copying files..."):
+             document = Document.objects.get(pk=record["pk"])
+ 
+             doc_file = record[EXPORTER_FILE_NAME]
+diff --git a/src/documents/management/commands/document_index.py b/src/documents/management/commands/document_index.py
+index 05efe870c4..742922010a 100644
+--- a/src/documents/management/commands/document_index.py
++++ b/src/documents/management/commands/document_index.py
+@@ -8,6 +8,9 @@
+ class Command(PaperlessCommand):
+     help = "Manages the document index."
+ 
++    supports_progress_bar = True
++    supports_multiprocessing = False
++
+     def add_arguments(self, parser):
+         super().add_arguments(parser)
+         parser.add_argument("command", choices=["reindex", "optimize"])
+diff --git a/src/documents/management/commands/document_llmindex.py b/src/documents/management/commands/document_llmindex.py
+index 6af1c7c9fd..3b9e3440bd 100644
+--- a/src/documents/management/commands/document_llmindex.py
++++ b/src/documents/management/commands/document_llmindex.py
+@@ -7,6 +7,9 @@
+ class Command(PaperlessCommand):
+     help = "Manages the LLM-based vector index for Paperless."
+ 
++    supports_progress_bar = True
++    supports_multiprocessing = False
++
+     def add_arguments(self, parser: Any) -> None:
+         super().add_arguments(parser)
+         parser.add_argument("command", choices=["rebuild", "update"])
+diff --git a/src/documents/management/commands/document_renamer.py b/src/documents/management/commands/document_renamer.py
+index 05f0224bbf..0e16f5cce9 100644
+--- a/src/documents/management/commands/document_renamer.py
++++ b/src/documents/management/commands/document_renamer.py
+@@ -7,6 +7,9 @@
+ class Command(PaperlessCommand):
+     help = "Rename all documents"
+ 
++    supports_progress_bar = True
++    supports_multiprocessing = False
++
+     def handle(self, *args, **options):
+         for document in self.track(Document.objects.all(), description="Renaming..."):
+             post_save.send(Document, instance=document, created=False)
+diff --git a/src/documents/management/commands/document_retagger.py b/src/documents/management/commands/document_retagger.py
+index 9dadc803f8..fc2e52e86c 100644
+--- a/src/documents/management/commands/document_retagger.py
++++ b/src/documents/management/commands/document_retagger.py
+@@ -180,6 +180,9 @@ class Command(PaperlessCommand):
+         "modified) after their initial import."
+     )
+ 
++    supports_progress_bar = True
++    supports_multiprocessing = False
++
+     def add_arguments(self, parser) -> None:
+         super().add_arguments(parser)
+         parser.add_argument("-c", "--correspondent", default=False, action="store_true")
+diff --git a/src/documents/management/commands/document_sanity_checker.py b/src/documents/management/commands/document_sanity_checker.py
+index df5a3e4bfd..598ddf7bb0 100644
+--- a/src/documents/management/commands/document_sanity_checker.py
++++ b/src/documents/management/commands/document_sanity_checker.py
+@@ -24,6 +24,9 @@
+ class Command(PaperlessCommand):
+     help = "This command checks your document archive for issues."
+ 
++    supports_progress_bar = True
++    supports_multiprocessing = False
++
+     def _render_results(self, messages: SanityCheckMessages) -> None:
+         """Render sanity check results as a Rich table."""
+ 
+diff --git a/src/documents/management/commands/document_thumbnails.py b/src/documents/management/commands/document_thumbnails.py
+index 994b801bd6..2d86095884 100644
+--- a/src/documents/management/commands/document_thumbnails.py
++++ b/src/documents/management/commands/document_thumbnails.py
+@@ -36,6 +36,7 @@ def _process_document(doc_id: int) -> None:
+ class Command(PaperlessCommand):
+     help = "This will regenerate the thumbnails for all documents."
+ 
++    supports_progress_bar = True
+     supports_multiprocessing = True
+ 
+     def add_arguments(self, parser) -> None:
+diff --git a/src/documents/management/commands/mixins.py b/src/documents/management/commands/mixins.py
+index b03e059564..6d325b1e3b 100644
+--- a/src/documents/management/commands/mixins.py
++++ b/src/documents/management/commands/mixins.py
+@@ -1,6 +1,5 @@
+ import base64
+ import os
+-from argparse import ArgumentParser
+ from typing import TypedDict
+ 
+ from cryptography.fernet import Fernet
+@@ -21,25 +20,6 @@ class CryptFields(TypedDict):
+     fields: list[str]
+ 
+ 
+-class ProgressBarMixin:
+-    """
+-    Many commands use a progress bar, which can be disabled
+-    via this class
+-    """
+-
+-    def add_argument_progress_bar_mixin(self, parser: ArgumentParser) -> None:
+-        parser.add_argument(
+-            "--no-progress-bar",
+-            default=False,
+-            action="store_true",
+-            help="If set, the progress bar will not be shown",
+-        )
+-
+-    def handle_progress_bar_mixin(self, *args, **options) -> None:
+-        self.no_progress_bar = options["no_progress_bar"]
+-        self.use_progress_bar = not self.no_progress_bar
+-
+-
+ class CryptMixin:
+     """
+     Fully based on:
+diff --git a/src/documents/management/commands/prune_audit_logs.py b/src/documents/management/commands/prune_audit_logs.py
+index eac6907578..1a54332cd3 100644
+--- a/src/documents/management/commands/prune_audit_logs.py
++++ b/src/documents/management/commands/prune_audit_logs.py
+@@ -9,6 +9,9 @@ class Command(PaperlessCommand):
+ 
+     help = "Prunes the audit logs of objects that no longer exist."
+ 
++    supports_progress_bar = True
++    supports_multiprocessing = False
++
+     def handle(self, *args, **options):
+         with transaction.atomic():
+             for log_entry in self.track(

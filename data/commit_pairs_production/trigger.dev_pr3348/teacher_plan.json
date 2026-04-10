@@ -1,0 +1,79 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "database_connection_management",
+      "recommendation": "Added application_name parameter to both primary and replica Prisma database connection strings using the SERVICE_NAME environment variable",
+      "rationale": "This allows database administrators to identify which service is responsible for specific database connections and queries in monitoring tools like pg_stat_activity. By using the existing SERVICE_NAME environment variable, we maintain consistency with other service identification patterns in the codebase without introducing new configuration.",
+      "alternatives_considered": [
+        "Creating a new dedicated environment variable for database application names",
+        "Hardcoding service names in the connection configuration",
+        "Using a combination of service name and instance identifier for more granular tracking"
+      ],
+      "files_affected": [
+        "apps/webapp/app/db.server.ts"
+      ]
+    },
+    {
+      "dimension": "observability_monitoring",
+      "recommendation": "Enhanced database connection observability by adding service attribution to connection strings",
+      "rationale": "In a distributed microservices architecture with multiple services connecting to the same database cluster, it's essential to attribute query load and connection usage to specific services. This change enables better performance monitoring, debugging, and capacity planning by providing clear service identification at the database layer.",
+      "alternatives_considered": [
+        "Relying solely on application-level logging for database attribution",
+        "Using database user names for service identification",
+        "Implementing custom query tagging at the application level"
+      ],
+      "files_affected": [
+        "apps/webapp/app/db.server.ts"
+      ]
+    },
+    {
+      "dimension": "configuration_management",
+      "recommendation": "Leveraged existing SERVICE_NAME environment variable rather than introducing new configuration",
+      "rationale": "The SERVICE_NAME environment variable already exists in the codebase and is used for service identification in other contexts. Reusing it maintains configuration simplicity and ensures consistency across the application. This follows the principle of minimal configuration surface area.",
+      "alternatives_considered": [
+        "Creating a new DATABASE_APPLICATION_NAME environment variable",
+        "Deriving the name from package.json or other metadata",
+        "Using a default value with optional override"
+      ],
+      "files_affected": [
+        "apps/webapp/app/db.server.ts"
+      ]
+    },
+    {
+      "dimension": "documentation_changelog",
+      "recommendation": "Created a changelog entry in .server-changes directory to document the improvement",
+      "rationale": "The .server-changes directory appears to be used for tracking server-side changes with structured metadata (area and type). This provides a lightweight way to document changes without requiring formal release notes or commit message conventions, making it easier for team members to understand what changed and why.",
+      "alternatives_considered": [
+        "Adding comments only in the code",
+        "Updating README or other documentation files",
+        "Relying solely on commit messages for documentation"
+      ],
+      "files_affected": [
+        ".server-changes/prisma-application-name.md"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Add application_name to Prisma database connections",
+      "description": "Configure Prisma client to include SERVICE_NAME as application_name parameter in both primary and replica database connection strings for better observability and monitoring",
+      "files_to_modify": [
+        "apps/webapp/app/db.server.ts"
+      ],
+      "files_to_create": [
+        ".server-changes/prisma-application-name.md"
+      ],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation adds database connection attribution by setting the `application_name` parameter in Prisma connection strings using the existing `SERVICE_NAME` environment variable. This change was made in two key locations within `apps/webapp/app/db.server.ts`: the primary database connection configuration (line 116) and the replica connection configuration (line 240).\n\nThe approach follows the existing pattern of database connection configuration in the codebase, where connection parameters are passed as an object to the connection URL builder. By adding `application_name: env.SERVICE_NAME` alongside other connection parameters like `connection_limit`, `pool_timeout`, and `connection_timeout`, we maintain consistency with the existing configuration structure.\n\nThis minimal change provides significant observability benefits in production environments. Database administrators can now query `pg_stat_activity` to see which services are connected, identify query sources during performance investigations, and attribute connection pool usage correctly. The implementation is backward compatible and requires no changes to existing database configuration or application logic beyond ensuring the `SERVICE_NAME` environment variable is set appropriately in deployment environments.\n\nA documentation entry was also created in `.server-changes/prisma-application-name.md` following the project's change tracking conventions, using the established metadata format with `area: webapp` and `type: improvement`. This ensures the change is properly documented for team awareness while maintaining the lightweight documentation approach used throughout the codebase.",
+  "source_pr": "https://github.com/triggerdotdev/trigger.dev/pull/3348",
+  "before_sha": "def21b26b64781945acdb0ca352a27213ab94e84",
+  "after_sha": "bd41bb2cbd734c4fd36f4046f81044ab52f84a14",
+  "diff_stats": {
+    "additions": 8,
+    "deletions": 0,
+    "files_changed": 2
+  }
+}

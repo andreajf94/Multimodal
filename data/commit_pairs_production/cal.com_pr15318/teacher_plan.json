@@ -1,0 +1,169 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "component_architecture",
+      "recommendation": "Created a generic OAuthConnect component that can be extended for any calendar provider, then created provider-specific wrapper components (GcalConnect, OutlookConnect) that configure the generic component with their specific constants and defaults.",
+      "rationale": "This follows the Strategy Pattern where the generic component handles the common OAuth flow logic while specific providers implement their configuration. It reduces code duplication and makes it easy to add new calendar providers in the future. The existing GcalConnect was refactored to use this new architecture.",
+      "alternatives_considered": [
+        "Creating completely separate components for each provider",
+        "Using a configuration object approach instead of wrapper components"
+      ],
+      "files_affected": [
+        "packages/platform/atoms/connect/OAuthConnect.tsx",
+        "packages/platform/atoms/connect/google/GcalConnect.tsx",
+        "packages/platform/atoms/connect/outlook/OutlookConnect.tsx"
+      ]
+    },
+    {
+      "dimension": "api_design",
+      "recommendation": "Added a 'redir' query parameter to the OAuth flow endpoints to allow custom redirect URLs after authentication completion, and unified the calendar service interfaces to accept this parameter.",
+      "rationale": "This provides flexibility for different use cases where the redirect destination might vary. The parameter is optional and defaults to the origin, maintaining backward compatibility. It's passed through the entire OAuth flow via the state parameter to persist across redirects.",
+      "alternatives_considered": [
+        "Hardcoding redirect URLs",
+        "Using session storage instead of query parameters"
+      ],
+      "files_affected": [
+        "apps/api/v2/src/ee/calendars/controllers/calendars.controller.ts",
+        "apps/api/v2/src/ee/calendars/services/gcal.service.ts",
+        "apps/api/v2/src/ee/calendars/services/outlook.service.ts"
+      ]
+    },
+    {
+      "dimension": "data_modeling",
+      "recommendation": "Extended the state parameter schema to include the 'redir' field alongside existing 'accessToken' and 'origin' fields, using Zod for validation with optional nullish handling.",
+      "rationale": "The state parameter needs to persist data across OAuth redirects. Extending the existing schema maintains consistency while adding the new functionality. Using Zod ensures type safety and proper validation of the state data.",
+      "alternatives_considered": [
+        "Creating a separate storage mechanism",
+        "Using cookies or session storage instead"
+      ],
+      "files_affected": [
+        "apps/api/v2/src/ee/calendars/controllers/calendars.controller.ts"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Created a reusable useCheck hook that handles connection status checking with proper error handling and loading states, replacing the provider-specific implementation.",
+      "rationale": "Centralizes error handling logic and provides consistent behavior across all calendar providers. The hook uses React Query for caching and state management, providing better performance and reliability than the previous useEffect-based approach.",
+      "alternatives_considered": [
+        "Keeping provider-specific checking logic",
+        "Using a simpler useState/useEffect approach"
+      ],
+      "files_affected": [
+        "packages/platform/atoms/hooks/connect/useCheck.ts"
+      ]
+    },
+    {
+      "dimension": "api_consolidation",
+      "recommendation": "Deprecated the standalone /gcal/save endpoint and redirected it to the unified /calendars/google/save endpoint, consolidating all calendar OAuth flows under a single API structure.",
+      "rationale": "Having a consistent API pattern (/calendars/{provider}/connect, /calendars/{provider}/save, /calendars/{provider}/check) makes the API more predictable and easier to maintain. It also allows the Outlook implementation to follow the same pattern from the start.",
+      "alternatives_considered": [
+        "Keeping separate endpoints for each provider",
+        "Creating a completely new API structure"
+      ],
+      "files_affected": [
+        "apps/api/v2/src/ee/gcal/gcal.controller.ts"
+      ]
+    },
+    {
+      "dimension": "code_organization",
+      "recommendation": "Reorganized the atoms package structure by creating a dedicated 'connect' directory with subdirectories for each provider, and moved hooks into a 'connect' subdirectory.",
+      "rationale": "Improves code discoverability and scalability as more providers are added. The new structure clearly separates concerns: generic components, provider-specific components, and shared hooks. This follows the platform's existing patterns for organizing related functionality.",
+      "alternatives_considered": [
+        "Keeping everything in flat directories",
+        "Organizing by feature instead of by provider"
+      ],
+      "files_affected": [
+        "packages/platform/atoms/connect/index.ts",
+        "packages/platform/atoms/index.ts"
+      ]
+    },
+    {
+      "dimension": "build_optimization",
+      "recommendation": "Updated Vite configuration to use @vitejs/plugin-react-swc instead of @vitejs/plugin-react and added vite-plugin-inspect for build analysis.",
+      "rationale": "SWC is faster than Babel for React transformations, improving build times. The inspect plugin helps with debugging and optimizing the build process. These changes improve developer experience and build performance.",
+      "alternatives_considered": [
+        "Keeping the existing Babel-based setup",
+        "Making more extensive build configuration changes"
+      ],
+      "files_affected": [
+        "packages/platform/atoms/package.json",
+        "packages/platform/atoms/vite.config.ts"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Create generic OAuth calendar connection architecture",
+      "description": "Implemented a reusable OAuthConnect component and supporting hooks that can be used by any calendar provider, following the Strategy Pattern for extensibility.",
+      "files_to_modify": [
+        "packages/platform/atoms/index.ts",
+        "packages/platform/atoms/package.json",
+        "packages/platform/atoms/vite.config.ts"
+      ],
+      "files_to_create": [
+        "packages/platform/atoms/connect/OAuthConnect.tsx",
+        "packages/platform/atoms/connect/index.ts",
+        "packages/platform/atoms/hooks/connect/useCheck.ts",
+        "packages/platform/atoms/hooks/connect/useConnect.ts"
+      ],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-002",
+      "title": "Implement Outlook 365 calendar connection",
+      "description": "Created Outlook-specific wrapper component and integrated it with the existing calendar service infrastructure, following the same patterns as Google Calendar.",
+      "files_to_modify": [],
+      "files_to_create": [
+        "packages/platform/atoms/connect/outlook/OutlookConnect.tsx"
+      ],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-003",
+      "title": "Refactor Google Calendar to use new architecture",
+      "description": "Updated the existing GcalConnect component to use the new generic OAuthConnect architecture and moved it to the new directory structure.",
+      "files_to_modify": [
+        "packages/platform/atoms/gcal-connect/GcalConnect.tsx",
+        "packages/platform/atoms/gcal-connect/index.ts",
+        "packages/platform/atoms/hooks/useGcal.ts"
+      ],
+      "files_to_create": [
+        "packages/platform/atoms/connect/google/GcalConnect.tsx"
+      ],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-004",
+      "title": "Extend backend API for flexible redirects",
+      "description": "Added support for custom redirect URLs in the calendar OAuth flow endpoints and consolidated API patterns across providers.",
+      "files_to_modify": [
+        "apps/api/v2/src/ee/calendars/controllers/calendars.controller.ts",
+        "apps/api/v2/src/ee/calendars/services/gcal.service.ts",
+        "apps/api/v2/src/ee/calendars/services/outlook.service.ts",
+        "apps/api/v2/src/ee/gcal/gcal.controller.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-005",
+      "title": "Update examples and documentation",
+      "description": "Updated the example application to demonstrate both Google and Outlook calendar connections with the new architecture.",
+      "files_to_modify": [
+        "packages/platform/examples/base/src/pages/index.tsx"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation follows a strategic approach to calendar OAuth connections by creating a generic, reusable architecture that can support multiple providers. The core innovation is the OAuthConnect component that handles the common OAuth flow logic, while provider-specific components (GcalConnect, OutlookConnect) configure it with their constants and defaults. This pattern reduces code duplication and makes it easy to add new calendar providers in the future.\n\nOn the backend, the API was extended to support custom redirect URLs via a 'redir' query parameter, providing flexibility for different use cases. The state parameter schema was updated to include this new field, maintaining data persistence across OAuth redirects. Notably, the standalone Google Calendar endpoints were consolidated into the unified calendar API structure (/calendars/{provider}/...), creating a consistent pattern for all providers.\n\nThe implementation integrates well with the existing codebase by following established patterns for calendar integrations and leveraging the platform's existing authentication and API infrastructure. The use of React Query for data fetching in the new hooks provides better performance and error handling compared to the previous implementation. The directory reorganization improves code discoverability and sets up a scalable structure for future calendar provider additions.",
+  "source_pr": "https://github.com/calcom/cal.com/pull/15318",
+  "before_sha": "50eeb712e3a4f9fbbe7e503a3979d7030fb1cee0",
+  "after_sha": "7d4e8e22107be704aec24947644d3ce3b9a089ea",
+  "diff_stats": {
+    "additions": 285,
+    "deletions": 195,
+    "files_changed": 17
+  }
+}

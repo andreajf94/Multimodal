@@ -1,0 +1,1075 @@
+diff --git a/charts/formbricks/Chart.lock b/charts/formbricks/Chart.lock
+index fe0ada406560..529a9232c0bb 100644
+--- a/charts/formbricks/Chart.lock
++++ b/charts/formbricks/Chart.lock
+@@ -5,5 +5,11 @@ dependencies:
+ - name: redis
+   repository: oci://registry-1.docker.io/bitnamicharts
+   version: 20.11.2
+-digest: sha256:6233567e6d133fd87585de7cb11f835125ab649fc7979eac7b17d4b2881f54dc
+-generated: "2025-03-06T15:48:20.190945+05:30"
++- name: gateway-helm
++  repository: oci://docker.io/envoyproxy
++  version: v1.7.1
++- name: redis
++  repository: oci://registry-1.docker.io/bitnamicharts
++  version: 20.11.2
++digest: sha256:d93a29cb9cbef513db410ded5aa199f219c5b25ce1870e1e049dc470acc34235
++generated: "2026-04-08T00:33:09.875832+05:30"
+diff --git a/charts/formbricks/Chart.yaml b/charts/formbricks/Chart.yaml
+index 898f9a40c179..ea4b804755ce 100644
+--- a/charts/formbricks/Chart.yaml
++++ b/charts/formbricks/Chart.yaml
+@@ -31,3 +31,13 @@ dependencies:
+     version: 20.11.2
+     repository: "oci://registry-1.docker.io/bitnamicharts"
+     condition: redis.enabled
++  - name: gateway-helm
++    alias: envoy
++    version: "v1.7.1"
++    repository: "oci://docker.io/envoyproxy"
++    condition: envoy.controller.enabled
++  - name: redis
++    alias: envoyRedis
++    version: 20.11.2
++    repository: "oci://registry-1.docker.io/bitnamicharts"
++    condition: envoyRedis.enabled
+diff --git a/charts/formbricks/README.md b/charts/formbricks/README.md
+index 8a06e85abf6d..c6398ee59434 100644
+--- a/charts/formbricks/README.md
++++ b/charts/formbricks/README.md
+@@ -18,6 +18,31 @@ A Helm chart for Formbricks with PostgreSQL, Redis
+ | ---------------------------------------- | ---------- | ------- |
+ | oci://registry-1.docker.io/bitnamicharts | postgresql | 16.4.16 |
+ | oci://registry-1.docker.io/bitnamicharts | redis      | 20.11.2 |
++| oci://docker.io/envoyproxy               | gateway-helm | v1.7.1 |
++| oci://registry-1.docker.io/bitnamicharts | redis      | 20.11.2 |
++
++## Envoy bundle modes
++
++The chart can optionally deploy Formbricks behind Envoy Gateway with a dedicated Redis HA backend for Envoy global
++rate limiting.
++
++- `envoy.enabled=true` enables the app-bound Envoy resources such as `Gateway`, `HTTPRoute`, and rate-limit policies.
++- `envoy.controller.enabled=true` installs a bundled Envoy Gateway controller with the release.
++- `envoy.controller.enabled=false` keeps the chart in external-controller mode and assumes the cluster already has
++  Gateway API CRDs plus an Envoy Gateway controller compatible with
++  `envoy.config.envoyGateway.gateway.controllerName`.
++- `envoyRedis.enabled=true` deploys a dedicated Redis replication + Sentinel bundle for Envoy RLS. It is intentionally
++  separate from the existing app `redis` dependency.
++- The bundled controller reads its Redis backend from `envoy.config.envoyGateway.rateLimit.backend.redis.url`.
++  If you enable Redis authentication or override `envoyRedis.fullnameOverride`, set that URL explicitly so the
++  controller points at the correct backend.
++- When both the main app ingress and the Envoy API ingress are enabled, set `envoy.formbricks.ingress.host`
++  explicitly so the Envoy host choice is intentional.
++
++The intended defaults are:
++
++- self-hosted / single-tenant clusters: bundled controller mode
++- shared clusters with an existing platform controller: external-controller mode
+ 
+ ## Values
+ 
+diff --git a/charts/formbricks/charts/gateway-helm-v1.7.1.tgz b/charts/formbricks/charts/gateway-helm-v1.7.1.tgz
+new file mode 100644
+index 000000000000..0b0c196636af
+Binary files /dev/null and b/charts/formbricks/charts/gateway-helm-v1.7.1.tgz differ
+diff --git a/charts/formbricks/templates/_helpers.tpl b/charts/formbricks/templates/_helpers.tpl
+index 5366a3e8a087..cb8ff9e25c65 100644
+--- a/charts/formbricks/templates/_helpers.tpl
++++ b/charts/formbricks/templates/_helpers.tpl
+@@ -139,3 +139,47 @@ If `namespaceOverride` is provided, it will be used; otherwise, it defaults to `
+     {{- randAlphaNum 32 -}}
+ {{- end -}}
+ {{- end }}
++
++{{- define "formbricks.envoy.gatewayClassName" -}}
++{{- if .Values.envoy.formbricks.gatewayClass.name -}}
++{{- .Values.envoy.formbricks.gatewayClass.name | trunc 63 | trimSuffix "-" -}}
++{{- else -}}
++{{- printf "%s-%s-envoy" .Release.Name (include "formbricks.namespace" .) | trunc 63 | trimSuffix "-" -}}
++{{- end -}}
++{{- end }}
++
++{{- define "formbricks.envoy.gatewayName" -}}
++{{- if .Values.envoy.formbricks.gateway.name -}}
++{{- .Values.envoy.formbricks.gateway.name | trunc 63 | trimSuffix "-" -}}
++{{- else -}}
++{{- printf "%s-envoy-gateway" (include "formbricks.name" .) | trunc 63 | trimSuffix "-" -}}
++{{- end -}}
++{{- end }}
++
++{{- define "formbricks.envoy.proxyName" -}}
++{{- if .Values.envoy.formbricks.proxy.name -}}
++{{- .Values.envoy.formbricks.proxy.name | trunc 63 | trimSuffix "-" -}}
++{{- else -}}
++{{- printf "%s-envoy-proxy" (include "formbricks.name" .) | trunc 63 | trimSuffix "-" -}}
++{{- end -}}
++{{- end }}
++
++{{- define "formbricks.envoy.proxyServiceName" -}}
++{{- if .Values.envoy.formbricks.proxy.service.name -}}
++{{- .Values.envoy.formbricks.proxy.service.name | trunc 63 | trimSuffix "-" -}}
++{{- else -}}
++{{- printf "%s-envoy" (include "formbricks.name" .) | trunc 63 | trimSuffix "-" -}}
++{{- end -}}
++{{- end }}
++
++{{- define "formbricks.envoy.ingressHost" -}}
++{{- if .Values.envoy.formbricks.ingress.host -}}
++{{- tpl .Values.envoy.formbricks.ingress.host $ -}}
++{{- else if and .Values.ingress.hosts (gt (len .Values.ingress.hosts) 0) -}}
++{{- tpl (index .Values.ingress.hosts 0).host $ -}}
++{{- end -}}
++{{- end }}
++
++{{- define "formbricks.envoy.defaultRedisUrl" -}}
++{{- printf "%s-master:6379" .Values.envoyRedis.fullnameOverride -}}
++{{- end }}
+diff --git a/charts/formbricks/templates/envoy-api-ingress.yaml b/charts/formbricks/templates/envoy-api-ingress.yaml
+new file mode 100644
+index 000000000000..e17fc3fb8344
+--- /dev/null
++++ b/charts/formbricks/templates/envoy-api-ingress.yaml
+@@ -0,0 +1,85 @@
++{{- if and .Values.envoy.enabled .Values.envoy.formbricks.ingress.enabled }}
++{{- $explicitHost := "" -}}
++{{- if .Values.envoy.formbricks.ingress.host -}}
++{{- $explicitHost = tpl .Values.envoy.formbricks.ingress.host $ | trim -}}
++{{- end -}}
++{{- if and .Values.ingress.enabled .Values.ingress.hosts (gt (len .Values.ingress.hosts) 0) (not $explicitHost) -}}
++{{- fail "envoy.formbricks.ingress.host must be set explicitly when ingress.enabled and envoy.formbricks.ingress.enabled are both true" -}}
++{{- end -}}
++{{- $host := include "formbricks.envoy.ingressHost" . -}}
++{{- $proxyServiceName := include "formbricks.envoy.proxyServiceName" . -}}
++---
++apiVersion: networking.k8s.io/v1
++kind: Ingress
++metadata:
++  name: {{ printf "%s-envoy-api" (include "formbricks.name" .) }}
++  namespace: {{ include "formbricks.namespace" . }}
++  labels:
++    {{- include "formbricks.labels" . | nindent 4 }}
++  {{- if .Values.envoy.formbricks.ingress.annotations }}
++  annotations:
++    {{- include "formbricks.tplvalues.render" (dict "value" .Values.envoy.formbricks.ingress.annotations "context" $ ) | nindent 4 }}
++  {{- end }}
++spec:
++  {{- if .Values.envoy.formbricks.ingress.ingressClassName }}
++  ingressClassName: {{ .Values.envoy.formbricks.ingress.ingressClassName }}
++  {{- end }}
++  rules:
++    - host: {{ $host }}
++      http:
++        paths:
++          {{- if .Values.envoy.formbricks.routes.authCallback }}
++          - path: /api/auth/callback
++            pathType: Prefix
++            backend:
++              service:
++                name: {{ $proxyServiceName }}
++                port:
++                  number: 80
++          {{- end }}
++          {{- if .Values.envoy.formbricks.routes.v1Client }}
++          - path: /api/v1/client
++            pathType: Prefix
++            backend:
++              service:
++                name: {{ $proxyServiceName }}
++                port:
++                  number: 80
++          {{- end }}
++          {{- if .Values.envoy.formbricks.routes.v2Client }}
++          - path: /api/v2/client
++            pathType: Prefix
++            backend:
++              service:
++                name: {{ $proxyServiceName }}
++                port:
++                  number: 80
++          {{- end }}
++          {{- if .Values.envoy.formbricks.routes.v1Management }}
++          - path: /api/v1/management
++            pathType: Prefix
++            backend:
++              service:
++                name: {{ $proxyServiceName }}
++                port:
++                  number: 80
++          {{- end }}
++          {{- if .Values.envoy.formbricks.routes.v1Webhooks }}
++          - path: /api/v1/webhooks
++            pathType: Prefix
++            backend:
++              service:
++                name: {{ $proxyServiceName }}
++                port:
++                  number: 80
++          {{- end }}
++          {{- if .Values.envoy.formbricks.routes.storage }}
++          - path: /storage
++            pathType: Prefix
++            backend:
++              service:
++                name: {{ $proxyServiceName }}
++                port:
++                  number: 80
++          {{- end }}
++{{- end }}
+diff --git a/charts/formbricks/templates/envoy-gateway-resources.yaml b/charts/formbricks/templates/envoy-gateway-resources.yaml
+new file mode 100644
+index 000000000000..5f06d6116ec1
+--- /dev/null
++++ b/charts/formbricks/templates/envoy-gateway-resources.yaml
+@@ -0,0 +1,260 @@
++{{- if .Values.envoy.enabled }}
++{{- if and (not .Values.envoy.formbricks.gatewayClass.create) (not .Values.envoy.formbricks.gatewayClass.name) -}}
++{{- fail "envoy.formbricks.gatewayClass.name is required when envoy.formbricks.gatewayClass.create=false" -}}
++{{- end -}}
++{{- $namespace := include "formbricks.namespace" . -}}
++{{- $gatewayName := include "formbricks.envoy.gatewayName" . -}}
++{{- $gatewayClassName := include "formbricks.envoy.gatewayClassName" . -}}
++{{- $proxyName := include "formbricks.envoy.proxyName" . -}}
++{{- $proxyServiceName := include "formbricks.envoy.proxyServiceName" . -}}
++{{- $appServiceName := include "formbricks.name" . -}}
++---
++apiVersion: gateway.envoyproxy.io/v1alpha1
++kind: EnvoyProxy
++metadata:
++  name: {{ $proxyName }}
++  namespace: {{ $namespace }}
++  labels:
++    {{- include "formbricks.labels" . | nindent 4 }}
++spec:
++  provider:
++    type: Kubernetes
++    kubernetes:
++      envoyDeployment:
++        replicas: {{ .Values.envoy.formbricks.proxy.replicas }}
++      envoyService:
++        name: {{ $proxyServiceName }}
++        type: {{ .Values.envoy.formbricks.proxy.service.type }}
++        labels:
++          app.kubernetes.io/name: {{ $proxyServiceName }}
++          app.kubernetes.io/managed-by: {{ .Release.Service }}
++  logging:
++    level:
++      default: {{ .Values.envoy.formbricks.proxy.logging.defaultLevel | quote }}
++  telemetry:
++    metrics:
++      prometheus:
++        disable: {{ not .Values.envoy.formbricks.proxy.telemetry.prometheus.enabled }}
++    {{- if .Values.envoy.formbricks.proxy.telemetry.openTelemetry.enabled }}
++      sinks:
++        - type: OpenTelemetry
++          openTelemetry:
++            backendRefs:
++              {{- toYaml .Values.envoy.formbricks.proxy.telemetry.openTelemetry.backendRefs | nindent 14 }}
++            resourceAttributes:
++              service.name: {{ default $proxyServiceName .Values.envoy.formbricks.proxy.telemetry.openTelemetry.serviceName | quote }}
++              service.namespace: {{ default $namespace .Values.envoy.formbricks.proxy.telemetry.openTelemetry.serviceNamespace | quote }}
++              deployment.environment: {{ default "self-hosted" .Values.envoy.formbricks.proxy.telemetry.openTelemetry.deploymentEnvironment | quote }}
++    {{- end }}
++  preserveRouteOrder: true
++{{- if .Values.envoy.formbricks.gatewayClass.create }}
++---
++apiVersion: gateway.networking.k8s.io/v1
++kind: GatewayClass
++metadata:
++  name: {{ $gatewayClassName }}
++  labels:
++    {{- include "formbricks.labels" . | nindent 4 }}
++spec:
++  controllerName: {{ .Values.envoy.config.envoyGateway.gateway.controllerName | quote }}
++  parametersRef:
++    group: gateway.envoyproxy.io
++    kind: EnvoyProxy
++    name: {{ $proxyName }}
++    namespace: {{ $namespace }}
++{{- end }}
++---
++apiVersion: gateway.networking.k8s.io/v1
++kind: Gateway
++metadata:
++  name: {{ $gatewayName }}
++  namespace: {{ $namespace }}
++  labels:
++    {{- include "formbricks.labels" . | nindent 4 }}
++spec:
++  gatewayClassName: {{ $gatewayClassName }}
++  listeners:
++    - name: {{ .Values.envoy.formbricks.gateway.listenerName }}
++      protocol: HTTP
++      port: {{ .Values.envoy.formbricks.gateway.port }}
++      allowedRoutes:
++        namespaces:
++          from: Same
++{{- if .Values.envoy.formbricks.clientTrafficPolicy.enabled }}
++---
++apiVersion: gateway.envoyproxy.io/v1alpha1
++kind: ClientTrafficPolicy
++metadata:
++  name: {{ printf "%s-client-ip" $gatewayName }}
++  namespace: {{ $namespace }}
++  labels:
++    {{- include "formbricks.labels" . | nindent 4 }}
++spec:
++  targetRefs:
++    - group: gateway.networking.k8s.io
++      kind: Gateway
++      name: {{ $gatewayName }}
++  clientIPDetection:
++    xForwardedFor:
++      numTrustedHops: {{ .Values.envoy.formbricks.clientTrafficPolicy.numTrustedHops }}
++{{- end }}
++---
++apiVersion: gateway.networking.k8s.io/v1
++kind: HTTPRoute
++metadata:
++  name: {{ printf "%s-health" $proxyServiceName }}
++  namespace: {{ $namespace }}
++  labels:
++    {{- include "formbricks.labels" . | nindent 4 }}
++spec:
++  parentRefs:
++    - name: {{ $gatewayName }}
++      sectionName: {{ .Values.envoy.formbricks.gateway.listenerName }}
++  rules:
++    - matches:
++        - path:
++            type: Exact
++            value: /health
++      backendRefs:
++        - kind: Service
++          name: {{ $appServiceName }}
++          port: 3000
++{{- if .Values.envoy.formbricks.routes.authCallback }}
++---
++apiVersion: gateway.networking.k8s.io/v1
++kind: HTTPRoute
++metadata:
++  name: {{ printf "%s-auth-callback" $proxyServiceName }}
++  namespace: {{ $namespace }}
++  labels:
++    {{- include "formbricks.labels" . | nindent 4 }}
++spec:
++  parentRefs:
++    - name: {{ $gatewayName }}
++      sectionName: {{ .Values.envoy.formbricks.gateway.listenerName }}
++  rules:
++    - matches:
++        - path:
++            type: PathPrefix
++            value: /api/auth/callback
++      backendRefs:
++        - kind: Service
++          name: {{ $appServiceName }}
++          port: 3000
++{{- end }}
++{{- if .Values.envoy.formbricks.routes.v1Client }}
++---
++apiVersion: gateway.networking.k8s.io/v1
++kind: HTTPRoute
++metadata:
++  name: {{ printf "%s-v1-client" $proxyServiceName }}
++  namespace: {{ $namespace }}
++  labels:
++    {{- include "formbricks.labels" . | nindent 4 }}
++spec:
++  parentRefs:
++    - name: {{ $gatewayName }}
++      sectionName: {{ .Values.envoy.formbricks.gateway.listenerName }}
++  rules:
++    - matches:
++        - path:
++            type: PathPrefix
++            value: /api/v1/client
++      backendRefs:
++        - kind: Service
++          name: {{ $appServiceName }}
++          port: 3000
++{{- end }}
++{{- if .Values.envoy.formbricks.routes.v2Client }}
++---
++apiVersion: gateway.networking.k8s.io/v1
++kind: HTTPRoute
++metadata:
++  name: {{ printf "%s-v2-client" $proxyServiceName }}
++  namespace: {{ $namespace }}
++  labels:
++    {{- include "formbricks.labels" . | nindent 4 }}
++spec:
++  parentRefs:
++    - name: {{ $gatewayName }}
++      sectionName: {{ .Values.envoy.formbricks.gateway.listenerName }}
++  rules:
++    - matches:
++        - path:
++            type: PathPrefix
++            value: /api/v2/client
++      backendRefs:
++        - kind: Service
++          name: {{ $appServiceName }}
++          port: 3000
++{{- end }}
++{{- if .Values.envoy.formbricks.routes.v1Management }}
++---
++apiVersion: gateway.networking.k8s.io/v1
++kind: HTTPRoute
++metadata:
++  name: {{ printf "%s-v1-management" $proxyServiceName }}
++  namespace: {{ $namespace }}
++  labels:
++    {{- include "formbricks.labels" . | nindent 4 }}
++spec:
++  parentRefs:
++    - name: {{ $gatewayName }}
++      sectionName: {{ .Values.envoy.formbricks.gateway.listenerName }}
++  rules:
++    - matches:
++        - path:
++            type: PathPrefix
++            value: /api/v1/management
++      backendRefs:
++        - kind: Service
++          name: {{ $appServiceName }}
++          port: 3000
++{{- end }}
++{{- if .Values.envoy.formbricks.routes.v1Webhooks }}
++---
++apiVersion: gateway.networking.k8s.io/v1
++kind: HTTPRoute
++metadata:
++  name: {{ printf "%s-v1-webhooks" $proxyServiceName }}
++  namespace: {{ $namespace }}
++  labels:
++    {{- include "formbricks.labels" . | nindent 4 }}
++spec:
++  parentRefs:
++    - name: {{ $gatewayName }}
++      sectionName: {{ .Values.envoy.formbricks.gateway.listenerName }}
++  rules:
++    - matches:
++        - path:
++            type: PathPrefix
++            value: /api/v1/webhooks
++      backendRefs:
++        - kind: Service
++          name: {{ $appServiceName }}
++          port: 3000
++{{- end }}
++{{- if .Values.envoy.formbricks.routes.storage }}
++---
++apiVersion: gateway.networking.k8s.io/v1
++kind: HTTPRoute
++metadata:
++  name: {{ printf "%s-storage" $proxyServiceName }}
++  namespace: {{ $namespace }}
++  labels:
++    {{- include "formbricks.labels" . | nindent 4 }}
++spec:
++  parentRefs:
++    - name: {{ $gatewayName }}
++      sectionName: {{ .Values.envoy.formbricks.gateway.listenerName }}
++  rules:
++    - matches:
++        - path:
++            type: PathPrefix
++            value: /storage
++      backendRefs:
++        - kind: Service
++          name: {{ $appServiceName }}
++          port: 3000
++{{- end }}
++{{- end }}
+diff --git a/charts/formbricks/templates/envoy-rate-limit-policies.yaml b/charts/formbricks/templates/envoy-rate-limit-policies.yaml
+new file mode 100644
+index 000000000000..a6cc23128684
+--- /dev/null
++++ b/charts/formbricks/templates/envoy-rate-limit-policies.yaml
+@@ -0,0 +1,346 @@
++{{- if and .Values.envoy.enabled .Values.envoy.formbricks.policies.enabled }}
++{{- $namespace := include "formbricks.namespace" . -}}
++{{- $proxyServiceName := include "formbricks.envoy.proxyServiceName" . -}}
++{{- if and .Values.envoy.formbricks.routes.authCallback .Values.envoy.formbricks.policies.authCallback }}
++---
++apiVersion: gateway.envoyproxy.io/v1alpha1
++kind: BackendTrafficPolicy
++metadata:
++  name: {{ printf "%s-auth-rate-limit" $proxyServiceName }}
++  namespace: {{ $namespace }}
++  labels:
++    {{- include "formbricks.labels" . | nindent 4 }}
++spec:
++  targetRefs:
++    - group: gateway.networking.k8s.io
++      kind: HTTPRoute
++      name: {{ printf "%s-auth-callback" $proxyServiceName }}
++  rateLimit:
++    global:
++      rules:
++        - clientSelectors:
++            - sourceCIDR:
++                type: Distinct
++                value: 0.0.0.0/0
++              methods:
++                - value: POST
++              path:
++                type: Exact
++                value: /api/auth/callback/credentials
++          limit:
++            requests: 40
++            unit: Hour
++        - clientSelectors:
++            - sourceCIDR:
++                type: Distinct
++                value: ::/0
++              methods:
++                - value: POST
++              path:
++                type: Exact
++                value: /api/auth/callback/credentials
++          limit:
++            requests: 40
++            unit: Hour
++        - clientSelectors:
++            - sourceCIDR:
++                type: Distinct
++                value: 0.0.0.0/0
++              methods:
++                - value: POST
++              path:
++                type: Exact
++                value: /api/auth/callback/token
++          limit:
++            requests: 10
++            unit: Hour
++        - clientSelectors:
++            - sourceCIDR:
++                type: Distinct
++                value: ::/0
++              methods:
++                - value: POST
++              path:
++                type: Exact
++                value: /api/auth/callback/token
++          limit:
++            requests: 10
++            unit: Hour
++{{- end }}
++{{- if and .Values.envoy.formbricks.routes.v1Client .Values.envoy.formbricks.policies.v1Client }}
++---
++apiVersion: gateway.envoyproxy.io/v1alpha1
++kind: BackendTrafficPolicy
++metadata:
++  name: {{ printf "%s-v1-client-rate-limit" $proxyServiceName }}
++  namespace: {{ $namespace }}
++  labels:
++    {{- include "formbricks.labels" . | nindent 4 }}
++spec:
++  targetRefs:
++    - group: gateway.networking.k8s.io
++      kind: HTTPRoute
++      name: {{ printf "%s-v1-client" $proxyServiceName }}
++  rateLimit:
++    global:
++      rules:
++        - clientSelectors:
++            - sourceCIDR:
++                type: Distinct
++                value: 0.0.0.0/0
++              methods:
++                - value: POST
++              path:
++                type: RegularExpression
++                value: ^/api/v1/client/[^/]+/storage$
++          limit:
++            requests: 5
++            unit: Minute
++        - clientSelectors:
++            - sourceCIDR:
++                type: Distinct
++                value: ::/0
++              methods:
++                - value: POST
++              path:
++                type: RegularExpression
++                value: ^/api/v1/client/[^/]+/storage$
++          limit:
++            requests: 5
++            unit: Minute
++        - clientSelectors:
++            - sourceCIDR:
++                type: Distinct
++                value: 0.0.0.0/0
++              methods:
++                - value: GET
++                - value: POST
++                - value: PUT
++                - value: PATCH
++                - value: DELETE
++              path:
++                type: RegularExpression
++                value: ^/api/v1/client/[^/]+/(environment|responses(?:/[^/]+)?|displays|user)$
++          limit:
++            requests: 100
++            unit: Minute
++        - clientSelectors:
++            - sourceCIDR:
++                type: Distinct
++                value: ::/0
++              methods:
++                - value: GET
++                - value: POST
++                - value: PUT
++                - value: PATCH
++                - value: DELETE
++              path:
++                type: RegularExpression
++                value: ^/api/v1/client/[^/]+/(environment|responses(?:/[^/]+)?|displays|user)$
++          limit:
++            requests: 100
++            unit: Minute
++{{- end }}
++{{- if and .Values.envoy.formbricks.routes.v2Client .Values.envoy.formbricks.policies.v2Client }}
++---
++apiVersion: gateway.envoyproxy.io/v1alpha1
++kind: BackendTrafficPolicy
++metadata:
++  name: {{ printf "%s-v2-client-rate-limit" $proxyServiceName }}
++  namespace: {{ $namespace }}
++  labels:
++    {{- include "formbricks.labels" . | nindent 4 }}
++spec:
++  targetRefs:
++    - group: gateway.networking.k8s.io
++      kind: HTTPRoute
++      name: {{ printf "%s-v2-client" $proxyServiceName }}
++  rateLimit:
++    global:
++      rules:
++        - clientSelectors:
++            - sourceCIDR:
++                type: Distinct
++                value: 0.0.0.0/0
++              methods:
++                - value: POST
++                - value: PUT
++              path:
++                type: RegularExpression
++                value: ^/api/v2/client/[^/]+/responses(?:/[^/]+)?$
++          limit:
++            requests: 100
++            unit: Minute
++        - clientSelectors:
++            - sourceCIDR:
++                type: Distinct
++                value: ::/0
++              methods:
++                - value: POST
++                - value: PUT
++              path:
++                type: RegularExpression
++                value: ^/api/v2/client/[^/]+/responses(?:/[^/]+)?$
++          limit:
++            requests: 100
++            unit: Minute
++        - clientSelectors:
++            - sourceCIDR:
++                type: Distinct
++                value: 0.0.0.0/0
++              methods:
++                - value: POST
++              path:
++                type: RegularExpression
++                value: ^/api/v2/client/[^/]+/displays$
++          limit:
++            requests: 100
++            unit: Minute
++        - clientSelectors:
++            - sourceCIDR:
++                type: Distinct
++                value: ::/0
++              methods:
++                - value: POST
++              path:
++                type: RegularExpression
++                value: ^/api/v2/client/[^/]+/displays$
++          limit:
++            requests: 100
++            unit: Minute
++        - clientSelectors:
++            - sourceCIDR:
++                type: Distinct
++                value: 0.0.0.0/0
++              methods:
++                - value: POST
++              path:
++                type: RegularExpression
++                value: ^/api/v2/client/[^/]+/storage$
++          limit:
++            requests: 5
++            unit: Minute
++        - clientSelectors:
++            - sourceCIDR:
++                type: Distinct
++                value: ::/0
++              methods:
++                - value: POST
++              path:
++                type: RegularExpression
++                value: ^/api/v2/client/[^/]+/storage$
++          limit:
++            requests: 5
++            unit: Minute
++{{- end }}
++{{- if and .Values.envoy.formbricks.routes.v1Management .Values.envoy.formbricks.policies.v1Management }}
++---
++apiVersion: gateway.envoyproxy.io/v1alpha1
++kind: BackendTrafficPolicy
++metadata:
++  name: {{ printf "%s-v1-management-rate-limit" $proxyServiceName }}
++  namespace: {{ $namespace }}
++  labels:
++    {{- include "formbricks.labels" . | nindent 4 }}
++spec:
++  targetRefs:
++    - group: gateway.networking.k8s.io
++      kind: HTTPRoute
++      name: {{ printf "%s-v1-management" $proxyServiceName }}
++  rateLimit:
++    global:
++      rules:
++        - clientSelectors:
++            - headers:
++                - name: x-api-key
++                  type: Distinct
++              methods:
++                - value: POST
++              path:
++                type: Exact
++                value: /api/v1/management/storage
++          limit:
++            requests: 5
++            unit: Minute
++        - clientSelectors:
++            - headers:
++                - name: x-api-key
++                  type: Distinct
++              methods:
++                - value: GET
++                - value: POST
++                - value: PUT
++                - value: PATCH
++                - value: DELETE
++              path:
++                type: PathPrefix
++                value: /api/v1/management/
++          limit:
++            requests: 100
++            unit: Minute
++{{- end }}
++{{- if and .Values.envoy.formbricks.routes.v1Webhooks .Values.envoy.formbricks.policies.v1Webhooks }}
++---
++apiVersion: gateway.envoyproxy.io/v1alpha1
++kind: BackendTrafficPolicy
++metadata:
++  name: {{ printf "%s-v1-webhooks-rate-limit" $proxyServiceName }}
++  namespace: {{ $namespace }}
++  labels:
++    {{- include "formbricks.labels" . | nindent 4 }}
++spec:
++  targetRefs:
++    - group: gateway.networking.k8s.io
++      kind: HTTPRoute
++      name: {{ printf "%s-v1-webhooks" $proxyServiceName }}
++  rateLimit:
++    global:
++      rules:
++        - clientSelectors:
++            - headers:
++                - name: x-api-key
++                  type: Distinct
++              methods:
++                - value: GET
++                - value: POST
++                - value: PUT
++                - value: PATCH
++                - value: DELETE
++              path:
++                type: PathPrefix
++                value: /api/v1/webhooks/
++          limit:
++            requests: 100
++            unit: Minute
++{{- end }}
++{{- if and .Values.envoy.formbricks.routes.storage .Values.envoy.formbricks.policies.storage }}
++---
++apiVersion: gateway.envoyproxy.io/v1alpha1
++kind: BackendTrafficPolicy
++metadata:
++  name: {{ printf "%s-storage-rate-limit" $proxyServiceName }}
++  namespace: {{ $namespace }}
++  labels:
++    {{- include "formbricks.labels" . | nindent 4 }}
++spec:
++  targetRefs:
++    - group: gateway.networking.k8s.io
++      kind: HTTPRoute
++      name: {{ printf "%s-storage" $proxyServiceName }}
++  rateLimit:
++    global:
++      rules:
++        - clientSelectors:
++            - headers:
++                - name: x-api-key
++                  type: Distinct
++              methods:
++                - value: DELETE
++              path:
++                type: RegularExpression
++                value: ^/storage/[^/]+/(public|private)/.+$
++          limit:
++            requests: 5
++            unit: Minute
++{{- end }}
++{{- end }}
+diff --git a/charts/formbricks/templates/envoy-validation.yaml b/charts/formbricks/templates/envoy-validation.yaml
+new file mode 100644
+index 000000000000..648bc9d80a37
+--- /dev/null
++++ b/charts/formbricks/templates/envoy-validation.yaml
+@@ -0,0 +1,22 @@
++{{- if and .Values.envoy.controller.enabled (not .Values.envoy.enabled) -}}
++{{- fail "envoy.controller.enabled requires envoy.enabled=true" -}}
++{{- end -}}
++
++{{- $configuredRedisUrl := default "" .Values.envoy.config.envoyGateway.rateLimit.backend.redis.url | trim -}}
++{{- $defaultRedisUrl := include "formbricks.envoy.defaultRedisUrl" . -}}
++
++{{- if and .Values.envoy.controller.enabled (not .Values.envoyRedis.enabled) (eq $configuredRedisUrl $defaultRedisUrl) -}}
++{{- fail "envoy.controller.enabled requires envoyRedis.enabled=true or envoy.config.envoyGateway.rateLimit.backend.redis.url to point at an existing Redis backend" -}}
++{{- end -}}
++
++{{- if and .Values.envoy.controller.enabled .Values.envoyRedis.enabled .Values.envoyRedis.auth.enabled (eq $configuredRedisUrl $defaultRedisUrl) -}}
++{{- fail "envoyRedis.auth.enabled requires envoy.config.envoyGateway.rateLimit.backend.redis.url to include Redis authentication credentials" -}}
++{{- end -}}
++
++{{- if and .Values.envoy.controller.enabled .Values.envoyRedis.enabled (ne .Values.envoyRedis.fullnameOverride "formbricks-envoy-redis") (eq $configuredRedisUrl "formbricks-envoy-redis-master:6379") -}}
++{{- fail "When overriding envoyRedis.fullnameOverride, also set envoy.config.envoyGateway.rateLimit.backend.redis.url to match the Redis service name" -}}
++{{- end -}}
++
++{{- if and .Values.envoy.enabled .Values.envoy.formbricks.ingress.enabled (not (include "formbricks.envoy.ingressHost" .)) -}}
++{{- fail "envoy.formbricks.ingress.enabled requires envoy.formbricks.ingress.host or ingress.hosts[0].host" -}}
++{{- end -}}
+diff --git a/charts/formbricks/values.yaml b/charts/formbricks/values.yaml
+index 7e02f76a43a0..f99f321e3100 100644
+--- a/charts/formbricks/values.yaml
++++ b/charts/formbricks/values.yaml
+@@ -302,6 +302,205 @@ ingress:
+           serviceName: "formbricks"
+   annotations: {} # Ingress annotations
+ 
++##########################################################
++# Envoy Gateway Bundle
++##########################################################
++envoy:
++  # Enable app-bound Envoy resources (Gateway, HTTPRoutes, policies, ingress)
++  enabled: false
++
++  # Install the Envoy Gateway controller from this chart when true.
++  # Leave disabled when the cluster already provides a compatible controller.
++  controller:
++    enabled: false
++
++  createNamespace: false
++
++  deployment:
++    replicas: 1
++    envoyGateway:
++      resources:
++        limits:
++          memory: 1024Mi
++        requests:
++          cpu: 100m
++          memory: 256Mi
++      pod:
++        topologySpreadConstraints: []
++        tolerations: []
++        nodeSelector: {}
++    ports:
++      - name: grpc
++        port: 18000
++        targetPort: 18000
++      - name: ratelimit
++        port: 18001
++        targetPort: 18001
++      - name: wasm
++        port: 18002
++        targetPort: 18002
++      - name: metrics
++        port: 19001
++        targetPort: 19001
++
++  service:
++    type: ClusterIP
++    annotations: {}
++
++  config:
++    envoyGateway:
++      gateway:
++        controllerName: gateway.envoyproxy.io/formbricks-envoy-controller
++      provider:
++        type: Kubernetes
++        kubernetes:
++          deploy:
++            type: GatewayNamespace
++          rateLimitDeployment:
++            replicas: 1
++            container:
++              env:
++                - name: CACHE_KEY_PREFIX
++                  value: "formbricks:"
++              resources:
++                requests:
++                  cpu: 100m
++                  memory: 256Mi
++                limits:
++                  memory: 512Mi
++      logging:
++        level:
++          default: info
++          global-ratelimit: info
++      rateLimit:
++        backend:
++          type: Redis
++          redis:
++            # Override this when enabling envoyRedis auth or changing envoyRedis.fullnameOverride.
++            url: "formbricks-envoy-redis-master:6379"
++        failClosed: false
++        telemetry:
++          metrics:
++            prometheus:
++              disable: false
++      envoyProxy:
++        logging:
++          level:
++            default: info
++        preserveRouteOrder: true
++
++  formbricks:
++    gatewayClass:
++      create: true
++      # Required when create=false so the Gateway can bind to an existing cluster-scoped GatewayClass.
++      name: ""
++    gateway:
++      name: ""
++      listenerName: http
++      port: 80
++    proxy:
++      name: ""
++      replicas: 1
++      service:
++        name: ""
++        type: ClusterIP
++      logging:
++        defaultLevel: info
++      telemetry:
++        prometheus:
++          enabled: true
++        openTelemetry:
++          enabled: false
++          serviceName: ""
++          serviceNamespace: ""
++          deploymentEnvironment: ""
++          backendRefs: []
++    clientTrafficPolicy:
++      enabled: true
++      numTrustedHops: 2
++    ingress:
++      enabled: false
++      ingressClassName: ""
++      # Set this explicitly when both the main app ingress and the Envoy API ingress are enabled.
++      host: ""
++      annotations: {}
++    routes:
++      authCallback: true
++      v1Client: true
++      v2Client: true
++      v1Management: true
++      v1Webhooks: true
++      storage: true
++    policies:
++      enabled: false
++      authCallback: true
++      v1Client: true
++      v2Client: true
++      v1Management: true
++      v1Webhooks: true
++      storage: true
++
++##########################################################
++# Dedicated Redis for Envoy Rate Limiting
++##########################################################
++envoyRedis:
++  enabled: false
++  fullnameOverride: "formbricks-envoy-redis"
++  architecture: replication
++  rbac:
++    create: true
++  serviceAccount:
++    create: true
++    automountServiceAccountToken: true
++  auth:
++    enabled: false
++  commonConfiguration: |-
++    appendonly yes
++    save ""
++  networkPolicy:
++    enabled: false
++  master:
++    resources: {}
++    podAntiAffinityPreset: soft
++    topologySpreadConstraints: []
++    persistence:
++      enabled: true
++      size: 8Gi
++      storageClass: ""
++    pdb:
++      create: true
++      maxUnavailable: 1
++  replica:
++    replicaCount: 2
++    automountServiceAccountToken: true
++    resources: {}
++    podAntiAffinityPreset: soft
++    topologySpreadConstraints: []
++    persistence:
++      enabled: true
++      size: 8Gi
++      storageClass: ""
++    pdb:
++      create: true
++      maxUnavailable: 1
++  sentinel:
++    enabled: true
++    quorum: 2
++    masterSet: formbricksenvoy
++    getMasterTimeout: 90
++    automateClusterRecovery: false
++    redisShutdownWaitFailover: true
++    resources: {}
++    persistence:
++      enabled: false
++    service:
++      type: ClusterIP
++    masterService:
++      enabled: true
++      type: ClusterIP
++  metrics:
++    enabled: false
++
+ ##########################################################
+ # Redis Configuration
+ ##########################################################

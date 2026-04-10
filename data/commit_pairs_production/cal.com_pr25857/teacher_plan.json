@@ -1,0 +1,152 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "app_store_patterns",
+      "recommendation": "Implemented Famulor as a redirect-based automation app following the established 'link-as-an-app' template pattern used by other automation apps like Telli, Framer, and Cron",
+      "rationale": "The codebase has a well-defined pattern for apps that don't require complex OAuth flows but instead redirect users to external services. This approach minimizes implementation complexity while maintaining consistency with existing integrations. The '__template': 'link-as-an-app' in config.json confirms this pattern usage.",
+      "alternatives_considered": [
+        "Full OAuth integration with credential storage",
+        "Custom API endpoints for bidirectional communication",
+        "Embedded widget or iframe integration"
+      ],
+      "files_affected": [
+        "packages/app-store/famulor/config.json",
+        "packages/app-store/famulor/api/add.ts"
+      ]
+    },
+    {
+      "dimension": "api_design",
+      "recommendation": "Created minimal API handlers that use the existing createDefaultInstallation utility and declarative handler pattern",
+      "rationale": "Leveraging the established AppDeclarativeHandler type and createDefaultInstallation function ensures type safety and consistency with other app store integrations. The add.ts handler follows the same structure as other redirect apps, focusing only on the redirect URL and credential creation without custom business logic.",
+      "alternatives_considered": [
+        "Custom API endpoints with unique business logic",
+        "Direct database operations bypassing existing utilities",
+        "Server-side rendering components for the integration flow"
+      ],
+      "files_affected": [
+        "packages/app-store/famulor/api/add.ts",
+        "packages/app-store/famulor/api/index.ts"
+      ]
+    },
+    {
+      "dimension": "code_generation_strategy",
+      "recommendation": "Updated auto-generated registry files (apps.metadata.generated.ts, apps.server.generated.ts, redirect-apps.generated.ts) to include Famulor in the app store listings",
+      "rationale": "The codebase uses generated files to maintain a centralized registry of all apps. This ensures the UI can discover and render Famulor alongside other apps without manual component updates. The generation system automatically picks up new app directories with proper config.json files.",
+      "alternatives_considered": [
+        "Manual updates to component imports throughout the codebase",
+        "Dynamic runtime discovery of app directories",
+        "Custom registration system separate from existing generators"
+      ],
+      "files_affected": [
+        "packages/app-store/apps.metadata.generated.ts",
+        "packages/app-store/apps.server.generated.ts",
+        "packages/app-store/redirect-apps.generated.ts"
+      ]
+    },
+    {
+      "dimension": "documentation_and_assets",
+      "recommendation": "Included comprehensive DESCRIPTION.md with marketing content and multiple demo images, plus proper SVG icon for dark theme",
+      "rationale": "Following the established pattern for app store listings ensures consistent user experience. The DESCRIPTION.md uses the same frontmatter structure (--- items: [...] ---) as other apps. The SVG icon is optimized with base64 encoding for performance and includes proper viewBox and preserveAspectRatio attributes.",
+      "alternatives_considered": [
+        "Minimal documentation with just basic functionality",
+        "External image hosting instead of bundled assets",
+        "PNG icons instead of SVG for simplicity"
+      ],
+      "files_affected": [
+        "packages/app-store/famulor/DESCRIPTION.md",
+        "packages/app-store/famulor/static/icon-dark.svg",
+        "packages/app-store/famulor/static/1.jpg",
+        "packages/app-store/famulor/static/2.jpg",
+        "packages/app-store/famulor/static/3.jpg",
+        "packages/app-store/famulor/static/4.jpg",
+        "packages/app-store/famulor/static/5.jpg",
+        "packages/app-store/famulor/static/6.jpg"
+      ]
+    },
+    {
+      "dimension": "dependency_management",
+      "recommendation": "Added workspace dependencies to @calcom/lib and @calcom/types in package.json without external npm dependencies",
+      "rationale": "Using workspace:* dependencies ensures version consistency across the monorepo and avoids dependency conflicts. The minimal dependencies reflect that this is a simple redirect app without complex functionality requiring additional packages.",
+      "alternatives_considered": [
+        "Adding external npm packages for Famulor-specific functionality",
+        "Creating shared dependencies with other automation apps",
+        "Bundling all dependencies in the main package.json"
+      ],
+      "files_affected": [
+        "packages/app-store/famulor/package.json",
+        "yarn.lock"
+      ]
+    },
+    {
+      "dimension": "type_safety",
+      "recommendation": "Used TypeScript with proper type imports from @calcom/types and followed the AppDeclarativeHandler interface",
+      "rationale": "Maintaining full type safety ensures compile-time error checking and better developer experience. The handler explicitly defines appType, variant, slug, and other required properties that the TypeScript compiler can validate against the existing type definitions.",
+      "alternatives_considered": [
+        "Plain JavaScript implementation",
+        "Partial typing with any types",
+        "Custom type definitions separate from existing patterns"
+      ],
+      "files_affected": [
+        "packages/app-store/famulor/api/add.ts",
+        "packages/app-store/famulor/index.ts"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Create Famulor app directory structure and core files",
+      "description": "Set up the basic app directory with config.json, package.json, index.ts, and static assets including icon and demo images",
+      "files_to_modify": [],
+      "files_to_create": [
+        "packages/app-store/famulor/DESCRIPTION.md",
+        "packages/app-store/famulor/config.json",
+        "packages/app-store/famulor/package.json",
+        "packages/app-store/famulor/index.ts",
+        "packages/app-store/famulor/static/icon-dark.svg",
+        "packages/app-store/famulor/static/1.jpg",
+        "packages/app-store/famulor/static/2.jpg",
+        "packages/app-store/famulor/static/3.jpg",
+        "packages/app-store/famulor/static/4.jpg",
+        "packages/app-store/famulor/static/5.jpg",
+        "packages/app-store/famulor/static/6.jpg",
+        "packages/app-store/famulor/components/.gitkeep"
+      ],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-002",
+      "title": "Implement API handlers for redirect-based authentication",
+      "description": "Create add.ts handler following the declarative pattern and index.ts exports for the API module",
+      "files_to_modify": [],
+      "files_to_create": [
+        "packages/app-store/famulor/api/add.ts",
+        "packages/app-store/famulor/api/index.ts"
+      ],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-003",
+      "title": "Update app store registries and utilities",
+      "description": "Modify generated files to include Famulor in the app store listings and redirect apps utility",
+      "files_to_modify": [
+        "packages/app-store/apps.metadata.generated.ts",
+        "packages/app-store/apps.server.generated.ts",
+        "packages/app-store/redirect-apps.generated.ts",
+        "packages/app-store/_utils/redirectApps.ts",
+        "yarn.lock"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The Famulor app integration was implemented as a redirect-based automation app following Cal.com's established patterns for external service integrations. The approach leverages the existing 'link-as-an-app' template, which is designed for services that handle authentication and configuration on their own platforms rather than through Cal.com's OAuth flow.\n\nThe implementation creates a complete app directory structure under packages/app-store/famulor/ with all necessary configuration files, API handlers, and static assets. The config.json defines Famulor as an automation app with type 'famulor_automation', ensuring it appears in the correct category in the app store. The API handler uses the declarative pattern established by other redirect apps, simply redirecting users to Famulor's documentation page while creating a minimal credential record in Cal.com's database.\n\nKey design decisions include using the existing generated file system for app discovery, maintaining type safety through proper TypeScript interfaces, and providing comprehensive documentation and marketing assets to match the quality of other app store listings. The implementation is minimal yet complete, adding Famulor to all the necessary registries (metadata, server handlers, redirect apps) without modifying any core application logic.\n\nThe changes integrate seamlessly with the existing codebase by following established conventions for app store integrations. The use of workspace dependencies ensures version consistency, and the inclusion in yarn.lock reflects proper monorepo dependency management. This implementation allows users to discover and 'install' Famulor from the Cal.com app store, initiating a redirect to Famulor's platform where the actual integration configuration occurs.",
+  "source_pr": "https://github.com/calcom/cal.com/pull/25857",
+  "before_sha": "e38cbdad853ea6219753c96232804a04290b9089",
+  "after_sha": "78ddc1b2ae97e6a90e4b27445c1f2d5eacf0ef9f",
+  "diff_stats": {
+    "additions": 125,
+    "deletions": 1,
+    "files_changed": 19
+  }
+}

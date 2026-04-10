@@ -1,0 +1,154 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "api_design",
+      "recommendation": "Created a new ClientIp extractor following Axum's extractor pattern, making it easy for route handlers to access client IP addresses with minimal boilerplate",
+      "rationale": "Axum's extractor system provides a clean, type-safe way to access request data. By implementing FromRequestParts for ClientIp, developers can simply add ClientIp as a parameter to their route handlers without manual header parsing. This follows established Axum patterns and integrates seamlessly with the existing router infrastructure.",
+      "alternatives_considered": [
+        "Manual header parsing in each route handler",
+        "Creating a custom middleware that modifies request context without a proper extractor",
+        "Using raw request extensions directly"
+      ],
+      "files_affected": [
+        "packages/ak-axum/src/extract/client_ip.rs",
+        "packages/ak-axum/src/extract/mod.rs"
+      ]
+    },
+    {
+      "dimension": "security",
+      "recommendation": "Implemented trusted proxy validation to prevent IP spoofing by only accepting proxy headers from trusted sources",
+      "rationale": "Client IP headers like X-Forwarded-For can be easily spoofed by malicious clients. By requiring the TrustedProxy extractor to return true before parsing proxy headers, we ensure that only requests coming through configured reverse proxies (like nginx, load balancers) have their proxy headers honored. This prevents attackers from forging their IP addresses.",
+      "alternatives_considered": [
+        "Always trusting proxy headers",
+        "Configurable trust levels per header",
+        "IP-based trust lists"
+      ],
+      "files_affected": [
+        "packages/ak-axum/src/extract/client_ip.rs"
+      ]
+    },
+    {
+      "dimension": "dependency_management",
+      "recommendation": "Added the 'client-ip' crate as a dependency to handle the complex logic of parsing various proxy headers correctly",
+      "rationale": "Parsing proxy headers (X-Forwarded-For, Forwarded, X-Real-IP) correctly requires handling edge cases like multiple IPs, malformed values, and different header formats. The client-ip crate is a well-tested library that implements RFC 7239 for the Forwarded header and handles rightmost extraction for X-Forwarded-For. This reduces maintenance burden and ensures correctness.",
+      "alternatives_considered": [
+        "Implementing custom header parsing logic",
+        "Using string manipulation functions",
+        "Creating a simpler but less robust implementation"
+      ],
+      "files_affected": [
+        "Cargo.lock",
+        "Cargo.toml",
+        "packages/ak-axum/Cargo.toml"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Implemented a fallback chain with clear priority order and default values when no IP can be determined",
+      "rationale": "The extractor follows a specific priority: 1) X-Forwarded-For (rightmost), 2) X-Real-IP, 3) Forwarded header, 4) Proxy Protocol, 5) ConnectInfo, 6) Default to localhost. Each step gracefully handles failures and falls back to the next option. The default to IPv6 localhost ensures the system always has a valid IP address, even for Unix socket connections.",
+      "alternatives_considered": [
+        "Failing the request when no IP can be determined",
+        "Returning Option<IpAddr>",
+        "Using a custom error type"
+      ],
+      "files_affected": [
+        "packages/ak-axum/src/extract/client_ip.rs"
+      ]
+    },
+    {
+      "dimension": "observability",
+      "recommendation": "Added client IP to tracing spans and included comprehensive logging for debugging",
+      "rationale": "By recording the client IP in the tracing span (via Span::current().record()), the IP becomes part of all subsequent log entries for that request. This aids in debugging and audit trails. The instrument macro on the extraction function ensures timing and success/failure are logged. The middleware also adds the remote field to the span for consistency.",
+      "alternatives_considered": [
+        "Logging only on error",
+        "Adding IP to response headers instead",
+        "Creating separate audit logs"
+      ],
+      "files_affected": [
+        "packages/ak-axum/src/extract/client_ip.rs",
+        "packages/ak-axum/src/tracing.rs"
+      ]
+    },
+    {
+      "dimension": "middleware_integration",
+      "recommendation": "Created a middleware that runs before route handlers to extract and store the client IP in request extensions",
+      "rationale": "The client_ip_middleware runs early in the request pipeline (after trusted_proxy_middleware but before tracing_middleware) to extract the IP and store it in the request's extensions. This allows the ClientIp extractor to simply retrieve the pre-computed value. This pattern is efficient as the IP is extracted once per request rather than in each handler that needs it.",
+      "alternatives_considered": [
+        "Extracting IP on-demand in each handler",
+        "Using thread-local storage",
+        "Storing in a custom request context"
+      ],
+      "files_affected": [
+        "packages/ak-axum/src/extract/client_ip.rs",
+        "packages/ak-axum/src/router.rs"
+      ]
+    },
+    {
+      "dimension": "testing",
+      "recommendation": "Added comprehensive unit tests covering all major scenarios including trusted/untrusted proxies, header priority, IPv6, and edge cases",
+      "rationale": "The tests verify: 1) Each proxy header type works correctly when trusted, 2) Headers are ignored when untrusted, 3) Priority order is respected, 4) IPv6 addresses are handled, 5) Multiple IPs in X-Forwarded-For extract the rightmost, 6) Fallback to ConnectInfo works, 7) Default to localhost when no IP found. This ensures reliability across different deployment scenarios.",
+      "alternatives_considered": [
+        "Integration tests only",
+        "No tests for edge cases",
+        "Manual testing"
+      ],
+      "files_affected": [
+        "packages/ak-axum/src/extract/client_ip.rs"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Implement Client IP Extractor Core Logic",
+      "description": "Create the main ClientIp extractor with proper header parsing, trusted proxy validation, and fallback logic",
+      "files_to_modify": [],
+      "files_to_create": [
+        "packages/ak-axum/src/extract/client_ip.rs"
+      ],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-002",
+      "title": "Add Dependencies and Module Integration",
+      "description": "Add required crates (client-ip, forwarded-header-value, nonempty) and integrate the new module into the existing extractor system",
+      "files_to_modify": [
+        "Cargo.lock",
+        "Cargo.toml",
+        "packages/ak-axum/Cargo.toml",
+        "packages/ak-axum/src/extract/mod.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-003",
+      "title": "Integrate Middleware into Router Pipeline",
+      "description": "Add the client_ip_middleware to the router wrapper to ensure IP extraction happens for all requests",
+      "files_to_modify": [
+        "packages/ak-axum/src/router.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-004",
+      "title": "Enhance Tracing with Client IP Information",
+      "description": "Update tracing spans to include the client IP for better observability and debugging",
+      "files_to_modify": [
+        "packages/ak-axum/src/tracing.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation adds a robust client IP extraction system to authentik's Axum framework. The core design follows Axum's extractor pattern, allowing route handlers to easily access client IPs via the ClientIp type. Security is prioritized through the TrustedProxy mechanism, which prevents IP spoofing by only honoring proxy headers from trusted sources.\n\nThe solution uses the established client-ip crate for reliable header parsing, implementing RFC 7239 compliance for the Forwarded header and proper handling of X-Forwarded-For's rightmost IP extraction. A clear fallback chain ensures reliability: trusted proxy headers \u2192 Proxy Protocol \u2192 ConnectInfo \u2192 default to localhost. This handles various deployment scenarios including reverse proxies, load balancers, and direct connections.\n\nIntegration with the existing codebase is seamless. The client_ip_middleware is added to the router pipeline in the correct order (after trusted proxy validation but before tracing), and the IP is recorded in tracing spans for observability. Comprehensive unit tests verify all major scenarios, ensuring the extractor works correctly in production environments. The implementation maintains consistency with authentik's existing patterns while adding a critical feature for security auditing and request handling.",
+  "source_pr": "https://github.com/goauthentik/authentik/pull/21321",
+  "before_sha": "94254c18a8a8b754771624e585a9e921059554c6",
+  "after_sha": "c4627de55e6f91cee53c18914e238ebc46f25b74",
+  "diff_stats": {
+    "additions": 272,
+    "deletions": 3,
+    "files_changed": 7
+  }
+}

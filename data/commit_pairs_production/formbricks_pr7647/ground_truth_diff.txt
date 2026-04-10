@@ -1,0 +1,1428 @@
+diff --git a/apps/web/app/(app)/environments/[environmentId]/surveys/[surveyId]/(analysis)/summary/components/shareEmbedModal/personal-links-tab.tsx b/apps/web/app/(app)/environments/[environmentId]/surveys/[surveyId]/(analysis)/summary/components/shareEmbedModal/personal-links-tab.tsx
+index 1807a1dda673..11c627e4b520 100644
+--- a/apps/web/app/(app)/environments/[environmentId]/surveys/[surveyId]/(analysis)/summary/components/shareEmbedModal/personal-links-tab.tsx
++++ b/apps/web/app/(app)/environments/[environmentId]/surveys/[surveyId]/(analysis)/summary/components/shareEmbedModal/personal-links-tab.tsx
+@@ -163,6 +163,7 @@ export const PersonalLinksTab = ({
+       <UpgradePrompt
+         title={t("environments.surveys.share.personal_links.upgrade_prompt_title")}
+         description={t("environments.surveys.share.personal_links.upgrade_prompt_description")}
++        feature="personal_links"
+         buttons={[
+           {
+             text: isFormbricksCloud ? t("common.upgrade_plan") : t("common.request_trial_license"),
+diff --git a/apps/web/app/(app)/environments/[environmentId]/surveys/[surveyId]/actions.ts b/apps/web/app/(app)/environments/[environmentId]/surveys/[surveyId]/actions.ts
+index 79105cf4b5ad..6106bda81bb4 100644
+--- a/apps/web/app/(app)/environments/[environmentId]/surveys/[surveyId]/actions.ts
++++ b/apps/web/app/(app)/environments/[environmentId]/surveys/[surveyId]/actions.ts
+@@ -4,6 +4,7 @@ import { z } from "zod";
+ import { ZId } from "@formbricks/types/common";
+ import { ResourceNotFoundError } from "@formbricks/types/errors";
+ import { ZResponseFilterCriteria } from "@formbricks/types/responses";
++import { capturePostHogEvent } from "@/lib/posthog";
+ import { getResponseDownloadFile, getResponseFilteringValues } from "@/lib/response/service";
+ import { getSurvey } from "@/lib/survey/service";
+ import { getTagsByEnvironmentId } from "@/lib/tag/service";
+@@ -23,9 +24,11 @@ const ZGetResponsesDownloadUrlAction = z.object({
+ export const getResponsesDownloadUrlAction = authenticatedActionClient
+   .inputSchema(ZGetResponsesDownloadUrlAction)
+   .action(async ({ ctx, parsedInput }) => {
++    const organizationId = await getOrganizationIdFromSurveyId(parsedInput.surveyId);
++
+     await checkAuthorizationUpdated({
+       userId: ctx.user.id,
+-      organizationId: await getOrganizationIdFromSurveyId(parsedInput.surveyId),
++      organizationId,
+       access: [
+         {
+           type: "organization",
+@@ -39,11 +42,20 @@ export const getResponsesDownloadUrlAction = authenticatedActionClient
+       ],
+     });
+ 
+-    return await getResponseDownloadFile(
++    const result = await getResponseDownloadFile(
+       parsedInput.surveyId,
+       parsedInput.format,
+       parsedInput.filterCriteria
+     );
++
++    capturePostHogEvent(ctx.user.id, "responses_exported", {
++      survey_id: parsedInput.surveyId,
++      format: parsedInput.format,
++      filter_applied: Object.keys(parsedInput.filterCriteria ?? {}).length > 0,
++      organization_id: organizationId,
++    });
++
++    return result;
+   });
+ 
+ const ZGetSurveyFilterDataAction = z.object({
+diff --git a/apps/web/app/(app)/environments/[environmentId]/workspace/integrations/actions.ts b/apps/web/app/(app)/environments/[environmentId]/workspace/integrations/actions.ts
+index bcfc84c02628..7e9be1e6d093 100644
+--- a/apps/web/app/(app)/environments/[environmentId]/workspace/integrations/actions.ts
++++ b/apps/web/app/(app)/environments/[environmentId]/workspace/integrations/actions.ts
+@@ -4,6 +4,7 @@ import { z } from "zod";
+ import { ZId } from "@formbricks/types/common";
+ import { ZIntegrationInput } from "@formbricks/types/integration";
+ import { createOrUpdateIntegration, deleteIntegration } from "@/lib/integration/service";
++import { capturePostHogEvent } from "@/lib/posthog";
+ import { authenticatedActionClient } from "@/lib/utils/action-client";
+ import { checkAuthorizationUpdated } from "@/lib/utils/action-client/action-client-middleware";
+ import {
+@@ -45,6 +46,12 @@ export const createOrUpdateIntegrationAction = authenticatedActionClient
+       const result = await createOrUpdateIntegration(parsedInput.environmentId, parsedInput.integrationData);
+       ctx.auditLoggingCtx.integrationId = result.id;
+       ctx.auditLoggingCtx.newObject = result;
++
++      capturePostHogEvent(ctx.user.id, "integration_connected", {
++        integration_type: parsedInput.integrationData.type,
++        organization_id: organizationId,
++      });
++
+       return result;
+     })
+   );
+diff --git a/apps/web/app/api/(internal)/pipeline/route.ts b/apps/web/app/api/(internal)/pipeline/route.ts
+index 96f93ed727bf..0bd25a31b900 100644
+--- a/apps/web/app/api/(internal)/pipeline/route.ts
++++ b/apps/web/app/api/(internal)/pipeline/route.ts
+@@ -1,6 +1,7 @@
+ import { PipelineTriggers, Webhook } from "@prisma/client";
+ import { headers } from "next/headers";
+ import { v7 as uuidv7 } from "uuid";
++import { createCacheKey } from "@formbricks/cache";
+ import { prisma } from "@formbricks/database";
+ import { logger } from "@formbricks/logger";
+ import { ResourceNotFoundError } from "@formbricks/types/errors";
+@@ -8,10 +9,12 @@ import { sendTelemetryEvents } from "@/app/api/(internal)/pipeline/lib/telemetry
+ import { ZPipelineInput } from "@/app/api/(internal)/pipeline/types/pipelines";
+ import { responses } from "@/app/lib/api/response";
+ import { transformErrorToDetails } from "@/app/lib/api/validator";
+-import { CRON_SECRET } from "@/lib/constants";
++import { cache } from "@/lib/cache";
++import { CRON_SECRET, POSTHOG_KEY } from "@/lib/constants";
+ import { generateStandardWebhookSignature } from "@/lib/crypto";
+ import { getIntegrations } from "@/lib/integration/service";
+ import { getOrganizationByEnvironmentId } from "@/lib/organization/service";
++import { capturePostHogEvent } from "@/lib/posthog";
+ import { getResponseCountBySurveyId } from "@/lib/response/service";
+ import { getSurvey, updateSurvey } from "@/lib/survey/service";
+ import { convertDatesInObject } from "@/lib/time";
+@@ -299,6 +302,27 @@ export const POST = async (request: Request) => {
+       logger.error({ error, responseId: response.id }, "Failed to record response meter event");
+     });
+ 
++    // Sampled PostHog tracking: first response + every 100th
++    if (POSTHOG_KEY) {
++      const responseCount = await cache.withCache(
++        () => getResponseCountBySurveyId(surveyId),
++        createCacheKey.response.countBySurveyId(surveyId),
++        60 * 1000
++      );
++
++      if (responseCount === 1 || responseCount % 100 === 0) {
++        capturePostHogEvent(organization.id, "survey_response_received", {
++          survey_id: surveyId,
++          survey_type: survey.type,
++          organization_id: organization.id,
++          environment_id: environmentId,
++          response_count: responseCount,
++          is_first_response: responseCount === 1,
++          milestone: responseCount === 1 ? "first" : String(responseCount),
++        });
++      }
++    }
++
+     // Send telemetry events
+     await sendTelemetryEvents();
+   }
+diff --git a/apps/web/app/api/v1/client/[environmentId]/environment/lib/environmentState.test.ts b/apps/web/app/api/v1/client/[environmentId]/environment/lib/environmentState.test.ts
+index 015ddf505ecf..338ae9cccea1 100644
+--- a/apps/web/app/api/v1/client/[environmentId]/environment/lib/environmentState.test.ts
++++ b/apps/web/app/api/v1/client/[environmentId]/environment/lib/environmentState.test.ts
+@@ -6,6 +6,7 @@ import { TJsEnvironmentState, TJsEnvironmentStateProject } from "@formbricks/typ
+ import { TOrganization } from "@formbricks/types/organizations";
+ import { TSurvey } from "@formbricks/types/surveys/types";
+ import { cache } from "@/lib/cache";
++import { capturePostHogEvent } from "@/lib/posthog";
+ import { EnvironmentStateData, getEnvironmentStateData } from "./data";
+ import { getEnvironmentState } from "./environmentState";
+ 
+@@ -36,6 +37,11 @@ vi.mock("@/lib/constants", () => ({
+   IS_RECAPTCHA_CONFIGURED: true,
+   IS_PRODUCTION: true,
+   ENTERPRISE_LICENSE_KEY: "mock_enterprise_license_key",
++  POSTHOG_KEY: "phc_test_key",
++}));
++
++vi.mock("@/lib/posthog", () => ({
++  capturePostHogEvent: vi.fn(),
+ }));
+ 
+ // Mock @formbricks/cache
+@@ -303,4 +309,38 @@ describe("getEnvironmentState", () => {
+ 
+     expect(result.data.actionClasses).toEqual([]);
+   });
++
++  test("should capture app_connected PostHog event when app setup completes", async () => {
++    const noCodeAction = {
++      ...mockActionClasses[0],
++      id: "action-2",
++      type: "noCode" as const,
++      key: null,
++    };
++    const incompleteEnvironmentData = {
++      ...mockEnvironmentStateData,
++      environment: {
++        ...mockEnvironmentStateData.environment,
++        appSetupCompleted: false,
++      },
++      actionClasses: [...mockActionClasses, noCodeAction],
++    };
++    vi.mocked(getEnvironmentStateData).mockResolvedValue(incompleteEnvironmentData);
++
++    await getEnvironmentState(environmentId);
++
++    expect(capturePostHogEvent).toHaveBeenCalledWith(environmentId, "app_connected", {
++      num_surveys: 1,
++      num_code_actions: 1,
++      num_no_code_actions: 1,
++    });
++  });
++
++  test("should not capture app_connected event when app setup already completed", async () => {
++    vi.mocked(getEnvironmentStateData).mockResolvedValue(mockEnvironmentStateData);
++
++    await getEnvironmentState(environmentId);
++
++    expect(capturePostHogEvent).not.toHaveBeenCalled();
++  });
+ });
+diff --git a/apps/web/app/api/v1/client/[environmentId]/environment/lib/environmentState.ts b/apps/web/app/api/v1/client/[environmentId]/environment/lib/environmentState.ts
+index b81b20fc8f33..40c3908814bc 100644
+--- a/apps/web/app/api/v1/client/[environmentId]/environment/lib/environmentState.ts
++++ b/apps/web/app/api/v1/client/[environmentId]/environment/lib/environmentState.ts
+@@ -3,7 +3,8 @@ import { createCacheKey } from "@formbricks/cache";
+ import { prisma } from "@formbricks/database";
+ import { TJsEnvironmentState } from "@formbricks/types/js";
+ import { cache } from "@/lib/cache";
+-import { IS_RECAPTCHA_CONFIGURED, RECAPTCHA_SITE_KEY } from "@/lib/constants";
++import { IS_RECAPTCHA_CONFIGURED, POSTHOG_KEY, RECAPTCHA_SITE_KEY } from "@/lib/constants";
++import { capturePostHogEvent } from "@/lib/posthog";
+ import { getEnvironmentStateData } from "./data";
+ 
+ /**
+@@ -30,6 +31,14 @@ export const getEnvironmentState = async (
+           where: { id: environmentId },
+           data: { appSetupCompleted: true },
+         });
++
++        if (POSTHOG_KEY) {
++          capturePostHogEvent(environmentId, "app_connected", {
++            num_surveys: surveys.length,
++            num_code_actions: actionClasses.filter((ac) => ac.type === "code").length,
++            num_no_code_actions: actionClasses.filter((ac) => ac.type === "noCode").length,
++          });
++        }
+       }
+ 
+       // Build the response data
+diff --git a/apps/web/app/setup/organization/create/actions.ts b/apps/web/app/setup/organization/create/actions.ts
+index 80080329e35b..23089e0cf10e 100644
+--- a/apps/web/app/setup/organization/create/actions.ts
++++ b/apps/web/app/setup/organization/create/actions.ts
+@@ -7,6 +7,7 @@ import { IS_FORMBRICKS_CLOUD } from "@/lib/constants";
+ import { gethasNoOrganizations } from "@/lib/instance/service";
+ import { createMembership } from "@/lib/membership/service";
+ import { createOrganization } from "@/lib/organization/service";
++import { capturePostHogEvent } from "@/lib/posthog";
+ import { authenticatedActionClient } from "@/lib/utils/action-client";
+ import { withAuditLogging } from "@/modules/ee/audit-logs/lib/handler";
+ import { ensureCloudStripeSetupForOrganization } from "@/modules/ee/billing/lib/organization-billing";
+@@ -49,6 +50,11 @@ export const createOrganizationAction = authenticatedActionClient
+       ctx.auditLoggingCtx.organizationId = newOrganization.id;
+       ctx.auditLoggingCtx.newObject = newOrganization;
+ 
++      capturePostHogEvent(ctx.user.id, "organization_created", {
++        organization_id: newOrganization.id,
++        is_first_org: hasNoOrganizations,
++      });
++
+       return newOrganization;
+     })
+   );
+diff --git a/apps/web/lib/posthog/capture.test.ts b/apps/web/lib/posthog/capture.test.ts
+new file mode 100644
+index 000000000000..cf5e84106000
+--- /dev/null
++++ b/apps/web/lib/posthog/capture.test.ts
+@@ -0,0 +1,84 @@
++import { beforeEach, describe, expect, test, vi } from "vitest";
++import { capturePostHogEvent } from "./capture";
++
++const mocks = vi.hoisted(() => ({
++  capture: vi.fn(),
++  loggerWarn: vi.fn(),
++}));
++
++vi.mock("server-only", () => ({}));
++
++vi.mock("@formbricks/logger", () => ({
++  logger: { warn: mocks.loggerWarn },
++}));
++
++vi.mock("./server", () => ({
++  posthogServerClient: { capture: mocks.capture },
++}));
++
++describe("capturePostHogEvent", () => {
++  beforeEach(() => {
++    vi.clearAllMocks();
++  });
++
++  test("calls posthog capture with correct params", () => {
++    capturePostHogEvent("user123", "test_event", { key: "value" });
++
++    expect(mocks.capture).toHaveBeenCalledWith({
++      distinctId: "user123",
++      event: "test_event",
++      properties: {
++        key: "value",
++        $lib: "posthog-node",
++        source: "server",
++      },
++    });
++  });
++
++  test("adds default properties when no properties provided", () => {
++    capturePostHogEvent("user123", "test_event");
++
++    expect(mocks.capture).toHaveBeenCalledWith({
++      distinctId: "user123",
++      event: "test_event",
++      properties: {
++        $lib: "posthog-node",
++        source: "server",
++      },
++    });
++  });
++
++  test("does not throw when capture throws", () => {
++    mocks.capture.mockImplementation(() => {
++      throw new Error("Network error");
++    });
++
++    expect(() => capturePostHogEvent("user123", "test_event")).not.toThrow();
++    expect(mocks.loggerWarn).toHaveBeenCalledWith(
++      { error: expect.any(Error), eventName: "test_event" },
++      "Failed to capture PostHog event"
++    );
++  });
++});
++
++describe("capturePostHogEvent with null client", () => {
++  test("no-ops when posthogServerClient is null", async () => {
++    vi.clearAllMocks();
++    vi.resetModules();
++
++    vi.doMock("server-only", () => ({}));
++    vi.doMock("@formbricks/logger", () => ({
++      logger: { warn: mocks.loggerWarn },
++    }));
++    vi.doMock("./server", () => ({
++      posthogServerClient: null,
++    }));
++
++    const { capturePostHogEvent: captureWithNullClient } = await import("./capture");
++
++    captureWithNullClient("user123", "test_event", { key: "value" });
++
++    expect(mocks.capture).not.toHaveBeenCalled();
++    expect(mocks.loggerWarn).not.toHaveBeenCalled();
++  });
++});
+diff --git a/apps/web/lib/posthog/capture.ts b/apps/web/lib/posthog/capture.ts
+new file mode 100644
+index 000000000000..ce5d7a980d9c
+--- /dev/null
++++ b/apps/web/lib/posthog/capture.ts
+@@ -0,0 +1,27 @@
++import "server-only";
++import { logger } from "@formbricks/logger";
++import { posthogServerClient } from "./server";
++
++type PostHogEventProperties = Record<string, string | number | boolean | null | undefined>;
++
++export function capturePostHogEvent(
++  distinctId: string,
++  eventName: string,
++  properties?: PostHogEventProperties
++): void {
++  if (!posthogServerClient) return;
++
++  try {
++    posthogServerClient.capture({
++      distinctId,
++      event: eventName,
++      properties: {
++        ...properties,
++        $lib: "posthog-node",
++        source: "server",
++      },
++    });
++  } catch (error) {
++    logger.warn({ error, eventName }, "Failed to capture PostHog event");
++  }
++}
+diff --git a/apps/web/lib/posthog/index.ts b/apps/web/lib/posthog/index.ts
+new file mode 100644
+index 000000000000..dd778aa5b4fa
+--- /dev/null
++++ b/apps/web/lib/posthog/index.ts
+@@ -0,0 +1 @@
++export { capturePostHogEvent } from "./capture";
+diff --git a/apps/web/lib/posthog/server.test.ts b/apps/web/lib/posthog/server.test.ts
+new file mode 100644
+index 000000000000..48e8846641a9
+--- /dev/null
++++ b/apps/web/lib/posthog/server.test.ts
+@@ -0,0 +1,171 @@
++import { beforeEach, describe, expect, test, vi } from "vitest";
++
++describe("server - posthogServerClient", () => {
++  const g = globalThis as Record<string, unknown>;
++
++  const setupMocks = (opts: {
++    posthogKey?: string;
++    shutdown?: ReturnType<typeof vi.fn>;
++    loggerError?: ReturnType<typeof vi.fn>;
++  }) => {
++    const shutdown = opts.shutdown ?? vi.fn().mockResolvedValue(undefined);
++    const loggerError = opts.loggerError ?? vi.fn();
++
++    vi.doMock("server-only", () => ({}));
++    vi.doMock("@formbricks/logger", () => ({ logger: { error: loggerError } }));
++    vi.doMock("posthog-node", () => ({
++      PostHog: vi.fn().mockImplementation(function (this: Record<string, unknown>) {
++        this.capture = vi.fn();
++        this.shutdown = shutdown;
++      }),
++    }));
++    vi.doMock("@/lib/constants", () => ({ POSTHOG_KEY: opts.posthogKey }));
++
++    return { shutdown, loggerError };
++  };
++
++  beforeEach(() => {
++    vi.resetModules();
++    delete g.posthogServerClient;
++    delete g.posthogHandlersRegistered;
++  });
++
++  test("returns null when POSTHOG_KEY is not set", async () => {
++    setupMocks({ posthogKey: undefined });
++
++    const { posthogServerClient } = await import("./server");
++    expect(posthogServerClient).toBeNull();
++  });
++
++  test("creates PostHog client when POSTHOG_KEY is set", async () => {
++    setupMocks({ posthogKey: "phc_test_key" });
++
++    const { posthogServerClient } = await import("./server");
++    expect(posthogServerClient).not.toBeNull();
++
++    const { PostHog } = await import("posthog-node");
++    expect(PostHog).toHaveBeenCalledWith("phc_test_key", {
++      host: "https://eu.i.posthog.com",
++      flushAt: 1,
++      flushInterval: 0,
++    });
++  });
++
++  test("reuses client from globalThis in development", async () => {
++    const fakeClient = { capture: vi.fn(), shutdown: vi.fn().mockResolvedValue(undefined) };
++    g.posthogServerClient = fakeClient;
++
++    setupMocks({ posthogKey: "phc_test_key" });
++
++    const { posthogServerClient } = await import("./server");
++    expect(posthogServerClient).toBe(fakeClient);
++
++    const { PostHog } = await import("posthog-node");
++    expect(PostHog).not.toHaveBeenCalled();
++  });
++
++  test("caches client on globalThis in non-production", async () => {
++    vi.stubEnv("NODE_ENV", "development");
++
++    setupMocks({ posthogKey: "phc_test_key" });
++
++    const { posthogServerClient } = await import("./server");
++    expect(g.posthogServerClient).toBe(posthogServerClient);
++
++    vi.unstubAllEnvs();
++  });
++
++  test("registers signal handlers once when NEXT_RUNTIME is nodejs", async () => {
++    vi.stubEnv("NEXT_RUNTIME", "nodejs");
++
++    setupMocks({ posthogKey: "phc_test_key" });
++    const processOnSpy = vi.spyOn(process, "on");
++
++    await import("./server");
++
++    expect(processOnSpy).toHaveBeenCalledWith("SIGTERM", expect.any(Function));
++    expect(processOnSpy).toHaveBeenCalledWith("SIGINT", expect.any(Function));
++    expect(g.posthogHandlersRegistered).toBe(true);
++
++    processOnSpy.mockRestore();
++    vi.unstubAllEnvs();
++  });
++
++  test("does not register signal handlers when already registered", async () => {
++    vi.stubEnv("NEXT_RUNTIME", "nodejs");
++    g.posthogHandlersRegistered = true;
++
++    setupMocks({ posthogKey: "phc_test_key" });
++    const processOnSpy = vi.spyOn(process, "on");
++
++    await import("./server");
++
++    const sigCalls = processOnSpy.mock.calls.filter(([event]) => event === "SIGTERM" || event === "SIGINT");
++    expect(sigCalls).toHaveLength(0);
++
++    processOnSpy.mockRestore();
++    vi.unstubAllEnvs();
++  });
++
++  test("does not register signal handlers when NEXT_RUNTIME is not nodejs", async () => {
++    vi.stubEnv("NEXT_RUNTIME", "");
++
++    setupMocks({ posthogKey: "phc_test_key" });
++    const processOnSpy = vi.spyOn(process, "on");
++
++    await import("./server");
++
++    const sigCalls = processOnSpy.mock.calls.filter(([event]) => event === "SIGTERM" || event === "SIGINT");
++    expect(sigCalls).toHaveLength(0);
++
++    processOnSpy.mockRestore();
++    vi.unstubAllEnvs();
++  });
++
++  test("shutdown handler calls shutdown()", async () => {
++    vi.stubEnv("NEXT_RUNTIME", "nodejs");
++
++    const { shutdown } = setupMocks({ posthogKey: "phc_test_key" });
++
++    let sigTermHandler: (() => void) | undefined;
++    const processOnSpy = vi.spyOn(process, "on").mockImplementation((event, handler) => {
++      if (event === "SIGTERM") sigTermHandler = handler as () => void;
++      return process;
++    });
++
++    await import("./server");
++
++    expect(sigTermHandler).toBeDefined();
++    sigTermHandler!();
++    expect(shutdown).toHaveBeenCalled();
++
++    processOnSpy.mockRestore();
++    vi.unstubAllEnvs();
++  });
++
++  test("shutdown handler logs error if shutdown rejects", async () => {
++    vi.stubEnv("NEXT_RUNTIME", "nodejs");
++
++    const shutdownError = new Error("shutdown failed");
++    const { loggerError } = setupMocks({
++      posthogKey: "phc_test_key",
++      shutdown: vi.fn().mockRejectedValue(shutdownError),
++    });
++
++    let sigTermHandler: (() => void) | undefined;
++    const processOnSpy = vi.spyOn(process, "on").mockImplementation((event, handler) => {
++      if (event === "SIGTERM") sigTermHandler = handler as () => void;
++      return process;
++    });
++
++    await import("./server");
++
++    sigTermHandler!();
++    await new Promise((resolve) => setTimeout(resolve, 10));
++
++    expect(loggerError).toHaveBeenCalledWith(shutdownError, "Error shutting down PostHog server client");
++
++    processOnSpy.mockRestore();
++    vi.unstubAllEnvs();
++  });
++});
+diff --git a/apps/web/lib/posthog/server.ts b/apps/web/lib/posthog/server.ts
+new file mode 100644
+index 000000000000..dffeccdd1be3
+--- /dev/null
++++ b/apps/web/lib/posthog/server.ts
+@@ -0,0 +1,43 @@
++import "server-only";
++import { PostHog } from "posthog-node";
++import { logger } from "@formbricks/logger";
++import { POSTHOG_KEY } from "@/lib/constants";
++
++const POSTHOG_HOST = "https://eu.i.posthog.com";
++
++const globalForPostHog = globalThis as unknown as {
++  posthogServerClient: PostHog | undefined;
++  posthogHandlersRegistered: boolean | undefined;
++};
++
++function createPostHogClient(): PostHog | null {
++  if (!POSTHOG_KEY) return null;
++
++  return new PostHog(POSTHOG_KEY, {
++    host: POSTHOG_HOST,
++    flushAt: 1,
++    flushInterval: 0,
++  });
++}
++
++export const posthogServerClient: PostHog | null =
++  globalForPostHog.posthogServerClient ?? createPostHogClient();
++
++if (process.env.NODE_ENV !== "production" && posthogServerClient) {
++  globalForPostHog.posthogServerClient = posthogServerClient;
++}
++
++if (
++  process.env.NEXT_RUNTIME === "nodejs" &&
++  posthogServerClient &&
++  !globalForPostHog.posthogHandlersRegistered
++) {
++  const shutdownPostHog = () => {
++    posthogServerClient?.shutdown().catch((err) => {
++      logger.error(err, "Error shutting down PostHog server client");
++    });
++  };
++  process.on("SIGTERM", shutdownPostHog);
++  process.on("SIGINT", shutdownPostHog);
++  globalForPostHog.posthogHandlersRegistered = true;
++}
+diff --git a/apps/web/modules/api/v2/auth/tests/authenticated-api-client.test.ts b/apps/web/modules/api/v2/auth/tests/authenticated-api-client.test.ts
+index 0ff0513ad536..712f1cb5d7dc 100644
+--- a/apps/web/modules/api/v2/auth/tests/authenticated-api-client.test.ts
++++ b/apps/web/modules/api/v2/auth/tests/authenticated-api-client.test.ts
+@@ -12,6 +12,10 @@ vi.mock("@/modules/api/v2/lib/utils", () => ({
+   logApiRequest: vi.fn(),
+ }));
+ 
++vi.mock("@/lib/posthog", () => ({
++  capturePostHogEvent: vi.fn(),
++}));
++
+ describe("authenticatedApiClient", () => {
+   beforeEach(() => {
+     vi.clearAllMocks();
+diff --git a/apps/web/modules/auth/lib/authOptions.test.ts b/apps/web/modules/auth/lib/authOptions.test.ts
+index 5bb76a20853b..ee92b771783f 100644
+--- a/apps/web/modules/auth/lib/authOptions.test.ts
++++ b/apps/web/modules/auth/lib/authOptions.test.ts
+@@ -3,6 +3,7 @@ import { Provider } from "next-auth/providers/index";
+ import { afterEach, describe, expect, test, vi } from "vitest";
+ import { prisma } from "@formbricks/database";
+ import { EMAIL_VERIFICATION_DISABLED } from "@/lib/constants";
++import { capturePostHogEvent } from "@/lib/posthog";
+ // Import mocked rate limiting functions
+ import { applyIPRateLimit } from "@/modules/core/rate-limit/helpers";
+ import { rateLimitConfigs } from "@/modules/core/rate-limit/rate-limit-configs";
+@@ -35,8 +36,19 @@ vi.mock("@/lib/encryption", () => ({
+   symmetricDecrypt: vi.fn((value: string) => value.replace("encrypted_", "")),
+ }));
+ 
++vi.mock("@/lib/crypto", async (importOriginal) => {
++  const actual = await importOriginal<typeof import("@/lib/crypto")>();
++  return {
++    ...actual,
++    symmetricEncrypt: vi.fn((value: string) => `encrypted_${value}`),
++    symmetricDecrypt: vi.fn((value: string) => value.replace("encrypted_", "")),
++  };
++});
++
+ // Mock JWT
+-vi.mock("@/lib/jwt");
++vi.mock("@/lib/jwt", () => ({
++  verifyToken: vi.fn(),
++}));
+ 
+ // Mock rate limiting dependencies
+ vi.mock("@/modules/core/rate-limit/helpers", () => ({
+@@ -70,6 +82,7 @@ vi.mock("@/lib/constants", async (importOriginal) => {
+     BREVO_API_KEY: undefined,
+     RATE_LIMITING_DISABLED: false,
+     CONTROL_HASH: "$2b$12$fzHf9le13Ss9UJ04xzmsjODXpFJxz6vsnupoepF5FiqDECkX2BH5q",
++    POSTHOG_KEY: "phc_test_key",
+   };
+ });
+ 
+@@ -105,9 +118,21 @@ vi.mock("@formbricks/database", () => ({
+       findFirst: vi.fn(),
+       findUnique: vi.fn(),
+     },
++    membership: {
++      count: vi.fn(),
++    },
+   },
+ }));
+ 
++vi.mock("@/modules/auth/lib/user", () => ({
++  updateUser: vi.fn(),
++  updateUserLastLoginAt: vi.fn(),
++}));
++
++vi.mock("@/lib/posthog", () => ({
++  capturePostHogEvent: vi.fn(),
++}));
++
+ // Helper to get the provider by id from authOptions.providers.
+ function getProviderById(id: string): Provider {
+   const provider = authOptions.providers.find((p) => p.options.id === id);
+@@ -347,6 +372,66 @@ describe("authOptions", () => {
+           );
+         }
+       });
++
++      test("should capture user_signed_in PostHog event on successful credentials sign-in", async () => {
++        const yesterday = new Date();
++        yesterday.setDate(yesterday.getDate() - 1);
++
++        const user = { ...mockUser, emailVerified: new Date() };
++        const account = { provider: "credentials" } as any;
++
++        vi.mocked(prisma.membership.count).mockResolvedValue(2);
++        vi.mocked(prisma.user.findUnique).mockResolvedValue({ lastLoginAt: yesterday } as any);
++
++        if (authOptions.callbacks?.signIn) {
++          const result = await authOptions.callbacks.signIn({ user, account });
++          expect(result).toBe(true);
++
++          // Allow the fire-and-forget captureSignIn to resolve
++          await new Promise((resolve) => setTimeout(resolve, 10));
++
++          expect(capturePostHogEvent).toHaveBeenCalledWith(user.id, "user_signed_in", {
++            auth_provider: "credentials",
++            organization_count: 2,
++            is_first_login_today: true,
++          });
++        }
++      });
++
++      test("should set is_first_login_today to false when user already logged in today", async () => {
++        const user = { ...mockUser, emailVerified: new Date() };
++        const account = { provider: "credentials" } as any;
++
++        vi.mocked(prisma.membership.count).mockResolvedValue(1);
++        vi.mocked(prisma.user.findUnique).mockResolvedValue({ lastLoginAt: new Date() } as any);
++
++        if (authOptions.callbacks?.signIn) {
++          await authOptions.callbacks.signIn({ user, account });
++          await new Promise((resolve) => setTimeout(resolve, 10));
++
++          expect(capturePostHogEvent).toHaveBeenCalledWith(
++            user.id,
++            "user_signed_in",
++            expect.objectContaining({ is_first_login_today: false })
++          );
++        }
++      });
++
++      test("should not throw if captureSignIn prisma query fails", async () => {
++        const user = { ...mockUser, emailVerified: new Date() };
++        const account = { provider: "credentials" } as any;
++
++        vi.mocked(prisma.membership.count).mockRejectedValue(new Error("DB error"));
++
++        if (authOptions.callbacks?.signIn) {
++          const result = await authOptions.callbacks.signIn({ user, account });
++          expect(result).toBe(true);
++
++          await new Promise((resolve) => setTimeout(resolve, 10));
++
++          expect(capturePostHogEvent).not.toHaveBeenCalled();
++        }
++      });
+     });
+   });
+ 
+diff --git a/apps/web/modules/auth/lib/authOptions.ts b/apps/web/modules/auth/lib/authOptions.ts
+index 74735aacea68..dca343786def 100644
+--- a/apps/web/modules/auth/lib/authOptions.ts
++++ b/apps/web/modules/auth/lib/authOptions.ts
+@@ -10,10 +10,12 @@ import {
+   EMAIL_VERIFICATION_DISABLED,
+   ENCRYPTION_KEY,
+   ENTERPRISE_LICENSE_KEY,
++  POSTHOG_KEY,
+   SESSION_MAX_AGE,
+ } from "@/lib/constants";
+ import { symmetricDecrypt, symmetricEncrypt } from "@/lib/crypto";
+ import { verifyToken } from "@/lib/jwt";
++import { capturePostHogEvent } from "@/lib/posthog";
+ import { updateUser, updateUserLastLoginAt } from "@/modules/auth/lib/user";
+ import {
+   logAuthAttempt,
+@@ -335,6 +337,29 @@ export const authOptions: NextAuthOptions = {
+         "";
+ 
+       const userEmail = user.email ?? "";
++      const userId = user.id as string;
++
++      // Capture sign-in event for PostHog (query BEFORE updating lastLoginAt)
++      const captureSignIn = async (provider: string) => {
++        if (!POSTHOG_KEY) return;
++
++        try {
++          const [membershipCount, userData] = await Promise.all([
++            prisma.membership.count({ where: { userId } }),
++            prisma.user.findUnique({ where: { id: userId }, select: { lastLoginAt: true } }),
++          ]);
++          const isFirstLoginToday =
++            userData?.lastLoginAt?.toISOString().slice(0, 10) !== new Date().toISOString().slice(0, 10);
++
++          capturePostHogEvent(userId, "user_signed_in", {
++            auth_provider: provider,
++            organization_count: membershipCount,
++            is_first_login_today: isFirstLoginToday,
++          });
++        } catch (error) {
++          logger.warn({ error }, "Failed to capture PostHog sign-in event");
++        }
++      };
+ 
+       if (account?.provider === "credentials" || account?.provider === "token") {
+         // check if user's email is verified or not
+@@ -342,6 +367,7 @@ export const authOptions: NextAuthOptions = {
+           logger.error("Email Verification is Pending");
+           throw new Error("Email Verification is Pending");
+         }
++        void captureSignIn(account.provider);
+         await updateUserLastLoginAt(userEmail);
+         return true;
+       }
+@@ -353,10 +379,12 @@ export const authOptions: NextAuthOptions = {
+         });
+ 
+         if (result) {
++          void captureSignIn(account.provider);
+           await updateUserLastLoginAt(userEmail);
+         }
+         return result;
+       }
++      void captureSignIn(account?.provider ?? "unknown");
+       await updateUserLastLoginAt(userEmail);
+       return true;
+     },
+diff --git a/apps/web/modules/auth/signup/actions.ts b/apps/web/modules/auth/signup/actions.ts
+index 85206db4f298..979248551000 100644
+--- a/apps/web/modules/auth/signup/actions.ts
++++ b/apps/web/modules/auth/signup/actions.ts
+@@ -9,6 +9,7 @@ import { IS_FORMBRICKS_CLOUD, IS_TURNSTILE_CONFIGURED, TURNSTILE_SECRET_KEY } fr
+ import { verifyInviteToken } from "@/lib/jwt";
+ import { createMembership } from "@/lib/membership/service";
+ import { createOrganization } from "@/lib/organization/service";
++import { capturePostHogEvent } from "@/lib/posthog";
+ import { actionClient } from "@/lib/utils/action-client";
+ import { ActionClientCtx } from "@/lib/utils/action-client/types/context";
+ import { createUser, updateUser } from "@/modules/auth/lib/user";
+@@ -211,6 +212,13 @@ export const createUserAction = actionClient.inputSchema(ZCreateUserAction).acti
+         subscribeToSecurityUpdates: parsedInput.subscribeToSecurityUpdates,
+         subscribeToProductUpdates: parsedInput.subscribeToProductUpdates,
+       });
++
++      capturePostHogEvent(user.id, "user_signed_up", {
++        auth_provider: "credentials",
++        email_domain: user.email.split("@")[1],
++        signup_source: parsedInput.inviteToken ? "invite" : "direct",
++        invite_organization_id: ctx.auditLoggingCtx.organizationId ?? null,
++      });
+     }
+ 
+     if (user) {
+diff --git a/apps/web/modules/ee/billing/actions.test.ts b/apps/web/modules/ee/billing/actions.test.ts
+index 52d4b0fc28f7..db060761925c 100644
+--- a/apps/web/modules/ee/billing/actions.test.ts
++++ b/apps/web/modules/ee/billing/actions.test.ts
+@@ -26,6 +26,11 @@ vi.mock("@/lib/utils/action-client", () => ({
+ 
+ vi.mock("@/lib/constants", () => ({
+   WEBAPP_URL: "https://app.formbricks.com",
++  POSTHOG_KEY: undefined,
++}));
++
++vi.mock("@/lib/posthog", () => ({
++  capturePostHogEvent: vi.fn(),
+ }));
+ 
+ vi.mock("@/lib/utils/action-client/action-client-middleware", () => ({
+diff --git a/apps/web/modules/ee/billing/actions.ts b/apps/web/modules/ee/billing/actions.ts
+index 62474f645fa3..b802e6ac06d2 100644
+--- a/apps/web/modules/ee/billing/actions.ts
++++ b/apps/web/modules/ee/billing/actions.ts
+@@ -6,6 +6,7 @@ import { OperationNotAllowedError, ResourceNotFoundError } from "@formbricks/typ
+ import { ZCloudBillingInterval } from "@formbricks/types/organizations";
+ import { WEBAPP_URL } from "@/lib/constants";
+ import { getOrganization } from "@/lib/organization/service";
++import { capturePostHogEvent } from "@/lib/posthog";
+ import { authenticatedActionClient } from "@/lib/utils/action-client";
+ import { checkAuthorizationUpdated } from "@/lib/utils/action-client/action-client-middleware";
+ import { getOrganizationIdFromEnvironmentId } from "@/lib/utils/helper";
+@@ -218,6 +219,11 @@ export const startHobbyAction = authenticatedActionClient
+ 
+     await reconcileCloudStripeSubscriptionsForOrganization(parsedInput.organizationId);
+     await syncOrganizationBillingFromStripe(parsedInput.organizationId);
++
++    capturePostHogEvent(ctx.user.id, "stayed_on_hobby_plan", {
++      organization_id: parsedInput.organizationId,
++    });
++
+     return { success: true };
+   });
+ 
+@@ -250,6 +256,17 @@ export const startProTrialAction = authenticatedActionClient
+     await createProTrialSubscription(parsedInput.organizationId, customerId);
+     await reconcileCloudStripeSubscriptionsForOrganization(parsedInput.organizationId);
+     await syncOrganizationBillingFromStripe(parsedInput.organizationId);
++
++    capturePostHogEvent(ctx.user.id, "free_trial_started", {
++      plan: "pro",
++      organization_id: parsedInput.organizationId,
++      trial_duration_days: 14,
++    });
++
++    capturePostHogEvent(ctx.user.id, "reverse_trial_started", {
++      organization_id: parsedInput.organizationId,
++    });
++
+     return { success: true };
+   });
+ 
+diff --git a/apps/web/modules/ee/contacts/components/contacts-page-layout.tsx b/apps/web/modules/ee/contacts/components/contacts-page-layout.tsx
+index 453beb6732cf..ac22442d04b6 100644
+--- a/apps/web/modules/ee/contacts/components/contacts-page-layout.tsx
++++ b/apps/web/modules/ee/contacts/components/contacts-page-layout.tsx
+@@ -16,6 +16,7 @@ interface ContactsPageLayoutProps {
+   children: ReactNode;
+   upgradePromptTitle?: string;
+   upgradePromptDescription?: string;
++  upgradeFeature?: string;
+ }
+ 
+ export const ContactsPageLayout = async ({
+@@ -28,6 +29,7 @@ export const ContactsPageLayout = async ({
+   children,
+   upgradePromptTitle,
+   upgradePromptDescription,
++  upgradeFeature = "contacts",
+ }: ContactsPageLayoutProps) => {
+   const t = await getTranslate();
+ 
+@@ -44,6 +46,7 @@ export const ContactsPageLayout = async ({
+           <UpgradePrompt
+             title={upgradePromptTitle ?? t("environments.contacts.unlock_contacts_title")}
+             description={upgradePromptDescription ?? t("environments.contacts.unlock_contacts_description")}
++            feature={upgradeFeature}
+             buttons={[
+               {
+                 text: IS_FORMBRICKS_CLOUD ? t("common.upgrade_plan") : t("common.request_trial_license"),
+diff --git a/apps/web/modules/ee/contacts/segments/page.tsx b/apps/web/modules/ee/contacts/segments/page.tsx
+index 6cb9e1be7149..63bd9c621520 100644
+--- a/apps/web/modules/ee/contacts/segments/page.tsx
++++ b/apps/web/modules/ee/contacts/segments/page.tsx
+@@ -45,7 +45,8 @@ export const SegmentsPage = async ({
+         />
+       }
+       upgradePromptTitle={t("environments.segments.unlock_segments_title")}
+-      upgradePromptDescription={t("environments.segments.unlock_segments_description")}>
++      upgradePromptDescription={t("environments.segments.unlock_segments_description")}
++      upgradeFeature="segments">
+       <SegmentTable
+         allSegments={segments}
+         segments={filteredSegments}
+diff --git a/apps/web/modules/ee/quotas/components/quotas-card.tsx b/apps/web/modules/ee/quotas/components/quotas-card.tsx
+index 2541dd4079b0..1b031c8ad026 100644
+--- a/apps/web/modules/ee/quotas/components/quotas-card.tsx
++++ b/apps/web/modules/ee/quotas/components/quotas-card.tsx
+@@ -171,6 +171,7 @@ export const QuotasCard = ({
+               <UpgradePrompt
+                 title={t("environments.surveys.edit.quotas.upgrade_prompt_title")}
+                 description={t("common.quotas_description")}
++                feature="quotas"
+                 buttons={[
+                   {
+                     text: isFormbricksCloud ? t("common.upgrade_plan") : t("common.request_trial_license"),
+diff --git a/apps/web/modules/ee/sso/lib/sso-handlers.ts b/apps/web/modules/ee/sso/lib/sso-handlers.ts
+index d3f7c91e61db..aea16a92e364 100644
+--- a/apps/web/modules/ee/sso/lib/sso-handlers.ts
++++ b/apps/web/modules/ee/sso/lib/sso-handlers.ts
+@@ -8,6 +8,7 @@ import { DEFAULT_TEAM_ID, SKIP_INVITE_FOR_SSO } from "@/lib/constants";
+ import { getIsFreshInstance } from "@/lib/instance/service";
+ import { verifyInviteToken } from "@/lib/jwt";
+ import { createMembership } from "@/lib/membership/service";
++import { capturePostHogEvent } from "@/lib/posthog";
+ import { findMatchingLocale } from "@/lib/utils/locale";
+ import { redactPII } from "@/lib/utils/logger-helpers";
+ import { createBrevoCustomer } from "@/modules/auth/lib/brevo";
+@@ -360,6 +361,14 @@ export const handleSsoCallback = async ({
+ 
+     // send new user to brevo
+     createBrevoCustomer({ id: userProfile.id, email: userProfile.email });
++
++    capturePostHogEvent(userProfile.id, "user_signed_up", {
++      auth_provider: provider,
++      email_domain: userProfile.email.split("@")[1],
++      signup_source: callbackUrl?.includes("token=") ? "invite" : "direct",
++      invite_organization_id: organization?.id ?? null,
++    });
++
+     await syncSsoAccount(userProfile.id, account);
+ 
+     if (isMultiOrgEnabled) {
+diff --git a/apps/web/modules/ee/sso/lib/tests/sso-handlers.test.ts b/apps/web/modules/ee/sso/lib/tests/sso-handlers.test.ts
+index 413a66914033..111c27a09e2d 100644
+--- a/apps/web/modules/ee/sso/lib/tests/sso-handlers.test.ts
++++ b/apps/web/modules/ee/sso/lib/tests/sso-handlers.test.ts
+@@ -1,9 +1,11 @@
++import { Organization } from "@prisma/client";
+ import { beforeEach, describe, expect, test, vi } from "vitest";
+ import { prisma } from "@formbricks/database";
+ import type { TUser } from "@formbricks/types/user";
+ import { upsertAccount } from "@/lib/account/service";
+ import { createMembership } from "@/lib/membership/service";
+ import { createOrganization, getOrganization } from "@/lib/organization/service";
++import { capturePostHogEvent } from "@/lib/posthog";
+ import { findMatchingLocale } from "@/lib/utils/locale";
+ import { createBrevoCustomer } from "@/modules/auth/lib/brevo";
+ import { createUser, getUserByEmail, updateUser } from "@/modules/auth/lib/user";
+@@ -102,6 +104,11 @@ vi.mock("@/lib/constants", () => ({
+   DEFAULT_TEAM_ID: "team-123",
+   DEFAULT_ORGANIZATION_ID: "org-123",
+   ENCRYPTION_KEY: "test-encryption-key-32-chars-long",
++  POSTHOG_KEY: undefined,
++}));
++
++vi.mock("@/lib/posthog", () => ({
++  capturePostHogEvent: vi.fn(),
+ }));
+ 
+ describe("handleSsoCallback", () => {
+@@ -330,6 +337,47 @@ describe("handleSsoCallback", () => {
+       expect(createBrevoCustomer).toHaveBeenCalledWith({ id: mockUser.id, email: mockUser.email });
+     });
+ 
++    test("should capture user_signed_up PostHog event for new SSO user", async () => {
++      vi.mocked(prisma.user.findFirst).mockResolvedValue(null);
++      vi.mocked(getUserByEmail).mockResolvedValue(null);
++      vi.mocked(createUser).mockResolvedValue(mockCreatedUser());
++
++      await handleSsoCallback({
++        user: mockUser,
++        account: mockAccount,
++        callbackUrl: "http://localhost:3000",
++      });
++
++      expect(capturePostHogEvent).toHaveBeenCalledWith(mockUser.id, "user_signed_up", {
++        auth_provider: mockAccount.provider,
++        email_domain: "example.com",
++        signup_source: "direct",
++        invite_organization_id: null,
++      });
++    });
++
++    test("should capture user_signed_up with invite signup_source when callbackUrl has token", async () => {
++      vi.mocked(prisma.user.findFirst).mockResolvedValue(null);
++      vi.mocked(getUserByEmail).mockResolvedValue(null);
++      vi.mocked(createUser).mockResolvedValue(mockCreatedUser());
++      vi.mocked(getOrganizationByTeamId).mockResolvedValue(mockOrganization as unknown as Organization);
++      vi.mocked(getAccessControlPermission).mockResolvedValue(true);
++
++      await handleSsoCallback({
++        user: mockUser,
++        account: mockAccount,
++        callbackUrl: "http://localhost:3000?token=invite-token",
++      });
++
++      expect(capturePostHogEvent).toHaveBeenCalledWith(
++        mockUser.id,
++        "user_signed_up",
++        expect.objectContaining({
++          signup_source: "invite",
++        })
++      );
++    });
++
+     test("should return true when organization doesn't exist with DEFAULT_TEAM_ID", async () => {
+       vi.mocked(prisma.user.findFirst).mockResolvedValue(null);
+       vi.mocked(getUserByEmail).mockResolvedValue(null);
+@@ -350,7 +398,7 @@ describe("handleSsoCallback", () => {
+       vi.mocked(prisma.user.findFirst).mockResolvedValue(null);
+       vi.mocked(getUserByEmail).mockResolvedValue(null);
+       vi.mocked(createUser).mockResolvedValue(mockCreatedUser());
+-      vi.mocked(getOrganizationByTeamId).mockResolvedValue(mockOrganization);
++      vi.mocked(getOrganizationByTeamId).mockResolvedValue(mockOrganization as unknown as Organization);
+       vi.mocked(getAccessControlPermission).mockResolvedValue(false);
+ 
+       const result = await handleSsoCallback({
+diff --git a/apps/web/modules/ee/teams/team-list/components/teams-view.tsx b/apps/web/modules/ee/teams/team-list/components/teams-view.tsx
+index 9a90097e2850..0e840306035e 100644
+--- a/apps/web/modules/ee/teams/team-list/components/teams-view.tsx
++++ b/apps/web/modules/ee/teams/team-list/components/teams-view.tsx
+@@ -67,6 +67,7 @@ export const TeamsView = async ({
+           title={t("environments.settings.teams.unlock_teams_title")}
+           description={t("environments.settings.teams.unlock_teams_description")}
+           buttons={buttons}
++          feature="teams"
+         />
+       )}
+     </SettingsCard>
+diff --git a/apps/web/modules/ee/whitelabel/email-customization/components/email-customization-settings.tsx b/apps/web/modules/ee/whitelabel/email-customization/components/email-customization-settings.tsx
+index b23aabb9f03d..ca840cd5068c 100644
+--- a/apps/web/modules/ee/whitelabel/email-customization/components/email-customization-settings.tsx
++++ b/apps/web/modules/ee/whitelabel/email-customization/components/email-customization-settings.tsx
+@@ -300,6 +300,7 @@ export const EmailCustomizationSettings = ({
+             title={t("environments.settings.general.customize_email_with_a_higher_plan")}
+             description={t("environments.settings.general.eliminate_branding_with_whitelabel")}
+             buttons={buttons}
++            feature="email_customization"
+           />
+         )}
+ 
+diff --git a/apps/web/modules/ee/whitelabel/favicon-customization/components/favicon-customization-settings.tsx b/apps/web/modules/ee/whitelabel/favicon-customization/components/favicon-customization-settings.tsx
+index 6387f55bc251..ee356e519010 100644
+--- a/apps/web/modules/ee/whitelabel/favicon-customization/components/favicon-customization-settings.tsx
++++ b/apps/web/modules/ee/whitelabel/favicon-customization/components/favicon-customization-settings.tsx
+@@ -241,6 +241,7 @@ export const FaviconCustomizationSettings = ({
+           title={t("environments.settings.domain.customize_favicon_with_higher_plan")}
+           description={t("environments.settings.domain.customize_favicon_description")}
+           buttons={buttons}
++          feature="favicon_customization"
+         />
+       )}
+     </SettingsCard>
+diff --git a/apps/web/modules/ee/whitelabel/remove-branding/components/branding-settings-card.tsx b/apps/web/modules/ee/whitelabel/remove-branding/components/branding-settings-card.tsx
+index bafce9b732b6..7164bced33a0 100644
+--- a/apps/web/modules/ee/whitelabel/remove-branding/components/branding-settings-card.tsx
++++ b/apps/web/modules/ee/whitelabel/remove-branding/components/branding-settings-card.tsx
+@@ -60,6 +60,7 @@ export const BrandingSettingsCard = async ({
+           title={t("environments.workspace.look.remove_branding_with_a_higher_plan")}
+           description={t("environments.settings.general.eliminate_branding_with_whitelabel")}
+           buttons={buttons}
++          feature="remove_branding"
+         />
+       )}
+       {isReadOnly && (
+diff --git a/apps/web/modules/organization/settings/teams/actions.ts b/apps/web/modules/organization/settings/teams/actions.ts
+index 2b835d8af759..3783c2d650ea 100644
+--- a/apps/web/modules/organization/settings/teams/actions.ts
++++ b/apps/web/modules/organization/settings/teams/actions.ts
+@@ -10,6 +10,7 @@ import { INVITE_DISABLED, IS_FORMBRICKS_CLOUD } from "@/lib/constants";
+ import { createInviteToken } from "@/lib/jwt";
+ import { getMembershipByUserIdOrganizationId } from "@/lib/membership/service";
+ import { getAccessFlags } from "@/lib/membership/utils";
++import { capturePostHogEvent } from "@/lib/posthog";
+ import { authenticatedActionClient } from "@/lib/utils/action-client";
+ import { checkAuthorizationUpdated } from "@/lib/utils/action-client/action-client-middleware";
+ import { getOrganizationIdFromInviteId } from "@/lib/utils/helper";
+@@ -327,6 +328,11 @@ export const inviteUserAction = authenticatedActionClient.inputSchema(ZInviteUse
+       await sendInviteMemberEmail(inviteId, parsedInput.email, ctx.user.name ?? "", parsedInput.name ?? "");
+     }
+ 
++    capturePostHogEvent(ctx.user.id, "team_member_invited", {
++      organization_id: parsedInput.organizationId,
++      invitee_role: parsedInput.role,
++    });
++
+     return inviteId;
+   })
+ );
+diff --git a/apps/web/modules/projects/components/project-limit-modal/index.tsx b/apps/web/modules/projects/components/project-limit-modal/index.tsx
+index 77cc12de8427..6fda0701e305 100644
+--- a/apps/web/modules/projects/components/project-limit-modal/index.tsx
++++ b/apps/web/modules/projects/components/project-limit-modal/index.tsx
+@@ -21,6 +21,7 @@ export const ProjectLimitModal = ({ open, setOpen, projectLimit, buttons }: Proj
+           title={t("common.unlock_more_workspaces_with_a_higher_plan")}
+           description={t("common.you_have_reached_your_limit_of_workspace_limit", { projectLimit })}
+           buttons={buttons}
++          feature="workspaces"
+         />
+       </DialogContent>
+     </Dialog>
+diff --git a/apps/web/modules/survey/components/template-list/actions.ts b/apps/web/modules/survey/components/template-list/actions.ts
+index 744f4f67d478..920ba5331a3e 100644
+--- a/apps/web/modules/survey/components/template-list/actions.ts
++++ b/apps/web/modules/survey/components/template-list/actions.ts
+@@ -3,6 +3,7 @@
+ import { z } from "zod";
+ import { OperationNotAllowedError, ResourceNotFoundError } from "@formbricks/types/errors";
+ import { ZSurveyCreateInput } from "@formbricks/types/surveys/types";
++import { capturePostHogEvent } from "@/lib/posthog";
+ import { authenticatedActionClient } from "@/lib/utils/action-client";
+ import { checkAuthorizationUpdated } from "@/lib/utils/action-client/action-client-middleware";
+ import { getOrganizationIdFromEnvironmentId, getProjectIdFromEnvironmentId } from "@/lib/utils/helper";
+@@ -15,6 +16,7 @@ import { getOrganizationBilling } from "@/modules/survey/lib/survey";
+ const ZCreateSurveyAction = z.object({
+   environmentId: z.cuid2(),
+   surveyBody: ZSurveyCreateInput,
++  createdFrom: z.enum(["blank", "template"]).optional(),
+ });
+ 
+ /**
+@@ -68,6 +70,15 @@ export const createSurveyAction = authenticatedActionClient.inputSchema(ZCreateS
+     ctx.auditLoggingCtx.organizationId = organizationId;
+     ctx.auditLoggingCtx.surveyId = result.id;
+     ctx.auditLoggingCtx.newObject = result;
++
++    capturePostHogEvent(ctx.user.id, "survey_created", {
++      survey_id: result.id,
++      survey_type: result.type,
++      organization_id: organizationId,
++      question_count: result.questions?.length ?? 0,
++      created_from: parsedInput.createdFrom ?? "template",
++    });
++
+     return result;
+   })
+ );
+diff --git a/apps/web/modules/survey/components/template-list/index.tsx b/apps/web/modules/survey/components/template-list/index.tsx
+index 30723fbcae6e..64c4c8250e52 100644
+--- a/apps/web/modules/survey/components/template-list/index.tsx
++++ b/apps/web/modules/survey/components/template-list/index.tsx
+@@ -8,7 +8,7 @@ import { useTranslation } from "react-i18next";
+ import { ZProjectConfigChannel, ZProjectConfigIndustry } from "@formbricks/types/project";
+ import { TSurveyCreateInput, TSurveyType } from "@formbricks/types/surveys/types";
+ import { TTemplate, TTemplateFilter, ZTemplateRole } from "@formbricks/types/templates";
+-import { templates } from "@/app/lib/templates";
++import { customSurveyTemplate, templates } from "@/app/lib/templates";
+ import { getFormattedErrorMessage } from "@/lib/utils/helper";
+ import { createSurveyAction } from "./actions";
+ import { StartFromScratchTemplate } from "./components/start-from-scratch-template";
+@@ -58,9 +58,11 @@ export const TemplateList = ({
+       type: surveyType,
+       createdBy: userId,
+     };
++    const isBlank = activeTemplate.name === customSurveyTemplate(t).name;
+     const createSurveyResponse = await createSurveyAction({
+       environmentId: environmentId,
+       surveyBody: augmentedTemplate,
++      createdFrom: isBlank ? "blank" : "template",
+     });
+ 
+     if (createSurveyResponse?.data) {
+diff --git a/apps/web/modules/survey/editor/actions.ts b/apps/web/modules/survey/editor/actions.ts
+index 65041c425a78..5583cfa9cc5f 100644
+--- a/apps/web/modules/survey/editor/actions.ts
++++ b/apps/web/modules/survey/editor/actions.ts
+@@ -5,7 +5,8 @@ import { z } from "zod";
+ import { ZActionClassInput } from "@formbricks/types/action-classes";
+ import { OperationNotAllowedError, ResourceNotFoundError } from "@formbricks/types/errors";
+ import { TSurvey, ZSurvey } from "@formbricks/types/surveys/types";
+-import { UNSPLASH_ACCESS_KEY, UNSPLASH_ALLOWED_DOMAINS } from "@/lib/constants";
++import { POSTHOG_KEY, UNSPLASH_ACCESS_KEY, UNSPLASH_ALLOWED_DOMAINS } from "@/lib/constants";
++import { capturePostHogEvent } from "@/lib/posthog";
+ import { actionClient, authenticatedActionClient } from "@/lib/utils/action-client";
+ import { checkAuthorizationUpdated } from "@/lib/utils/action-client/action-client-middleware";
+ import {
+@@ -21,6 +22,7 @@ import { checkExternalUrlsPermission } from "@/modules/survey/editor/lib/check-e
+ import { updateSurvey, updateSurveyDraft } from "@/modules/survey/editor/lib/survey";
+ import { ZSurveyDraft } from "@/modules/survey/editor/types/survey";
+ import { getSurveyFollowUpsPermission } from "@/modules/survey/follow-ups/lib/utils";
++import { getElementsFromBlocks } from "@/modules/survey/lib/client-utils";
+ import { checkSpamProtectionPermission } from "@/modules/survey/lib/permission";
+ import { getOrganizationBilling, getSurvey } from "@/modules/survey/lib/survey";
+ import { getProject } from "./lib/project";
+@@ -145,6 +147,26 @@ export const updateSurveyAction = authenticatedActionClient.inputSchema(ZSurvey)
+     ctx.auditLoggingCtx.oldObject = oldObject;
+     ctx.auditLoggingCtx.newObject = result;
+ 
++    if (POSTHOG_KEY && result.status !== "draft") {
++      const isPublish = oldObject?.status === "draft" && result.status === "inProgress";
++
++      const posthogEventMetadata = {
++        survey_id: result.id,
++        survey_type: result.type,
++        question_count: getElementsFromBlocks(result.blocks).length,
++        organization_id: organizationId,
++        has_targeting: result.segment ? !result.segment.isPrivate : false,
++        language_count: result.languages?.length ?? 0,
++      };
++
++      if (isPublish) {
++        capturePostHogEvent(ctx.user.id, "survey_published", posthogEventMetadata);
++        capturePostHogEvent(ctx.user.id, "survey_updated", posthogEventMetadata);
++      } else {
++        capturePostHogEvent(ctx.user.id, "survey_updated", posthogEventMetadata);
++      }
++    }
++
+     revalidatePath(`/environments/${result.environmentId}/surveys/${result.id}`);
+ 
+     return result;
+@@ -260,8 +282,6 @@ export const triggerDownloadUnsplashImageAction = actionClient
+       const errorData = await response.json();
+       throw new Error(errorData.error || "Failed to download image from Unsplash");
+     }
+-
+-    return;
+   });
+ 
+ const ZCreateActionClassAction = z.object({
+diff --git a/apps/web/modules/survey/editor/components/targeting-locked-card.tsx b/apps/web/modules/survey/editor/components/targeting-locked-card.tsx
+index dd3bf1f69776..9e9dfbdbcf93 100644
+--- a/apps/web/modules/survey/editor/components/targeting-locked-card.tsx
++++ b/apps/web/modules/survey/editor/components/targeting-locked-card.tsx
+@@ -41,6 +41,7 @@ export const TargetingLockedCard = ({ isFormbricksCloud, environmentId }: Target
+           <UpgradePrompt
+             title={t("environments.surveys.edit.unlock_targeting_title")}
+             description={t("environments.surveys.edit.unlock_targeting_description")}
++            feature="targeting"
+             buttons={[
+               {
+                 text: isFormbricksCloud ? t("common.upgrade_plan") : t("common.request_trial_license"),
+diff --git a/apps/web/modules/survey/follow-ups/components/follow-ups-view.tsx b/apps/web/modules/survey/follow-ups/components/follow-ups-view.tsx
+index 69c565d8d81e..3b9877b48ded 100644
+--- a/apps/web/modules/survey/follow-ups/components/follow-ups-view.tsx
++++ b/apps/web/modules/survey/follow-ups/components/follow-ups-view.tsx
+@@ -46,6 +46,7 @@ export const FollowUpsView = ({
+         <UpgradePrompt
+           title={t("environments.surveys.edit.follow_ups_empty_heading")}
+           description={t("environments.surveys.edit.follow_ups_empty_description")}
++          feature="follow_ups"
+           buttons={[
+             {
+               text: isFormbricksCloud
+diff --git a/apps/web/modules/ui/components/upgrade-prompt/index.tsx b/apps/web/modules/ui/components/upgrade-prompt/index.tsx
+index 70066e7424ef..5cd89b615453 100644
+--- a/apps/web/modules/ui/components/upgrade-prompt/index.tsx
++++ b/apps/web/modules/ui/components/upgrade-prompt/index.tsx
+@@ -1,5 +1,8 @@
++"use client";
++
+ import { KeyIcon } from "lucide-react";
+ import Link from "next/link";
++import posthog from "posthog-js";
+ import { Button } from "@/modules/ui/components/button";
+ 
+ export type ModalButton = {
+@@ -12,11 +15,19 @@ interface UpgradePromptProps {
+   title: string;
+   description?: string;
+   buttons: [ModalButton, ModalButton];
++  feature?: string;
+ }
+ 
+-export const UpgradePrompt = ({ title, description, buttons }: UpgradePromptProps) => {
++export const UpgradePrompt = ({ title, description, buttons, feature }: UpgradePromptProps) => {
+   const [primaryButton, secondaryButton] = buttons;
+ 
++  const handlePrimaryClick = () => {
++    if (posthog.__loaded && feature) {
++      posthog.capture("upgrade_cta_clicked", { feature });
++    }
++    primaryButton.onClick?.();
++  };
++
+   return (
+     <div className="flex w-full flex-col items-center gap-6 p-6">
+       <div className="rounded-md border border-slate-200 p-3">
+@@ -29,12 +40,16 @@ export const UpgradePrompt = ({ title, description, buttons }: UpgradePromptProp
+       <div className="flex gap-3">
+         {primaryButton.href ? (
+           <Button asChild>
+-            <Link href={primaryButton.href} target="_blank" rel="noopener noreferrer">
++            <Link
++              href={primaryButton.href}
++              target="_blank"
++              rel="noopener noreferrer"
++              onClick={handlePrimaryClick}>
+               {primaryButton.text}
+             </Link>
+           </Button>
+         ) : (
+-          <Button onClick={primaryButton.onClick}>{primaryButton.text}</Button>
++          <Button onClick={handlePrimaryClick}>{primaryButton.text}</Button>
+         )}
+         {secondaryButton.href ? (
+           <Button variant="secondary" asChild>
+diff --git a/apps/web/next.config.mjs b/apps/web/next.config.mjs
+index 243e2bb24c7f..b13405be7358 100644
+--- a/apps/web/next.config.mjs
++++ b/apps/web/next.config.mjs
+@@ -33,6 +33,7 @@ const nextConfig = {
+     "pino",
+     "pino-pretty",
+     "pino-opentelemetry-transport",
++    "posthog-node",
+   ],
+   outputFileTracingIncludes: {
+     "/api/auth/**/*": ["../../node_modules/jose/**/*"],
+diff --git a/apps/web/package.json b/apps/web/package.json
+index c54c3b089c1d..73969625ca50 100644
+--- a/apps/web/package.json
++++ b/apps/web/package.json
+@@ -105,6 +105,7 @@
+     "otplib": "12.0.1",
+     "papaparse": "5.5.3",
+     "posthog-js": "1.360.0",
++    "posthog-node": "5.28.9",
+     "prismjs": "1.30.0",
+     "qr-code-styling": "1.9.2",
+     "qrcode": "1.5.4",
+diff --git a/packages/cache/src/cache-keys.ts b/packages/cache/src/cache-keys.ts
+index 85cdf775d166..232299e691cd 100644
+--- a/packages/cache/src/cache-keys.ts
++++ b/packages/cache/src/cache-keys.ts
+@@ -35,6 +35,11 @@ export const createCacheKey = {
+     fetch_lock: (organizationId: string): CacheKey => makeCacheKey("license", organizationId, "fetch_lock"),
+   },
+ 
++  // Response-related keys
++  response: {
++    countBySurveyId: (surveyId: string): CacheKey => makeCacheKey("response", surveyId, "count"),
++  },
++
+   // Rate limiting and security
+   rateLimit: {
+     core: (namespace: string, identifier: string, windowStart: number): CacheKey =>
+diff --git a/pnpm-lock.yaml b/pnpm-lock.yaml
+index 0e5768c2707a..b63f552b932b 100644
+--- a/pnpm-lock.yaml
++++ b/pnpm-lock.yaml
+@@ -372,6 +372,9 @@ importers:
+       posthog-js:
+         specifier: 1.360.0
+         version: 1.360.0
++      posthog-node:
++        specifier: 5.28.9
++        version: 5.28.9(rxjs@7.8.2)
+       prismjs:
+         specifier: 1.30.0
+         version: 1.30.0
+@@ -3519,6 +3522,9 @@ packages:
+   '@posthog/core@1.23.2':
+     resolution: {integrity: sha512-zTDdda9NuSHrnwSOfFMxX/pyXiycF4jtU1kTr8DL61dHhV+7LF6XF1ndRZZTuaGGbfbb/GJYkEsjEX9SXfNZeQ==}
+ 
++  '@posthog/core@1.24.4':
++    resolution: {integrity: sha512-S+TolwBHSSJz7WWtgaELQWQqXviSm3uf1e+qorWUts0bZcgPwWzhnmhCUZAhvn0NVpTQHDJ3epv+hHbPLl5dHg==}
++
+   '@posthog/types@1.360.0':
+     resolution: {integrity: sha512-roypbiJ49V3jWlV/lzhXGf0cKLLRj69L4H4ZHW6YsITHlnjQ12cgdPhPS88Bb9nW9xZTVSGWWDjfNGsdgAxsNg==}
+ 
+@@ -9558,6 +9564,15 @@ packages:
+   posthog-js@1.360.0:
+     resolution: {integrity: sha512-jkyO+T97yi6RuiexOaXC7AnEGiC+yIfGU5DIUzI5rqBH6MltmtJw/ve2Oxc4jeua2WDr5sXMzo+SS+acbpueAA==}
+ 
++  posthog-node@5.28.9:
++    resolution: {integrity: sha512-iZWyAYkIAq5QqcYz4q2nXOX+Ivn04Yh8AuKqfFVw0SvBpfli49bNAjyE97qbRTLr+irrzRUELgGIkDC14NgugA==}
++    engines: {node: ^20.20.0 || >=22.22.0}
++    peerDependencies:
++   
+
+... [truncated, 60962 chars total]

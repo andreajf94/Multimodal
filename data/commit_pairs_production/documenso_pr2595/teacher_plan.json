@@ -1,0 +1,157 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "ui_component_design",
+      "recommendation": "Created a reusable EnvelopeRenameDialog component that handles both document and template renaming with proper validation and error handling",
+      "rationale": "The dialog component follows the existing pattern of envelope-related dialogs (EnvelopeDownloadDialog, EnvelopeSaveAsTemplateDialog) and uses the established UI primitives. It's designed to be reusable across different contexts (documents and templates) by accepting an envelopeType prop. This reduces code duplication and maintains consistency with the existing dialog patterns in the codebase.",
+      "alternatives_considered": [
+        "Creating separate dialog components for documents and templates",
+        "Implementing inline editing directly in the table",
+        "Using a modal instead of a dialog component"
+      ],
+      "files_affected": [
+        "apps/remix/app/components/dialogs/envelope-rename-dialog.tsx"
+      ]
+    },
+    {
+      "dimension": "api_design",
+      "recommendation": "Leveraged the existing envelope.update tRPC mutation instead of creating a new document-specific endpoint",
+      "rationale": "The codebase already has an envelope.update mutation that handles envelope updates. By using this existing endpoint, we maintain consistency with the existing API patterns and avoid creating redundant endpoints. The mutation accepts an envelopeId and data object containing the title, which aligns with the existing envelope update pattern.",
+      "alternatives_considered": [
+        "Creating a new document.rename tRPC mutation",
+        "Creating a new template.rename tRPC mutation",
+        "Using a REST endpoint instead of tRPC"
+      ],
+      "files_affected": [
+        "apps/remix/app/components/dialogs/envelope-rename-dialog.tsx"
+      ]
+    },
+    {
+      "dimension": "data_validation",
+      "recommendation": "Extracted DOCUMENT_TITLE_MAX_LENGTH constant from the schema and used it consistently across frontend validation",
+      "rationale": "By exporting DOCUMENT_TITLE_MAX_LENGTH from the schema file and using it in the dialog component's input maxLength attribute, we ensure frontend validation matches backend validation. This prevents users from entering titles that would be rejected by the server and provides immediate feedback.",
+      "alternatives_considered": [
+        "Hardcoding the max length in the component",
+        "Not having frontend validation and relying only on backend validation",
+        "Creating a separate constants file for document limits"
+      ],
+      "files_affected": [
+        "packages/trpc/server/document-router/schema.ts",
+        "apps/remix/app/components/dialogs/envelope-rename-dialog.tsx"
+      ]
+    },
+    {
+      "dimension": "permission_management",
+      "recommendation": "Used existing getEnvelopeItemPermissions utility to determine if a document/template title can be changed based on its state",
+      "rationale": "The getEnvelopeItemPermissions function already contains logic for determining what actions can be performed on an envelope based on its status, completion time, deletion status, etc. By reusing this existing permission system, we ensure the rename feature respects the same business rules as other envelope operations.",
+      "alternatives_considered": [
+        "Creating new permission logic specific to renaming",
+        "Hardcoding permission checks in each component",
+        "Not having permission checks for renaming"
+      ],
+      "files_affected": [
+        "apps/remix/app/components/general/document/document-page-view-dropdown.tsx",
+        "apps/remix/app/components/tables/documents-table-action-dropdown.tsx"
+      ]
+    },
+    {
+      "dimension": "state_management",
+      "recommendation": "Implemented proper cache invalidation after successful rename operations using tRPC utils",
+      "rationale": "After a successful rename, the code invalidates the relevant tRPC queries to ensure the UI reflects the updated data. Different queries are invalidated based on the context: envelope.get for the document page view, document.findDocumentsInternal for the documents table, and template.findTemplates for the templates table. This ensures immediate UI updates without requiring page refreshes.",
+      "alternatives_considered": [
+        "Refetching all data after rename",
+        "Manually updating the cache",
+        "Not invalidating cache and relying on background refetches"
+      ],
+      "files_affected": [
+        "apps/remix/app/components/general/document/document-page-view-dropdown.tsx",
+        "apps/remix/app/components/tables/documents-table-action-dropdown.tsx",
+        "apps/remix/app/components/tables/templates-table-action-dropdown.tsx"
+      ]
+    },
+    {
+      "dimension": "user_experience",
+      "recommendation": "Added proper loading states, validation feedback, and success/error toast notifications",
+      "rationale": "The dialog shows a loading state while the mutation is in progress, disables the input and buttons, and provides clear visual feedback. Success and error toasts give users immediate confirmation or alert them to issues. The validation prevents empty titles and titles that haven't changed from triggering unnecessary API calls.",
+      "alternatives_considered": [
+        "Not showing loading states",
+        "Using inline error messages instead of toasts",
+        "Not validating on the frontend"
+      ],
+      "files_affected": [
+        "apps/remix/app/components/dialogs/envelope-rename-dialog.tsx"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Create reusable rename dialog component",
+      "description": "Implement a reusable dialog component for renaming documents and templates with proper validation, loading states, and error handling",
+      "files_to_modify": [],
+      "files_to_create": [
+        "apps/remix/app/components/dialogs/envelope-rename-dialog.tsx"
+      ],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-002",
+      "title": "Add rename option to document page view dropdown",
+      "description": "Integrate the rename dialog into the document page view dropdown menu with proper permission checks and cache invalidation",
+      "files_to_modify": [
+        "apps/remix/app/components/general/document/document-page-view-dropdown.tsx"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-003",
+      "title": "Add rename option to documents table action dropdown",
+      "description": "Integrate the rename dialog into the documents table action dropdown with proper permission checks and cache invalidation",
+      "files_to_modify": [
+        "apps/remix/app/components/tables/documents-table-action-dropdown.tsx"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-004",
+      "title": "Add rename option to templates table action dropdown",
+      "description": "Integrate the rename dialog into the templates table action dropdown with proper cache invalidation",
+      "files_to_modify": [
+        "apps/remix/app/components/tables/templates-table-action-dropdown.tsx"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-005",
+      "title": "Export document title max length constant",
+      "description": "Export DOCUMENT_TITLE_MAX_LENGTH constant from schema for consistent frontend-backend validation",
+      "files_to_modify": [
+        "packages/trpc/server/document-router/schema.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-006",
+      "title": "Clean up unused import in embed component",
+      "description": "Remove unused zod import from embed component to maintain code cleanliness",
+      "files_to_modify": [
+        "apps/remix/app/components/embed/embed-direct-template-client-page.tsx"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The document rename feature was implemented by creating a reusable EnvelopeRenameDialog component that handles both document and template renaming. The approach leverages existing patterns in the codebase: using the established envelope.update tRPC mutation, reusing the getEnvelopeItemPermissions utility for permission checks, and following the same dialog patterns as other envelope-related operations.\n\nThe implementation is integrated into three different UI contexts: the document page view dropdown, the documents table action dropdown, and the templates table action dropdown. Each integration includes proper permission checks to ensure only authorized users can rename documents/templates, and appropriate cache invalidation to update the UI immediately after successful renaming.\n\nA key design decision was to export the DOCUMENT_TITLE_MAX_LENGTH constant from the schema file and use it in the frontend validation, ensuring consistency between client and server validation. The feature also includes comprehensive user experience considerations like loading states, success/error toasts, and proper validation feedback. The removal of an unused import in an unrelated file shows attention to code hygiene during feature development.",
+  "source_pr": "https://github.com/documenso/documenso/pull/2595",
+  "before_sha": "0b9a23c5507cf713cf68b3f219627fa28098eef1",
+  "after_sha": "6f650e1c2fec85a30eee2322b63c03f6edcf106e",
+  "diff_stats": {
+    "additions": 228,
+    "deletions": 5,
+    "files_changed": 6
+  }
+}

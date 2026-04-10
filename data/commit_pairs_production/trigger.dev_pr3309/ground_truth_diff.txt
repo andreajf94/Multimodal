@@ -1,0 +1,720 @@
+diff --git a/apps/webapp/app/routes/admin.feature-flags.tsx b/apps/webapp/app/routes/admin.feature-flags.tsx
+index 65e975880cb..8e91bdb0731 100644
+--- a/apps/webapp/app/routes/admin.feature-flags.tsx
++++ b/apps/webapp/app/routes/admin.feature-flags.tsx
+@@ -55,7 +55,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
+ 
+   // Resolve env-based defaults for locked flags
+   const resolvedDefaults: Record<string, string> = {
+-    [FEATURE_FLAG.runsListRepository]: "clickhouse",
+     [FEATURE_FLAG.taskEventRepository]: env.EVENT_REPOSITORY_DEFAULT_STORE,
+   };
+ 
+diff --git a/apps/webapp/app/services/runsRepository/postgresRunsRepository.server.ts b/apps/webapp/app/services/runsRepository/postgresRunsRepository.server.ts
+deleted file mode 100644
+index eaf22420901..00000000000
+--- a/apps/webapp/app/services/runsRepository/postgresRunsRepository.server.ts
++++ /dev/null
+@@ -1,344 +0,0 @@
+-import { RunId } from "@trigger.dev/core/v3/isomorphic";
+-import { Prisma } from "@trigger.dev/database";
+-import { sqlDatabaseSchema } from "~/db.server";
+-import {
+-  type FilterRunsOptions,
+-  type IRunsRepository,
+-  type ListRunsOptions,
+-  type ListedRun,
+-  type RunListInputOptions,
+-  type RunsRepositoryOptions,
+-  type TagListOptions,
+-  convertRunListInputOptionsToFilterRunsOptions,
+-} from "./runsRepository.server";
+-
+-export class PostgresRunsRepository implements IRunsRepository {
+-  constructor(private readonly options: RunsRepositoryOptions) {}
+-
+-  get name() {
+-    return "postgres";
+-  }
+-
+-  async listRunIds(options: ListRunsOptions) {
+-    const filterOptions = await convertRunListInputOptionsToFilterRunsOptions(
+-      options,
+-      this.options.prisma
+-    );
+-
+-    const query = this.#buildRunIdsQuery(filterOptions, options.page);
+-    const runs = await this.options.prisma.$queryRaw<{ id: string }[]>(query);
+-
+-    return runs.map((run) => run.id);
+-  }
+-
+-  async listFriendlyRunIds(options: ListRunsOptions) {
+-    const filterOptions = await convertRunListInputOptionsToFilterRunsOptions(
+-      options,
+-      this.options.prisma
+-    );
+-
+-    const query = this.#buildFriendlyRunIdsQuery(filterOptions, options.page);
+-    const runs = await this.options.prisma.$queryRaw<{ friendlyId: string }[]>(query);
+-
+-    return runs.map((run) => run.friendlyId);
+-  }
+-
+-  async listRuns(options: ListRunsOptions) {
+-    const filterOptions = await convertRunListInputOptionsToFilterRunsOptions(
+-      options,
+-      this.options.prisma
+-    );
+-
+-    const query = this.#buildRunsQuery(filterOptions, options.page);
+-    const runs = await this.options.prisma.$queryRaw<ListedRun[]>(query);
+-
+-    // If there are more runs than the page size, we need to fetch the next page
+-    const hasMore = runs.length > options.page.size;
+-
+-    let nextCursor: string | null = null;
+-    let previousCursor: string | null = null;
+-
+-    // Get cursors for next and previous pages
+-    const direction = options.page.direction ?? "forward";
+-    switch (direction) {
+-      case "forward": {
+-        previousCursor = options.page.cursor ? runs.at(0)?.id ?? null : null;
+-        if (hasMore) {
+-          // The next cursor should be the last run ID from this page
+-          nextCursor = runs[options.page.size - 1]?.id ?? null;
+-        }
+-        break;
+-      }
+-      case "backward": {
+-        const reversedRuns = [...runs].reverse();
+-        if (hasMore) {
+-          previousCursor = reversedRuns.at(1)?.id ?? null;
+-          nextCursor = reversedRuns.at(options.page.size)?.id ?? null;
+-        } else {
+-          nextCursor = reversedRuns.at(options.page.size - 1)?.id ?? null;
+-        }
+-        break;
+-      }
+-    }
+-
+-    const runsToReturn =
+-      options.page.direction === "backward" && hasMore
+-        ? runs.slice(1, options.page.size + 1)
+-        : runs.slice(0, options.page.size);
+-
+-    // ClickHouse is slightly delayed, so we're going to do in-memory status filtering too
+-    let filteredRuns = runsToReturn;
+-    if (options.statuses && options.statuses.length > 0) {
+-      filteredRuns = runsToReturn.filter((run) => options.statuses!.includes(run.status));
+-    }
+-
+-    return {
+-      runs: filteredRuns,
+-      pagination: {
+-        nextCursor,
+-        previousCursor,
+-      },
+-    };
+-  }
+-
+-  async countRuns(options: RunListInputOptions) {
+-    const filterOptions = await convertRunListInputOptionsToFilterRunsOptions(
+-      options,
+-      this.options.prisma
+-    );
+-
+-    const query = this.#buildCountQuery(filterOptions);
+-    const result = await this.options.prisma.$queryRaw<{ count: bigint }[]>(query);
+-
+-    if (result.length === 0) {
+-      throw new Error("No count rows returned");
+-    }
+-
+-    return Number(result[0].count);
+-  }
+-
+-  async listTags({ projectId, query, offset, limit }: TagListOptions) {
+-    const tags = await this.options.prisma.taskRunTag.findMany({
+-      select: {
+-        name: true,
+-      },
+-      where: {
+-        projectId,
+-        name: query
+-          ? {
+-              startsWith: query,
+-              mode: "insensitive",
+-            }
+-          : undefined,
+-      },
+-      orderBy: {
+-        id: "desc",
+-      },
+-      take: limit + 1,
+-      skip: offset,
+-    });
+-
+-    return {
+-      tags: tags.map((tag) => tag.name),
+-    };
+-  }
+-
+-  #buildRunIdsQuery(
+-    filterOptions: FilterRunsOptions,
+-    page: { size: number; cursor?: string; direction?: "forward" | "backward" }
+-  ) {
+-    const whereConditions = this.#buildWhereConditions(filterOptions, page.cursor, page.direction);
+-
+-    return Prisma.sql`
+-      SELECT tr.id
+-      FROM ${sqlDatabaseSchema}."TaskRun" tr
+-      WHERE ${whereConditions}
+-      ORDER BY ${page.direction === "backward" ? Prisma.sql`tr.id ASC` : Prisma.sql`tr.id DESC`}
+-      LIMIT ${page.size + 1}
+-    `;
+-  }
+-
+-  #buildFriendlyRunIdsQuery(
+-    filterOptions: FilterRunsOptions,
+-    page: { size: number; cursor?: string; direction?: "forward" | "backward" }
+-  ) {
+-    const whereConditions = this.#buildWhereConditions(filterOptions, page.cursor, page.direction);
+-
+-    return Prisma.sql`
+-      SELECT tr."friendlyId"
+-      FROM ${sqlDatabaseSchema}."TaskRun" tr
+-      WHERE ${whereConditions}
+-      ORDER BY ${page.direction === "backward" ? Prisma.sql`tr.id ASC` : Prisma.sql`tr.id DESC`}
+-      LIMIT ${page.size + 1}
+-    `;
+-  }
+-
+-  #buildRunsQuery(
+-    filterOptions: FilterRunsOptions,
+-    page: { size: number; cursor?: string; direction?: "forward" | "backward" }
+-  ) {
+-    const whereConditions = this.#buildWhereConditions(filterOptions, page.cursor, page.direction);
+-
+-    return Prisma.sql`
+-      SELECT
+-        tr.id,
+-        tr."friendlyId",
+-        tr."taskIdentifier",
+-        tr."taskVersion",
+-        tr."runtimeEnvironmentId",
+-        tr.status,
+-        tr."createdAt",
+-        tr."startedAt",
+-        tr."lockedAt",
+-        tr."delayUntil",
+-        tr."updatedAt",
+-        tr."completedAt",
+-        tr."isTest",
+-        tr."spanId",
+-        tr."idempotencyKey",
+-        tr."ttl",
+-        tr."expiredAt",
+-        tr."costInCents",
+-        tr."baseCostInCents",
+-        tr."usageDurationMs",
+-        tr."runTags",
+-        tr."depth",
+-        tr."rootTaskRunId",
+-        tr."batchId",
+-        tr."metadata",
+-        tr."metadataType",
+-        tr."machinePreset",
+-        tr."queue"
+-      FROM ${sqlDatabaseSchema}."TaskRun" tr
+-      WHERE ${whereConditions}
+-      ORDER BY ${page.direction === "backward" ? Prisma.sql`tr.id ASC` : Prisma.sql`tr.id DESC`}
+-      LIMIT ${page.size + 1}
+-    `;
+-  }
+-
+-  #buildCountQuery(filterOptions: FilterRunsOptions) {
+-    const whereConditions = this.#buildWhereConditions(filterOptions);
+-
+-    return Prisma.sql`
+-      SELECT COUNT(*) as count
+-      FROM ${sqlDatabaseSchema}."TaskRun" tr
+-      WHERE ${whereConditions}
+-    `;
+-  }
+-
+-  #buildWhereConditions(
+-    filterOptions: FilterRunsOptions,
+-    cursor?: string,
+-    direction?: "forward" | "backward"
+-  ) {
+-    const conditions: Prisma.Sql[] = [];
+-
+-    // Environment filter
+-    conditions.push(Prisma.sql`tr."runtimeEnvironmentId" = ${filterOptions.environmentId}`);
+-
+-    // Cursor pagination
+-    if (cursor) {
+-      if (direction === "forward" || !direction) {
+-        conditions.push(Prisma.sql`tr.id < ${cursor}`);
+-      } else {
+-        conditions.push(Prisma.sql`tr.id > ${cursor}`);
+-      }
+-    }
+-
+-    // Task filters
+-    if (filterOptions.tasks && filterOptions.tasks.length > 0) {
+-      conditions.push(Prisma.sql`tr."taskIdentifier" IN (${Prisma.join(filterOptions.tasks)})`);
+-    }
+-
+-    // Version filters
+-    if (filterOptions.versions && filterOptions.versions.length > 0) {
+-      conditions.push(Prisma.sql`tr."taskVersion" IN (${Prisma.join(filterOptions.versions)})`);
+-    }
+-
+-    // Status filters
+-    if (filterOptions.statuses && filterOptions.statuses.length > 0) {
+-      conditions.push(
+-        Prisma.sql`tr.status = ANY(ARRAY[${Prisma.join(
+-          filterOptions.statuses
+-        )}]::"TaskRunStatus"[])`
+-      );
+-    }
+-
+-    // Tag filters
+-    if (filterOptions.tags && filterOptions.tags.length > 0) {
+-      conditions.push(
+-        Prisma.sql`tr."runTags" && ARRAY[${Prisma.join(filterOptions.tags)}]::text[]`
+-      );
+-    }
+-
+-    // Schedule filter
+-    if (filterOptions.scheduleId) {
+-      conditions.push(Prisma.sql`tr."scheduleId" = ${filterOptions.scheduleId}`);
+-    }
+-
+-    // Time period filter
+-    if (filterOptions.period) {
+-      conditions.push(
+-        Prisma.sql`tr."createdAt" >= NOW() - INTERVAL '1 millisecond' * ${filterOptions.period}`
+-      );
+-    }
+-
+-    // From date filter
+-    if (filterOptions.from) {
+-      conditions.push(
+-        Prisma.sql`tr."createdAt" >= ${new Date(filterOptions.from).toISOString()}::timestamp`
+-      );
+-    }
+-
+-    // To date filter
+-    if (filterOptions.to) {
+-      const toDate = new Date(filterOptions.to);
+-      const now = new Date();
+-      const clampedDate = toDate > now ? now : toDate;
+-      conditions.push(Prisma.sql`tr."createdAt" <= ${clampedDate.toISOString()}::timestamp`);
+-    }
+-
+-    // Test filter
+-    if (typeof filterOptions.isTest === "boolean") {
+-      conditions.push(Prisma.sql`tr."isTest" = ${filterOptions.isTest}`);
+-    }
+-
+-    // Root only filter
+-    if (filterOptions.rootOnly) {
+-      conditions.push(Prisma.sql`tr."rootTaskRunId" IS NULL`);
+-    }
+-
+-    // Batch filter
+-    if (filterOptions.batchId) {
+-      conditions.push(Prisma.sql`tr."batchId" = ${filterOptions.batchId}`);
+-    }
+-
+-    // Bulk action filter
+-    if (filterOptions.bulkId) {
+-      conditions.push(
+-        Prisma.sql`tr."bulkActionGroupIds" && ARRAY[${filterOptions.bulkId}]::text[]`
+-      );
+-    }
+-
+-    // Run ID filter
+-    if (filterOptions.runId && filterOptions.runId.length > 0) {
+-      const friendlyIds = filterOptions.runId.map((runId) => RunId.toFriendlyId(runId));
+-      conditions.push(Prisma.sql`tr."friendlyId" IN (${Prisma.join(friendlyIds)})`);
+-    }
+-
+-    // Queue filter
+-    if (filterOptions.queues && filterOptions.queues.length > 0) {
+-      conditions.push(Prisma.sql`tr."queue" IN (${Prisma.join(filterOptions.queues)})`);
+-    }
+-
+-    // Machine preset filter
+-    if (filterOptions.machines && filterOptions.machines.length > 0) {
+-      conditions.push(Prisma.sql`tr."machinePreset" IN (${Prisma.join(filterOptions.machines)})`);
+-    }
+-
+-    // Combine all conditions with AND
+-    return conditions.reduce((acc, condition) =>
+-      acc === null ? condition : Prisma.sql`${acc} AND ${condition}`
+-    );
+-  }
+-}
+diff --git a/apps/webapp/app/services/runsRepository/runsRepository.server.ts b/apps/webapp/app/services/runsRepository/runsRepository.server.ts
+index 0bcc73eab6e..4f097f61ce2 100644
+--- a/apps/webapp/app/services/runsRepository/runsRepository.server.ts
++++ b/apps/webapp/app/services/runsRepository/runsRepository.server.ts
+@@ -8,12 +8,8 @@ import parseDuration from "parse-duration";
+ import { z } from "zod";
+ import { timeFilters } from "~/components/runs/v3/SharedFilters";
+ import { type PrismaClient, type PrismaClientOrTransaction } from "~/db.server";
+-import { FEATURE_FLAG } from "~/v3/featureFlags";
+-import { makeFlag } from "~/v3/featureFlags.server";
+ import { startActiveSpan } from "~/v3/tracer.server";
+-import { logger } from "../logger.server";
+ import { ClickHouseRunsRepository } from "./clickhouseRunsRepository.server";
+-import { PostgresRunsRepository } from "./postgresRunsRepository.server";
+ 
+ export type RunsRepositoryOptions = {
+   clickhouse: ClickHouse;
+@@ -144,81 +140,22 @@ export interface IRunsRepository {
+ 
+ export class RunsRepository implements IRunsRepository {
+   private readonly clickHouseRunsRepository: ClickHouseRunsRepository;
+-  private readonly postgresRunsRepository: PostgresRunsRepository;
+-  private readonly defaultRepository: "clickhouse" | "postgres";
+-  private readonly logger: Logger;
+ 
+-  constructor(
+-    private readonly options: RunsRepositoryOptions & {
+-      defaultRepository?: "clickhouse" | "postgres";
+-    }
+-  ) {
++  constructor(private readonly options: RunsRepositoryOptions) {
+     this.clickHouseRunsRepository = new ClickHouseRunsRepository(options);
+-    this.postgresRunsRepository = new PostgresRunsRepository(options);
+-    this.defaultRepository = options.defaultRepository ?? "clickhouse";
+-    this.logger = options.logger ?? logger;
+   }
+ 
+   get name() {
+     return "runsRepository";
+   }
+ 
+-  async #getRepository(): Promise<IRunsRepository> {
+-    return startActiveSpan("runsRepository.getRepository", async (span) => {
+-      const getFlag = makeFlag(this.options.prisma);
+-      const runsListRepository = await getFlag({
+-        key: FEATURE_FLAG.runsListRepository,
+-        defaultValue: this.defaultRepository,
+-      });
+-
+-      span.setAttribute("repository.name", runsListRepository);
+-
+-      logger.log("runsListRepository", { runsListRepository });
+-
+-      switch (runsListRepository) {
+-        case "postgres":
+-          return this.postgresRunsRepository;
+-        case "clickhouse":
+-        default:
+-          return this.clickHouseRunsRepository;
+-      }
+-    });
+-  }
+-
+   async listRunIds(options: ListRunsOptions): Promise<string[]> {
+-    const repository = await this.#getRepository();
+     return startActiveSpan(
+       "runsRepository.listRunIds",
+-      async () => {
+-        try {
+-          return await repository.listRunIds(options);
+-        } catch (error) {
+-          // If ClickHouse fails, retry with Postgres
+-          if (repository.name === "clickhouse") {
+-            this.logger?.warn("ClickHouse failed, retrying with Postgres", { error });
+-            return startActiveSpan(
+-              "runsRepository.listRunIds.fallback",
+-              async () => {
+-                return await this.postgresRunsRepository.listRunIds(options);
+-              },
+-              {
+-                attributes: {
+-                  "repository.name": "postgres",
+-                  "fallback.reason": "clickhouse_error",
+-                  "fallback.error": error instanceof Error ? error.message : String(error),
+-                  organizationId: options.organizationId,
+-                  projectId: options.projectId,
+-                  environmentId: options.environmentId,
+-                },
+-              }
+-            );
+-          }
+-          throw error;
+-        }
+-      },
++      async () => this.clickHouseRunsRepository.listRunIds(options),
+       {
+         attributes: {
+-          "repository.name": repository.name,
++          "repository.name": "clickhouse",
+           organizationId: options.organizationId,
+           projectId: options.projectId,
+           environmentId: options.environmentId,
+@@ -228,39 +165,12 @@ export class RunsRepository implements IRunsRepository {
+   }
+ 
+   async listFriendlyRunIds(options: ListRunsOptions): Promise<string[]> {
+-    const repository = await this.#getRepository();
+     return startActiveSpan(
+       "runsRepository.listFriendlyRunIds",
+-      async () => {
+-        try {
+-          return await repository.listFriendlyRunIds(options);
+-        } catch (error) {
+-          // If ClickHouse fails, retry with Postgres
+-          if (repository.name === "clickhouse") {
+-            this.logger?.warn("ClickHouse failed, retrying with Postgres", { error });
+-            return startActiveSpan(
+-              "runsRepository.listFriendlyRunIds.fallback",
+-              async () => {
+-                return await this.postgresRunsRepository.listFriendlyRunIds(options);
+-              },
+-              {
+-                attributes: {
+-                  "repository.name": "postgres",
+-                  "fallback.reason": "clickhouse_error",
+-                  "fallback.error": error instanceof Error ? error.message : String(error),
+-                  organizationId: options.organizationId,
+-                  projectId: options.projectId,
+-                  environmentId: options.environmentId,
+-                },
+-              }
+-            );
+-          }
+-          throw error;
+-        }
+-      },
++      async () => this.clickHouseRunsRepository.listFriendlyRunIds(options),
+       {
+         attributes: {
+-          "repository.name": repository.name,
++          "repository.name": "clickhouse",
+           organizationId: options.organizationId,
+           projectId: options.projectId,
+           environmentId: options.environmentId,
+@@ -276,39 +186,12 @@ export class RunsRepository implements IRunsRepository {
+       previousCursor: string | null;
+     };
+   }> {
+-    const repository = await this.#getRepository();
+     return startActiveSpan(
+       "runsRepository.listRuns",
+-      async () => {
+-        try {
+-          return await repository.listRuns(options);
+-        } catch (error) {
+-          // If ClickHouse fails, retry with Postgres
+-          if (repository.name === "clickhouse") {
+-            this.logger?.warn("ClickHouse failed, retrying with Postgres", { error });
+-            return startActiveSpan(
+-              "runsRepository.listRuns.fallback",
+-              async () => {
+-                return await this.postgresRunsRepository.listRuns(options);
+-              },
+-              {
+-                attributes: {
+-                  "repository.name": "postgres",
+-                  "fallback.reason": "clickhouse_error",
+-                  "fallback.error": error instanceof Error ? error.message : String(error),
+-                  organizationId: options.organizationId,
+-                  projectId: options.projectId,
+-                  environmentId: options.environmentId,
+-                },
+-              }
+-            );
+-          }
+-          throw error;
+-        }
+-      },
++      async () => this.clickHouseRunsRepository.listRuns(options),
+       {
+         attributes: {
+-          "repository.name": repository.name,
++          "repository.name": "clickhouse",
+           organizationId: options.organizationId,
+           projectId: options.projectId,
+           environmentId: options.environmentId,
+@@ -318,39 +201,12 @@ export class RunsRepository implements IRunsRepository {
+   }
+ 
+   async countRuns(options: RunListInputOptions): Promise<number> {
+-    const repository = await this.#getRepository();
+     return startActiveSpan(
+       "runsRepository.countRuns",
+-      async () => {
+-        try {
+-          return await repository.countRuns(options);
+-        } catch (error) {
+-          // If ClickHouse fails, retry with Postgres
+-          if (repository.name === "clickhouse") {
+-            this.logger?.warn("ClickHouse failed, retrying with Postgres", { error });
+-            return startActiveSpan(
+-              "runsRepository.countRuns.fallback",
+-              async () => {
+-                return await this.postgresRunsRepository.countRuns(options);
+-              },
+-              {
+-                attributes: {
+-                  "repository.name": "postgres",
+-                  "fallback.reason": "clickhouse_error",
+-                  "fallback.error": error instanceof Error ? error.message : String(error),
+-                  organizationId: options.organizationId,
+-                  projectId: options.projectId,
+-                  environmentId: options.environmentId,
+-                },
+-              }
+-            );
+-          }
+-          throw error;
+-        }
+-      },
++      async () => this.clickHouseRunsRepository.countRuns(options),
+       {
+         attributes: {
+-          "repository.name": repository.name,
++          "repository.name": "clickhouse",
+           organizationId: options.organizationId,
+           projectId: options.projectId,
+           environmentId: options.environmentId,
+@@ -360,15 +216,12 @@ export class RunsRepository implements IRunsRepository {
+   }
+ 
+   async listTags(options: TagListOptions): Promise<TagList> {
+-    const repository = await this.#getRepository();
+     return startActiveSpan(
+       "runsRepository.listTags",
+-      async () => {
+-        return await repository.listTags(options);
+-      },
++      async () => this.clickHouseRunsRepository.listTags(options),
+       {
+         attributes: {
+-          "repository.name": repository.name,
++          "repository.name": "clickhouse",
+           organizationId: options.organizationId,
+           projectId: options.projectId,
+           environmentId: options.environmentId,
+diff --git a/apps/webapp/app/v3/eventRepository/clickhouseEventRepository.server.ts b/apps/webapp/app/v3/eventRepository/clickhouseEventRepository.server.ts
+index e598a17fdcc..27b96ed7d37 100644
+--- a/apps/webapp/app/v3/eventRepository/clickhouseEventRepository.server.ts
++++ b/apps/webapp/app/v3/eventRepository/clickhouseEventRepository.server.ts
+@@ -1229,7 +1229,7 @@ export class ClickhouseEventRepository implements IEventRepository {
+     endCreatedAt?: Date,
+     options?: { includeDebugLogs?: boolean }
+   ): Promise<SpanDetail | undefined> {
+-    const startCreatedAtWithBuffer = new Date(startCreatedAt.getTime() - 1000);
++    const startCreatedAtWithBuffer = new Date(startCreatedAt.getTime() - 60_000);
+ 
+     const queryBuilder =
+       this._version === "v2"
+diff --git a/apps/webapp/app/v3/featureFlags.ts b/apps/webapp/app/v3/featureFlags.ts
+index 7571d27f67b..a274abd75ff 100644
+--- a/apps/webapp/app/v3/featureFlags.ts
++++ b/apps/webapp/app/v3/featureFlags.ts
+@@ -2,7 +2,6 @@ import { z } from "zod";
+ 
+ export const FEATURE_FLAG = {
+   defaultWorkerInstanceGroupId: "defaultWorkerInstanceGroupId",
+-  runsListRepository: "runsListRepository",
+   taskEventRepository: "taskEventRepository",
+   hasQueryAccess: "hasQueryAccess",
+   hasLogsPageAccess: "hasLogsPageAccess",
+@@ -14,7 +13,6 @@ export const FEATURE_FLAG = {
+ 
+ export const FeatureFlagCatalog = {
+   [FEATURE_FLAG.defaultWorkerInstanceGroupId]: z.string(),
+-  [FEATURE_FLAG.runsListRepository]: z.enum(["clickhouse", "postgres"]),
+   [FEATURE_FLAG.taskEventRepository]: z.enum(["clickhouse", "clickhouse_v2", "postgres"]),
+   [FEATURE_FLAG.hasQueryAccess]: z.coerce.boolean(),
+   [FEATURE_FLAG.hasLogsPageAccess]: z.coerce.boolean(),
+@@ -30,7 +28,6 @@ export type FeatureFlagKey = keyof typeof FeatureFlagCatalog;
+ // Shown with current/resolved value but no controls.
+ export const GLOBAL_LOCKED_FLAGS: FeatureFlagKey[] = [
+   FEATURE_FLAG.defaultWorkerInstanceGroupId,
+-  FEATURE_FLAG.runsListRepository,
+   FEATURE_FLAG.taskEventRepository,
+ ];
+ 
+@@ -38,7 +35,6 @@ export const GLOBAL_LOCKED_FLAGS: FeatureFlagKey[] = [
+ // Shown with global value but no controls (org can't override these).
+ export const ORG_LOCKED_FLAGS: FeatureFlagKey[] = [
+   FEATURE_FLAG.defaultWorkerInstanceGroupId,
+-  FEATURE_FLAG.runsListRepository,
+   FEATURE_FLAG.taskEventRepository,
+ ];
+ 
+diff --git a/internal-packages/database/prisma/migrations/20260401000000_drop_taskrun_foreign_keys/migration.sql b/internal-packages/database/prisma/migrations/20260401000000_drop_taskrun_foreign_keys/migration.sql
+new file mode 100644
+index 00000000000..a2ec4e42304
+--- /dev/null
++++ b/internal-packages/database/prisma/migrations/20260401000000_drop_taskrun_foreign_keys/migration.sql
+@@ -0,0 +1,9 @@
++-- Drop all foreign key constraints on TaskRun (no schema change, data intact)
++ALTER TABLE "TaskRun" DROP CONSTRAINT IF EXISTS "TaskRun_runtimeEnvironmentId_fkey";
++ALTER TABLE "TaskRun" DROP CONSTRAINT IF EXISTS "TaskRun_projectId_fkey";
++ALTER TABLE "TaskRun" DROP CONSTRAINT IF EXISTS "TaskRun_lockedById_fkey";
++ALTER TABLE "TaskRun" DROP CONSTRAINT IF EXISTS "TaskRun_lockedToVersionId_fkey";
++ALTER TABLE "TaskRun" DROP CONSTRAINT IF EXISTS "TaskRun_rootTaskRunId_fkey";
++ALTER TABLE "TaskRun" DROP CONSTRAINT IF EXISTS "TaskRun_parentTaskRunId_fkey";
++ALTER TABLE "TaskRun" DROP CONSTRAINT IF EXISTS "TaskRun_parentTaskRunAttemptId_fkey";
++ALTER TABLE "TaskRun" DROP CONSTRAINT IF EXISTS "TaskRun_batchId_fkey";
+diff --git a/internal-packages/database/prisma/migrations/20260401130744_drop_task_run_runtime_environment_id_index/migration.sql b/internal-packages/database/prisma/migrations/20260401130744_drop_task_run_runtime_environment_id_index/migration.sql
+new file mode 100644
+index 00000000000..7778de20c10
+--- /dev/null
++++ b/internal-packages/database/prisma/migrations/20260401130744_drop_task_run_runtime_environment_id_index/migration.sql
+@@ -0,0 +1,2 @@
++-- DropIndex
++DROP INDEX CONCURRENTLY IF EXISTS "public"."TaskRun_runtimeEnvironmentId_id_idx";
+diff --git a/internal-packages/database/prisma/migrations/20260401132332_drop_task_run_schedule_id_idx/migration.sql b/internal-packages/database/prisma/migrations/20260401132332_drop_task_run_schedule_id_idx/migration.sql
+new file mode 100644
+index 00000000000..f9006fe2081
+--- /dev/null
++++ b/internal-packages/database/prisma/migrations/20260401132332_drop_task_run_schedule_id_idx/migration.sql
+@@ -0,0 +1,2 @@
++-- DropIndex
++DROP INDEX CONCURRENTLY IF EXISTS "public"."TaskRun_scheduleId_idx";
+diff --git a/internal-packages/database/prisma/migrations/20260401132508_drop_task_run_root_task_run_id_idx/migration.sql b/internal-packages/database/prisma/migrations/20260401132508_drop_task_run_root_task_run_id_idx/migration.sql
+new file mode 100644
+index 00000000000..ccfa6f6d19c
+--- /dev/null
++++ b/internal-packages/database/prisma/migrations/20260401132508_drop_task_run_root_task_run_id_idx/migration.sql
+@@ -0,0 +1,2 @@
++-- DropIndex
++DROP INDEX CONCURRENTLY IF EXISTS "public"."TaskRun_rootTaskRunId_idx";
+diff --git a/internal-packages/database/prisma/schema.prisma b/internal-packages/database/prisma/schema.prisma
+index 1de0aaf1ddf..7138aeaab0d 100644
+--- a/internal-packages/database/prisma/schema.prisma
++++ b/internal-packages/database/prisma/schema.prisma
+@@ -874,10 +874,6 @@ model TaskRun {
+   @@unique([runtimeEnvironmentId, taskIdentifier, idempotencyKey])
+   // Finding child runs
+   @@index([parentTaskRunId])
+-  // Finding ancestor runs
+-  @@index([rootTaskRunId])
+-  //Schedules
+-  @@index([scheduleId])
+   // Run page inspector
+   @@index([spanId])
+   @@index([parentSpanId])
+@@ -886,8 +882,6 @@ model TaskRun {
+   // Finding runs in a batch
+   @@index([runTags(ops: ArrayOps)], type: Gin)
+   @@index([runtimeEnvironmentId, batchId])
+-  // This will include the createdAt index to help speed up the run list page
+-  @@index([runtimeEnvironmentId, id(sort: Desc)])
+   @@index([runtimeEnvironmentId, createdAt(sort: Desc)])
+   @@index([createdAt], type: Brin)
+   @@index([status, runtimeEnvironmentId, createdAt, id(sort: Desc)])

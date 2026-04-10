@@ -1,0 +1,95 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "security",
+      "recommendation": "Added hostname safety validation to prevent PostgreSQL data sync connections to unsafe addresses including wildcards (0.0.0.0, ::), loopback, link-local, multicast, and reserved IPs",
+      "rationale": "Wildcard addresses pose security risks as they could allow connections to unintended interfaces or expose internal services. The validation ensures data sync connections are made to specific, non-wildcard endpoints, preventing potential security vulnerabilities in data synchronization",
+      "alternatives_considered": [
+        "Only checking for wildcard addresses (0.0.0.0 and ::) specifically",
+        "Adding validation at the UI/API layer instead of the data sync connection layer",
+        "Using a simpler regex-based approach instead of IP address resolution and classification"
+      ],
+      "files_affected": [
+        "backend/src/baserow/contrib/database/data_sync/postgresql_data_sync_type.py",
+        "backend/src/baserow/core/utils.py"
+      ]
+    },
+    {
+      "dimension": "api_design",
+      "recommendation": "Created a reusable utility function `is_hostname_safe()` in core utils that performs comprehensive IP address safety checks",
+      "rationale": "Placing the validation logic in a core utility function makes it reusable across the codebase and follows the DRY principle. The function uses Python's built-in `ipaddress` module for proper IP address parsing and classification, ensuring accurate detection of unsafe address types",
+      "alternatives_considered": [
+        "Implementing validation directly in the PostgreSQL data sync type class",
+        "Creating a separate validation module specific to data sync",
+        "Using third-party IP validation libraries"
+      ],
+      "files_affected": [
+        "backend/src/baserow/core/utils.py"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Added validation at connection time with a clear error message when unsafe hostnames are detected",
+      "rationale": "By validating at the point of connection establishment, we ensure security checks are always performed. The error message 'It's not allowed to connect to this hostname.' provides immediate feedback while maintaining security by not revealing too much detail about why the hostname is unsafe",
+      "alternatives_considered": [
+        "Providing more detailed error messages explaining exactly which type of unsafe address was detected",
+        "Validating during configuration save instead of connection time",
+        "Using different exception types for different unsafe address categories"
+      ],
+      "files_affected": [
+        "backend/src/baserow/contrib/database/data_sync/postgresql_data_sync_type.py"
+      ]
+    },
+    {
+      "dimension": "testing",
+      "recommendation": "Added comprehensive test coverage for the new `is_hostname_safe()` function and updated existing `get_all_ips()` tests",
+      "rationale": "Tests verify the function correctly identifies safe vs. unsafe addresses across different IP categories (wildcard, loopback, link-local, multicast, reserved). The tests use the `# noqa: S104` comment to suppress security linter warnings for test cases that intentionally use wildcard addresses",
+      "alternatives_considered": [
+        "Only testing the specific wildcard addresses mentioned in the requirements",
+        "Mocking DNS resolution instead of testing with actual IP strings",
+        "Adding integration tests with actual PostgreSQL connections"
+      ],
+      "files_affected": [
+        "backend/tests/baserow/core/test_core_utils.py"
+      ]
+    },
+    {
+      "dimension": "documentation",
+      "recommendation": "Added detailed docstring for `is_hostname_safe()` function explaining what constitutes unsafe addresses",
+      "rationale": "Clear documentation helps other developers understand the security rationale and ensures consistent usage. The docstring explicitly lists all unsafe address categories (wildcard, loopback, link-local, multicast, reserved) that the function checks for",
+      "alternatives_considered": [
+        "Adding comments inline in the function body",
+        "Creating separate documentation in a security guide",
+        "Relying on function name and parameter names alone"
+      ],
+      "files_affected": [
+        "backend/src/baserow/core/utils.py"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Implement hostname safety validation for PostgreSQL data sync",
+      "description": "Add security validation to prevent PostgreSQL data sync connections to unsafe IP addresses including wildcards, loopback, and other restricted addresses",
+      "files_to_modify": [
+        "backend/src/baserow/contrib/database/data_sync/postgresql_data_sync_type.py",
+        "backend/src/baserow/core/utils.py",
+        "backend/tests/baserow/core/test_core_utils.py"
+      ],
+      "files_to_create": [
+        "changelog/entries/unreleased/bug/postgres_sync_wildcard_address.json"
+      ],
+      "estimated_effort": "medium"
+    }
+  ],
+  "implementation_summary": "The implementation adds security validation to prevent PostgreSQL data sync connections to unsafe IP addresses, with a primary focus on wildcard addresses (0.0.0.0 and ::) as requested. The solution was implemented by creating a new utility function `is_hostname_safe()` in the core utils module that performs comprehensive IP address safety checks. This function resolves hostnames to IP addresses using the existing `get_all_ips()` function, then uses Python's `ipaddress` module to classify each IP and check for unsafe categories including wildcard, loopback, link-local, multicast, and reserved addresses.\n\nThe validation is integrated into the PostgreSQL data sync connection establishment process in `postgresql_data_sync_type.py`, where it checks the hostname before attempting to establish a connection. If an unsafe hostname is detected, a `SyncError` is raised with a clear error message. This approach ensures validation happens at the right time (connection establishment) and provides immediate feedback to users.\n\nThe implementation maintains backward compatibility by only adding validation without changing existing behavior for safe addresses. Comprehensive tests were added to verify the validation works correctly for various IP address types, and a changelog entry was created to document the security enhancement. The solution follows the existing codebase patterns by placing reusable utilities in core modules and integrating validation into the appropriate business logic layer.",
+  "source_pr": "https://github.com/baserow/baserow/pull/5137",
+  "before_sha": "5ae6ac62f7f869c941a6bc70fe11520811c0a085",
+  "after_sha": "5ec7fa19af16c64b675cf64bb14465c527fba328",
+  "diff_stats": {
+    "additions": 81,
+    "deletions": 1,
+    "files_changed": 4
+  }
+}

@@ -1,0 +1,125 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "environment_configuration",
+      "recommendation": "Added TELEMETRY_DISABLED environment variable with proper validation and documentation",
+      "rationale": "Self-hosted deployments need control over telemetry collection for privacy compliance. The variable follows the existing pattern of boolean flags (using '1'/'0' values) and is documented across all configuration surfaces.",
+      "alternatives_considered": [
+        "Hard-coded telemetry behavior",
+        "Separate configuration file",
+        "Database-stored preferences"
+      ],
+      "files_affected": [
+        ".env.example",
+        "apps/web/lib/env.ts",
+        "apps/web/lib/constants.ts",
+        "docker/docker-compose.yml",
+        "docs/self-hosting/configuration/environment-variables.mdx"
+      ]
+    },
+    {
+      "dimension": "enterprise_licensing",
+      "recommendation": "Made telemetry mandatory for Enterprise Edition (EE) customers regardless of TELEMETRY_DISABLED setting",
+      "rationale": "Enterprise licenses require compliance monitoring and usage tracking. By checking getEnterpriseLicense() and overriding the env var, we ensure EE customers cannot opt out while maintaining the opt-out capability for Community Edition (CE) users.",
+      "alternatives_considered": [
+        "Separate EE-only telemetry system",
+        "License-based telemetry configuration",
+        "Different telemetry endpoints for EE vs CE"
+      ],
+      "files_affected": [
+        "apps/web/app/api/(internal)/pipeline/lib/telemetry.ts",
+        "apps/web/app/api/(internal)/pipeline/lib/telemetry.test.ts"
+      ]
+    },
+    {
+      "dimension": "privacy_and_security",
+      "recommendation": "Implemented hashed license key logging and development environment skipping",
+      "rationale": "License keys are sensitive and should never appear in logs. Hashing with hashString() allows correlation without exposure. Development environments (IS_DEVELOPMENT, E2E_TESTING) should never send telemetry to avoid polluting production data.",
+      "alternatives_considered": [
+        "Redacting license keys entirely",
+        "Using UUIDs for correlation",
+        "Development-only telemetry endpoint"
+      ],
+      "files_affected": [
+        "apps/web/app/api/(internal)/pipeline/lib/telemetry.ts",
+        "apps/web/app/api/(internal)/pipeline/lib/telemetry.test.ts"
+      ]
+    },
+    {
+      "dimension": "testing_strategy",
+      "recommendation": "Added comprehensive test coverage for all telemetry control flow scenarios",
+      "rationale": "Telemetry behavior has multiple conditional paths (env var, EE license, dev flags). Each scenario needs verification to ensure correct behavior in production. Tests use vi.doMock() to simulate different runtime conditions.",
+      "alternatives_considered": [
+        "Integration tests only",
+        "Manual testing",
+        "Separate test configuration files"
+      ],
+      "files_affected": [
+        "apps/web/app/api/(internal)/pipeline/lib/telemetry.test.ts",
+        "apps/web/vitestSetup.ts"
+      ]
+    },
+    {
+      "dimension": "ci_cd_integration",
+      "recommendation": "Added TELEMETRY_DISABLED to Turbo's environment variable passthrough",
+      "rationale": "Turbo manages build caching and needs to know which environment variables affect build output. Adding TELEMETRY_DISABLED ensures cache invalidation when telemetry configuration changes.",
+      "alternatives_considered": [
+        "Ignoring in CI/CD",
+        "Manual cache busting",
+        "Separate build configuration"
+      ],
+      "files_affected": [
+        "turbo.json"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Telemetry Configuration System",
+      "description": "Add environment variable control for telemetry with proper validation, documentation, and CI/CD integration",
+      "files_to_modify": [
+        ".env.example",
+        "apps/web/lib/env.ts",
+        "apps/web/lib/constants.ts",
+        "docker/docker-compose.yml",
+        "docs/self-hosting/configuration/environment-variables.mdx",
+        "turbo.json"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-002",
+      "title": "Enterprise License Telemetry Enforcement",
+      "description": "Implement logic that bypasses TELEMETRY_DISABLED when an active Enterprise license is detected",
+      "files_to_modify": [
+        "apps/web/app/api/(internal)/pipeline/lib/telemetry.ts",
+        "apps/web/app/api/(internal)/pipeline/lib/telemetry.test.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-003",
+      "title": "Development Environment Safeguards",
+      "description": "Add hard skips for telemetry in development and testing environments with proper logging privacy",
+      "files_to_modify": [
+        "apps/web/app/api/(internal)/pipeline/lib/telemetry.ts",
+        "apps/web/app/api/(internal)/pipeline/lib/telemetry.test.ts",
+        "apps/web/vitestSetup.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The enhanced telemetry system implements a sophisticated, privacy-focused approach to observability that balances user control with business requirements. The core innovation is the dual-layer control system: Community Edition users can opt out via TELEMETRY_DISABLED=1, while Enterprise customers have mandatory telemetry for license compliance monitoring. This is achieved by checking getEnterpriseLicense() and overriding the environment variable when an active license exists.\n\nPrivacy is baked into multiple layers: license keys are hashed before logging using the existing hashString() utility, development environments (IS_DEVELOPMENT, E2E_TESTING) unconditionally skip telemetry, and the system maintains the existing distributed locking mechanism to prevent duplicate submissions in multi-instance deployments. The implementation follows the established patterns in the codebase, using the same environment variable validation schema (z.enum(['1', '0'])) as other boolean flags like RATE_LIMITING_DISABLED.\n\nTesting is comprehensive, covering all conditional paths: TELEMETRY_DISABLED with/without EE license, development environment skips, and error scenarios. The tests use vi.doMock() to simulate different runtime conditions, ensuring each code path is verified. Documentation is updated across all surfaces (.env.example, docker-compose.yml, and official docs), providing clear guidance for self-hosted deployments while maintaining backward compatibility for existing installations.",
+  "source_pr": "https://github.com/formbricks/formbricks/pull/7666",
+  "before_sha": "995c03bc01f1d6408b3fd46c247f3fd0b67f12c7",
+  "after_sha": "b5eaa4c7fd59740c8f50426e12d472e64457f9f5",
+  "diff_stats": {
+    "additions": 191,
+    "deletions": 4,
+    "files_changed": 9
+  }
+}

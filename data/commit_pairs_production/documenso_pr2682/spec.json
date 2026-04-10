@@ -1,0 +1,12 @@
+{
+  "feature_name": "Nullable Document Audit Logs",
+  "description": "Update the database schema to allow document audit log records to exist independently of their associated documents. Currently, when a document is deleted, its audit logs are also deleted due to foreign key constraints. We need to modify the relationship so audit logs persist even when the referenced document is removed.",
+  "functional_requirements": [
+    "Modify the foreign key constraint between documents and audit logs to use SET NULL instead of CASCADE on delete",
+    "Ensure the document reference field in audit logs can accept null values after the constraint change",
+    "Update the Prisma schema to reflect the new nullable relationship between documents and audit logs",
+    "Create a database migration that safely applies these changes without data loss"
+  ],
+  "project_name": "documenso",
+  "source_pr": "https://github.com/documenso/documenso/pull/2682"
+}

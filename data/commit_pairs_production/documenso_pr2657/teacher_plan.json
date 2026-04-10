@@ -1,0 +1,135 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "api_design",
+      "recommendation": "Added BullMQ job provider as a third option alongside existing Inngest and Local providers, maintaining the same abstract BaseJobProvider interface",
+      "rationale": "The existing provider abstraction (BaseJobProvider) was designed for extensibility, making it straightforward to add new implementations without changing client code. BullMQ fits cleanly into this pattern with its own Redis-based implementation while preserving the same API surface.",
+      "alternatives_considered": [
+        "pg-boss (PostgreSQL-backed)",
+        "Graphile Worker",
+        "Improving the existing Local provider"
+      ],
+      "files_affected": [
+        ".env.example",
+        "ARCHITECTURE.md"
+      ]
+    },
+    {
+      "dimension": "infrastructure",
+      "recommendation": "Added Redis service to development Docker Compose and configured environment variables for Redis connection",
+      "rationale": "BullMQ requires Redis as a backing store. Adding Redis to the development environment ensures developers can test the new provider locally. The Redis port (63790) avoids conflicts with default Redis port (6379) that might be in use elsewhere.",
+      "alternatives_considered": [
+        "Using existing PostgreSQL database (pg-boss)",
+        "External Redis-as-a-service only",
+        "No local Redis for development"
+      ],
+      "files_affected": [
+        "docker/development/compose.yml",
+        ".env.example"
+      ]
+    },
+    {
+      "dimension": "documentation",
+      "recommendation": "Created comprehensive documentation for all three background job providers with clear comparison tables and setup guides",
+      "rationale": "Users need clear guidance on choosing between providers based on their deployment scenario (managed vs self-hosted, development vs production). The documentation explains trade-offs and provides concrete examples for each option.",
+      "alternatives_considered": [
+        "Minimal documentation updates",
+        "Separate documentation for each provider",
+        "No documentation changes"
+      ],
+      "files_affected": [
+        "apps/docs/content/docs/self-hosting/configuration/background-jobs.mdx",
+        "apps/docs/content/docs/self-hosting/configuration/environment.mdx",
+        "apps/docs/content/docs/self-hosting/configuration/meta.json",
+        "apps/docs/content/docs/self-hosting/getting-started/requirements.mdx",
+        "apps/docs/content/docs/self-hosting/getting-started/tips.mdx"
+      ]
+    },
+    {
+      "dimension": "routing",
+      "recommendation": "Integrated job routes into existing API routing structure and configured Vite to handle Bull Board static assets",
+      "rationale": "The existing router.ts already handles API routing, so adding the job routes there maintains consistency. The Vite configuration change ensures Bull Board's static CSS files are properly served through Hono without being intercepted by Vite's dev server.",
+      "alternatives_considered": [
+        "Separate server for job routes",
+        "Custom static file serving for Bull Board",
+        "Different routing pattern"
+      ],
+      "files_affected": [
+        "apps/remix/server/router.ts",
+        "apps/remix/vite.config.ts"
+      ]
+    },
+    {
+      "dimension": "dependency_management",
+      "recommendation": "Added BullMQ, Bull Board, and Redis dependencies while updating existing packages to newer versions",
+      "rationale": "BullMQ requires bullmq and ioredis packages. Bull Board provides monitoring dashboard. Package updates (esbuild, tailwindcss, @types/node) maintain compatibility and security while adding the new functionality.",
+      "alternatives_considered": [
+        "No package updates",
+        "Different dashboard solution",
+        "Custom monitoring instead of Bull Board"
+      ],
+      "files_affected": [
+        "package-lock.json"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "BullMQ Provider Core Implementation",
+      "description": "Implement the BullMQJobProvider class that extends BaseJobProvider with Redis connection, queue management, worker setup, and integration with existing job definitions",
+      "files_to_modify": [],
+      "files_to_create": [
+        ".agents/plans/bright-emerald-flower-bullmq-background-jobs.md"
+      ],
+      "estimated_effort": "large"
+    },
+    {
+      "id": "T-002",
+      "title": "Infrastructure and Environment Configuration",
+      "description": "Add Redis service to Docker Compose, update environment variables, and configure development setup for BullMQ",
+      "files_to_modify": [
+        ".env.example",
+        "docker/development/compose.yml"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-003",
+      "title": "Documentation and User Guidance",
+      "description": "Create comprehensive documentation covering all three job providers with comparison tables, setup guides, and recommendations for different deployment scenarios",
+      "files_to_modify": [
+        "apps/docs/content/docs/self-hosting/configuration/environment.mdx",
+        "apps/docs/content/docs/self-hosting/configuration/meta.json",
+        "apps/docs/content/docs/self-hosting/getting-started/requirements.mdx",
+        "apps/docs/content/docs/self-hosting/getting-started/tips.mdx",
+        "ARCHITECTURE.md"
+      ],
+      "files_to_create": [
+        "apps/docs/content/docs/self-hosting/configuration/background-jobs.mdx"
+      ],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-004",
+      "title": "Routing and Asset Handling",
+      "description": "Integrate job routes into existing API structure and configure Vite to properly serve Bull Board static assets",
+      "files_to_modify": [
+        "apps/remix/server/router.ts",
+        "apps/remix/vite.config.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation adds a Redis-backed BullMQ background job provider as a third option alongside the existing Inngest (managed) and Local (PostgreSQL) providers. This addresses limitations of the Local provider for production self-hosted deployments, offering better reliability, concurrency control, and monitoring capabilities.\n\nThe approach leverages the existing provider abstraction pattern, making BullMQ a drop-in replacement that implements the same BaseJobProvider interface. Key decisions include using Redis for queue storage (adding it to Docker Compose), implementing a singleton pattern for BullMQ instances, and providing a Bull Board dashboard for job monitoring accessible via /api/jobs/board.\n\nThe changes integrate smoothly with the existing architecture: environment variables control provider selection, documentation guides users through the options, and routing changes ensure the dashboard is properly served. The Vite configuration was carefully adjusted to allow Bull Board's static assets through while maintaining existing dev server behavior. This implementation provides a production-ready job processing solution for self-hosted deployments without requiring external SaaS dependencies.",
+  "source_pr": "https://github.com/documenso/documenso/pull/2657",
+  "before_sha": "025a27d3856705877f0ace807a6d021763884017",
+  "after_sha": "ad559f72dd4927f47839589e751e93d06c6f4986",
+  "diff_stats": {
+    "additions": 1576,
+    "deletions": 321,
+    "files_changed": 18
+  }
+}

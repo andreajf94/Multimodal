@@ -1,0 +1,32 @@
+diff --git a/changelog/entries/unreleased/bug/fixed_a_bug_where_an_unknown_timezone_could_cause_a_data_sou.json b/changelog/entries/unreleased/bug/fixed_a_bug_where_an_unknown_timezone_could_cause_a_data_sou.json
+new file mode 100644
+index 0000000000..ebf394cd02
+--- /dev/null
++++ b/changelog/entries/unreleased/bug/fixed_a_bug_where_an_unknown_timezone_could_cause_a_data_sou.json
+@@ -0,0 +1,9 @@
++{
++    "type": "bug",
++    "message": "Fixed a bug where an unknown timezone could cause a data source dispatch to fail.",
++    "issue_origin": "github",
++    "issue_number": null,
++    "domain": "builder",
++    "bullet_points": [],
++    "created_at": "2026-03-31"
++}
+\ No newline at end of file
+diff --git a/web-frontend/modules/builder/dataProviderTypes.js b/web-frontend/modules/builder/dataProviderTypes.js
+index 8ef89d1e30..b18ecd9b57 100644
+--- a/web-frontend/modules/builder/dataProviderTypes.js
++++ b/web-frontend/modules/builder/dataProviderTypes.js
+@@ -941,7 +941,10 @@ export class UserDataProviderType extends DataProviderType {
+     const { is_authenticated: isAuthenticated, id } =
+       this.getDataContent(applicationContext)
+ 
+-    const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone
++    let timezone = Intl.DateTimeFormat().resolvedOptions().timeZone
++    if (!timezone || timezone.toLowerCase().includes('unknown')) {
++      timezone = 'UTC'
++    }
+ 
+     if (isAuthenticated) {
+       return {

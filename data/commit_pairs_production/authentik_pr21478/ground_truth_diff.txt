@@ -1,0 +1,41 @@
+diff --git a/packages/ak-common/src/arbiter.rs b/packages/ak-common/src/arbiter.rs
+index 0634a1b3b5a3..5f69b5875700 100644
+--- a/packages/ak-common/src/arbiter.rs
++++ b/packages/ak-common/src/arbiter.rs
+@@ -307,12 +307,13 @@ impl From<SignalKind> for Event {
+ mod tests {
+     mod events {
+         use nix::sys::signal::{Signal, raise};
++        use tokio::time::sleep;
+ 
+         use super::super::*;
+ 
+         async fn signal_self(signal: Signal) {
+             raise(signal).expect("failed to send signal");
+-            tokio::time::sleep(Duration::from_millis(50)).await;
++            sleep(Duration::from_millis(50)).await;
+         }
+ 
+         #[tokio::test]
+diff --git a/packages/ak-common/src/config/mod.rs b/packages/ak-common/src/config/mod.rs
+index 8e94d7dc9faf..6ec32a44db77 100644
+--- a/packages/ak-common/src/config/mod.rs
++++ b/packages/ak-common/src/config/mod.rs
+@@ -9,7 +9,7 @@ use arc_swap::ArcSwap;
+ use eyre::Result;
+ use notify::{RecommendedWatcher, Watcher as _};
+ use serde_json::{Map, Value};
+-use tokio::sync::mpsc;
++use tokio::{sync::mpsc, task::spawn_blocking};
+ use tracing::{error, info, warn};
+ use url::Url;
+ 
+@@ -237,7 +237,7 @@ async fn watch_config(arbiter: Arbiter) -> Result<()> {
+                     break;
+                 }
+                 let manager = CONFIG_MANAGER.get().expect("failed to get config, has it been initialized?");
+-                match tokio::task::spawn_blocking(|| Config::load(&manager.config_paths, None)).await? {
++                match spawn_blocking(|| Config::load(&manager.config_paths, None)).await? {
+                     Ok((new_config, _)) => {
+                         info!("configuration reloaded");
+                         manager.config.store(Arc::new(new_config));

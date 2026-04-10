@@ -1,0 +1,1891 @@
+diff --git a/authentik/api/pagination.py b/authentik/api/pagination.py
+index 773f722fc9d4..abd481fede13 100644
+--- a/authentik/api/pagination.py
++++ b/authentik/api/pagination.py
+@@ -1,10 +1,18 @@
+ """Pagination which includes total pages and current page"""
+ 
++from typing import TYPE_CHECKING
++
+ from drf_spectacular.plumbing import build_object_type
+ from rest_framework import pagination
+ from rest_framework.response import Response
+ 
++from authentik.api.search.ql import QLSearch
+ from authentik.api.v3.schema.pagination import PAGINATION
++from authentik.api.v3.schema.search import AUTOCOMPLETE_SCHEMA
++
++if TYPE_CHECKING:
++    from django.db.models import QuerySet
++    from rest_framework.request import Request
+ 
+ 
+ class Pagination(pagination.PageNumberPagination):
+@@ -13,14 +21,14 @@ class Pagination(pagination.PageNumberPagination):
+     page_query_param = "page"
+     page_size_query_param = "page_size"
+ 
+-    def get_page_size(self, request):
++    def get_page_size(self, request: Request) -> int:
+         if self.page_size_query_param in request.query_params:
+             page_size = super().get_page_size(request)
+             if page_size is not None:
+                 return min(super().get_page_size(request), request.tenant.pagination_max_page_size)
+         return request.tenant.pagination_default_page_size
+ 
+-    def get_paginated_response(self, data):
++    def get_paginated_response(self, data) -> Response:
+         previous_page_number = 0
+         if self.page.has_previous():
+             previous_page_number = self.page.previous_page_number()
+@@ -39,16 +47,33 @@ def get_paginated_response(self, data):
+                     "end_index": self.page.end_index(),
+                 },
+                 "results": data,
++                "autocomplete": self.get_autocomplete(),
+             }
+         )
+ 
++    def paginate_queryset(self, queryset: QuerySet, request: Request, view=None):
++        self.view = view
++        return super().paginate_queryset(queryset, request, view)
++
++    def get_autocomplete(self):
++        schema = QLSearch().get_schema(self.request, self.view)
++        introspections = {}
++        if hasattr(self.view, "get_ql_fields"):
++            from authentik.api.search.schema import AKQLSchemaSerializer
++
++            introspections = AKQLSchemaSerializer().serialize(
++                schema(self.page.paginator.object_list.model)
++            )
++        return introspections
++
+     def get_paginated_response_schema(self, schema):
+         return build_object_type(
+             properties={
+                 "pagination": PAGINATION.ref,
+                 "results": schema,
++                "autocomplete": AUTOCOMPLETE_SCHEMA.ref,
+             },
+-            required=["pagination", "results"],
++            required=["pagination", "results", "autocomplete"],
+         )
+ 
+ 
+diff --git a/authentik/enterprise/search/__init__.py b/authentik/api/search/__init__.py
+similarity index 100%
+rename from authentik/enterprise/search/__init__.py
+rename to authentik/api/search/__init__.py
+diff --git a/authentik/enterprise/search/fields.py b/authentik/api/search/fields.py
+similarity index 100%
+rename from authentik/enterprise/search/fields.py
+rename to authentik/api/search/fields.py
+diff --git a/authentik/enterprise/search/ql.py b/authentik/api/search/ql.py
+similarity index 83%
+rename from authentik/enterprise/search/ql.py
+rename to authentik/api/search/ql.py
+index 8d9d0fe50ab6..405e6b8d9cf0 100644
+--- a/authentik/enterprise/search/ql.py
++++ b/authentik/api/search/ql.py
+@@ -1,25 +1,17 @@
+ """DjangoQL search"""
+ 
+-from django.apps import apps
+ from django.db.models import QuerySet
+ from djangoql.ast import Name
+ from djangoql.exceptions import DjangoQLError
+ from djangoql.queryset import apply_search
+ from djangoql.schema import DjangoQLSchema
+-from drf_spectacular.plumbing import ResolvedComponent, build_object_type
+ from rest_framework.filters import SearchFilter
+ from rest_framework.request import Request
+ from structlog.stdlib import get_logger
+ 
+-from authentik.enterprise.search.fields import JSONSearchField
++from authentik.api.search.fields import JSONSearchField
+ 
+ LOGGER = get_logger()
+-AUTOCOMPLETE_SCHEMA = ResolvedComponent(
+-    name="Autocomplete",
+-    object="Autocomplete",
+-    type=ResolvedComponent.SCHEMA,
+-    schema=build_object_type(additionalProperties={}),
+-)
+ 
+ 
+ class BaseSchema(DjangoQLSchema):
+@@ -48,10 +40,6 @@ def __init__(self):
+         super().__init__()
+         self._fallback = SearchFilter()
+ 
+-    @property
+-    def enabled(self):
+-        return apps.get_app_config("authentik_enterprise").enabled()
+-
+     def get_search_terms(self, request: Request) -> str:
+         """Search terms are set by a ?search=... query parameter,
+         and may be comma and/or whitespace delimited."""
+@@ -73,7 +61,7 @@ def get_fields(self, model):
+     def filter_queryset(self, request: Request, queryset: QuerySet, view) -> QuerySet:
+         search_query = self.get_search_terms(request)
+         schema = self.get_schema(request, view)
+-        if len(search_query) == 0 or not self.enabled:
++        if len(search_query) == 0:
+             return self._fallback.filter_queryset(request, queryset, view)
+         try:
+             return apply_search(queryset, search_query, schema=schema)
+diff --git a/authentik/enterprise/search/schema.py b/authentik/api/search/schema.py
+similarity index 66%
+rename from authentik/enterprise/search/schema.py
+rename to authentik/api/search/schema.py
+index a0f57de89456..31d801b5bee5 100644
+--- a/authentik/enterprise/search/schema.py
++++ b/authentik/api/search/schema.py
+@@ -1,8 +1,6 @@
+ from djangoql.serializers import DjangoQLSchemaSerializer
+-from drf_spectacular.generators import SchemaGenerator
+ 
+-from authentik.enterprise.search.fields import JSONSearchField
+-from authentik.enterprise.search.ql import AUTOCOMPLETE_SCHEMA
++from authentik.api.search.fields import JSONSearchField
+ 
+ 
+ class AKQLSchemaSerializer(DjangoQLSchemaSerializer):
+@@ -20,9 +18,3 @@ def serialize_field(self, field):
+         if isinstance(field, JSONSearchField):
+             result["relation"] = field.relation()
+         return result
+-
+-
+-def postprocess_schema_search_autocomplete(result, generator: SchemaGenerator, **kwargs):
+-    generator.registry.register_on_missing(AUTOCOMPLETE_SCHEMA)
+-
+-    return result
+diff --git a/authentik/enterprise/search/tests.py b/authentik/api/tests/test_search.py
+similarity index 93%
+rename from authentik/enterprise/search/tests.py
+rename to authentik/api/tests/test_search.py
+index 55d4fbef1937..a56b2a45bb0e 100644
+--- a/authentik/enterprise/search/tests.py
++++ b/authentik/api/tests/test_search.py
+@@ -1,5 +1,4 @@
+ from json import loads
+-from unittest.mock import PropertyMock, patch
+ from urllib.parse import urlencode
+ 
+ from django.urls import reverse
+@@ -8,10 +7,6 @@
+ from authentik.core.tests.utils import create_test_admin_user
+ 
+ 
+-@patch(
+-    "authentik.enterprise.audit.middleware.EnterpriseAuditMiddleware.enabled",
+-    PropertyMock(return_value=True),
+-)
+ class QLTest(APITestCase):
+ 
+     def setUp(self):
+diff --git a/authentik/api/v3/schema/search.py b/authentik/api/v3/schema/search.py
+new file mode 100644
+index 000000000000..e64593581c49
+--- /dev/null
++++ b/authentik/api/v3/schema/search.py
+@@ -0,0 +1,20 @@
++from typing import TYPE_CHECKING
++
++from drf_spectacular.plumbing import ResolvedComponent, build_object_type
++
++if TYPE_CHECKING:
++    from drf_spectacular.generators import SchemaGenerator
++
++
++AUTOCOMPLETE_SCHEMA = ResolvedComponent(
++    name="Autocomplete",
++    object="Autocomplete",
++    type=ResolvedComponent.SCHEMA,
++    schema=build_object_type(additionalProperties={}),
++)
++
++
++def postprocess_schema_search_autocomplete(result, generator: SchemaGenerator, **kwargs):
++    generator.registry.register_on_missing(AUTOCOMPLETE_SCHEMA)
++
++    return result
+diff --git a/authentik/core/api/groups.py b/authentik/core/api/groups.py
+index 8675ccdf41e7..f3e7427faa88 100644
+--- a/authentik/core/api/groups.py
++++ b/authentik/core/api/groups.py
+@@ -7,6 +7,7 @@
+ from django.utils.translation import gettext as _
+ from django_filters.filters import CharFilter, ModelMultipleChoiceFilter
+ from django_filters.filterset import FilterSet
++from djangoql.schema import BoolField, StrField
+ from drf_spectacular.utils import (
+     OpenApiParameter,
+     OpenApiResponse,
+@@ -25,6 +26,9 @@
+ from rest_framework.viewsets import ModelViewSet
+ 
+ from authentik.api.authentication import TokenAuthentication
++from authentik.api.search.fields import (
++    JSONSearchField,
++)
+ from authentik.api.validation import validate
+ from authentik.core.api.used_by import UsedByMixin
+ from authentik.core.api.utils import JSONDictField, ModelSerializer, PassiveSerializer
+@@ -265,12 +269,6 @@ class UserAccountSerializer(PassiveSerializer):
+     ]
+ 
+     def get_ql_fields(self):
+-        from djangoql.schema import BoolField, StrField
+-
+-        from authentik.enterprise.search.fields import (
+-            JSONSearchField,
+-        )
+-
+         return [
+             StrField(Group, "name"),
+             BoolField(Group, "is_superuser", nullable=True),
+diff --git a/authentik/core/api/users.py b/authentik/core/api/users.py
+index 8041017431e8..eaa23b99ac3e 100644
+--- a/authentik/core/api/users.py
++++ b/authentik/core/api/users.py
+@@ -22,6 +22,7 @@
+     UUIDFilter,
+ )
+ from django_filters.filterset import FilterSet
++from djangoql.schema import BoolField, StrField
+ from drf_spectacular.types import OpenApiTypes
+ from drf_spectacular.utils import (
+     OpenApiParameter,
+@@ -55,6 +56,10 @@
+ from structlog.stdlib import get_logger
+ 
+ from authentik.api.authentication import TokenAuthentication
++from authentik.api.search.fields import (
++    ChoiceSearchField,
++    JSONSearchField,
++)
+ from authentik.api.validation import validate
+ from authentik.blueprints.v1.importer import SERIALIZER_CONTEXT_BLUEPRINT
+ from authentik.brands.models import Brand
+@@ -524,13 +529,6 @@ class UserViewSet(
+     ]
+ 
+     def get_ql_fields(self):
+-        from djangoql.schema import BoolField, StrField
+-
+-        from authentik.enterprise.search.fields import (
+-            ChoiceSearchField,
+-            JSONSearchField,
+-        )
+-
+         return [
+             StrField(User, "username"),
+             StrField(User, "name"),
+diff --git a/authentik/enterprise/search/apps.py b/authentik/enterprise/search/apps.py
+deleted file mode 100644
+index 0fc58b0b867d..000000000000
+--- a/authentik/enterprise/search/apps.py
++++ /dev/null
+@@ -1,12 +0,0 @@
+-"""Enterprise app config"""
+-
+-from authentik.enterprise.apps import EnterpriseConfig
+-
+-
+-class AuthentikEnterpriseSearchConfig(EnterpriseConfig):
+-    """Enterprise app config"""
+-
+-    name = "authentik.enterprise.search"
+-    label = "authentik_search"
+-    verbose_name = "authentik Enterprise.Search"
+-    default = True
+diff --git a/authentik/enterprise/search/pagination.py b/authentik/enterprise/search/pagination.py
+deleted file mode 100644
+index ab5015b55032..000000000000
+--- a/authentik/enterprise/search/pagination.py
++++ /dev/null
+@@ -1,51 +0,0 @@
+-from rest_framework.response import Response
+-
+-from authentik.api.pagination import Pagination
+-from authentik.enterprise.search.ql import AUTOCOMPLETE_SCHEMA, QLSearch
+-
+-
+-class AutocompletePagination(Pagination):
+-
+-    def paginate_queryset(self, queryset, request, view=None):
+-        self.view = view
+-        return super().paginate_queryset(queryset, request, view)
+-
+-    def get_autocomplete(self):
+-        schema = QLSearch().get_schema(self.request, self.view)
+-        introspections = {}
+-        if hasattr(self.view, "get_ql_fields"):
+-            from authentik.enterprise.search.schema import AKQLSchemaSerializer
+-
+-            introspections = AKQLSchemaSerializer().serialize(
+-                schema(self.page.paginator.object_list.model)
+-            )
+-        return introspections
+-
+-    def get_paginated_response(self, data):
+-        previous_page_number = 0
+-        if self.page.has_previous():
+-            previous_page_number = self.page.previous_page_number()
+-        next_page_number = 0
+-        if self.page.has_next():
+-            next_page_number = self.page.next_page_number()
+-        return Response(
+-            {
+-                "pagination": {
+-                    "next": next_page_number,
+-                    "previous": previous_page_number,
+-                    "count": self.page.paginator.count,
+-                    "current": self.page.number,
+-                    "total_pages": self.page.paginator.num_pages,
+-                    "start_index": self.page.start_index(),
+-                    "end_index": self.page.end_index(),
+-                },
+-                "results": data,
+-                "autocomplete": self.get_autocomplete(),
+-            }
+-        )
+-
+-    def get_paginated_response_schema(self, schema):
+-        final_schema = super().get_paginated_response_schema(schema)
+-        final_schema["properties"]["autocomplete"] = AUTOCOMPLETE_SCHEMA.ref
+-        final_schema["required"].append("autocomplete")
+-        return final_schema
+diff --git a/authentik/enterprise/search/settings.py b/authentik/enterprise/search/settings.py
+deleted file mode 100644
+index 977ba9692815..000000000000
+--- a/authentik/enterprise/search/settings.py
++++ /dev/null
+@@ -1,20 +0,0 @@
+-SPECTACULAR_SETTINGS = {
+-    "POSTPROCESSING_HOOKS": [
+-        "authentik.api.v3.schema.response.postprocess_schema_register",
+-        "authentik.api.v3.schema.response.postprocess_schema_responses",
+-        "authentik.api.v3.schema.query.postprocess_schema_query_params",
+-        "authentik.api.v3.schema.cleanup.postprocess_schema_remove_unused",
+-        "authentik.enterprise.search.schema.postprocess_schema_search_autocomplete",
+-        "authentik.api.v3.schema.enum.postprocess_schema_enums",
+-    ],
+-}
+-
+-REST_FRAMEWORK = {
+-    "DEFAULT_PAGINATION_CLASS": "authentik.enterprise.search.pagination.AutocompletePagination",
+-    "DEFAULT_FILTER_BACKENDS": [
+-        "authentik.enterprise.search.ql.QLSearch",
+-        "authentik.rbac.filters.ObjectFilter",
+-        "django_filters.rest_framework.DjangoFilterBackend",
+-        "rest_framework.filters.OrderingFilter",
+-    ],
+-}
+diff --git a/authentik/enterprise/settings.py b/authentik/enterprise/settings.py
+index 849cb43aa856..555dd1148381 100644
+--- a/authentik/enterprise/settings.py
++++ b/authentik/enterprise/settings.py
+@@ -14,7 +14,6 @@
+     "authentik.enterprise.providers.ssf",
+     "authentik.enterprise.providers.ws_federation",
+     "authentik.enterprise.reports",
+-    "authentik.enterprise.search",
+     "authentik.enterprise.stages.authenticator_endpoint_gdtc",
+     "authentik.enterprise.stages.mtls",
+     "authentik.enterprise.stages.source",
+diff --git a/authentik/events/api/events.py b/authentik/events/api/events.py
+index a489f6871955..84733ecb0a32 100644
+--- a/authentik/events/api/events.py
++++ b/authentik/events/api/events.py
+@@ -11,6 +11,8 @@
+ from django.db.models.query_utils import Q
+ from django.utils.text import slugify
+ from django.utils.timezone import now
++from djangoql.schema import DateTimeField as QLDateTimeFIeld
++from djangoql.schema import IntField, StrField
+ from drf_spectacular.types import OpenApiTypes
+ from drf_spectacular.utils import OpenApiParameter, extend_schema
+ from guardian.shortcuts import get_objects_for_user
+@@ -27,6 +29,7 @@
+ from rest_framework.response import Response
+ from rest_framework.viewsets import ModelViewSet
+ 
++from authentik.api.search.fields import ChoiceSearchField, JSONSearchField
+ from authentik.api.validation import validate
+ from authentik.core.api.object_types import TypeCreateSerializer
+ from authentik.core.api.utils import ModelSerializer, PassiveSerializer
+@@ -171,10 +174,6 @@ class EventStatsParameters(PassiveSerializer):
+     filterset_class = EventsFilter
+ 
+     def get_ql_fields(self):
+-        from djangoql.schema import DateTimeField, IntField, StrField
+-
+-        from authentik.enterprise.search.fields import ChoiceSearchField, JSONSearchField
+-
+         return [
+             ChoiceSearchField(Event, "action"),
+             StrField(Event, "event_uuid"),
+@@ -216,7 +215,7 @@ def get_ql_fields(self):
+                     ),
+                 ),
+             ),
+-            DateTimeField(Event, "created", suggest_options=True),
++            QLDateTimeFIeld(Event, "created", suggest_options=True),
+         ]
+ 
+     @extend_schema(
+diff --git a/authentik/rbac/tests/test_api_permissions_roles.py b/authentik/rbac/tests/test_api_permissions_roles.py
+index 0ad001450030..92308de24c05 100644
+--- a/authentik/rbac/tests/test_api_permissions_roles.py
++++ b/authentik/rbac/tests/test_api_permissions_roles.py
+@@ -49,6 +49,7 @@ def test_list_role(self):
+         self.assertJSONEqual(
+             res.content,
+             {
++                "autocomplete": {},
+                 "pagination": {
+                     "next": 0,
+                     "previous": 0,
+diff --git a/authentik/root/settings.py b/authentik/root/settings.py
+index c65ccffb2459..ca05a5d41c97 100644
+--- a/authentik/root/settings.py
++++ b/authentik/root/settings.py
+@@ -208,6 +208,7 @@
+         "authentik.api.v3.schema.response.postprocess_schema_responses",
+         "authentik.api.v3.schema.query.postprocess_schema_query_params",
+         "authentik.api.v3.schema.cleanup.postprocess_schema_remove_unused",
++        "authentik.api.v3.schema.search.postprocess_schema_search_autocomplete",
+         "authentik.api.v3.schema.enum.postprocess_schema_enums",
+     ],
+ }
+@@ -215,10 +216,10 @@
+ REST_FRAMEWORK = {
+     "DEFAULT_PAGINATION_CLASS": "authentik.api.pagination.Pagination",
+     "DEFAULT_FILTER_BACKENDS": [
++        "authentik.api.search.ql.QLSearch",
+         "authentik.rbac.filters.ObjectFilter",
+         "django_filters.rest_framework.DjangoFilterBackend",
+         "rest_framework.filters.OrderingFilter",
+-        "rest_framework.filters.SearchFilter",
+     ],
+     "DEFAULT_PERMISSION_CLASSES": ("authentik.rbac.permissions.ObjectPermissions",),
+     "DEFAULT_AUTHENTICATION_CLASSES": (
+diff --git a/blueprints/schema.json b/blueprints/schema.json
+index 8b7c62e9c9ad..663af89beefe 100644
+--- a/blueprints/schema.json
++++ b/blueprints/schema.json
+@@ -8934,7 +8934,6 @@
+                         "authentik.enterprise.providers.ssf",
+                         "authentik.enterprise.providers.ws_federation",
+                         "authentik.enterprise.reports",
+-                        "authentik.enterprise.search",
+                         "authentik.enterprise.stages.authenticator_endpoint_gdtc",
+                         "authentik.enterprise.stages.mtls",
+                         "authentik.enterprise.stages.source"
+diff --git a/packages/client-go/model_app_enum.go b/packages/client-go/model_app_enum.go
+index af645bba9bec..15bbb9fc1dda 100644
+--- a/packages/client-go/model_app_enum.go
++++ b/packages/client-go/model_app_enum.go
+@@ -97,7 +97,6 @@ const (
+ 	APPENUM_AUTHENTIK_ENTERPRISE_PROVIDERS_SSF                      AppEnum = "authentik.enterprise.providers.ssf"
+ 	APPENUM_AUTHENTIK_ENTERPRISE_PROVIDERS_WS_FEDERATION            AppEnum = "authentik.enterprise.providers.ws_federation"
+ 	APPENUM_AUTHENTIK_ENTERPRISE_REPORTS                            AppEnum = "authentik.enterprise.reports"
+-	APPENUM_AUTHENTIK_ENTERPRISE_SEARCH                             AppEnum = "authentik.enterprise.search"
+ 	APPENUM_AUTHENTIK_ENTERPRISE_STAGES_AUTHENTICATOR_ENDPOINT_GDTC AppEnum = "authentik.enterprise.stages.authenticator_endpoint_gdtc"
+ 	APPENUM_AUTHENTIK_ENTERPRISE_STAGES_MTLS                        AppEnum = "authentik.enterprise.stages.mtls"
+ 	APPENUM_AUTHENTIK_ENTERPRISE_STAGES_SOURCE                      AppEnum = "authentik.enterprise.stages.source"
+@@ -181,7 +180,6 @@ var AllowedAppEnumEnumValues = []AppEnum{
+ 	"authentik.enterprise.providers.ssf",
+ 	"authentik.enterprise.providers.ws_federation",
+ 	"authentik.enterprise.reports",
+-	"authentik.enterprise.search",
+ 	"authentik.enterprise.stages.authenticator_endpoint_gdtc",
+ 	"authentik.enterprise.stages.mtls",
+ 	"authentik.enterprise.stages.source",
+diff --git a/packages/client-go/model_paginated_extra_role_object_permission_list.go b/packages/client-go/model_paginated_extra_role_object_permission_list.go
+index 2be30099d492..539603fb9e1c 100644
+--- a/packages/client-go/model_paginated_extra_role_object_permission_list.go
++++ b/packages/client-go/model_paginated_extra_role_object_permission_list.go
+@@ -23,6 +23,7 @@ var _ MappedNullable = &PaginatedExtraRoleObjectPermissionList{}
+ type PaginatedExtraRoleObjectPermissionList struct {
+ 	Pagination           Pagination                  `json:"pagination"`
+ 	Results              []ExtraRoleObjectPermission `json:"results"`
++	Autocomplete         map[string]interface{}      `json:"autocomplete"`
+ 	AdditionalProperties map[string]interface{}
+ }
+ 
+@@ -32,10 +33,11 @@ type _PaginatedExtraRoleObjectPermissionList PaginatedExtraRoleObjectPermissionL
+ // This constructor will assign default values to properties that have it defined,
+ // and makes sure properties required by API are set, but the set of arguments
+ // will change when the set of required properties is changed
+-func NewPaginatedExtraRoleObjectPermissionList(pagination Pagination, results []ExtraRoleObjectPermission) *PaginatedExtraRoleObjectPermissionList {
++func NewPaginatedExtraRoleObjectPermissionList(pagination Pagination, results []ExtraRoleObjectPermission, autocomplete map[string]interface{}) *PaginatedExtraRoleObjectPermissionList {
+ 	this := PaginatedExtraRoleObjectPermissionList{}
+ 	this.Pagination = pagination
+ 	this.Results = results
++	this.Autocomplete = autocomplete
+ 	return &this
+ }
+ 
+@@ -95,6 +97,30 @@ func (o *PaginatedExtraRoleObjectPermissionList) SetResults(v []ExtraRoleObjectP
+ 	o.Results = v
+ }
+ 
++// GetAutocomplete returns the Autocomplete field value
++func (o *PaginatedExtraRoleObjectPermissionList) GetAutocomplete() map[string]interface{} {
++	if o == nil {
++		var ret map[string]interface{}
++		return ret
++	}
++
++	return o.Autocomplete
++}
++
++// GetAutocompleteOk returns a tuple with the Autocomplete field value
++// and a boolean to check if the value has been set.
++func (o *PaginatedExtraRoleObjectPermissionList) GetAutocompleteOk() (map[string]interface{}, bool) {
++	if o == nil {
++		return map[string]interface{}{}, false
++	}
++	return o.Autocomplete, true
++}
++
++// SetAutocomplete sets field value
++func (o *PaginatedExtraRoleObjectPermissionList) SetAutocomplete(v map[string]interface{}) {
++	o.Autocomplete = v
++}
++
+ func (o PaginatedExtraRoleObjectPermissionList) MarshalJSON() ([]byte, error) {
+ 	toSerialize, err := o.ToMap()
+ 	if err != nil {
+@@ -107,6 +133,7 @@ func (o PaginatedExtraRoleObjectPermissionList) ToMap() (map[string]interface{},
+ 	toSerialize := map[string]interface{}{}
+ 	toSerialize["pagination"] = o.Pagination
+ 	toSerialize["results"] = o.Results
++	toSerialize["autocomplete"] = o.Autocomplete
+ 
+ 	for key, value := range o.AdditionalProperties {
+ 		toSerialize[key] = value
+@@ -122,6 +149,7 @@ func (o *PaginatedExtraRoleObjectPermissionList) UnmarshalJSON(data []byte) (err
+ 	requiredProperties := []string{
+ 		"pagination",
+ 		"results",
++		"autocomplete",
+ 	}
+ 
+ 	allProperties := make(map[string]interface{})
+@@ -153,6 +181,7 @@ func (o *PaginatedExtraRoleObjectPermissionList) UnmarshalJSON(data []byte) (err
+ 	if err = json.Unmarshal(data, &additionalProperties); err == nil {
+ 		delete(additionalProperties, "pagination")
+ 		delete(additionalProperties, "results")
++		delete(additionalProperties, "autocomplete")
+ 		o.AdditionalProperties = additionalProperties
+ 	}
+ 
+diff --git a/packages/client-rust/src/models/app_enum.rs b/packages/client-rust/src/models/app_enum.rs
+index 66fcaf32eab0..c97a01832488 100644
+--- a/packages/client-rust/src/models/app_enum.rs
++++ b/packages/client-rust/src/models/app_enum.rs
+@@ -165,8 +165,6 @@ pub enum AppEnum {
+     AuthentikEnterpriseProvidersWsFederation,
+     #[serde(rename = "authentik.enterprise.reports")]
+     AuthentikEnterpriseReports,
+-    #[serde(rename = "authentik.enterprise.search")]
+-    AuthentikEnterpriseSearch,
+     #[serde(rename = "authentik.enterprise.stages.authenticator_endpoint_gdtc")]
+     AuthentikEnterpriseStagesAuthenticatorEndpointGdtc,
+     #[serde(rename = "authentik.enterprise.stages.mtls")]
+@@ -290,7 +288,6 @@ impl std::fmt::Display for AppEnum {
+                 write!(f, "authentik.enterprise.providers.ws_federation")
+             }
+             Self::AuthentikEnterpriseReports => write!(f, "authentik.enterprise.reports"),
+-            Self::AuthentikEnterpriseSearch => write!(f, "authentik.enterprise.search"),
+             Self::AuthentikEnterpriseStagesAuthenticatorEndpointGdtc => {
+                 write!(f, "authentik.enterprise.stages.authenticator_endpoint_gdtc")
+             }
+diff --git a/packages/client-rust/src/models/paginated_extra_role_object_permission_list.rs b/packages/client-rust/src/models/paginated_extra_role_object_permission_list.rs
+index 5074945357c9..e3c57893d440 100644
+--- a/packages/client-rust/src/models/paginated_extra_role_object_permission_list.rs
++++ b/packages/client-rust/src/models/paginated_extra_role_object_permission_list.rs
+@@ -16,16 +16,20 @@ pub struct PaginatedExtraRoleObjectPermissionList {
+     pub pagination: models::Pagination,
+     #[serde(rename = "results")]
+     pub results: Vec<models::ExtraRoleObjectPermission>,
++    #[serde(rename = "autocomplete")]
++    pub autocomplete: std::collections::HashMap<String, serde_json::Value>,
+ }
+ 
+ impl PaginatedExtraRoleObjectPermissionList {
+     pub fn new(
+         pagination: models::Pagination,
+         results: Vec<models::ExtraRoleObjectPermission>,
++        autocomplete: std::collections::HashMap<String, serde_json::Value>,
+     ) -> PaginatedExtraRoleObjectPermissionList {
+         PaginatedExtraRoleObjectPermissionList {
+             pagination,
+             results,
++            autocomplete,
+         }
+     }
+ }
+diff --git a/packages/client-ts/src/models/AppEnum.ts b/packages/client-ts/src/models/AppEnum.ts
+index 05b0b782e60b..5ceabeda7ad4 100644
+--- a/packages/client-ts/src/models/AppEnum.ts
++++ b/packages/client-ts/src/models/AppEnum.ts
+@@ -94,7 +94,6 @@ export const AppEnum = {
+     AuthentikEnterpriseProvidersSsf: "authentik.enterprise.providers.ssf",
+     AuthentikEnterpriseProvidersWsFederation: "authentik.enterprise.providers.ws_federation",
+     AuthentikEnterpriseReports: "authentik.enterprise.reports",
+-    AuthentikEnterpriseSearch: "authentik.enterprise.search",
+     AuthentikEnterpriseStagesAuthenticatorEndpointGdtc:
+         "authentik.enterprise.stages.authenticator_endpoint_gdtc",
+     AuthentikEnterpriseStagesMtls: "authentik.enterprise.stages.mtls",
+diff --git a/packages/client-ts/src/models/PaginatedExtraRoleObjectPermissionList.ts b/packages/client-ts/src/models/PaginatedExtraRoleObjectPermissionList.ts
+index f37a47dc69f7..74df0b67026c 100644
+--- a/packages/client-ts/src/models/PaginatedExtraRoleObjectPermissionList.ts
++++ b/packages/client-ts/src/models/PaginatedExtraRoleObjectPermissionList.ts
+@@ -38,6 +38,12 @@ export interface PaginatedExtraRoleObjectPermissionList {
+      * @memberof PaginatedExtraRoleObjectPermissionList
+      */
+     results: Array<ExtraRoleObjectPermission>;
++    /**
++     *
++     * @type {{ [key: string]: any; }}
++     * @memberof PaginatedExtraRoleObjectPermissionList
++     */
++    autocomplete: { [key: string]: any };
+ }
+ 
+ /**
+@@ -48,6 +54,7 @@ export function instanceOfPaginatedExtraRoleObjectPermissionList(
+ ): value is PaginatedExtraRoleObjectPermissionList {
+     if (!("pagination" in value) || value["pagination"] === undefined) return false;
+     if (!("results" in value) || value["results"] === undefined) return false;
++    if (!("autocomplete" in value) || value["autocomplete"] === undefined) return false;
+     return true;
+ }
+ 
+@@ -67,6 +74,7 @@ export function PaginatedExtraRoleObjectPermissionListFromJSONTyped(
+     return {
+         pagination: PaginationFromJSON(json["pagination"]),
+         results: (json["results"] as Array<any>).map(ExtraRoleObjectPermissionFromJSON),
++        autocomplete: json["autocomplete"],
+     };
+ }
+ 
+@@ -87,5 +95,6 @@ export function PaginatedExtraRoleObjectPermissionListToJSONTyped(
+     return {
+         pagination: PaginationToJSON(value["pagination"]),
+         results: (value["results"] as Array<any>).map(ExtraRoleObjectPermissionToJSON),
++        autocomplete: value["autocomplete"],
+     };
+ }
+diff --git a/schema.yml b/schema.yml
+index 7ac46018a281..49ef628cf12d 100644
+--- a/schema.yml
++++ b/schema.yml
+@@ -33756,7 +33756,6 @@ components:
+       - authentik.enterprise.providers.ssf
+       - authentik.enterprise.providers.ws_federation
+       - authentik.enterprise.reports
+-      - authentik.enterprise.search
+       - authentik.enterprise.stages.authenticator_endpoint_gdtc
+       - authentik.enterprise.stages.mtls
+       - authentik.enterprise.stages.source
+@@ -44282,9 +44281,9 @@ components:
+         autocomplete:
+           $ref: '#/components/schemas/Autocomplete'
+       required:
++      - autocomplete
+       - pagination
+       - results
+-      - autocomplete
+     PaginatedApplicationEntitlementList:
+       type: object
+       properties:
+@@ -44297,9 +44296,9 @@ components:
+         autocomplete:
+           $ref: '#/components/schemas/Autocomplete'
+       required:
++      - autocomplete
+       - pagination
+       - results
+-      - autocomplete
+     PaginatedApplicationList:
+       type: object
+       properties:
+@@ -44312,9 +44311,9 @@ components:
+         autocomplete:
+           $ref: '#/components/schemas/Autocomplete'
+       required:
++      - autocomplete
+       - pagination
+       - results
+-      - autocomplete
+     PaginatedAuthenticatedSessionList:
+       type: object
+       properties:
+@@ -44327,9 +44326,9 @@ components:
+         autocomplete:
+           $ref: '#/components/schemas/Autocomplete'
+       required:
++      - autocomplete
+       - pagination
+       - results
+-      - autocomplete
+     PaginatedAuthenticatorDuoStageList:
+       type: object
+       properties:
+@@ -44342,9 +44341,9 @@ components:
+         autocomplete:
+           $ref: '#/components/schemas/Autocomplete'
+       required:
++      - autocomplete
+       - pagination
+       - results
+-      - autocomplete
+     PaginatedAuthenticatorEmailStageList:
+       type: object
+       properties:
+@@ -44357,9 +44356,9 @@ components:
+         autocomplete:
+           $ref: '#/components/schemas/Autocomplete'
+       required:
++      - autocomplete
+       - pagination
+       - results
+-      - autocomplete
+     PaginatedAuthenticatorEndpointGDTCStageList:
+       type: object
+       properties:
+@@ -44372,9 +44371,9 @@ components:
+         autocomplete:
+           $ref: '#/components/schemas/Autocomplete'
+       required:
++      - autocomplete
+       - pagination
+       - results
+-      - autocomplete
+     PaginatedAuthenticatorSMSStageList:
+       type: object
+       properties:
+@@ -44387,9 +44386,9 @@ components:
+         autocomplete:
+           $ref: '#/components/schemas/Autocomplete'
+       required:
++      - autocomplete
+       - pagination
+       - results
+-      - autocomplete
+     PaginatedAuthenticatorStaticStageList:
+       type: object
+       properties:
+@@ -44402,9 +44401,9 @@ components:
+         autocomplete:
+           $ref: '#/components/schemas/Autocomplete'
+       required:
++      - autocomplete
+       - pagination
+       - results
+-      - autocomplete
+     PaginatedAuthenticatorTOTPStageList:
+       type: object
+       properties:
+@@ -44417,9 +44416,9 @@ components:
+         autocomplete:
+           $ref: '#/components/schemas/Autocomplete'
+       required:
++      - autocomplete
+       - pagination
+       - results
+-      - autocomplete
+     PaginatedAuthenticatorValidateStageList:
+       type: object
+       properties:
+@@ -44432,9 +44431,9 @@ components:
+         autocomplete:
+           $ref: '#/components/schemas/Autocomplete'
+       required:
++      - autocomplete
+       - pagination
+       - results
+-      - autocomplete
+     PaginatedAuthenticatorWebAuthnStageList:
+       type: object
+       properties:
+@@ -44447,9 +44446,9 @@ components:
+         autocomplete:
+           $ref: '#/components/schemas/Autocomplete'
+       required:
++      - autocomplete
+       - pagination
+       - results
+-      - autocomplete
+     PaginatedBlueprintInstanceList:
+       type: object
+       properties:
+@@ -44462,9 +44461,9 @@ components:
+         autocomplete:
+           $ref: '#/components/schemas/Autocomplete'
+       required:
++      - autocomplete
+       - pagination
+       - results
+-      - autocomplete
+     PaginatedBrandList:
+       type: object
+       properties:
+@@ -44477,9 +44476,9 @@ components:
+         autocomplete:
+           $ref: '#/components/schemas/Autocomplete'
+       required:
++      - autocomplete
+       - pagination
+       - results
+-      - autocomplete
+     PaginatedCaptchaStageList:
+       type: object
+       properties:
+@@ -44492,9 +44491,9 @@ components:
+         autocomplete:
+           $ref: '#/components/schemas/Autocomplete'
+       required:
++      - autocomplete
+       - pagination
+       - results
+-      - autocomplete
+     PaginatedCertificateKeyPairList:
+       type: object
+       properties:
+@@ -44507,9 +44506,9 @@ components:
+         autocomplete:
+           $ref: '#/components/schemas/Autocomplete'
+       required:
++      - autocomplete
+       - pagination
+       - results
+-      - autocomplete
+     PaginatedConnectionTokenList:
+       type: object
+       properties:
+@@ -44522,9 +44521,9 @@ components:
+         autocomplete:
+           $ref: '#/components/schemas/Autocomplete'
+       required:
++      - autocomplete
+       - pagination
+       - results
+-      - autocomplete
+     PaginatedConnectorList:
+       type: object
+       properties:
+@@ -44537,9 +44536,9 @@ components:
+         autocomplete:
+           $ref: '#/components/schemas/Autocomplete'
+       required:
++      - autocomplete
+       - pagination
+       - results
+-      - autocomplete
+     PaginatedConsentStageList:
+       type: object
+       properties:
+@@ -44552,9 +44551,9 @@ components:
+         autocomplete:
+           $ref: '#/components/schemas/Autocomplete'
+       required:
++      - autocomplete
+       - pagination
+       - results
+-      - autocomplete
+     PaginatedDataExportList:
+       type: object
+       properties:
+@@ -44567,9 +44566,9 @@ components:
+         autocomplete:
+           $ref: '#/components/schemas/Autocomplete'
+       required:
++      - autocomplete
+       - pagination
+       - results
+-      - autocomplete
+     PaginatedDenyStageList:
+       type: object
+       properties:
+@@ -44582,9 +44581,9 @@ components:
+         autocomplete:
+           $ref: '#/components/schemas/Autocomplete'
+       required:
++      - autocomplete
+       - pagination
+       - results
+-      - autocomplete
+     PaginatedDeviceAccessGroupList:
+       type: object
+       properties:
+@@ -44597,9 +44596,9 @@ components:
+         autocomplete:
+           $ref: '#/components/schemas/Autocomplete'
+       required:
++      - autocomplete
+       - pagination
+       - results
+-      - autocomplete
+     PaginatedDeviceUserBindingList:
+       type: object
+       properties:
+@@ -44612,9 +44611,9 @@ components:
+         autocomplete:
+           $ref: '#/components/schemas/Autocomplete'
+       required:
++      - autocomplete
+       - pagination
+       - results
+-      - autocomplete
+     PaginatedDockerServiceConnectionList:
+       type: object
+       properties:
+@@ -44627,9 +44626,9 @@ components:
+         autocomplete:
+           $ref: '#/components/schemas/Autocomplete'
+       required:
++      - autocomplete
+       - pagination
+       - results
+-      - autocomplete
+     PaginatedDomainList:
+       type: object
+       properties:
+@@ -44642,9 +44641,9 @@ components:
+         autocomplete:
+           $ref: '#/components/schemas/Autocomplete'
+       required:
++      - autocomplete
+       - pagination
+       - results
+-      - autocomplete
+     PaginatedDummyPolicyList:
+       type: object
+       properties:
+@@ -44657,9 +44656,9 @@ components:
+         autocomplete:
+           $ref: '#/components/schemas/Autocomplete'
+       required:
++      - autocomplete
+       - pagination
+       - results
+-      - autocomplete
+     PaginatedDummyStageList:
+       type: object
+       properties:
+@@ -44672,9 +44671,9 @@ components:
+         autocomplete:
+           $ref: '#/components/schemas/Autocomplete'
+       required:
++      - autocomplete
+       - pagination
+       - results
+-      - autocomplete
+     PaginatedDuoDeviceList:
+       type: object
+       properties:
+@@ -44687,9 +44686,9 @@ components:
+         autocomplete:
+           $ref: '#/components/schemas/Autocomplete'
+       required:
++      - autocomplete
+       - pagination
+       - results
+-      - autocomplete
+     PaginatedEmailDeviceList:
+       type: object
+       properties:
+@@ -44702,9 +44701,9 @@ components:
+         autocomplete:
+           $ref: '#/components/schemas/Autocomplete'
+       required:
++      - autocomplete
+       - pagination
+       - results
+-      - autocomplete
+     PaginatedEmailStageList:
+       type: object
+       properties:
+@@ -44717,9 +44716,9 @@ components:
+         autocomplete:
+           $ref: '#/components/schemas/Autocomplete'
+       required:
++      - autocomplete
+       - pagination
+       - results
+-      - autocomplete
+     PaginatedEndpointDeviceList:
+       type: object
+       properties:
+@@ -44732,9 +44731,9 @@ components:
+         autocomplete:
+           $ref: '#/components/schemas/Autocomplete'
+       required:
++      - autocomplete
+       - pagination
+       - results
+-      - autocomplete
+     PaginatedEndpointList:
+       type: object
+       properties:
+@@ -44747,9 +44746,9 @@ components:
+         autocomplete:
+           $ref: '#/components/schemas/Autocomplete'
+       required:
++      - autocomplete
+       - pagination
+       - results
+-      - autocomplete
+     PaginatedEndpointStageList:
+       type: object
+       properties:
+@@ -44762,9 +44761,9 @@ components:
+         autocomplete:
+           $ref: '#/components/schemas/Autocomplete'
+       required:
++      - autocomplete
+       - pagination
+       - results
+-      - autocomplete
+     PaginatedEnrollmentTokenList:
+       type: object
+       properties:
+@@ -44777,9 +44776,9 @@ components:
+         autocomplete:
+           $ref: '#/components/schemas/Autocomplete'
+       required:
++      - autocomplete
+       - pagination
+       - results
+-      - autocomplete
+     PaginatedEventList:
+       type: object
+       properties:
+@@ -44792,9 +44791,9 @@ components:
+         autocomplete:
+           $ref: '#/components/schemas/Autocomplete'
+       required:
++      - autocomplete
+       - pagination
+       - results
+-      - autocomplete
+     PaginatedEventMatcherPolicyList:
+       type: object
+       properties:
+@@ -44807,9 +44806,9 @@ components:
+         autocomplete:
+           $ref: '#/components/schemas/Autocomplete'
+       required:
++      - autocomplete
+       - pagination
+       - results
+-      - autocomplete
+     PaginatedExpiringBaseGrantModelList:
+       type: object
+       properties:
+@@ -44822,9 +44821,9 @@ components:
+         autocomplete:
+           $ref: '#/components/schemas/Autocomplete'
+       required:
++      - autocomplete
+       - pagination
+       - results
+-      - autocomplete
+     PaginatedExpressionPolicyList:
+       type: object
+       properties:
+@@ -44837,9 +44836,9 @@ components:
+         autocomplete:
+           $ref: '#/components/schemas/Autocomplete'
+       required:
++      - autocomplete
+       - pagination
+       - results
+-      - autocomplete
+     PaginatedExtraRoleObjectPermissionList:
+       type: object
+       properties:
+@@ -44849,7 +44848,10 @@ components:
+           type: array
+           items:
+             $ref: '#/components/schemas/ExtraRoleObjectPermission'
++        autocomplete:
++          $ref: '#/components/schemas/Autocomplete'
+       required:
++      - autocomplete
+       - pagination
+       - results
+     PaginatedFleetConnectorList:
+@@ -44864,9 +44866,9 @@ components:
+         autocomplete:
+           $ref: '#/components/schemas/Autocomplete'
+       required:
++      - autocomplete
+       - pagination
+       - results
+-      - autocomplete
+     PaginatedFlowList:
+       type: object
+       properties:
+@@ -44879,9 +44881,9 @@ components:
+         autocomplete:
+           $ref: '#/components/schemas/Autocomplete'
+       required:
++      - autocomplete
+       - pagination
+       - results
+-      - autocomplete
+     PaginatedFlowStageBindingList:
+       type: object
+       properties:
+@@ -44894,9 +44896,9 @@ components:
+         autocomplete:
+           $ref: '#/components/schemas/Autocomplete'
+       required:
++      - autocomplete
+       - pagination
+       - results
+-      - autocomplete
+     PaginatedGeoIPPolicyList:
+       type: object
+       properties:
+@@ -44909,9 +44911,9 @@ components:
+         autocomplete:
+           $ref: '#/components/schemas/Autocomplete'
+       required:
++      - autocomplete
+       - pagination
+       - results
+-      - autocomplete
+     PaginatedGoogleChromeConnectorList:
+       type: object
+       properties:
+@@ -44924,9 +44926,9 @@ components:
+         autocomplete:
+           $ref: '#/components/schemas/Autocomplete'
+       required:
++      - autocomplete
+       - pagination
+       - results
+-      - autocomplete
+     PaginatedGoogleEndpointDeviceList:
+       type: object
+       properties:
+@@ -44939,9 +44941,9 @@ components:
+         autocomplete:
+           $ref: '#/components/schemas/Autocomplete'
+       required:
++      - autocomplete
+       - pagination
+       - results
+-      - autocomplete
+     PaginatedGoogleWorkspaceProviderGroupList:
+       type: object
+       properties:
+@@ -44954,9 +44956,9 @@ components:
+         autocomplete:
+           $ref: '#/components/schemas/Autocomplete'
+       required:
++      - autocomplete
+       - pagination
+       - results
+-      - autocomplete
+     PaginatedGoogleWorkspaceProviderList:
+       type: object
+       properties:
+@@ -44969,9 +44971,9 @@ components:
+         autocomplete:
+           $ref: '#/components/schemas/Autocomplete'
+       required:
++      - autocomplete
+       - pagination
+       - results
+-      - autocomplete
+     PaginatedGoogleWorkspaceProviderMappingList:
+       type: object
+       properties:
+@@ -44984,9 +44986,9 @@ components:
+         autocomplete:
+           $ref: '#/components/schemas/Autocomplete'
+       required:
++      - autocomplete
+       - pagination
+       - results
+-      - autocomplete
+     PaginatedGoogleWorkspaceProviderUserList:
+       type: object
+       properties:
+@@ -44999,9 +45001,9 @@ components:
+         autocomplete:
+           $ref: '#/components/schemas/Autocomplete'
+       required:
++      - autocomplete
+       - pagination
+       - results
+-      - autocomplete
+     PaginatedGroupKerberosSourceConnectionList:
+       type: object
+       properties:
+@@ -45014,9 +45016,9 @@ components:
+         autocomplete:
+           $ref: '#/components/schemas/Autocomplete'
+       required:
++      - autocomplete
+       - pagination
+       - results
+-      - autocomplete
+     PaginatedGroupLDAPSourceConnectionList:
+       type: object
+       properties:
+@@ -45029,9 +45031,9 @@ components:
+         autocomplete:
+           $ref: '#/components/schemas/Autocomplete'
+       required:
++      - autocomplete
+       - pagination
+       - results
+-      - autocomplete
+     PaginatedGroupList:
+       type: object
+       properties:
+@@ -45044,9 +45046,9 @@ components:
+         autocomplete:
+           $ref: '#/components/schemas/Autocomplete'
+       required:
++      - autocomplete
+       - pagination
+       - results
+-      - autocomplete
+     PaginatedGroupOAuthSourceConnectionList:
+       type: object
+       properties:
+@@ -45059,9 +45061,9 @@ components:
+         autocomplete:
+           $ref: '#/components/schemas/Autocomplete'
+       required:
++      - autocomplete
+       - pagination
+       - results
+-      - autocomplete
+     PaginatedGroupPlexSourceConnectionList:
+       type: object
+       properties:
+@@ -45074,9 +45076,9 @@ components:
+         autocomplete:
+           $ref: '#/components/schemas/Autocomplete'
+       required:
++      - autocomplete
+       - pagination
+       - results
+-      - autocomplete
+     PaginatedGroupSAMLSourceConnectionList:
+       type: object
+       properties:
+@@ -45089,9 +45091,9 @@ components:
+         autocomplete:
+           $ref: '#/components/schemas/Autocomplete'
+       required:
++      - autocomplete
+       - pagination
+       - results
+-      - autocomplete
+     PaginatedGroupSourceConnectionList:
+       type: object
+       properties:
+@@ -45104,9 +45106,9 @@ components:
+         autocomplete:
+           $ref: '#/components/schemas/Autocomplete'
+       required:
++      - autocomplete
+       - pagination
+       - results
+-      - autocomplete
+     PaginatedGroupTelegramSourceConnectionList:
+       type: object
+       properties:
+@@ -45119,9 +45121,9 @@ components:
+         autocomplete:
+           $ref: '#/components/schemas/Autocomplete'
+       required:
++      - autocomplete
+       - pagination
+       - results
+-      - autocomplete
+     PaginatedIdentificationStageList:
+       type: object
+       properties:
+@@ -45134,9 +45136,9 @@ components:
+         autocomplete:
+           $ref: '#/components/schemas/Autocomplete'
+       required:
++      - autocomplete
+       - pagination
+       - results
+-      - autocomplete
+     PaginatedInitialPermissionsList:
+       type: object
+       properties:
+@@ -45149,9 +45151,9 @@ components:
+         autocomplete:
+           $ref: '#/components/schemas/Autocomplete'
+       required:
++      - autocomplete
+       - pagination
+       - results
+-      - autocomplete
+     PaginatedInvitationList:
+       type: object
+       properties:
+@@ -45164,9 +45166,9 @@ components:
+         autocomplete:
+           $ref: '#/components/schemas/Autocomplete'
+       required:
++      - autocomplete
+       - pagination
+       - results
+-      - autocomplete
+     PaginatedInvitationStageList:
+       type: object
+       properties:
+@@ -45179,9 +45181,9 @@ components:
+         autocomplete:
+           $ref: '#/components/schemas/Autocomplete'
+       required:
++      - autocomplete
+       - pagination
+       - results
+-      - autocomplete
+     PaginatedKerberosSourceList:
+       type: object
+       properties:
+@@ -45194,9 +45196,9 @@ components:
+         autocomplete:
+           $ref: '#/components/schemas/Autocomplete'
+       required:
++      - autocomplete
+       - pagination
+       - results
+-      - autocomplete
+     PaginatedKerberosSourcePropertyMappingList:
+       type: object
+       properties:
+@@ -45209,9 +45211,9 @@ components:
+         autocomplete:
+           $ref: '#/components/schemas/Autocomplete'
+       required:
++      - autocomplete
+       - pagination
+       - results
+-      - autocomplete
+     PaginatedKubernetesServiceConnectionList:
+       type: object
+       properties:
+@@ -45224,9 +45226,9 @@ components:
+         autocomplete:
+           $ref: '#/components/schemas/Autocomplete'
+       required:
++      - autocomplete
+       - pagination
+       - results
+-      - autocomplete
+     PaginatedLDAPOutpostConfigList:
+       type: object
+       properties:
+@@ -45239,9 +45241,9 @@ components:
+         autocomplete:
+           $ref: '#/components/schemas/Autocomplete'
+       required:
++      - autocomplete
+       - pagination
+       - results
+-      - autocomplete
+     PaginatedLDAPProviderList:
+       type: object
+       properties:
+@@ -45254,9 +45256,9 @@ components:
+         autocomplete:
+           $ref: '#/components/schemas/Autocomplete'
+       required:
++      - autocomplete
+       - pagination
+       - results
+-      - autocomplete
+     PaginatedLDAPSourceList:
+       type: object
+       properties:
+@@ -45269,9 +45271,9 @@ components:
+         autocomplete:
+           $ref: '#/components/schemas/Autocomplete'
+       required:
++      - autocomplete
+       - pagination
+       - results
+-      - autocomplete
+     PaginatedLDAPSourcePropertyMappingList:
+       type: object
+       properties:
+@@ -45284,9 +45286,9 @@ components:
+         autocomplete:
+           $ref: '#/components/schemas/Autocomplete'
+       required:
++      - autocomplete
+       - pagination
+       - results
+-      - autocomplete
+     PaginatedLicenseList:
+       type: object
+       properties:
+@@ -45299,9 +45301,9 @@ components:
+         autocomplete:
+           $ref: '#/components/schemas/Autocomplete'
+       required:
++      - autocomplete
+       - pagination
+       - results
+-      - autocomplete
+     PaginatedLifecycleIterationList:
+       type: object
+       properties:
+@@ -45314,9 +45316,9 @@ components:
+         autocomplete:
+           $ref: '#/components/schemas/Autocomplete'
+       required:
++      - autocomplete
+       - pagination
+       - results
+-      - autocomplete
+     PaginatedLifecycleRuleList:
+       type: object
+       properties:
+@@ -45329,9 +45331,9 @@ components:
+         autocomplete:
+           $ref: '#/components/schemas/Autocomplete'
+       required:
++      - autocomplete
+       - pagination
+       - results
+-      - autocomplete
+     PaginatedMicrosoftEntraProviderGroupList:
+       type: object
+       properties:
+@@ -45344,9 +45346,9 @@ components:
+         autocomplete:
+           $ref: '#/components/schemas/Autocomplete'
+       required:
++      - autocomplete
+       - pagination
+       - results
+-      - autocomplete
+     PaginatedMicrosoftEntraProviderList:
+       type: object
+       properties:
+@@ -45359,9 +45361,9 @@ components:
+         autocomplete:
+           $ref: '#/components/schemas/Autocomplete'
+       required:
++      - autocomplete
+       - pagination
+       - results
+-      - autocomplete
+     PaginatedMicrosoftEntraProviderMappingList:
+       type: object
+       properties:
+@@ -45374,9 +45376,9 @@ components:
+         autocomplete:
+           $ref: '#/components/schemas/Autocomplete'
+       required:
++      - autocomplete
+       - pagination
+       - results
+-      - autocomplete
+     PaginatedMicrosoftEntraProviderUserList:
+       type: object
+       properties:
+@@ -45389,9 +45391,9 @@ components:
+         autocomplete:
+           $ref: '#/components/schemas/Autocomplete'
+       required:
++      - autocomplete
+       - pagination
+       - results
+-      - autocomplete
+     PaginatedMutualTLSStageList:
+       type: object
+       properties:
+@@ -45404,9 +45406,9 @@ components:
+         autocomplete:
+           $ref: '#/components/schemas/Autocomplete'
+       required:
++      - autocomplete
+       - pagination
+       - results
+-      - autocomplete
+     PaginatedNotificationList:
+       type: object
+       properties:
+@@ -45419,9 +45421,9 @@ components:
+         autocomplete:
+           $ref: '#/components/schemas/Autocomplete'
+       required:
++      - autocomplete
+       - pagination
+       - results
+-      - autocomplete
+     PaginatedNotificationRuleList:
+       type: object
+       properties:
+@@ -45434,9 +45436,9 @@ components:
+         autocomplete:
+           $ref: '#/components/schemas/Autocomplete'
+       required:
++      - autocomplete
+       - pagination
+       - results
+-      - autocomplete
+     PaginatedNotificationTransportList:
+       type: object
+       properties:
+@@ -45449,9 +45451,9 @@ components:
+         autocomplete:
+           $ref: '#/components/schemas/Autocomplete'
+       required:
++      - autocomplete
+       - pagination
+       - results
+-      - autocomplete
+     PaginatedNotificationWebhookMappingList:
+       type: object
+       properties:
+@@ -45464,9 +45466,9 @@ components:
+         autocomplete:
+           $ref: '#/components/schemas/Autocomplete'
+       required:
++      - autocomplete
+       - pagination
+       - results
+-      - autocomplete
+     PaginatedOAuth2ProviderList:
+       type: object
+       properties:
+@@ -45479,9 +45481,9 @@ components:
+         autocomplete:
+           $ref: '#/components/schemas/Autocomplete'
+       required:
++      - autocomplete
+       - pagination
+       - results
+-      - autocomplete
+     PaginatedOAuthSourceList:
+       type: object
+       properties:
+@@ -45494,9 +45496,9 @@ components:
+         autocomplete:
+           $ref: '#/components/schemas/Autocomplete'
+       required:
++      - autocomplete
+       - pagination
+       - results
+-      - autocomplete
+     PaginatedOAuthSourcePropertyMappingList:
+       type: object
+       properties:
+@@ -45509,9 +45511,9 @@ components:
+         autocomplete:
+           $ref: '#/components/schemas/Autocomplete'
+       required:
++      - autocomplete
+       - pagination
+       - results
+-      - autocomplete
+     PaginatedOutpostList:
+       type: object
+       properties:
+@@ -45524,9 +45526,9 @@ components:
+         autocomplete:
+           $ref: '#/components/schemas/Autocomplete'
+       required:
++      - autocomplete
+       - pagination
+       - results
+-      - autocomplete
+     PaginatedPasswordExpiryPolicyList:
+       type: object
+       properties:
+@@ -45539,9 +45541,9 @@ components:
+         autocomplete:
+           $ref: '#/components/schemas/Autocomplete'
+       required:
++      - autocomplete
+       - pagination
+       - results
+-      - autocomplete
+     PaginatedPasswordPolicyList:
+       type: object
+       properties:
+@@ -45554,9 +45556,9 @@ components:
+         autocomplete:
+           $ref: '#/components/schemas/Autocomplete'
+       required:
++      - autocomplete
+       - pagination
+       - results
+-      - autocomplete
+     PaginatedPasswordStageList:
+       type: object
+       properties:
+@@ -45569,9 +45571,9 @@ components:
+         autocomplete:
+           $ref: '#/components/schemas/Autocomplete'
+       required:
++      - autocomplete
+       - pagination
+       - results
+-      - autocomplete
+     PaginatedPermissionList:
+       type: object
+       properties:
+@@ -45584,9 +45586,9 @@ components:
+         autocomplete:
+           $ref: '#/components/schemas/Autocomplete'
+       required:
++      - autocomplete
+       - pagination
+       - results
+-      - autocomplete
+     PaginatedPlexSourceList:
+       type: object
+       properties:
+@@ -45599,9 +45601,9 @@ components:
+         autocomplete:
+           $ref: '#/components/schemas/Autocomplete'
+       required:
++      - autocomplete
+       - pagination
+       - results
+-      - autocomplete
+     PaginatedPlexSourcePropertyMappingList:
+       type: object
+       properties:
+@@ -45614,9 +45616,9 @@ components:
+         autocomplete:
+           $ref: '#/components/schemas/Autocomplete'
+       required:
++      - autocomplete
+       - pagination
+       - results
+-      - autocomplete
+     PaginatedPolicyBindingList:
+       type: object
+       properties:
+@@ -45629,9 +45631,9 @@ components:
+         autocomplete:
+           $ref: '#/components/schemas/Autocomplete'
+       required:
++      - autocomplete
+       - pagination
+       - results
+-      - autocomplete
+     PaginatedPolicyList:
+       type: object
+       properties:
+@@ -45644,9 +45646,9 @@ components:
+         autocomplete:
+           $ref: '#/components/schemas/Autocomplete'
+       required:
++      - autocomplete
+       - pagination
+       - results
+-      - autocomplete
+     PaginatedPromptList:
+       type: object
+       properties:
+@@ -45659,9 +45661,9 @@ components:
+         autocomplete:
+           $ref: '#/components/schemas/Autocomplete'
+       required:
++      - autocomplete
+       - pagination
+       - results
+-      - autocomplete
+     PaginatedPromptStageList:
+       type: object
+       properties:
+@@ -45674,9 +45676,9 @@ components:
+         autocomplete:
+           $ref: '#/components/schemas/Autocomplete'
+       required:
++      - autocomplete
+       - pagination
+       - results
+-      - autocomplete
+     PaginatedPropertyMappingList:
+       type: object
+       properties:
+@@ -45689,9 +45691,9 @@ components:
+         autocomplete:
+           $ref: '#/components/schemas/Autocomplete'
+       required:
++      - autocomplete
+       - pagination
+       - results
+-      - autocomplete
+     PaginatedProviderList:
+       type: object
+       properties:
+@@ -45704,9 +45706,9 @@ components:
+         autocomplete:
+           $ref: '#/components/schemas/Autocomplete'
+       required:
++      - autocomplete
+       - pagination
+       - results
+-      - autocomplete
+     PaginatedProxyOutpostConfigList:
+       type: object
+       properties:
+@@ -45719,9 +45721,9 @@ components:
+         autocomplete:
+           $ref: '#/components/schemas/Autocomplete'
+       required:
++      - autocomplete
+       - pagination
+       - results
+-      - autocomplete
+     PaginatedProxyProviderList:
+       type: object
+       properties:
+@@ -45734,9 +45736,9 @@ components:
+         autocomplete:
+           $ref: '#/components/schemas/Autocomplete'
+       required:
++      - autocomplete
+       - pagination
+       - results
+-      - autocomplete
+     PaginatedRACPropertyMappingList:
+       type: object
+       properties:
+@@ -45749,9 +45751,9 @@ components:
+         autocomplete:
+           $ref: '#/components/schemas/Autocomplete'
+       required:
++      - autocomplete
+       - pagination
+       - results
+-      - autocomplete
+     PaginatedRACProviderList:
+       type: object
+       properties:
+@@ -45764,9 +45766,9 @@ components:
+         autocomplete:
+           $ref: '#/components/schemas/Autocomplete'
+       required:
++      - autocomplete
+       - pagination
+       - results
+-      - autocomplete
+     PaginatedRadiusOutpostConfigList:
+       type: object
+       properties:
+@@ -45779,9 +45781,9 @@ components:
+         autocomplete:
+           $ref: '#/components/schemas/Autocomplete'
+       required:
++      - autocomplete
+       - pagination
+       - results
+-      - autocomplete
+     PaginatedRadiusProviderList:
+       type: object
+       properties:
+@@ -45794,9 +45796,9 @@ components:
+         autocomplete:
+           $ref: '#/components/schemas/Autocomplete'
+       required:
++      - autocomplete
+       - pagination
+       - results
+-      - autocomplete
+     PaginatedRadiusProviderPropertyMappingList:
+       type: object
+       properties:
+@@ -45809,9 +45811,9 @@ components:
+         autocomplete:
+           $ref: '#/components/schemas/Autocomplete'
+       required:
++      - autocomplete
+       - pagination
+       - results
+-      - autocomplete
+     PaginatedRedirectStageList:
+       type: object
+       properties:
+@@ -45824,9 +45826,9 @@ components:
+         autocomplete:
+           $ref: '#/components/schemas/Autocomplete'
+       required:
++      - autocomplete
+       - pagination
+       - results
+-      - autocomplete
+     PaginatedReputationList:
+       type: object
+       properties:
+@@ -45839,9 +45841,9 @@ components:
+         autocomplete:
+           $ref: '#/components/schemas/Autocomplete'
+       required:
++      - autocomplete
+       - pagination
+       - results
+-      - autocomplete
+     PaginatedReputationPolicyList:
+       type: object
+       properties:
+@@ -45854,9 +45856,9 @@ components:
+         autocomplete:
+           $ref: '#/components/schemas/Autocomplete'
+       required:
++      - autocomplete
+       - pagination
+       - results
+-      - autocomplete
+     PaginatedRoleAssignedObjectPermissionList:
+       type: object
+       properties:
+@@ -45869,9 +45871,9 @@ components:
+         autocomplete:
+           $ref: '#/components/schemas/Autocomplete'
+       required:
++      - autocomplete
+       - pagination
+       - results
+-      - autocomplete
+     PaginatedRoleList:
+       type: object
+       properties:
+@@ -45884,9 +45886,9 @@ components:
+         autocomplete:
+           $ref: '#/components/schemas/Autocomplete'
+       required:
++      - autocomplete
+       - pagination
+       - results
+-      - autocomplete
+     PaginatedSAMLPropertyMappingList:
+       type: object
+       properties:
+@@ -45899,9 +45901,9 @@ components:
+         autocomplete:
+   
+
+... [truncated, 79483 chars total]

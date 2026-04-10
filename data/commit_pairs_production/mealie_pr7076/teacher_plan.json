@@ -1,0 +1,145 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "component_design",
+      "recommendation": "Created a unified BaseDialog component to replace all direct Vuetify dialog implementations, ensuring consistent UI patterns and mobile responsiveness",
+      "rationale": "Direct Vuetify v-dialog usage led to inconsistent UI patterns across the application. By centralizing dialog logic in BaseDialog, we achieve: 1) Consistent mobile behavior (full-screen on small screens), 2) Standardized action button placement, 3) Unified loading states, 4) Consistent icon and title handling. This follows the DRY principle and improves maintainability.",
+      "alternatives_considered": [
+        "Keeping individual Vuetify dialogs with shared CSS classes",
+        "Creating multiple specialized dialog components",
+        "Using Vuetify's provide/inject for dialog configuration"
+      ],
+      "files_affected": [
+        "frontend/components/global/BaseDialog.vue"
+      ]
+    },
+    {
+      "dimension": "mobile_responsiveness",
+      "recommendation": "Implemented responsive dialog behavior where BaseDialog automatically displays in full-screen mode on mobile devices",
+      "rationale": "The existing dialogs were not optimized for mobile use, often being too wide for small screens. By using Vuetify's built-in fullscreen prop with responsive breakpoints, we ensure dialogs are usable on all device sizes without manual per-dialog configuration.",
+      "alternatives_considered": [
+        "Creating separate mobile-specific dialog components",
+        "Using CSS media queries to adjust dialog width",
+        "Maintaining separate mobile and desktop dialog implementations"
+      ],
+      "files_affected": [
+        "frontend/components/global/BaseDialog.vue"
+      ]
+    },
+    {
+      "dimension": "api_design",
+      "recommendation": "Standardized BaseDialog component API with consistent props for title, icon, loading state, and action handlers",
+      "rationale": "Previously, each dialog had its own way of handling titles, icons, and actions. The new BaseDialog provides a clean, consistent API with props like :title, :icon, :loading, @submit, and @confirm. This makes dialogs predictable and easier to use throughout the codebase.",
+      "alternatives_considered": [
+        "Using slots for all content",
+        "Creating multiple dialog variants with different APIs",
+        "Using a configuration object prop"
+      ],
+      "files_affected": [
+        "frontend/components/global/BaseDialog.vue",
+        "frontend/components/Domain/Recipe/RecipeDialogBulkAdd.vue",
+        "frontend/components/Domain/Recipe/RecipeOrganizerDialog.vue"
+      ]
+    },
+    {
+      "dimension": "ui_ux_consistency",
+      "recommendation": "Standardized action button placement at the bottom of all dialogs with consistent spacing and alignment",
+      "rationale": "Action buttons were inconsistently placed across dialogs - some at top, some at bottom, with varying spacing. By enforcing bottom placement in BaseDialog with proper spacing (v-spacer and mx-2), users develop muscle memory for where to find actions, improving usability.",
+      "alternatives_considered": [
+        "Allowing flexible button placement via slots",
+        "Creating multiple dialog layouts",
+        "Using CSS classes to standardize existing dialogs"
+      ],
+      "files_affected": [
+        "frontend/components/global/BaseDialog.vue",
+        "frontend/components/Domain/Recipe/RecipePage/RecipePageParts/RecipePageInstructions.vue"
+      ]
+    },
+    {
+      "dimension": "icon_management",
+      "recommendation": "Added missing play icon to the global icons registry and updated icon usage patterns",
+      "rationale": "The bulk add dialog needed a play icon for utility actions, but it wasn't in the global icons registry. Adding mdiPlay ensures consistency with other icons and follows the established pattern of centralizing icon definitions for maintainability.",
+      "alternatives_considered": [
+        "Using inline SVG icons",
+        "Importing icons directly in components",
+        "Creating a separate utility icon set"
+      ],
+      "files_affected": [
+        "frontend/lib/icons/icons.ts",
+        "frontend/components/Domain/Recipe/RecipeDialogBulkAdd.vue"
+      ]
+    },
+    {
+      "dimension": "event_handling",
+      "recommendation": "Improved dialog event emission patterns, particularly in RecipeOrganizerDialog where the created item is now properly returned",
+      "rationale": "Previously, RecipeOrganizerDialog emitted events but didn't properly return the created item from the API call. Now it emits the actual API response, making the component more reliable and consistent with other dialog patterns in the codebase.",
+      "alternatives_considered": [
+        "Keeping the existing pattern of searching the store",
+        "Using callbacks instead of events",
+        "Creating a separate response handler prop"
+      ],
+      "files_affected": [
+        "frontend/components/Domain/Recipe/RecipeOrganizerDialog.vue"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "BaseDialog Component Enhancement",
+      "description": "Enhanced BaseDialog component with mobile responsiveness, consistent action button placement, and improved loading state handling",
+      "files_to_modify": [
+        "frontend/components/global/BaseDialog.vue"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-002",
+      "title": "Recipe Component Dialog Migration",
+      "description": "Migrated all recipe-related dialogs to use BaseDialog component, including bulk add, organizer, and ingredient linker dialogs",
+      "files_to_modify": [
+        "frontend/components/Domain/Recipe/RecipeDialogBulkAdd.vue",
+        "frontend/components/Domain/Recipe/RecipeOrganizerDialog.vue",
+        "frontend/components/Domain/Recipe/RecipePage/RecipePageParts/RecipePageInstructions.vue",
+        "frontend/components/Domain/Recipe/RecipeTimelineBadge.vue",
+        "frontend/components/Domain/Recipe/RecipeOrganizerPage.vue"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "large"
+    },
+    {
+      "id": "T-003",
+      "title": "Admin and Shopping List Dialog Standardization",
+      "description": "Updated admin management pages and shopping list pages to use consistent BaseDialog patterns with proper icons",
+      "files_to_modify": [
+        "frontend/pages/admin/manage/groups/index.vue",
+        "frontend/pages/admin/manage/households/index.vue",
+        "frontend/pages/admin/manage/users/index.vue",
+        "frontend/pages/shopping-lists/[id].vue",
+        "frontend/pages/shopping-lists/index.vue"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-004",
+      "title": "Icon System Enhancement",
+      "description": "Added missing play icon to global icons registry and updated icon usage patterns in dialog components",
+      "files_to_modify": [
+        "frontend/lib/icons/icons.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation focused on standardizing dialog components across the Mealie application by migrating all Vuetify v-dialog implementations to use a unified BaseDialog component. This approach addresses several key issues: inconsistent UI patterns, poor mobile responsiveness, and varying action button placements.\n\nThe core change was enhancing BaseDialog.vue to support full-screen mode on mobile devices via Vuetify's responsive fullscreen prop, standardizing action buttons at the bottom with consistent spacing, and improving loading state handling with integrated progress indicators. This component now serves as the single source of truth for dialog behavior throughout the application.\n\nRecipe-related components saw the most significant refactoring, with RecipeDialogBulkAdd.vue being completely redesigned to use BaseDialog's simplified API, removing complex activator patterns and manual card layouts. RecipeOrganizerDialog.vue was streamlined to pass icon and title props to BaseDialog while fixing event emission patterns. The ingredient linker dialog in RecipePageInstructions.vue was migrated to use BaseDialog with proper slot handling for custom action buttons.\n\nThroughout the migration, we maintained backward compatibility by preserving existing functionality while improving the API. The changes follow established patterns in the codebase, such as using the global icons registry and consistent prop naming. This standardization effort will make future dialog-related changes easier and improve the overall user experience, particularly on mobile devices.",
+  "source_pr": "https://github.com/mealie-recipes/mealie/pull/7076",
+  "before_sha": "f6305b785ee7f9d7951004883ebc0b09fa9d638f",
+  "after_sha": "f36c892bb7373b00dd518f143523d1212f8cdec2",
+  "diff_stats": {
+    "additions": 180,
+    "deletions": 249,
+    "files_changed": 12
+  }
+}

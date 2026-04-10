@@ -1,0 +1,69 @@
+diff --git a/charts/formbricks/README.md b/charts/formbricks/README.md
+index c6398ee59434..47d0614d2d11 100644
+--- a/charts/formbricks/README.md
++++ b/charts/formbricks/README.md
+@@ -36,6 +36,8 @@ rate limiting.
+ - The bundled controller reads its Redis backend from `envoy.config.envoyGateway.rateLimit.backend.redis.url`.
+   If you enable Redis authentication or override `envoyRedis.fullnameOverride`, set that URL explicitly so the
+   controller points at the correct backend.
++- OpenTelemetry proxy metrics can target either `envoy.formbricks.proxy.telemetry.openTelemetry.host`/`port`
++  or `backendRefs`, but not both. Prefer `host`/`port` for collectors that live in another namespace.
+ - When both the main app ingress and the Envoy API ingress are enabled, set `envoy.formbricks.ingress.host`
+   explicitly so the Envoy host choice is intentional.
+ 
+diff --git a/charts/formbricks/templates/envoy-gateway-resources.yaml b/charts/formbricks/templates/envoy-gateway-resources.yaml
+index 5f06d6116ec1..3b7bf5cc1efa 100644
+--- a/charts/formbricks/templates/envoy-gateway-resources.yaml
++++ b/charts/formbricks/templates/envoy-gateway-resources.yaml
+@@ -39,8 +39,13 @@ spec:
+       sinks:
+         - type: OpenTelemetry
+           openTelemetry:
++            {{- if .Values.envoy.formbricks.proxy.telemetry.openTelemetry.host }}
++            host: {{ .Values.envoy.formbricks.proxy.telemetry.openTelemetry.host | quote }}
++            port: {{ .Values.envoy.formbricks.proxy.telemetry.openTelemetry.port }}
++            {{- else }}
+             backendRefs:
+               {{- toYaml .Values.envoy.formbricks.proxy.telemetry.openTelemetry.backendRefs | nindent 14 }}
++            {{- end }}
+             resourceAttributes:
+               service.name: {{ default $proxyServiceName .Values.envoy.formbricks.proxy.telemetry.openTelemetry.serviceName | quote }}
+               service.namespace: {{ default $namespace .Values.envoy.formbricks.proxy.telemetry.openTelemetry.serviceNamespace | quote }}
+diff --git a/charts/formbricks/templates/envoy-validation.yaml b/charts/formbricks/templates/envoy-validation.yaml
+index 648bc9d80a37..6381f9954817 100644
+--- a/charts/formbricks/templates/envoy-validation.yaml
++++ b/charts/formbricks/templates/envoy-validation.yaml
+@@ -20,3 +20,15 @@
+ {{- if and .Values.envoy.enabled .Values.envoy.formbricks.ingress.enabled (not (include "formbricks.envoy.ingressHost" .)) -}}
+ {{- fail "envoy.formbricks.ingress.enabled requires envoy.formbricks.ingress.host or ingress.hosts[0].host" -}}
+ {{- end -}}
++
++{{- $otlpEnabled := .Values.envoy.formbricks.proxy.telemetry.openTelemetry.enabled -}}
++{{- $otlpHost := default "" .Values.envoy.formbricks.proxy.telemetry.openTelemetry.host | trim -}}
++{{- $otlpBackendRefs := .Values.envoy.formbricks.proxy.telemetry.openTelemetry.backendRefs -}}
++
++{{- if and $otlpEnabled $otlpHost (gt (len $otlpBackendRefs) 0) -}}
++{{- fail "envoy.formbricks.proxy.telemetry.openTelemetry supports either host/port or backendRefs, but not both" -}}
++{{- end -}}
++
++{{- if and $otlpEnabled (not $otlpHost) (eq (len $otlpBackendRefs) 0) -}}
++{{- fail "envoy.formbricks.proxy.telemetry.openTelemetry.enabled requires either openTelemetry.host or openTelemetry.backendRefs" -}}
++{{- end -}}
+diff --git a/charts/formbricks/values.yaml b/charts/formbricks/values.yaml
+index f99f321e3100..a4585a11689d 100644
+--- a/charts/formbricks/values.yaml
++++ b/charts/formbricks/values.yaml
+@@ -411,9 +411,13 @@ envoy:
+           enabled: true
+         openTelemetry:
+           enabled: false
++          # Prefer host/port when the collector Service lives in another namespace.
++          host: ""
++          port: 4317
+           serviceName: ""
+           serviceNamespace: ""
+           deploymentEnvironment: ""
++          # Use backendRefs only when you intentionally want Service discovery through Gateway API refs.
+           backendRefs: []
+     clientTrafficPolicy:
+       enabled: true

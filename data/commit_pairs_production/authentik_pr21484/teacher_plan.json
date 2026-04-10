@@ -1,0 +1,187 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "api_design",
+      "recommendation": "Moved QL search from enterprise module to core API by integrating it into the default pagination class and filter backends",
+      "rationale": "To make advanced search available to all users without enterprise license, the search functionality needed to be integrated into the core API stack. This involved modifying the default pagination to include autocomplete data and adding QLSearch as the primary filter backend instead of the basic SearchFilter.",
+      "alternatives_considered": [
+        "Keeping separate enterprise-only pagination class",
+        "Creating a new open source search module without modifying existing pagination"
+      ],
+      "files_affected": [
+        "authentik/api/pagination.py",
+        "authentik/root/settings.py"
+      ]
+    },
+    {
+      "dimension": "module_structure",
+      "recommendation": "Relocated search files from enterprise/search to api/search directory while preserving functionality",
+      "rationale": "The search functionality is now a core API feature rather than an enterprise add-on. Moving files to the api directory makes logical sense for organization and clarifies that this is part of the public API surface. This maintains the same code structure but in a more appropriate location.",
+      "alternatives_considered": [
+        "Keeping files in enterprise directory with feature flags",
+        "Creating completely new implementations in api directory"
+      ],
+      "files_affected": [
+        "authentik/enterprise/search/__init__.py",
+        "authentik/api/search/__init__.py",
+        "authentik/enterprise/search/fields.py",
+        "authentik/api/search/fields.py",
+        "authentik/enterprise/search/ql.py",
+        "authentik/api/search/ql.py",
+        "authentik/enterprise/search/schema.py",
+        "authentik/api/search/schema.py",
+        "authentik/enterprise/search/tests.py",
+        "authentik/api/tests/test_search.py"
+      ]
+    },
+    {
+      "dimension": "schema_management",
+      "recommendation": "Created new schema module for autocomplete and moved schema post-processing hook",
+      "rationale": "The autocomplete schema definition needed to be separated from the enterprise module. Creating a dedicated schema file in the v3 API structure follows the existing pattern of organizing OpenAPI schema components. This ensures proper OpenAPI documentation generation for the new autocomplete field.",
+      "alternatives_considered": [
+        "Keeping schema definition in the ql.py file",
+        "Adding to existing schema modules"
+      ],
+      "files_affected": [
+        "authentik/api/v3/schema/search.py"
+      ]
+    },
+    {
+      "dimension": "dependency_management",
+      "recommendation": "Removed enterprise search app from settings and updated client SDKs to reflect the change",
+      "rationale": "Since search is no longer an enterprise feature, it needed to be removed from enterprise app registration and client SDK enums. This prevents confusion about feature availability and ensures consistent behavior across all client libraries.",
+      "alternatives_considered": [
+        "Keeping enterprise search as deprecated module",
+        "Creating transitional compatibility layer"
+      ],
+      "files_affected": [
+        "authentik/enterprise/search/apps.py",
+        "authentik/enterprise/search/settings.py",
+        "authentik/enterprise/settings.py",
+        "blueprints/schema.json",
+        "packages/client-go/model_app_enum.go",
+        "packages/client-rust/src/models/app_enum.rs",
+        "packages/client-ts/src/models/AppEnum.ts",
+        "schema.yml"
+      ]
+    },
+    {
+      "dimension": "data_modeling",
+      "recommendation": "Updated paginated response models to include autocomplete field as required property",
+      "rationale": "All paginated API responses now include autocomplete data for QL search. This required updating the response schema in OpenAPI definitions and client SDK models to include the new field as required, ensuring type safety and proper documentation.",
+      "alternatives_considered": [
+        "Making autocomplete optional",
+        "Creating separate response types for search-enabled endpoints"
+      ],
+      "files_affected": [
+        "packages/client-go/model_paginated_extra_role_object_permission_list.go",
+        "packages/client-rust/src/models/paginated_extra_role_object_permission_list.rs",
+        "packages/client-ts/src/models/PaginatedExtraRoleObjectPermissionList.ts",
+        "schema.yml"
+      ]
+    },
+    {
+      "dimension": "testing",
+      "recommendation": "Moved and simplified search tests by removing enterprise mocking",
+      "rationale": "Tests needed to be relocated to the api module and simplified since they no longer require enterprise feature flags. The test now validates core functionality without enterprise dependencies, ensuring the feature works in the open source context.",
+      "alternatives_considered": [
+        "Keeping tests in enterprise module with modified mocking",
+        "Creating new test suite from scratch"
+      ],
+      "files_affected": [
+        "authentik/enterprise/search/tests.py",
+        "authentik/api/tests/test_search.py"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Move search core functionality to API module",
+      "description": "Relocate QL search implementation files from enterprise/search to api/search directory and update all imports",
+      "files_to_modify": [
+        "authentik/enterprise/search/__init__.py",
+        "authentik/enterprise/search/fields.py",
+        "authentik/enterprise/search/ql.py",
+        "authentik/enterprise/search/schema.py",
+        "authentik/enterprise/search/tests.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-002",
+      "title": "Integrate search into core pagination and API configuration",
+      "description": "Update default pagination class to include autocomplete data and configure QLSearch as default filter backend",
+      "files_to_modify": [
+        "authentik/api/pagination.py",
+        "authentik/root/settings.py",
+        "authentik/enterprise/search/settings.py"
+      ],
+      "files_to_create": [
+        "authentik/api/v3/schema/search.py"
+      ],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-003",
+      "title": "Update API view imports and remove enterprise dependencies",
+      "description": "Remove enterprise imports from view files and update QL field definitions to use new search module",
+      "files_to_modify": [
+        "authentik/core/api/groups.py",
+        "authentik/core/api/users.py",
+        "authentik/events/api/events.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-004",
+      "title": "Clean up enterprise module registration",
+      "description": "Remove search app from enterprise settings and update blueprints schema",
+      "files_to_modify": [
+        "authentik/enterprise/search/apps.py",
+        "authentik/enterprise/search/pagination.py",
+        "authentik/enterprise/settings.py",
+        "blueprints/schema.json"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-005",
+      "title": "Update client SDKs and OpenAPI schema",
+      "description": "Regenerate client SDK models to include autocomplete field and remove enterprise search from app enums",
+      "files_to_modify": [
+        "packages/client-go/model_app_enum.go",
+        "packages/client-go/model_paginated_extra_role_object_permission_list.go",
+        "packages/client-rust/src/models/app_enum.rs",
+        "packages/client-rust/src/models/paginated_extra_role_object_permission_list.rs",
+        "packages/client-ts/src/models/AppEnum.ts",
+        "packages/client-ts/src/models/PaginatedExtraRoleObjectPermissionList.ts",
+        "schema.yml"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-006",
+      "title": "Update test expectations",
+      "description": "Modify existing tests to expect autocomplete field in paginated responses",
+      "files_to_modify": [
+        "authentik/rbac/tests/test_api_permissions_roles.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation moves the advanced query language (QL) search functionality from the enterprise module to the open source codebase through a systematic refactoring approach. The core strategy involved relocating search-related files from the enterprise/search directory to api/search while preserving their functionality, then integrating QL search into the default API infrastructure.\n\nKey architectural changes include modifying the base Pagination class to automatically include autocomplete data in all paginated responses, and configuring QLSearch as the default filter backend in Django REST Framework settings. This ensures that all API endpoints automatically gain QL search capabilities without requiring individual endpoint modifications. The autocomplete schema was extracted into a dedicated module (api/v3/schema/search.py) following the existing schema organization pattern.\n\nAll enterprise dependencies were removed from view files by importing search components directly from the new api.search module instead of enterprise.search. Client SDKs were regenerated to include the new required autocomplete field in paginated response models and to remove enterprise.search from the app enumeration. The implementation maintains backward compatibility for existing API consumers while adding the enhanced search functionality transparently.\n\nThis approach successfully democratizes advanced event log searching by making it available to all authentik users without requiring an enterprise license, while maintaining code organization and following established patterns within the Django monolith architecture.",
+  "source_pr": "https://github.com/goauthentik/authentik/pull/21484",
+  "before_sha": "92fceb1524d8bc746fc78f35dcace736ab8054fb",
+  "after_sha": "c32f21046db468e04f28c1166e0427088155d49c",
+  "diff_stats": {
+    "additions": 274,
+    "deletions": 312,
+    "files_changed": 30
+  }
+}

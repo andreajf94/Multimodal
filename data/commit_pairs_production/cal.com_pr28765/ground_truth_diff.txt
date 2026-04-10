@@ -1,0 +1,39 @@
+diff --git a/packages/lib/checkRateLimitAndThrowError.test.ts b/packages/lib/checkRateLimitAndThrowError.test.ts
+index 0c20560b585c22..993335853a363f 100644
+--- a/packages/lib/checkRateLimitAndThrowError.test.ts
++++ b/packages/lib/checkRateLimitAndThrowError.test.ts
+@@ -67,4 +67,21 @@ describe("checkRateLimitAndThrowError", () => {
+ 
+     await expect(checkRateLimitAndThrowError({ rateLimitingType, identifier })).resolves.not.toThrow();
+   });
++  it("should not return negative wait time when reset is in the past", async () => {
++    vi.mocked(rateLimiter).mockReturnValue(() => {
++      return {
++        limit: 10,
++        remaining: -1,
++        reset: Date.now() - 5000, // past time
++        success: false,
++      } as RatelimitResponse;
++    });
++
++    const identifier = "test-identifier";
++    const rateLimitingType = "core";
++
++    await expect(
++      checkRateLimitAndThrowError({ rateLimitingType, identifier })
++    ).rejects.toThrow("0 seconds");
++  });
+ });
+diff --git a/packages/lib/checkRateLimitAndThrowError.ts b/packages/lib/checkRateLimitAndThrowError.ts
+index 35ada22389032b..73f01132bee201 100644
+--- a/packages/lib/checkRateLimitAndThrowError.ts
++++ b/packages/lib/checkRateLimitAndThrowError.ts
+@@ -13,7 +13,7 @@ export async function checkRateLimitAndThrowError({
+   const { success, reset } = response;
+   if (!success) {
+     const convertToSeconds = (ms: number) => Math.floor(ms / 1000);
+-    const secondsToWait = convertToSeconds(reset - Date.now());
++    const secondsToWait = Math.max(0, convertToSeconds(reset - Date.now()));
+     throw new HttpError({
+       statusCode: 429,
+       message: `Rate limit exceeded. Try again in ${secondsToWait} seconds.`,

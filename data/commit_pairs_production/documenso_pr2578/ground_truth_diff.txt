@@ -1,0 +1,193 @@
+diff --git a/apps/remix/app/components/tables/documents-table-action-button.tsx b/apps/remix/app/components/tables/documents-table-action-button.tsx
+index 237524c766..506c6afa03 100644
+--- a/apps/remix/app/components/tables/documents-table-action-button.tsx
++++ b/apps/remix/app/components/tables/documents-table-action-button.tsx
+@@ -7,6 +7,7 @@ import { match } from 'ts-pattern';
+ import { useSession } from '@documenso/lib/client-only/providers/session';
+ import type { TDocumentMany as TDocumentRow } from '@documenso/lib/types/document';
+ import { isDocumentCompleted } from '@documenso/lib/utils/document';
++import { findRecipientByEmail } from '@documenso/lib/utils/recipients';
+ import { formatDocumentsPath } from '@documenso/lib/utils/teams';
+ import { Button } from '@documenso/ui/primitives/button';
+ 
+@@ -23,7 +24,11 @@ export const DocumentsTableActionButton = ({ row }: DocumentsTableActionButtonPr
+ 
+   const team = useCurrentTeam();
+ 
+-  const recipient = row.recipients.find((recipient) => recipient.email === user.email);
++  const recipient = findRecipientByEmail({
++    recipients: row.recipients,
++    userEmail: user.email,
++    teamEmail: team.teamEmail?.email,
++  });
+ 
+   const isOwner = row.user.id === user.id;
+   const isRecipient = !!recipient;
+diff --git a/apps/remix/app/components/tables/documents-table-action-dropdown.tsx b/apps/remix/app/components/tables/documents-table-action-dropdown.tsx
+index da500a6156..295f6bba23 100644
+--- a/apps/remix/app/components/tables/documents-table-action-dropdown.tsx
++++ b/apps/remix/app/components/tables/documents-table-action-dropdown.tsx
+@@ -24,6 +24,7 @@ import { useSession } from '@documenso/lib/client-only/providers/session';
+ import type { TDocumentMany as TDocumentRow } from '@documenso/lib/types/document';
+ import { isDocumentCompleted } from '@documenso/lib/utils/document';
+ import { getEnvelopeItemPermissions } from '@documenso/lib/utils/envelope';
++import { findRecipientByEmail } from '@documenso/lib/utils/recipients';
+ import { formatDocumentsPath } from '@documenso/lib/utils/teams';
+ import { trpc as trpcReact } from '@documenso/trpc/react';
+ import { DocumentShareButton } from '@documenso/ui/components/document/document-share-button';
+@@ -64,7 +65,11 @@ export const DocumentsTableActionDropdown = ({
+   const [isDuplicateDialogOpen, setDuplicateDialogOpen] = useState(false);
+   const [isRenameDialogOpen, setRenameDialogOpen] = useState(false);
+ 
+-  const recipient = row.recipients.find((recipient) => recipient.email === user.email);
++  const recipient = findRecipientByEmail({
++    recipients: row.recipients,
++    userEmail: user.email,
++    teamEmail: team.teamEmail?.email,
++  });
+ 
+   const isOwner = row.user.id === user.id;
+   // const isRecipient = !!recipient;
+diff --git a/apps/remix/app/components/tables/documents-table-title.tsx b/apps/remix/app/components/tables/documents-table-title.tsx
+index 42ea9983e8..914a596251 100644
+--- a/apps/remix/app/components/tables/documents-table-title.tsx
++++ b/apps/remix/app/components/tables/documents-table-title.tsx
+@@ -3,8 +3,11 @@ import { match } from 'ts-pattern';
+ 
+ import { useSession } from '@documenso/lib/client-only/providers/session';
+ import type { TDocumentMany as TDocumentRow } from '@documenso/lib/types/document';
++import { findRecipientByEmail } from '@documenso/lib/utils/recipients';
+ import { formatDocumentsPath } from '@documenso/lib/utils/teams';
+ 
++import { useCurrentTeam } from '~/providers/team';
++
+ export type DataTableTitleProps = {
+   row: TDocumentRow;
+   teamUrl: string;
+@@ -12,8 +15,13 @@ export type DataTableTitleProps = {
+ 
+ export const DataTableTitle = ({ row, teamUrl }: DataTableTitleProps) => {
+   const { user } = useSession();
++  const team = useCurrentTeam();
+ 
+-  const recipient = row.recipients.find((recipient) => recipient.email === user.email);
++  const recipient = findRecipientByEmail({
++    recipients: row.recipients,
++    userEmail: user.email,
++    teamEmail: team.teamEmail?.email,
++  });
+ 
+   const isOwner = row.user.id === user.id;
+   const isRecipient = !!recipient;
+diff --git a/apps/remix/app/components/tables/documents-table.tsx b/apps/remix/app/components/tables/documents-table.tsx
+index a9da6ac2db..7f1d104dd8 100644
+--- a/apps/remix/app/components/tables/documents-table.tsx
++++ b/apps/remix/app/components/tables/documents-table.tsx
+@@ -10,6 +10,7 @@ import { match } from 'ts-pattern';
+ import { useUpdateSearchParams } from '@documenso/lib/client-only/hooks/use-update-search-params';
+ import { useSession } from '@documenso/lib/client-only/providers/session';
+ import { isDocumentCompleted } from '@documenso/lib/utils/document';
++import { findRecipientByEmail } from '@documenso/lib/utils/recipients';
+ import { formatDocumentsPath } from '@documenso/lib/utils/teams';
+ import type { TFindDocumentsResponse } from '@documenso/trpc/server/document-router/find-documents.types';
+ import { Checkbox } from '@documenso/ui/primitives/checkbox';
+@@ -91,7 +92,13 @@ export const DocumentsTable = ({
+       },
+       {
+         header: _(msg`Title`),
+-        cell: ({ row }) => <DataTableTitle row={row.original} teamUrl={team?.url} />,
++        cell: ({ row }) => (
++          <DataTableTitle
++            row={row.original}
++            teamUrl={team?.url}
++            teamEmail={team?.teamEmail?.email}
++          />
++        ),
+       },
+       {
+         id: 'sender',
+@@ -213,12 +220,17 @@ export const DocumentsTable = ({
+ type DataTableTitleProps = {
+   row: DocumentsTableRow;
+   teamUrl: string;
++  teamEmail?: string;
+ };
+ 
+-const DataTableTitle = ({ row, teamUrl }: DataTableTitleProps) => {
++const DataTableTitle = ({ row, teamUrl, teamEmail }: DataTableTitleProps) => {
+   const { user } = useSession();
+ 
+-  const recipient = row.recipients.find((recipient) => recipient.email === user.email);
++  const recipient = findRecipientByEmail({
++    recipients: row.recipients,
++    userEmail: user.email,
++    teamEmail,
++  });
+ 
+   const isOwner = row.user.id === user.id;
+   const isRecipient = !!recipient;
+diff --git a/apps/remix/app/routes/embed+/v2+/authoring+/_layout.tsx b/apps/remix/app/routes/embed+/v2+/authoring+/_layout.tsx
+index 17c1c98c36..b5e8a1a5a4 100644
+--- a/apps/remix/app/routes/embed+/v2+/authoring+/_layout.tsx
++++ b/apps/remix/app/routes/embed+/v2+/authoring+/_layout.tsx
+@@ -114,6 +114,7 @@ export default function AuthoringLayout() {
+     createdAt: new Date(),
+     avatarImageId: null,
+     organisationId: '',
++    teamEmail: null,
+     currentTeamRole: TeamMemberRole.MEMBER,
+     preferences: {
+       aiFeaturesEnabled: preferences.aiFeaturesEnabled,
+diff --git a/packages/lib/utils/recipients.ts b/packages/lib/utils/recipients.ts
+index d5cf3d9021..a8a4c574f4 100644
+--- a/packages/lib/utils/recipients.ts
++++ b/packages/lib/utils/recipients.ts
+@@ -92,6 +92,16 @@ export const mapRecipientToLegacyRecipient = (
+   };
+ };
+ 
++export const findRecipientByEmail = <T extends { email: string }>({
++  recipients,
++  userEmail,
++  teamEmail,
++}: {
++  recipients: T[];
++  userEmail: string;
++  teamEmail?: string | null;
++}) => recipients.find((r) => r.email === userEmail || (teamEmail && r.email === teamEmail));
++
+ export const isRecipientEmailValidForSending = (recipient: Pick<Recipient, 'email'>) => {
+   return zEmail().safeParse(recipient.email).success;
+ };
+diff --git a/packages/trpc/server/organisation-router/get-organisation-session.ts b/packages/trpc/server/organisation-router/get-organisation-session.ts
+index 1d87945f11..8ae4b7ab3a 100644
+--- a/packages/trpc/server/organisation-router/get-organisation-session.ts
++++ b/packages/trpc/server/organisation-router/get-organisation-session.ts
+@@ -51,6 +51,7 @@ export const getOrganisationSession = async ({
+         where: buildTeamWhereQuery({ teamId: undefined, userId }),
+         include: {
+           teamGlobalSettings: true,
++          teamEmail: { select: { email: true } },
+           teamGroups: {
+             where: {
+               organisationGroup: {
+diff --git a/packages/trpc/server/organisation-router/get-organisation-session.types.ts b/packages/trpc/server/organisation-router/get-organisation-session.types.ts
+index 48713770d3..1bf7ba05ac 100644
+--- a/packages/trpc/server/organisation-router/get-organisation-session.types.ts
++++ b/packages/trpc/server/organisation-router/get-organisation-session.types.ts
+@@ -3,6 +3,7 @@ import { z } from 'zod';
+ import { ZOrganisationSchema } from '@documenso/lib/types/organisation';
+ import { OrganisationMemberRole, TeamMemberRole } from '@documenso/prisma/generated/types';
+ import SubscriptionSchema from '@documenso/prisma/generated/zod/modelSchema/SubscriptionSchema';
++import { TeamEmailSchema } from '@documenso/prisma/generated/zod/modelSchema/TeamEmailSchema';
+ import TeamSchema from '@documenso/prisma/generated/zod/modelSchema/TeamSchema';
+ 
+ export const ZGetOrganisationSessionResponseSchema = ZOrganisationSchema.extend({
+@@ -16,6 +17,7 @@ export const ZGetOrganisationSessionResponseSchema = ZOrganisationSchema.extend(
+       organisationId: true,
+     }).extend({
+       currentTeamRole: z.nativeEnum(TeamMemberRole),
++      teamEmail: TeamEmailSchema.pick({ email: true }).nullable(),
+       preferences: z.object({
+         aiFeaturesEnabled: z.boolean(),
+       }),

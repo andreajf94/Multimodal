@@ -1,0 +1,144 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "infrastructure",
+      "recommendation": "Added Envoy Gateway as an optional Helm subchart dependency with two deployment modes (bundled-controller and external-controller)",
+      "rationale": "This approach provides flexibility for different deployment scenarios. Self-hosted/single-tenant clusters can use the bundled controller, while shared clusters with existing platform controllers can use external-controller mode. Using the official envoyproxy/gateway-helm chart ensures compatibility and reduces maintenance burden.",
+      "alternatives_considered": [
+        "Building custom Envoy Gateway manifests from scratch",
+        "Using a different API gateway solution like Kong or Traefik"
+      ],
+      "files_affected": [
+        "charts/formbricks/Chart.lock",
+        "charts/formbricks/Chart.yaml"
+      ]
+    },
+    {
+      "dimension": "data_modeling",
+      "recommendation": "Added a dedicated Redis/Sentinel deployment specifically for Envoy global rate limiting, separate from the existing app Redis",
+      "rationale": "Rate limiting requires high availability and persistence to maintain state across Envoy instances. A separate Redis instance prevents rate limiting operations from interfering with application caching and ensures isolation of concerns. The Sentinel configuration provides HA failover capabilities.",
+      "alternatives_considered": [
+        "Sharing the existing app Redis instance",
+        "Using an in-memory rate limiting solution without persistence"
+      ],
+      "files_affected": [
+        "charts/formbricks/Chart.yaml",
+        "charts/formbricks/values.yaml"
+      ]
+    },
+    {
+      "dimension": "api_design",
+      "recommendation": "Implemented granular rate limiting policies for different API routes with configurable thresholds",
+      "rationale": "Different API endpoints have different usage patterns and security requirements. For example, authentication endpoints need stricter limits than client API endpoints. The implementation uses BackendTrafficPolicy resources with distinct rules for IPv4 and IPv6 traffic, and includes header-based rate limiting for management APIs using x-api-key.",
+      "alternatives_considered": [
+        "Global rate limiting for all endpoints",
+        "Application-level rate limiting instead of gateway-level"
+      ],
+      "files_affected": [
+        "charts/formbricks/templates/envoy-rate-limit-policies.yaml"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Added comprehensive validation templates to prevent misconfiguration",
+      "rationale": "Envoy Gateway configuration is complex with many interdependent options. The validation template ensures users get clear error messages when they enable features without required dependencies (e.g., enabling controller without Redis, or enabling ingress without host configuration). This prevents runtime failures and improves user experience.",
+      "alternatives_considered": [
+        "Relying on Kubernetes admission controllers",
+        "Documentation-only validation"
+      ],
+      "files_affected": [
+        "charts/formbricks/templates/envoy-validation.yaml"
+      ]
+    },
+    {
+      "dimension": "infrastructure",
+      "recommendation": "Used helper functions to generate consistent resource names and handle defaults",
+      "rationale": "Kubernetes resource names have length constraints (63 characters) and naming conventions. The helper functions in _helpers.tpl ensure generated names are truncated properly and follow consistent patterns. They also provide sensible defaults while allowing overrides for advanced users.",
+      "alternatives_considered": [
+        "Hardcoded resource names",
+        "Requiring users to specify all resource names"
+      ],
+      "files_affected": [
+        "charts/formbricks/templates/_helpers.tpl"
+      ]
+    },
+    {
+      "dimension": "api_design",
+      "recommendation": "Created separate ingress resource for Envoy API traffic with explicit host validation",
+      "rationale": "When both the main app ingress and Envoy API ingress are enabled, they need different hosts to avoid routing conflicts. The implementation requires explicit host configuration in this scenario and provides clear error messages. The ingress supports all Formbricks API routes (auth, client v1/v2, management, webhooks, storage) with configurable path routing.",
+      "alternatives_considered": [
+        "Using the same ingress as the main app",
+        "Requiring manual ingress configuration outside the chart"
+      ],
+      "files_affected": [
+        "charts/formbricks/templates/envoy-api-ingress.yaml"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Add Envoy Gateway Helm dependency and configuration",
+      "description": "Integrate Envoy Gateway as an optional subchart with configurable deployment modes and sensible defaults",
+      "files_to_modify": [
+        "charts/formbricks/Chart.lock",
+        "charts/formbricks/Chart.yaml",
+        "charts/formbricks/README.md",
+        "charts/formbricks/values.yaml"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-002",
+      "title": "Create Envoy Gateway resource templates",
+      "description": "Generate Kubernetes manifests for Gateway, HTTPRoute, EnvoyProxy, and ClientTrafficPolicy resources",
+      "files_to_modify": [
+        "charts/formbricks/templates/_helpers.tpl"
+      ],
+      "files_to_create": [
+        "charts/formbricks/templates/envoy-gateway-resources.yaml"
+      ],
+      "estimated_effort": "large"
+    },
+    {
+      "id": "T-003",
+      "title": "Implement rate limiting policies",
+      "description": "Define granular rate limiting rules for different API endpoints with IPv4/IPv6 support and header-based authentication",
+      "files_to_modify": [],
+      "files_to_create": [
+        "charts/formbricks/templates/envoy-rate-limit-policies.yaml"
+      ],
+      "estimated_effort": "large"
+    },
+    {
+      "id": "T-004",
+      "title": "Add Envoy API ingress configuration",
+      "description": "Create ingress resource for routing external traffic to Envoy Gateway with host validation",
+      "files_to_modify": [],
+      "files_to_create": [
+        "charts/formbricks/templates/envoy-api-ingress.yaml"
+      ],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-005",
+      "title": "Implement configuration validation",
+      "description": "Add validation templates to prevent misconfiguration and provide clear error messages",
+      "files_to_modify": [],
+      "files_to_create": [
+        "charts/formbricks/templates/envoy-validation.yaml"
+      ],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation adds an optional Envoy Gateway bundle to the Formbricks Helm chart, providing API gateway capabilities with sophisticated rate limiting. The approach is opt-in by default, with all Envoy components disabled unless explicitly enabled through configuration values.\n\nKey patterns used include: 1) Flexible deployment modes supporting both bundled-controller (for self-hosted clusters) and external-controller (for shared clusters with existing controllers); 2) Separation of concerns with a dedicated Redis/Sentinel deployment specifically for Envoy rate limiting, distinct from the application Redis; 3) Granular, configurable rate limiting policies that can be enabled separately from the initial deployment; and 4) Comprehensive validation to prevent misconfiguration.\n\nThe changes integrate cleanly with the existing codebase by extending the Helm chart's dependency management system, adding new template files that conditionally render based on configuration values, and maintaining backward compatibility. The implementation follows Kubernetes Gateway API standards and uses the official Envoy Gateway Helm chart as a subchart dependency, ensuring compatibility with upstream releases. All resource naming follows consistent patterns using helper functions, and the configuration provides sensible defaults while allowing extensive customization for advanced use cases.",
+  "source_pr": "https://github.com/formbricks/formbricks/pull/7686",
+  "before_sha": "87bcad2b201b81a0baaf3b6f7ca409c426ee963c",
+  "after_sha": "a43ed2b25cd3188e9ab7c935fcfaa849c9afa1cf",
+  "diff_stats": {
+    "additions": 999,
+    "deletions": 2,
+    "files_changed": 10
+  }
+}

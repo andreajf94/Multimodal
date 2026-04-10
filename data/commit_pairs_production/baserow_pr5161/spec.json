@@ -1,0 +1,12 @@
+{
+  "feature_name": "Enterprise Field Rules Import Without License Check",
+  "description": "Modify the field rules system to allow importing templates containing enterprise field rules (like date dependencies) even when the instance lacks an enterprise license. Currently, template synchronization fails because the rule creation process always validates licensing. Create a mechanism to bypass license checks during import while preserving all other validation and lifecycle hooks.",
+  "functional_requirements": [
+    "Extract the license validation check from the core rule creation logic into a separate, overridable hook within the rule type registry.",
+    "Refactor the existing `create_rule` method into two distinct methods: one that performs the license check and delegates, and another that creates the rule without any permission validation.",
+    "Update the rule import logic to call the new permission-bypassing creation method, ensuring imported rules are still fully validated and trigger their standard lifecycle events.",
+    "Ensure that direct API requests to create enterprise rules without a license continue to raise the appropriate feature-not-available error, maintaining the existing licensing gate for user-initiated actions."
+  ],
+  "project_name": "baserow",
+  "source_pr": "https://github.com/baserow/baserow/pull/5161"
+}

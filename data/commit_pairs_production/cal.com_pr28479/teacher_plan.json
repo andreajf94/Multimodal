@@ -1,0 +1,76 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "internationalization",
+      "recommendation": "Replaced hardcoded 'apps' count display with proper i18n pluralization using the 'number_apps' translation key",
+      "rationale": "The existing code had a TODO comment indicating it needed proper internationalization. By using t('number_apps', { count: installedAppsNumber }), we leverage the existing i18n infrastructure that already has 'number_apps_one' and 'number_apps_other' keys in locale files. This ensures correct singular/plural forms across all supported languages without manual string concatenation.",
+      "alternatives_considered": [
+        "Manually concatenating strings based on count (e.g., `${installedAppsNumber} ${installedAppsNumber === 1 ? t('app') : t('apps')}`)",
+        "Creating separate translation keys for singular and plural cases",
+        "Keeping the hardcoded English string as-is"
+      ],
+      "files_affected": [
+        "packages/platform/atoms/event-types/hooks/useTabsNavigations.tsx"
+      ]
+    },
+    {
+      "dimension": "testing",
+      "recommendation": "Updated Playwright tests to verify both installed and active app counts separately",
+      "rationale": "The original test only verified active apps count, but the UI now displays both installed and active counts. The test fixture was updated to accept both parameters and generate the expected text dynamically. This ensures tests remain accurate after the i18n change and properly validate the new display format.",
+      "alternatives_considered": [
+        "Keeping tests unchanged and relying on translation keys to always produce English output",
+        "Using regex patterns to match dynamic text",
+        "Removing the test verification entirely"
+      ],
+      "files_affected": [
+        "apps/web/playwright/apps/analytics/analyticsApps.e2e.ts",
+        "apps/web/playwright/fixtures/apps.ts"
+      ]
+    },
+    {
+      "dimension": "code_quality",
+      "recommendation": "Removed the TODO comment that flagged the internationalization issue",
+      "rationale": "The TODO comment served its purpose by identifying the i18n gap. After implementing the proper solution using the translation system, the comment is no longer needed and was removed to keep the codebase clean and maintainable.",
+      "alternatives_considered": [
+        "Keeping the TODO comment with a 'FIXED' annotation",
+        "Converting it to a documentation comment",
+        "Leaving it as historical context"
+      ],
+      "files_affected": [
+        "packages/platform/atoms/event-types/hooks/useTabsNavigations.tsx"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Implement i18n pluralization for apps count display",
+      "description": "Replace hardcoded 'apps' string with proper internationalization using existing translation keys to handle singular/plural forms across all languages",
+      "files_to_modify": [
+        "packages/platform/atoms/event-types/hooks/useTabsNavigations.tsx"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-002",
+      "title": "Update Playwright tests for new i18n format",
+      "description": "Modify test fixtures and E2E tests to verify both installed and active app counts in the updated UI format",
+      "files_to_modify": [
+        "apps/web/playwright/apps/analytics/analyticsApps.e2e.ts",
+        "apps/web/playwright/fixtures/apps.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "This change implements proper internationalization for the apps count display in the event types navigation. The core modification was in the useTabsNavigations.tsx hook, where the hardcoded string `${installedAppsNumber} apps` was replaced with a call to the translation system using `t('number_apps', { count: installedAppsNumber })`. This leverages existing translation keys ('number_apps_one' and 'number_apps_other') that are already defined in locale files, ensuring correct singular/plural forms across all supported languages.\n\nThe implementation follows the project's established i18n patterns and removes a TODO comment that previously flagged this issue. The change is minimal and focused, affecting only the display logic without modifying any underlying data structures or business logic.\n\nCorresponding Playwright tests were updated to reflect the new display format. The test fixture was enhanced to accept both installed and active app counts, generating the expected English text dynamically. This ensures tests remain accurate while the production code uses proper i18n. The solution maintains backward compatibility and integrates seamlessly with the existing translation infrastructure, demonstrating good attention to internationalization best practices in a globally-used scheduling application.",
+  "source_pr": "https://github.com/calcom/cal.com/pull/28479",
+  "before_sha": "96d78a03d23f1e4c1e1b2d1869242ae91f992b6f",
+  "after_sha": "ae0109225872af8d21fa36d8c95b4002417c65b7",
+  "diff_stats": {
+    "additions": 8,
+    "deletions": 6,
+    "files_changed": 3
+  }
+}

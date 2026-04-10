@@ -1,0 +1,368 @@
+diff --git a/.env.example b/.env.example
+index 57786efb24d9..017b0acfd3bc 100644
+--- a/.env.example
++++ b/.env.example
+@@ -191,6 +191,9 @@ ENTERPRISE_LICENSE_KEY=
+ # Ignore Rate Limiting across the Formbricks app
+ # RATE_LIMITING_DISABLED=1
+ 
++# Disable telemetry reporting (usage stats sent to Formbricks). Ignored when an EE license is active.
++# TELEMETRY_DISABLED=1
++
+ # Allow webhook URLs to point to internal/private network addresses (e.g. localhost, 192.168.x.x)
+ # WARNING: Only enable this if you understand the SSRF risks. Useful for self-hosted instances
+ # that need to send webhooks to internal services.
+diff --git a/apps/web/app/api/(internal)/pipeline/lib/telemetry.test.ts b/apps/web/app/api/(internal)/pipeline/lib/telemetry.test.ts
+index cdef0a22ee86..db15d034ccc1 100644
+--- a/apps/web/app/api/(internal)/pipeline/lib/telemetry.test.ts
++++ b/apps/web/app/api/(internal)/pipeline/lib/telemetry.test.ts
+@@ -51,8 +51,20 @@ vi.mock("@/lib/env", () => ({
+     RECAPTCHA_SECRET_KEY: "secret-key",
+     GITHUB_ID: "github-id",
+     SAML_DATABASE_URL: "postgresql://saml.example.com/formbricks",
++    ENTERPRISE_LICENSE_KEY: "test-license-key",
+   },
+ }));
++vi.mock("@/lib/constants", () => ({
++  E2E_TESTING: false,
++  IS_DEVELOPMENT: false,
++  TELEMETRY_DISABLED: false,
++}));
++vi.mock("@/lib/hash-string", () => ({
++  hashString: vi.fn((s: string) => `hashed-${s}`),
++}));
++vi.mock("@/modules/ee/license-check/lib/license", () => ({
++  getEnterpriseLicense: vi.fn(),
++}));
+ 
+ // Mock fetch
+ const fetchMock = vi.fn();
+@@ -199,6 +211,14 @@ describe("sendTelemetryEvents", () => {
+   test("should handle telemetry send failure and apply cooldown", async () => {
+     // Reset module to clear nextTelemetryCheck state from previous tests
+     vi.resetModules();
++    vi.doMock("@/lib/constants", () => ({
++      E2E_TESTING: false,
++      IS_DEVELOPMENT: false,
++      TELEMETRY_DISABLED: false,
++    }));
++    vi.doMock("@/modules/ee/license-check/lib/license", () => ({
++      getEnterpriseLicense: vi.fn().mockResolvedValue({ active: false }),
++    }));
+     const { sendTelemetryEvents: freshSendTelemetryEvents } = await import("./telemetry");
+ 
+     // Ensure we can acquire lock by setting last sent time far in the past
+@@ -221,6 +241,7 @@ describe("sendTelemetryEvents", () => {
+       expect.objectContaining({
+         error: networkError,
+         message: "Network error",
++        hashedLicenseKey: "hashed-test-license-key",
+       }),
+       "Failed to send telemetry - applying 1h cooldown"
+     );
+@@ -242,6 +263,14 @@ describe("sendTelemetryEvents", () => {
+   test("should skip if no organization exists", async () => {
+     // Reset module to clear nextTelemetryCheck state from previous tests
+     vi.resetModules();
++    vi.doMock("@/lib/constants", () => ({
++      E2E_TESTING: false,
++      IS_DEVELOPMENT: false,
++      TELEMETRY_DISABLED: false,
++    }));
++    vi.doMock("@/modules/ee/license-check/lib/license", () => ({
++      getEnterpriseLicense: vi.fn().mockResolvedValue({ active: false }),
++    }));
+     const { sendTelemetryEvents: freshSendTelemetryEvents } = await import("./telemetry");
+ 
+     // Ensure we can acquire lock by setting last sent time far in the past
+@@ -276,4 +305,113 @@ describe("sendTelemetryEvents", () => {
+     // This might be a bug, but we test the actual behavior
+     expect(mockCacheService.set).toHaveBeenCalled();
+   });
++
++  test("should skip telemetry when TELEMETRY_DISABLED is true and no active EE license", async () => {
++    vi.resetModules();
++    vi.doMock("@/lib/constants", () => ({
++      E2E_TESTING: false,
++      IS_DEVELOPMENT: false,
++      TELEMETRY_DISABLED: true,
++    }));
++    vi.doMock("@/modules/ee/license-check/lib/license", () => ({
++      getEnterpriseLicense: vi.fn().mockResolvedValue({ active: false }),
++    }));
++    const { sendTelemetryEvents: freshSendTelemetryEvents } = await import("./telemetry");
++
++    await freshSendTelemetryEvents();
++
++    // Should return early without touching cache or sending telemetry
++    expect(getCacheService).not.toHaveBeenCalled();
++    expect(fetchMock).not.toHaveBeenCalled();
++  });
++
++  test("should send telemetry when TELEMETRY_DISABLED is true but EE license is active", async () => {
++    vi.resetModules();
++    vi.doMock("@/lib/constants", () => ({
++      E2E_TESTING: false,
++      IS_DEVELOPMENT: false,
++      TELEMETRY_DISABLED: true,
++    }));
++    vi.doMock("@/modules/ee/license-check/lib/license", () => ({
++      getEnterpriseLicense: vi.fn().mockResolvedValue({ active: true }),
++    }));
++    const { sendTelemetryEvents: freshSendTelemetryEvents } = await import("./telemetry");
++
++    // Re-setup mocks after resetModules
++    vi.mocked(getCacheService).mockResolvedValue({
++      ok: true,
++      data: mockCacheService as any,
++    });
++    mockCacheService.tryLock.mockResolvedValue({ ok: true, data: true });
++    mockCacheService.del.mockResolvedValue({ ok: true, data: undefined });
++    mockCacheService.get.mockResolvedValue({ ok: true, data: null });
++    mockCacheService.set.mockResolvedValue({ ok: true, data: undefined });
++
++    vi.mocked(prisma.organization.findFirst).mockResolvedValue({
++      id: "org-123",
++      createdAt: new Date("2023-01-01"),
++    } as any);
++    vi.mocked(prisma.$queryRaw).mockResolvedValue([
++      {
++        organizationCount: BigInt(1),
++        userCount: BigInt(5),
++        teamCount: BigInt(2),
++        projectCount: BigInt(3),
++        surveyCount: BigInt(10),
++        inProgressSurveyCount: BigInt(4),
++        completedSurveyCount: BigInt(6),
++        responseCountAllTime: BigInt(100),
++        responseCountSinceLastUpdate: BigInt(10),
++        displayCount: BigInt(50),
++        contactCount: BigInt(20),
++        segmentCount: BigInt(4),
++        newestResponseAt: new Date("2024-01-01T00:00:00.000Z"),
++      },
++    ] as any);
++    vi.mocked(prisma.integration.findMany).mockResolvedValue([{ type: IntegrationType.notion }] as any);
++    vi.mocked(prisma.account.findMany).mockResolvedValue([{ provider: "github" }] as any);
++    fetchMock.mockResolvedValue({ ok: true });
++
++    await freshSendTelemetryEvents();
++
++    // EE license active — telemetry should bypass TELEMETRY_DISABLED and send
++    expect(fetchMock).toHaveBeenCalledTimes(1);
++  });
++
++  test("should unconditionally skip when E2E_TESTING is true even with active EE license", async () => {
++    vi.resetModules();
++    vi.doMock("@/lib/constants", () => ({
++      E2E_TESTING: true,
++      IS_DEVELOPMENT: false,
++      TELEMETRY_DISABLED: false,
++    }));
++    vi.doMock("@/modules/ee/license-check/lib/license", () => ({
++      getEnterpriseLicense: vi.fn().mockResolvedValue({ active: true }),
++    }));
++    const { sendTelemetryEvents: freshSendTelemetryEvents } = await import("./telemetry");
++
++    await freshSendTelemetryEvents();
++
++    // E2E_TESTING is a hard skip — no EE bypass, no cache, no fetch
++    expect(getCacheService).not.toHaveBeenCalled();
++    expect(fetchMock).not.toHaveBeenCalled();
++  });
++
++  test("should unconditionally skip when IS_DEVELOPMENT is true", async () => {
++    vi.resetModules();
++    vi.doMock("@/lib/constants", () => ({
++      E2E_TESTING: false,
++      IS_DEVELOPMENT: true,
++      TELEMETRY_DISABLED: false,
++    }));
++    vi.doMock("@/modules/ee/license-check/lib/license", () => ({
++      getEnterpriseLicense: vi.fn().mockResolvedValue({ active: true }),
++    }));
++    const { sendTelemetryEvents: freshSendTelemetryEvents } = await import("./telemetry");
++
++    await freshSendTelemetryEvents();
++
++    expect(getCacheService).not.toHaveBeenCalled();
++    expect(fetchMock).not.toHaveBeenCalled();
++  });
+ });
+diff --git a/apps/web/app/api/(internal)/pipeline/lib/telemetry.ts b/apps/web/app/api/(internal)/pipeline/lib/telemetry.ts
+index 965b431ed785..c2d47e3fd242 100644
+--- a/apps/web/app/api/(internal)/pipeline/lib/telemetry.ts
++++ b/apps/web/app/api/(internal)/pipeline/lib/telemetry.ts
+@@ -2,8 +2,11 @@ import { IntegrationType } from "@prisma/client";
+ import { createCacheKey, getCacheService } from "@formbricks/cache";
+ import { prisma } from "@formbricks/database";
+ import { logger } from "@formbricks/logger";
++import { E2E_TESTING, IS_DEVELOPMENT, TELEMETRY_DISABLED } from "@/lib/constants";
+ import { env } from "@/lib/env";
++import { hashString } from "@/lib/hash-string";
+ import { getInstanceInfo } from "@/lib/instance";
++import { getEnterpriseLicense } from "@/modules/ee/license-check/lib/license";
+ import packageJson from "@/package.json";
+ 
+ const TELEMETRY_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
+@@ -24,8 +27,31 @@ let nextTelemetryCheck = 0;
+  * 2. Redis check (shared across instances, persists across restarts)
+  * 3. Distributed lock (prevents concurrent execution in multi-instance deployments)
+  */
++// Hashed license key for log context — allows correlating log entries to a specific license
++// without exposing the raw key. Computed once at module load.
++const hashedLicenseKey = env.ENTERPRISE_LICENSE_KEY ? hashString(env.ENTERPRISE_LICENSE_KEY) : null;
++
++/**
++ * Returns true if telemetry is disabled via env var AND there is no active EE license.
++ * EE customers cannot opt out — telemetry is always enforced for license compliance.
++ */
++const isTelemetryDisabledForCE = async (): Promise<boolean> => {
++  if (!TELEMETRY_DISABLED) return false;
++  const license = await getEnterpriseLicense();
++  return !license.active;
++};
++
+ export const sendTelemetryEvents = async () => {
+   try {
++    // ============================================================
++    // CHECK 0: Non-Production Hard Skip
++    // ============================================================
++    // Purpose: Unconditionally skip telemetry in dev and test/CI environments.
++    // No EE bypass — these are internal flags, not customer-facing.
++    if (E2E_TESTING || IS_DEVELOPMENT) {
++      return;
++    }
++
+     const now = Date.now();
+ 
+     // ============================================================
+@@ -39,7 +65,18 @@ export const sendTelemetryEvents = async () => {
+     }
+ 
+     // ============================================================
+-    // CHECK 2: Redis Check (Shared State)
++    // CHECK 2: Telemetry Disabled Check
++    // ============================================================
++    // Purpose: Allow CE self-hosters to opt out of telemetry via env var.
++    // EE bypass: If an active Enterprise License is detected, telemetry is always sent
++    // regardless of the TELEMETRY_DISABLED setting to enforce license compliance.
++    // Placed after in-memory check to avoid calling getEnterpriseLicense() on every invocation.
++    if (await isTelemetryDisabledForCE()) {
++      return;
++    }
++
++    // ============================================================
++    // CHECK 3: Redis Check (Shared State)
+     // ============================================================
+     // Purpose: Check if telemetry was sent recently by ANY instance (shared across cluster).
+     // This persists across restarts and works in multi-instance deployments.
+@@ -66,7 +103,7 @@ export const sendTelemetryEvents = async () => {
+     }
+ 
+     // ============================================================
+-    // CHECK 3: Distributed Lock (Prevent Concurrent Execution)
++    // CHECK 4: Distributed Lock (Prevent Concurrent Execution)
+     // ============================================================
+     // Purpose: Ensure only ONE instance executes telemetry at a time in a cluster.
+     // How it works:
+@@ -100,7 +137,7 @@ export const sendTelemetryEvents = async () => {
+       // Log as warning since telemetry is non-essential
+       const errorMessage = e instanceof Error ? e.message : String(e);
+       logger.warn(
+-        { error: e, message: errorMessage, lastSent, now },
++        { error: e, message: errorMessage, lastSent, now, hashedLicenseKey },
+         "Failed to send telemetry - applying 1h cooldown"
+       );
+ 
+@@ -118,7 +155,7 @@ export const sendTelemetryEvents = async () => {
+     // Log as warning since telemetry is non-essential functionality
+     const errorMessage = error instanceof Error ? error.message : String(error);
+     logger.warn(
+-      { error, message: errorMessage, timestamp: Date.now() },
++      { error, message: errorMessage, timestamp: Date.now(), hashedLicenseKey },
+       "Unexpected error in sendTelemetryEvents wrapper - telemetry check skipped"
+     );
+   }
+diff --git a/apps/web/lib/constants.ts b/apps/web/lib/constants.ts
+index c3bf58bfa512..1420c6ac3000 100644
+--- a/apps/web/lib/constants.ts
++++ b/apps/web/lib/constants.ts
+@@ -155,6 +155,7 @@ export const ENTERPRISE_LICENSE_KEY = env.ENTERPRISE_LICENSE_KEY;
+ 
+ export const REDIS_URL = env.REDIS_URL;
+ export const RATE_LIMITING_DISABLED = env.RATE_LIMITING_DISABLED === "1";
++export const TELEMETRY_DISABLED = env.TELEMETRY_DISABLED === "1";
+ 
+ export const BREVO_API_KEY = env.BREVO_API_KEY;
+ export const BREVO_LIST_ID = env.BREVO_LIST_ID;
+diff --git a/apps/web/lib/env.ts b/apps/web/lib/env.ts
+index b41a9c402ce4..f3b022b90d6e 100644
+--- a/apps/web/lib/env.ts
++++ b/apps/web/lib/env.ts
+@@ -68,6 +68,7 @@ export const env = createEnv({
+       .optional()
+       .or(z.string().refine((str) => str === "")),
+     RATE_LIMITING_DISABLED: z.enum(["1", "0"]).optional(),
++    TELEMETRY_DISABLED: z.enum(["1", "0"]).optional(),
+     S3_ACCESS_KEY: z.string().optional(),
+     S3_BUCKET_NAME: z.string().optional(),
+     S3_REGION: z.string().optional(),
+@@ -189,6 +190,7 @@ export const env = createEnv({
+     PASSWORD_RESET_TOKEN_LIFETIME_MINUTES: process.env.PASSWORD_RESET_TOKEN_LIFETIME_MINUTES,
+     PRIVACY_URL: process.env.PRIVACY_URL,
+     RATE_LIMITING_DISABLED: process.env.RATE_LIMITING_DISABLED,
++    TELEMETRY_DISABLED: process.env.TELEMETRY_DISABLED,
+     S3_ACCESS_KEY: process.env.S3_ACCESS_KEY,
+     S3_BUCKET_NAME: process.env.S3_BUCKET_NAME,
+     S3_REGION: process.env.S3_REGION,
+diff --git a/apps/web/vitestSetup.ts b/apps/web/vitestSetup.ts
+index 86937e9510b7..dde2b62705df 100644
+--- a/apps/web/vitestSetup.ts
++++ b/apps/web/vitestSetup.ts
+@@ -240,6 +240,7 @@ vi.mock("@/lib/constants", () => ({
+   MAIL_FROM: "mock@mail.com",
+   MAIL_FROM_NAME: "Mock Mail",
+   RATE_LIMITING_DISABLED: false,
++  TELEMETRY_DISABLED: false,
+   PASSWORD_RESET_TOKEN_LIFETIME_MINUTES: 30,
+   CONTROL_HASH: "$2b$12$fzHf9le13Ss9UJ04xzmsjODXpFJxz6vsnupoepF5FiqDECkX2BH5q",
+ }));
+diff --git a/docker/docker-compose.yml b/docker/docker-compose.yml
+index 0d13c6c5abff..364c82211b57 100644
+--- a/docker/docker-compose.yml
++++ b/docker/docker-compose.yml
+@@ -169,6 +169,9 @@ x-environment: &environment
+     # Set the below to 1 to disable Rate Limiting across Formbricks
+     # RATE_LIMITING_DISABLED: 1
+ 
++    # Set the below to 1 to disable telemetry reporting (ignored when EE license is active)
++    # TELEMETRY_DISABLED: 1
++
+     # Set the below to send OpenTelemetry data via OTLP to your collector
+     # OTEL_EXPORTER_OTLP_ENDPOINT: http://localhost:4318
+     # OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
+diff --git a/docs/self-hosting/configuration/environment-variables.mdx b/docs/self-hosting/configuration/environment-variables.mdx
+index a68c43714d30..36366c4a3a7e 100644
+--- a/docs/self-hosting/configuration/environment-variables.mdx
++++ b/docs/self-hosting/configuration/environment-variables.mdx
+@@ -33,6 +33,7 @@ These variables are present inside your machine's docker-compose file. Restart t
+ | PASSWORD_RESET_TOKEN_LIFETIME_MINUTES | Configures how long password reset links remain valid in minutes. Accepted values are integers from 5 to 120. | optional                                                | 30                                                                        |
+ | EMAIL_VERIFICATION_DISABLED  | Disables email verification if set to 1.                                                                             | optional                                                |                                                                           |
+ | RATE_LIMITING_DISABLED       | Disables rate limiting if set to 1.                                                                                  | optional                                                |                                                                           |
++| TELEMETRY_DISABLED           | Disables telemetry reporting if set to 1. Ignored when an Enterprise License is active.                              | optional                                                |                                                                           |
+ | DANGEROUSLY_ALLOW_WEBHOOK_INTERNAL_URLS | Allows webhook URLs to point to internal/private network addresses (e.g. localhost, 192.168.x.x) if set to 1. Useful for self-hosted instances that need to send webhooks to internal services. | optional                                                |                                                                           |
+ | INVITE_DISABLED              | Disables the ability for invited users to create an account if set to 1.                                             | optional                                                |                                                                           |
+ | MAIL_FROM                    | Email address to send emails from.                                                                                   | optional (required if email services are to be enabled) |                                                                           |
+diff --git a/turbo.json b/turbo.json
+index 6e4a2210cf52..1a76c1521938 100644
+--- a/turbo.json
++++ b/turbo.json
+@@ -238,6 +238,7 @@
+         "TURNSTILE_SITE_KEY",
+         "RECAPTCHA_SITE_KEY",
+         "RECAPTCHA_SECRET_KEY",
++        "TELEMETRY_DISABLED",
+         "TERMS_URL",
+         "VERCEL",
+         "VERCEL_URL",

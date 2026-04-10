@@ -1,0 +1,102 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "api_design",
+      "recommendation": "Updated the @trigger.dev/platform dependency from 1.0.26 to 1.0.27 to access the new endpointIps property on private connection objects",
+      "rationale": "The platform SDK needed to be updated to expose the IP address data that was likely added to the backend API response. This follows semantic versioning where a patch version bump (1.0.26 \u2192 1.0.27) indicates backward-compatible changes, allowing the frontend to safely consume new fields without breaking existing functionality.",
+      "alternatives_considered": [
+        "Creating a custom API endpoint specifically for IP address data",
+        "Fetching IP information separately via a different API call",
+        "Hardcoding IP ranges in the frontend (not recommended)"
+      ],
+      "files_affected": [
+        "apps/webapp/package.json",
+        "pnpm-lock.yaml"
+      ]
+    },
+    {
+      "dimension": "data_modeling",
+      "recommendation": "Replaced endpointDnsName display with endpointIps display, changing from showing DNS names to showing IP addresses",
+      "rationale": "The feature requirement specifically asked to display assigned IP addresses. The data model now includes an endpointIps array property on connection objects, which is more directly useful for administrators configuring network access than DNS names. This aligns with the functional requirement to show IPs for provisioned private links.",
+      "alternatives_considered": [
+        "Showing both DNS and IP information simultaneously",
+        "Adding a toggle between DNS and IP views",
+        "Creating a separate details panel for IP information"
+      ],
+      "files_affected": [
+        "apps/webapp/app/routes/_app.orgs.$organizationSlug.settings.private-connections._index/route.tsx"
+      ]
+    },
+    {
+      "dimension": "ui_ux",
+      "recommendation": "Changed the label from 'DNS:' to 'IPs:' and updated the display to show comma-separated IP addresses instead of a single DNS name",
+      "rationale": "The UI needed to clearly indicate that IP addresses are being shown rather than DNS names. Using 'IPs:' as the label immediately communicates the type of information. Displaying multiple IPs joined with commas handles cases where a private link might have multiple assigned IP addresses (e.g., for redundancy or different availability zones).",
+      "alternatives_considered": [
+        "Using a more descriptive label like 'Assigned IP Addresses:'",
+        "Displaying IPs in a list format rather than comma-separated",
+        "Adding tooltips or help text explaining what the IPs are for"
+      ],
+      "files_affected": [
+        "apps/webapp/app/routes/_app.orgs.$organizationSlug.settings.private-connections._index/route.tsx"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Added conditional rendering to only show IP section when endpointIps exists and has items, maintaining the same pattern used for endpointDnsName",
+      "rationale": "This ensures backward compatibility and handles edge cases gracefully. If endpointIps is undefined or empty (e.g., for private links that aren't fully provisioned), the IP section won't render, preventing UI errors. This matches the existing pattern for endpointDnsName and follows React best practices for conditional rendering.",
+      "alternatives_considered": [
+        "Always showing the IP section with a placeholder like 'No IPs assigned'",
+        "Throwing an error if endpointIps is missing",
+        "Creating a separate component for IP display with more complex error states"
+      ],
+      "files_affected": [
+        "apps/webapp/app/routes/_app.orgs.$organizationSlug.settings.private-connections._index/route.tsx"
+      ]
+    },
+    {
+      "dimension": "maintenance",
+      "recommendation": "Updated the CopyButton value to use the joined IP addresses string instead of the DNS name",
+      "rationale": "The copy functionality needed to be updated to match the displayed content. When users click the copy button, they should get the IP addresses (comma-separated) rather than the DNS name. This maintains consistency between what's displayed and what's copied, which is important for user experience.",
+      "alternatives_considered": [
+        "Keeping the copy button for DNS names even when showing IPs",
+        "Adding a separate copy button for IPs",
+        "Removing the copy functionality entirely"
+      ],
+      "files_affected": [
+        "apps/webapp/app/routes/_app.orgs.$organizationSlug.settings.private-connections._index/route.tsx"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Update Private Connections UI to Display Assigned IP Addresses",
+      "description": "Modified the private connections settings page to show assigned IP addresses instead of DNS names for provisioned private links. This provides administrators with immediate visibility into specific IP allocations.",
+      "files_to_modify": [
+        "apps/webapp/app/routes/_app.orgs.$organizationSlug.settings.private-connections._index/route.tsx"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-002",
+      "title": "Update Platform SDK Dependency for IP Address Data",
+      "description": "Bumped the @trigger.dev/platform dependency from 1.0.26 to 1.0.27 to access the new endpointIps property on private connection objects returned from the backend API.",
+      "files_to_modify": [
+        "apps/webapp/package.json",
+        "pnpm-lock.yaml"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation focused on a minimal, backward-compatible change to display assigned IP addresses for private links instead of DNS names. The approach involved two key changes: updating the frontend UI component and bumping the platform SDK dependency.\n\nFirst, the @trigger.dev/platform dependency was updated from 1.0.26 to 1.0.27, indicating that the backend API now returns an endpointIps array property on private connection objects. This follows semantic versioning practices where patch updates should be backward-compatible.\n\nSecond, the private connections route component was modified to display IP addresses instead of DNS names. The conditional rendering logic was updated from checking endpointDnsName to checking if endpointIps exists and has items. The UI label was changed from 'DNS:' to 'IPs:', and the display now shows comma-separated IP addresses using join(', '). The copy button functionality was also updated to copy the IP addresses string.\n\nThe implementation maintains the existing layout and styling as required, only changing the data being displayed. The conditional rendering ensures that IP information is only shown when available, handling cases where private links might not be fully provisioned. This approach integrates seamlessly with the existing codebase by following established patterns for data display and conditional rendering in the Remix application.",
+  "source_pr": "https://github.com/triggerdotdev/trigger.dev/pull/3317",
+  "before_sha": "0e14b6d750538b1887fcb24cdc8a8a4e26332975",
+  "after_sha": "ed6404216870125740c202dee0f28ff35ee20ab8",
+  "diff_stats": {
+    "additions": 18,
+    "deletions": 18,
+    "files_changed": 3
+  }
+}

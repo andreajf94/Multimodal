@@ -1,0 +1,149 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "database_optimization",
+      "recommendation": "Removed foreign key constraints from TaskRun table to improve write performance and simplify schema maintenance",
+      "rationale": "Foreign key constraints create overhead on every INSERT/UPDATE operation as PostgreSQL must validate referential integrity. Since all run listing operations now use ClickHouse, these constraints are no longer needed for query correctness. Data integrity is maintained at the application level through business logic.",
+      "alternatives_considered": [
+        "Keeping constraints for data safety",
+        "Adding application-level validation before removal"
+      ],
+      "files_affected": [
+        "internal-packages/database/prisma/migrations/20260401000000_drop_taskrun_foreign_keys/migration.sql"
+      ]
+    },
+    {
+      "dimension": "index_optimization",
+      "recommendation": "Dropped three redundant indexes that were only used by the deprecated Postgres query path",
+      "rationale": "Indexes have maintenance costs (storage, write overhead). The runtimeEnvironmentId_id_idx was for cursor pagination, scheduleId_idx for schedule-based queries, and rootTaskRunId_idx for finding ancestor runs - all now handled by ClickHouse. Using CONCURRENTLY IF EXISTS prevents table locks during deployment.",
+      "alternatives_considered": [
+        "Keeping indexes for potential fallback scenarios",
+        "Marking indexes as unused instead of dropping"
+      ],
+      "files_affected": [
+        "internal-packages/database/prisma/migrations/20260401130744_drop_task_run_runtime_environment_id_index/migration.sql",
+        "internal-packages/database/prisma/migrations/20260401132332_drop_task_run_schedule_id_idx/migration.sql",
+        "internal-packages/database/prisma/migrations/20260401132508_drop_task_run_root_task_run_id_idx/migration.sql"
+      ]
+    },
+    {
+      "dimension": "code_cleanup",
+      "recommendation": "Removed PostgresRunsRepository implementation and simplified RunsRepository to use only ClickHouse",
+      "rationale": "Maintaining dual repository implementations adds complexity, testing burden, and potential for bugs. Since ClickHouse is now the sole source for run listings, the fallback mechanism and feature flag logic are unnecessary technical debt.",
+      "alternatives_considered": [
+        "Keeping the code as reference",
+        "Commenting out instead of deleting"
+      ],
+      "files_affected": [
+        "apps/webapp/app/services/runsRepository/postgresRunsRepository.server.ts",
+        "apps/webapp/app/services/runsRepository/runsRepository.server.ts"
+      ]
+    },
+    {
+      "dimension": "feature_flag_management",
+      "recommendation": "Removed the runsListRepository feature flag from the feature flag system",
+      "rationale": "Feature flags should be removed when the feature is fully rolled out and stable to reduce configuration complexity and prevent confusion. The flag served its purpose during the ClickHouse migration but is now obsolete.",
+      "alternatives_considered": [
+        "Keeping the flag disabled by default",
+        "Deprecating the flag with warnings"
+      ],
+      "files_affected": [
+        "apps/webapp/app/routes/admin.feature-flags.tsx",
+        "apps/webapp/app/v3/featureFlags.ts"
+      ]
+    },
+    {
+      "dimension": "query_optimization",
+      "recommendation": "Increased buffer time for span queries from 1 second to 60 seconds in ClickHouse event repository",
+      "rationale": "A 1-second buffer was insufficient for clock skew or delayed event ingestion in distributed systems. Increasing to 60 seconds ensures span queries reliably find related events while maintaining query performance.",
+      "alternatives_considered": [
+        "Dynamic buffer based on system metrics",
+        "Configurable buffer time"
+      ],
+      "files_affected": [
+        "apps/webapp/app/v3/eventRepository/clickhouseEventRepository.server.ts"
+      ]
+    },
+    {
+      "dimension": "schema_definition",
+      "recommendation": "Updated Prisma schema to reflect removed indexes and maintain only essential indexes",
+      "rationale": "Prisma schema should accurately reflect the database structure. Removing index definitions from the schema ensures new developers understand the current optimization state and prevents confusion about expected database performance characteristics.",
+      "alternatives_considered": [
+        "Keeping schema comments about removed indexes",
+        "Creating a separate documentation file"
+      ],
+      "files_affected": [
+        "internal-packages/database/prisma/schema.prisma"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Remove Postgres runs repository implementation",
+      "description": "Delete the PostgresRunsRepository class and simplify the main RunsRepository to use only ClickHouse, removing all fallback logic and feature flag checks",
+      "files_to_modify": [
+        "apps/webapp/app/services/runsRepository/postgresRunsRepository.server.ts",
+        "apps/webapp/app/services/runsRepository/runsRepository.server.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-002",
+      "title": "Clean up feature flag system",
+      "description": "Remove the runsListRepository feature flag from all feature flag definitions, catalogs, and admin UI defaults",
+      "files_to_modify": [
+        "apps/webapp/app/routes/admin.feature-flags.tsx",
+        "apps/webapp/app/v3/featureFlags.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-003",
+      "title": "Drop TaskRun foreign key constraints",
+      "description": "Create migration to remove all foreign key constraints from TaskRun table to improve write performance",
+      "files_to_modify": [
+        "internal-packages/database/prisma/schema.prisma"
+      ],
+      "files_to_create": [
+        "internal-packages/database/prisma/migrations/20260401000000_drop_taskrun_foreign_keys/migration.sql"
+      ],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-004",
+      "title": "Remove redundant TaskRun indexes",
+      "description": "Create three separate migrations to drop indexes that were only used by the deprecated Postgres query path",
+      "files_to_modify": [
+        "internal-packages/database/prisma/schema.prisma"
+      ],
+      "files_to_create": [
+        "internal-packages/database/prisma/migrations/20260401130744_drop_task_run_runtime_environment_id_index/migration.sql",
+        "internal-packages/database/prisma/migrations/20260401132332_drop_task_run_schedule_id_idx/migration.sql",
+        "internal-packages/database/prisma/migrations/20260401132508_drop_task_run_root_task_run_id_idx/migration.sql"
+      ],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-005",
+      "title": "Optimize ClickHouse span query buffer",
+      "description": "Increase the buffer time for span queries from 1 second to 60 seconds to account for clock skew and event ingestion delays",
+      "files_to_modify": [
+        "apps/webapp/app/v3/eventRepository/clickhouseEventRepository.server.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "This change implements a comprehensive database optimization by removing unnecessary constraints and indexes from the TaskRun table, enabled by the complete migration of run listing operations to ClickHouse. The implementation follows a phased approach: first removing the application-level Postgres repository implementation and feature flag, then cleaning up the database schema through carefully crafted migrations.\n\nKey patterns include the use of CONCURRENTLY IF EXISTS in index drop operations to prevent table locks during deployment, maintaining data integrity at the application level rather than through database constraints, and incremental removal of technical debt. The changes reflect a mature system where ClickHouse has proven reliable enough to become the sole source for run listings, allowing PostgreSQL to be optimized for write performance rather than read queries.\n\nThe implementation integrates with the existing codebase by maintaining backward compatibility at the API level - all existing method signatures remain unchanged, only the underlying implementations are simplified. The feature flag removal follows established patterns in the codebase, and the database migrations use the existing Prisma migration system. The increased buffer time for span queries addresses a real-world issue observed in production without changing the overall architecture.",
+  "source_pr": "https://github.com/triggerdotdev/trigger.dev/pull/3309",
+  "before_sha": "bf736a79fcd91bd113fc379195273863569abc1f",
+  "after_sha": "0e14b6d750538b1887fcb24cdc8a8a4e26332975",
+  "diff_stats": {
+    "additions": 27,
+    "deletions": 514,
+    "files_changed": 10
+  }
+}

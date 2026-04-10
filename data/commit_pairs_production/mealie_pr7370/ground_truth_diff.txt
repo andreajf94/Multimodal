@@ -1,0 +1,144 @@
+diff --git a/frontend/components/Domain/Recipe/RecipeCardSection.vue b/frontend/components/Domain/Recipe/RecipeCardSection.vue
+index fd93821949b..4321c6d2eb0 100644
+--- a/frontend/components/Domain/Recipe/RecipeCardSection.vue
++++ b/frontend/components/Domain/Recipe/RecipeCardSection.vue
+@@ -160,13 +160,13 @@
+         </v-row>
+       </div>
+       <v-card v-intersect="infiniteScroll" />
+-      <v-fade-transition>
+-        <AppLoader
+-          v-if="loading"
+-          :loading="loading"
+-        />
+-      </v-fade-transition>
+     </div>
++    <v-fade-transition>
++      <AppLoader
++        v-if="loading"
++        :loading="loading"
++      />
++    </v-fade-transition>
+   </div>
+ </template>
+ 
+@@ -243,6 +243,7 @@ const ready = ref(false);
+ const loading = ref(false);
+ 
+ const { fetchMore, getRandom } = useLazyRecipes(isOwnGroup.value ? null : groupSlug.value);
++const { savePosition, getSavedPage, restorePosition } = useScrollPosition();
+ const router = useRouter();
+ 
+ const queryFilter = computed(() => {
+@@ -283,8 +284,29 @@ async function fetchRecipes(pageCount = 1) {
+ }
+ 
+ onMounted(async () => {
+-  await initRecipes();
+-  ready.value = true;
++  loading.value = true;
++  const savedPage = getSavedPage(route.path);
++
++  if (savedPage && savedPage > 2) {
++    page.value = 1;
++    hasMore.value = true;
++    const newRecipes = await fetchRecipes(savedPage);
++    if (newRecipes.length < perPage * savedPage) {
++      hasMore.value = false;
++    }
++    page.value = savedPage;
++    emit(REPLACE_RECIPES_EVENT, newRecipes);
++    ready.value = true;
++    restorePosition(route.path);
++  }
++  else {
++    await initRecipes();
++    ready.value = true;
++    if (savedPage) {
++      restorePosition(route.path);
++    }
++  }
++  loading.value = false;
+ });
+ 
+ let lastQuery: string | undefined = JSON.stringify(props.query);
+@@ -337,6 +359,8 @@ const infiniteScroll = useThrottleFn(async () => {
+     emit(APPEND_RECIPES_EVENT, newRecipes);
+   }
+ 
++  savePosition(route.path, page.value);
++
+   loading.value = false;
+ }, 500);
+ 
+diff --git a/frontend/composables/use-scroll-position.ts b/frontend/composables/use-scroll-position.ts
+new file mode 100644
+index 00000000000..5f4a0755afa
+--- /dev/null
++++ b/frontend/composables/use-scroll-position.ts
+@@ -0,0 +1,65 @@
++const scrollPositions = new Map<string, number>();
++const pagePositions = new Map<string, number>();
++
++export function useScrollPosition() {
++  const router = useRouter();
++
++  let observer: MutationObserver | null = null;
++  let timeout: ReturnType<typeof setTimeout> | null = null;
++  let fallback: ReturnType<typeof setTimeout> | null = null;
++
++  function savePosition(path: string, page: number) {
++    scrollPositions.set(path, document.documentElement.scrollTop);
++    pagePositions.set(path, page);
++  }
++
++  function getSavedPage(path: string): number | undefined {
++    return pagePositions.get(path);
++  }
++
++  function restorePosition(path: string) {
++    const savedPosition = scrollPositions.get(path);
++    if (!savedPosition) return;
++
++    observer?.disconnect();
++    if (timeout) clearTimeout(timeout);
++    if (fallback) clearTimeout(fallback);
++
++    fallback = setTimeout(() => {
++      if (timeout) clearTimeout(timeout);
++      observer?.disconnect();
++      document.documentElement.scrollTop = savedPosition;
++    }, 500);
++
++    observer = new MutationObserver(() => {
++      if (timeout) clearTimeout(timeout);
++      timeout = setTimeout(() => {
++        if (fallback) clearTimeout(fallback);
++        observer?.disconnect();
++        document.documentElement.scrollTop = savedPosition;
++      }, 100);
++    });
++
++    observer.observe(document.body, {
++      childList: true,
++      subtree: true,
++    });
++  }
++
++  const unregisterBefore = router.beforeEach((to, from) => {
++    scrollPositions.set(from.path, document.documentElement.scrollTop);
++  });
++
++  onUnmounted(() => {
++    unregisterBefore();
++    observer?.disconnect();
++    if (timeout) clearTimeout(timeout);
++    if (fallback) clearTimeout(fallback);
++  });
++
++  return {
++    savePosition,
++    getSavedPage,
++    restorePosition,
++  };
++}

@@ -1,0 +1,14 @@
+{
+  "feature_name": "Instant Booking Audit Logging",
+  "description": "Add audit logging to the instant booking flow to match the functionality already present in regular and recurring bookings. When an instant booking is created, the system should emit an audit event that gets recorded in the BookingAudit table, ensuring consistent tracking across all booking types. This audit logging should be implemented as a fire-and-forget operation that never interferes with the booking creation process.",
+  "functional_requirements": [
+    "Integrate the existing BookingEventHandlerService.onBookingCreated() method into the instant booking creation flow",
+    "Wrap the audit logging call in a try/catch block to ensure audit failures never prevent successful bookings",
+    "Maintain the same audit event pattern used by RegularBookingService and RecurringBookingService",
+    "Ensure audit events are only recorded when the booking-audit feature flag is enabled for the organization",
+    "Create BookingAudit records with action='CREATED' and the correct bookingUid for instant bookings",
+    "Verify the booking flow continues to work normally regardless of audit logging success or failure"
+  ],
+  "project_name": "cal.com",
+  "source_pr": "https://github.com/calcom/cal.com/pull/28176"
+}

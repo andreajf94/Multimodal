@@ -1,0 +1,1669 @@
+diff --git a/.changeset/packet-v2-packets-api.md b/.changeset/packet-v2-packets-api.md
+new file mode 100644
+index 00000000000..9ec5fa1b338
+--- /dev/null
++++ b/.changeset/packet-v2-packets-api.md
+@@ -0,0 +1,5 @@
++---
++"@trigger.dev/core": patch
++---
++
++Large run outputs can use the new API which allows switching object storage providers.
+\ No newline at end of file
+diff --git a/.env.example b/.env.example
+index 35c8c976ff6..69d5acdc560 100644
+--- a/.env.example
++++ b/.env.example
+@@ -77,9 +77,28 @@ POSTHOG_PROJECT_KEY=
+ # DEPOT_TOKEN=<Depot org token>
+ # DEV_OTEL_EXPORTER_OTLP_ENDPOINT="http://0.0.0.0:4318"
+ # These are needed for the object store (for handling large payloads/outputs)
+-# OBJECT_STORE_BASE_URL="https://{bucket}.{accountId}.r2.cloudflarestorage.com"
+-# OBJECT_STORE_ACCESS_KEY_ID=
+-# OBJECT_STORE_SECRET_ACCESS_KEY=
++#
++# Default provider
++# OBJECT_STORE_BASE_URL=http://localhost:9005
++# OBJECT_STORE_BUCKET=packets
++# OBJECT_STORE_ACCESS_KEY_ID=minioadmin
++# OBJECT_STORE_SECRET_ACCESS_KEY=minioadmin
++# OBJECT_STORE_REGION=us-east-1
++# OBJECT_STORE_SERVICE=s3
++#
++# OBJECT_STORE_DEFAULT_PROTOCOL=s3  # Only specify this if you're going to migrate object storage and set protocol values below
++# Named providers (protocol-prefixed data) - optional for multi-provider support
++# OBJECT_STORE_S3_BASE_URL=https://s3.amazonaws.com
++# OBJECT_STORE_S3_ACCESS_KEY_ID=
++# OBJECT_STORE_S3_SECRET_ACCESS_KEY=
++# OBJECT_STORE_S3_REGION=us-east-1
++# OBJECT_STORE_S3_SERVICE=s3
++#
++# OBJECT_STORE_R2_BASE_URL=https://{bucket}.{accountId}.r2.cloudflarestorage.com
++# OBJECT_STORE_R2_ACCESS_KEY_ID=
++# OBJECT_STORE_R2_SECRET_ACCESS_KEY=
++# OBJECT_STORE_R2_REGION=auto
++# OBJECT_STORE_R2_SERVICE=s3
+ # CHECKPOINT_THRESHOLD_IN_MS=10000
+ 
+ # These control the server-side internal telemetry
+diff --git a/.server-changes/multi-provider-object-storage.md b/.server-changes/multi-provider-object-storage.md
+new file mode 100644
+index 00000000000..6749b5dcdbb
+--- /dev/null
++++ b/.server-changes/multi-provider-object-storage.md
+@@ -0,0 +1,6 @@
++---
++area: webapp
++type: feature
++---
++
++Multi-provider object storage with protocol-based routing for zero-downtime migration
+diff --git a/.server-changes/object-store-iam-auth.md b/.server-changes/object-store-iam-auth.md
+new file mode 100644
+index 00000000000..4a400eb29fe
+--- /dev/null
++++ b/.server-changes/object-store-iam-auth.md
+@@ -0,0 +1,6 @@
++---
++area: webapp
++type: feature
++---
++
++Add IAM role-based auth support for object stores (no access keys required).
+diff --git a/apps/webapp/app/env.server.ts b/apps/webapp/app/env.server.ts
+index a29fe4b9796..82b73b34853 100644
+--- a/apps/webapp/app/env.server.ts
++++ b/apps/webapp/app/env.server.ts
+@@ -349,11 +349,18 @@ const EnvironmentSchema = z
+       .default(60 * 1000 * 15), // 15 minutes
+ 
+     OBJECT_STORE_BASE_URL: z.string().optional(),
++    OBJECT_STORE_BUCKET: z.string().optional(),
+     OBJECT_STORE_ACCESS_KEY_ID: z.string().optional(),
+     OBJECT_STORE_SECRET_ACCESS_KEY: z.string().optional(),
+     OBJECT_STORE_REGION: z.string().optional(),
+     OBJECT_STORE_SERVICE: z.string().default("s3"),
+ 
++    // Protocol to use for new uploads (e.g., "s3", "r2"). Data without protocol uses default provider above.
++    // If specified, you must configure the corresponding provider using OBJECT_STORE_{PROTOCOL}_* env vars.
++    // Example: OBJECT_STORE_DEFAULT_PROTOCOL=s3 requires OBJECT_STORE_S3_BASE_URL, OBJECT_STORE_S3_ACCESS_KEY_ID, etc.
++    // Enables zero-downtime migration between providers (old data keeps working, new data uses new provider).
++    OBJECT_STORE_DEFAULT_PROTOCOL: z.string().regex(/^[a-z0-9]+$/).optional(),
++
+     ARTIFACTS_OBJECT_STORE_BUCKET: z.string().optional(),
+     ARTIFACTS_OBJECT_STORE_BASE_URL: z.string().optional(),
+     ARTIFACTS_OBJECT_STORE_ACCESS_KEY_ID: z.string().optional(),
+diff --git a/apps/webapp/app/presenters/v3/ApiRetrieveRunPresenter.server.ts b/apps/webapp/app/presenters/v3/ApiRetrieveRunPresenter.server.ts
+index 8d1a312c5d7..dc19457cdd1 100644
+--- a/apps/webapp/app/presenters/v3/ApiRetrieveRunPresenter.server.ts
++++ b/apps/webapp/app/presenters/v3/ApiRetrieveRunPresenter.server.ts
+@@ -15,7 +15,7 @@ import assertNever from "assert-never";
+ import { API_VERSIONS, CURRENT_API_VERSION, RunStatusUnspecifiedApiVersion } from "~/api/versions";
+ import { $replica, prisma } from "~/db.server";
+ import { AuthenticatedEnvironment } from "~/services/apiAuth.server";
+-import { generatePresignedUrl } from "~/v3/r2.server";
++import { generatePresignedUrl } from "~/v3/objectStore.server";
+ import { tracer } from "~/v3/tracer.server";
+ import { startSpanWithEnv } from "~/v3/tracing.server";
+ 
+diff --git a/apps/webapp/app/routes/api.v1.packets.$.ts b/apps/webapp/app/routes/api.v1.packets.$.ts
+index 4632df09186..031f2854bbb 100644
+--- a/apps/webapp/app/routes/api.v1.packets.$.ts
++++ b/apps/webapp/app/routes/api.v1.packets.$.ts
+@@ -3,7 +3,7 @@ import { json } from "@remix-run/server-runtime";
+ import { z } from "zod";
+ import { authenticateApiRequest } from "~/services/apiAuth.server";
+ import { createLoaderApiRoute } from "~/services/routeBuilders/apiBuilder.server";
+-import { generatePresignedUrl } from "~/v3/r2.server";
++import { generatePresignedUrl } from "~/v3/objectStore.server";
+ 
+ const ParamsSchema = z.object({
+   "*": z.string(),
+@@ -29,7 +29,8 @@ export async function action({ request, params }: ActionFunctionArgs) {
+     authenticationResult.environment.project.externalRef,
+     authenticationResult.environment.slug,
+     filename,
+-    "PUT"
++    "PUT",
++    { forceNoPrefix: true }
+   );
+ 
+   if (!signed.success) {
+diff --git a/apps/webapp/app/routes/api.v1.waitpoints.tokens.$waitpointFriendlyId.callback.$hash.ts b/apps/webapp/app/routes/api.v1.waitpoints.tokens.$waitpointFriendlyId.callback.$hash.ts
+index fd29764d653..e8a7f046edb 100644
+--- a/apps/webapp/app/routes/api.v1.waitpoints.tokens.$waitpointFriendlyId.callback.$hash.ts
++++ b/apps/webapp/app/routes/api.v1.waitpoints.tokens.$waitpointFriendlyId.callback.$hash.ts
+@@ -1,13 +1,11 @@
+ import { type ActionFunctionArgs, json } from "@remix-run/server-runtime";
+-import {
+-  type CompleteWaitpointTokenResponseBody,
+-  conditionallyExportPacket,
+-  stringifyIO,
+-} from "@trigger.dev/core/v3";
++import { type CompleteWaitpointTokenResponseBody, stringifyIO } from "@trigger.dev/core/v3";
+ import { WaitpointId } from "@trigger.dev/core/v3/isomorphic";
+ import { z } from "zod";
+ import { $replica } from "~/db.server";
+ import { env } from "~/env.server";
++import { processWaitpointCompletionPacket } from "~/runEngine/concerns/waitpointCompletionPacket.server";
++import type { AuthenticatedEnvironment } from "~/services/apiAuth.server";
+ import { verifyHttpCallbackHash } from "~/services/httpCallback.server";
+ import { logger } from "~/services/logger.server";
+ import { engine } from "~/v3/runEngine.server";
+@@ -41,8 +39,10 @@ export async function action({ request, params }: ActionFunctionArgs) {
+       },
+       include: {
+         environment: {
+-          select: {
+-            apiKey: true,
++          include: {
++            project: true,
++            organization: true,
++            orgMember: true,
+             parentEnvironment: {
+               select: {
+                 apiKey: true,
+@@ -77,9 +77,10 @@ export async function action({ request, params }: ActionFunctionArgs) {
+     const body = await request.json().catch(() => ({}));
+ 
+     const stringifiedData = await stringifyIO(body);
+-    const finalData = await conditionallyExportPacket(
++    const finalData = await processWaitpointCompletionPacket(
+       stringifiedData,
+-      `${waitpointId}/waitpoint/http-callback`
++      waitpoint.environment,
++      `${WaitpointId.toFriendlyId(waitpointId)}/http-callback`
+     );
+ 
+     const result = await engine.completeWaitpoint({
+diff --git a/apps/webapp/app/routes/api.v1.waitpoints.tokens.$waitpointFriendlyId.complete.ts b/apps/webapp/app/routes/api.v1.waitpoints.tokens.$waitpointFriendlyId.complete.ts
+index afd68850130..916bfd19864 100644
+--- a/apps/webapp/app/routes/api.v1.waitpoints.tokens.$waitpointFriendlyId.complete.ts
++++ b/apps/webapp/app/routes/api.v1.waitpoints.tokens.$waitpointFriendlyId.complete.ts
+@@ -2,7 +2,6 @@ import { json } from "@remix-run/server-runtime";
+ import {
+   CompleteWaitpointTokenRequestBody,
+   type CompleteWaitpointTokenResponseBody,
+-  conditionallyExportPacket,
+   stringifyIO,
+ } from "@trigger.dev/core/v3";
+ import { WaitpointId } from "@trigger.dev/core/v3/isomorphic";
+@@ -10,6 +9,7 @@ import { z } from "zod";
+ import { $replica } from "~/db.server";
+ import { env } from "~/env.server";
+ import { logger } from "~/services/logger.server";
++import { processWaitpointCompletionPacket } from "~/runEngine/concerns/waitpointCompletionPacket.server";
+ import { createActionApiRoute } from "~/services/routeBuilders/apiBuilder.server";
+ import { engine } from "~/v3/runEngine.server";
+ 
+@@ -52,9 +52,10 @@ const { action, loader } = createActionApiRoute(
+       }
+ 
+       const stringifiedData = await stringifyIO(body.data);
+-      const finalData = await conditionallyExportPacket(
++      const finalData = await processWaitpointCompletionPacket(
+         stringifiedData,
+-        `${waitpointId}/waitpoint/token`
++        authentication.environment,
++        `${WaitpointId.toFriendlyId(waitpointId)}/token`
+       );
+ 
+       const result = await engine.completeWaitpoint({
+diff --git a/apps/webapp/app/routes/api.v2.packets.$.ts b/apps/webapp/app/routes/api.v2.packets.$.ts
+new file mode 100644
+index 00000000000..8810dc6005a
+--- /dev/null
++++ b/apps/webapp/app/routes/api.v2.packets.$.ts
+@@ -0,0 +1,45 @@
++import type { ActionFunctionArgs } from "@remix-run/server-runtime";
++import { json } from "@remix-run/server-runtime";
++import { z } from "zod";
++import { authenticateApiRequest } from "~/services/apiAuth.server";
++import { generatePresignedUrl } from "~/v3/objectStore.server";
++
++const ParamsSchema = z.object({
++  "*": z.string(),
++});
++
++/**
++ * PUT-only presign for packet uploads (SDK offload). Uses OBJECT_STORE_DEFAULT_PROTOCOL for
++ * unprefixed keys; returns canonical storagePath for IOPacket.data. GET presigns use v1.
++ */
++export async function action({ request, params }: ActionFunctionArgs) {
++  if (request.method.toUpperCase() !== "PUT") {
++    return { status: 405, body: "Method Not Allowed" };
++  }
++
++  const authenticationResult = await authenticateApiRequest(request);
++
++  if (!authenticationResult) {
++    return json({ error: "Invalid or Missing API key" }, { status: 401 });
++  }
++
++  const parsedParams = ParamsSchema.parse(params);
++  const filename = parsedParams["*"];
++
++  const signed = await generatePresignedUrl(
++    authenticationResult.environment.project.externalRef,
++    authenticationResult.environment.slug,
++    filename,
++    "PUT"
++  );
++
++  if (!signed.success) {
++    return json({ error: `Failed to generate presigned URL: ${signed.error}` }, { status: 500 });
++  }
++
++  if (signed.storagePath === undefined) {
++    return json({ error: "Failed to resolve storage path for packet upload" }, { status: 500 });
++  }
++
++  return json({ presignedUrl: signed.url, storagePath: signed.storagePath });
++}
+diff --git a/apps/webapp/app/routes/resources.orgs.$organizationSlug.projects.$projectParam.env.$envParam.waitpoints.$waitpointFriendlyId.complete/route.tsx b/apps/webapp/app/routes/resources.orgs.$organizationSlug.projects.$projectParam.env.$envParam.waitpoints.$waitpointFriendlyId.complete/route.tsx
+index 2544b2ea52c..670aee165c1 100644
+--- a/apps/webapp/app/routes/resources.orgs.$organizationSlug.projects.$projectParam.env.$envParam.waitpoints.$waitpointFriendlyId.complete/route.tsx
++++ b/apps/webapp/app/routes/resources.orgs.$organizationSlug.projects.$projectParam.env.$envParam.waitpoints.$waitpointFriendlyId.complete/route.tsx
+@@ -2,13 +2,7 @@ import { env } from "~/env.server";
+ import { parse } from "@conform-to/zod";
+ import { Form, useLocation, useNavigation, useSubmit } from "@remix-run/react";
+ import { type ActionFunctionArgs, json } from "@remix-run/server-runtime";
+-import {
+-  conditionallyExportPacket,
+-  IOPacket,
+-  stringifyIO,
+-  timeoutError,
+-  WaitpointTokenStatus,
+-} from "@trigger.dev/core/v3";
++import { stringifyIO, timeoutError, WaitpointTokenStatus } from "@trigger.dev/core/v3";
+ import { WaitpointId } from "@trigger.dev/core/v3/isomorphic";
+ import type { Waitpoint } from "@trigger.dev/database";
+ import { useCallback, useRef } from "react";
+@@ -24,6 +18,8 @@ import { $replica } from "~/db.server";
+ import { useOrganization } from "~/hooks/useOrganizations";
+ import { useProject } from "~/hooks/useProject";
+ import { redirectWithErrorMessage, redirectWithSuccessMessage } from "~/models/message.server";
++import { findEnvironmentBySlug } from "~/models/runtimeEnvironment.server";
++import { processWaitpointCompletionPacket } from "~/runEngine/concerns/waitpointCompletionPacket.server";
+ import { logger } from "~/services/logger.server";
+ import { requireUserId } from "~/services/session.server";
+ import { EnvironmentParamSchema, ProjectParamSchema, v3RunsPath } from "~/utils/pathBuilder";
+@@ -86,6 +82,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
+     const waitpoint = await $replica.waitpoint.findFirst({
+       select: {
+         projectId: true,
++        environmentId: true,
+       },
+       where: {
+         id: waitpointId,
+@@ -150,11 +147,29 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
+             );
+           }
+ 
++          const environment = await findEnvironmentBySlug(project.id, envParam, userId);
++          if (!environment) {
++            return redirectWithErrorMessage(
++              submission.value.failureRedirect,
++              request,
++              "Environment not found"
++            );
++          }
++
++          if (environment.id !== waitpoint.environmentId) {
++            return redirectWithErrorMessage(
++              submission.value.failureRedirect,
++              request,
++              "No waitpoint found"
++            );
++          }
++
+           const data = submission.value.payload ? JSON.parse(submission.value.payload) : {};
+           const stringifiedData = await stringifyIO(data);
+-          const finalData = await conditionallyExportPacket(
++          const finalData = await processWaitpointCompletionPacket(
+             stringifiedData,
+-            `${waitpointId}/waitpoint/token`
++            environment,
++            `${WaitpointId.toFriendlyId(waitpointId)}/token`
+           );
+ 
+           const result = await engine.completeWaitpoint({
+diff --git a/apps/webapp/app/routes/resources.packets.$environmentId.$.ts b/apps/webapp/app/routes/resources.packets.$environmentId.$.ts
+index 2c3e280a7e5..4269e13d63a 100644
+--- a/apps/webapp/app/routes/resources.packets.$environmentId.$.ts
++++ b/apps/webapp/app/routes/resources.packets.$environmentId.$.ts
+@@ -3,7 +3,7 @@ import { basename } from "node:path";
+ import { z } from "zod";
+ import { prisma } from "~/db.server";
+ import { requireUserId } from "~/services/session.server";
+-import { generatePresignedRequest } from "~/v3/r2.server";
++import { generatePresignedRequest } from "~/v3/objectStore.server";
+ 
+ const ParamSchema = z.object({
+   environmentId: z.string(),
+diff --git a/apps/webapp/app/runEngine/concerns/batchPayloads.server.ts b/apps/webapp/app/runEngine/concerns/batchPayloads.server.ts
+index efd9062195c..eeb33fa4b41 100644
+--- a/apps/webapp/app/runEngine/concerns/batchPayloads.server.ts
++++ b/apps/webapp/app/runEngine/concerns/batchPayloads.server.ts
+@@ -1,9 +1,9 @@
+-import { IOPacket, packetRequiresOffloading, tryCatch } from "@trigger.dev/core/v3";
++import { type IOPacket, packetRequiresOffloading, tryCatch } from "@trigger.dev/core/v3";
+ import { env } from "~/env.server";
+-import { startActiveSpan } from "~/v3/tracer.server";
+-import { uploadPacketToObjectStore, r2 } from "~/v3/r2.server";
+ import type { AuthenticatedEnvironment } from "~/services/apiAuth.server";
+ import { logger } from "~/services/logger.server";
++import { hasObjectStoreClient, uploadPacketToObjectStore } from "~/v3/objectStore.server";
++import { startActiveSpan } from "~/v3/tracer.server";
+ 
+ export type BatchPayloadProcessResult = {
+   /** The processed payload - either the original or an R2 path */
+@@ -31,7 +31,7 @@ export class BatchPayloadProcessor {
+    * If not available, large payloads will be stored inline (which may fail for very large payloads).
+    */
+   isObjectStoreAvailable(): boolean {
+-    return r2 !== undefined && env.OBJECT_STORE_BASE_URL !== undefined;
++    return hasObjectStoreClient();
+   }
+ 
+   /**
+@@ -103,11 +103,17 @@ export class BatchPayloadProcessor {
+         };
+       }
+ 
+-      // Upload to R2
++      // Upload to object store
+       const filename = `batch_${batchId}/item_${itemIndex}/payload.json`;
+ 
+-      const [uploadError] = await tryCatch(
+-        uploadPacketToObjectStore(filename, packet.data, packet.dataType, environment)
++      const [uploadError, uploadedFilename] = await tryCatch(
++        uploadPacketToObjectStore(
++          filename,
++          packet.data,
++          packet.dataType,
++          environment,
++          env.OBJECT_STORE_DEFAULT_PROTOCOL
++        )
+       );
+ 
+       if (uploadError) {
+@@ -125,18 +131,18 @@ export class BatchPayloadProcessor {
+         );
+       }
+ 
+-      logger.debug("Batch item payload offloaded to R2", {
++      logger.debug("Batch item payload offloaded to object store", {
+         batchId,
+         itemIndex,
+-        filename,
++        filename: uploadedFilename,
+         size,
+       });
+ 
+       span.setAttribute("wasOffloaded", true);
+-      span.setAttribute("offloadPath", filename);
++      span.setAttribute("offloadPath", uploadedFilename);
+ 
+       return {
+-        payload: filename,
++        payload: uploadedFilename!,
+         payloadType: "application/store",
+         wasOffloaded: true,
+         size,
+diff --git a/apps/webapp/app/runEngine/concerns/payloads.server.ts b/apps/webapp/app/runEngine/concerns/payloads.server.ts
+index 5ad84f8dc66..7e1efbdf302 100644
+--- a/apps/webapp/app/runEngine/concerns/payloads.server.ts
++++ b/apps/webapp/app/runEngine/concerns/payloads.server.ts
+@@ -2,7 +2,7 @@ import { IOPacket, packetRequiresOffloading, tryCatch } from "@trigger.dev/core/
+ import { PayloadProcessor, TriggerTaskRequest } from "../types";
+ import { env } from "~/env.server";
+ import { startActiveSpan } from "~/v3/tracer.server";
+-import { uploadPacketToObjectStore } from "~/v3/r2.server";
++import { uploadPacketToObjectStore } from "~/v3/objectStore.server";
+ import { ServiceValidationError } from "~/v3/services/common.server";
+ 
+ export class DefaultPayloadProcessor implements PayloadProcessor {
+@@ -31,8 +31,8 @@ export class DefaultPayloadProcessor implements PayloadProcessor {
+ 
+       const filename = `${request.friendlyId}/payload.json`;
+ 
+-      const [uploadError] = await tryCatch(
+-        uploadPacketToObjectStore(filename, packet.data, packet.dataType, request.environment)
++      const [uploadError, uploadedFilename] = await tryCatch(
++        uploadPacketToObjectStore(filename, packet.data, packet.dataType, request.environment, env.OBJECT_STORE_DEFAULT_PROTOCOL)
+       );
+ 
+       if (uploadError) {
+@@ -40,7 +40,7 @@ export class DefaultPayloadProcessor implements PayloadProcessor {
+       }
+ 
+       return {
+-        data: filename,
++        data: uploadedFilename!,
+         dataType: "application/store",
+       };
+     });
+diff --git a/apps/webapp/app/runEngine/concerns/waitpointCompletionPacket.server.ts b/apps/webapp/app/runEngine/concerns/waitpointCompletionPacket.server.ts
+new file mode 100644
+index 00000000000..5e029221344
+--- /dev/null
++++ b/apps/webapp/app/runEngine/concerns/waitpointCompletionPacket.server.ts
+@@ -0,0 +1,63 @@
++import { type IOPacket, packetRequiresOffloading, tryCatch } from "@trigger.dev/core/v3";
++import type { AuthenticatedEnvironment } from "~/services/apiAuth.server";
++import { env } from "~/env.server";
++import { uploadPacketToObjectStore } from "~/v3/objectStore.server";
++import { ServiceValidationError } from "~/v3/services/common.server";
++
++function packetExtensionForDataType(dataType: string): string {
++  switch (dataType) {
++    case "application/json":
++    case "application/super+json":
++      return "json";
++    case "text/plain":
++      return "txt";
++    default:
++      return "txt";
++  }
++}
++
++/**
++ * Offloads large waitpoint completion payloads to object store (same threshold and
++ * upload path pattern as DefaultPayloadProcessor). Object key prefix should use the
++ * waitpoint friendly id folder, e.g. `${WaitpointId.toFriendlyId(internalId)}/token`.
++ * Replaces no-op conditionallyExportPacket usage in webapp routes where apiClientManager is unset.
++ */
++export async function processWaitpointCompletionPacket(
++  packet: IOPacket,
++  environment: AuthenticatedEnvironment,
++  pathPrefix: string
++): Promise<IOPacket> {
++  if (!packet.data) {
++    return packet;
++  }
++
++  const { needsOffloading, size } = packetRequiresOffloading(
++    packet,
++    env.TASK_PAYLOAD_OFFLOAD_THRESHOLD
++  );
++
++  if (!needsOffloading) {
++    return packet;
++  }
++
++  const filename = `${pathPrefix}.${packetExtensionForDataType(packet.dataType)}`;
++
++  const [uploadError, uploadedFilename] = await tryCatch(
++    uploadPacketToObjectStore(
++      filename,
++      packet.data,
++      packet.dataType,
++      environment,
++      env.OBJECT_STORE_DEFAULT_PROTOCOL
++    )
++  );
++
++  if (uploadError) {
++    throw new ServiceValidationError("Failed to upload large waitpoint to object store", 500);
++  }
++
++  return {
++    data: uploadedFilename!,
++    dataType: "application/store",
++  };
++}
+diff --git a/apps/webapp/app/runEngine/services/batchTrigger.server.ts b/apps/webapp/app/runEngine/services/batchTrigger.server.ts
+index 98aaaf60ae1..4e504163fec 100644
+--- a/apps/webapp/app/runEngine/services/batchTrigger.server.ts
++++ b/apps/webapp/app/runEngine/services/batchTrigger.server.ts
+@@ -16,7 +16,7 @@ import { env } from "~/env.server";
+ import type { AuthenticatedEnvironment } from "~/services/apiAuth.server";
+ import { logger } from "~/services/logger.server";
+ import { batchTriggerWorker } from "~/v3/batchTriggerWorker.server";
+-import { downloadPacketFromObjectStore, uploadPacketToObjectStore } from "../../v3/r2.server";
++import { downloadPacketFromObjectStore, uploadPacketToObjectStore } from "../../v3/objectStore.server";
+ import { ServiceValidationError, WithRunEngine } from "../../v3/services/baseService.server";
+ import { TriggerTaskService } from "../../v3/services/triggerTask.server";
+ import { startActiveSpan } from "../../v3/tracer.server";
+@@ -716,10 +716,10 @@ export class RunEngineBatchTriggerService extends WithRunEngine {
+ 
+       const filename = `${pathPrefix}/payload.json`;
+ 
+-      await uploadPacketToObjectStore(filename, packet.data, packet.dataType, environment);
++      const uploadedFilename = await uploadPacketToObjectStore(filename, packet.data, packet.dataType, environment);
+ 
+       return {
+-        data: filename,
++        data: uploadedFilename,
+         dataType: "application/store",
+       };
+     });
+diff --git a/apps/webapp/app/v3/objectStore.server.ts b/apps/webapp/app/v3/objectStore.server.ts
+new file mode 100644
+index 00000000000..bd85fb905fa
+--- /dev/null
++++ b/apps/webapp/app/v3/objectStore.server.ts
+@@ -0,0 +1,317 @@
++import { type IOPacket } from "@trigger.dev/core/v3";
++import { env } from "~/env.server";
++import { type AuthenticatedEnvironment } from "~/services/apiAuth.server";
++import { logger } from "~/services/logger.server";
++import { singleton } from "~/utils/singleton";
++import { ObjectStoreClient, type ObjectStoreClientConfig } from "./objectStoreClient.server";
++
++/**
++ * Parsed storage URI with optional protocol prefix
++ * @example { protocol: "s3", path: "run_abc/payload.json" }
++ * @example { protocol: undefined, path: "batch_123/item_0/payload.json" } // legacy, uses default
++ */
++export type ParsedStorageUri = {
++  protocol?: string;
++  path: string;
++};
++
++/**
++ * Parse a storage URI into protocol and path components
++ * @param uri Storage URI, optionally prefixed with protocol (e.g., "s3://path" or "path")
++ * @returns Parsed components { protocol?, path }
++ */
++export function parseStorageUri(uri: string): ParsedStorageUri {
++  const match = uri.match(/^([a-z0-9]+):\/\/(.+)$/);
++  if (match) {
++    return {
++      protocol: match[1],
++      path: match[2],
++    };
++  }
++  return {
++    protocol: undefined,
++    path: uri,
++  };
++}
++
++/**
++ * Format a storage URI with optional protocol prefix
++ * @param path Storage path
++ * @param protocol Optional protocol to prefix (e.g., "s3", "r2")
++ * @returns Formatted URI (e.g., "s3://path" or "path")
++ */
++export function formatStorageUri(path: string, protocol?: string): string {
++  if (protocol) {
++    return `${protocol}://${path}`;
++  }
++  return path;
++}
++
++/**
++ * Get object storage configuration for a given protocol.
++ * Returns a config if baseUrl is set, even without explicit credentials —
++ * in that case the AWS credential chain (ECS task role, EC2 IMDS, etc.) is used,
++ * and OBJECT_STORE_BUCKET must also be set.
++ */
++function getObjectStoreConfig(protocol?: string): ObjectStoreClientConfig | undefined {
++  if (protocol) {
++    // Named provider (e.g., OBJECT_STORE_S3_*)
++    const prefix = `OBJECT_STORE_${protocol.toUpperCase()}_`;
++    const baseUrl = process.env[`${prefix}BASE_URL`];
++    if (!baseUrl) return undefined;
++
++    return {
++      baseUrl,
++      bucket: process.env[`${prefix}BUCKET`] || undefined,
++      accessKeyId: process.env[`${prefix}ACCESS_KEY_ID`] || undefined,
++      secretAccessKey: process.env[`${prefix}SECRET_ACCESS_KEY`] || undefined,
++      region: process.env[`${prefix}REGION`] || undefined,
++      service: process.env[`${prefix}SERVICE`] || undefined,
++    };
++  }
++
++  // Default provider (backward compatible)
++  if (!env.OBJECT_STORE_BASE_URL) {
++    return undefined;
++  }
++
++  return {
++    baseUrl: env.OBJECT_STORE_BASE_URL,
++    bucket: env.OBJECT_STORE_BUCKET || undefined,
++    accessKeyId: env.OBJECT_STORE_ACCESS_KEY_ID || undefined,
++    secretAccessKey: env.OBJECT_STORE_SECRET_ACCESS_KEY || undefined,
++    region: env.OBJECT_STORE_REGION || undefined,
++    service: env.OBJECT_STORE_SERVICE || undefined,
++  };
++}
++
++/**
++ * Object storage client registry. Maps protocol name to ObjectStoreClient singleton.
++ * ObjectStoreClient internally uses either aws4fetch (static credentials) or the
++ * AWS SDK S3Client (IAM credential chain), selected at creation time.
++ */
++const objectStoreClients = singleton(
++  "objectStoreClients",
++  () => new Map<string, ObjectStoreClient>()
++);
++
++function getObjectStoreClient(protocol?: string): ObjectStoreClient | undefined {
++  const config = getObjectStoreConfig(protocol);
++  if (!config) return undefined;
++
++  // Key includes baseUrl so that config changes (e.g. different containers in tests)
++  // always produce a fresh client while production usage (stable env) is effectively
++  // a per-protocol singleton.
++  const cacheKey = `${protocol ?? "default"}:${config.baseUrl}`;
++  if (objectStoreClients.has(cacheKey)) {
++    return objectStoreClients.get(cacheKey);
++  }
++
++  const client = ObjectStoreClient.create(config);
++  objectStoreClients.set(cacheKey, client);
++  return client;
++}
++
++export function hasObjectStoreClient(): boolean {
++  const defaultConfig = getObjectStoreConfig();
++  const protocolConfig = env.OBJECT_STORE_DEFAULT_PROTOCOL
++    ? getObjectStoreConfig(env.OBJECT_STORE_DEFAULT_PROTOCOL)
++    : undefined;
++  return !!(defaultConfig || protocolConfig);
++}
++
++export async function uploadPacketToObjectStore(
++  filename: string,
++  data: ReadableStream | string,
++  contentType: string,
++  environment: AuthenticatedEnvironment,
++  storageProtocol?: string
++): Promise<string> {
++  const protocol = storageProtocol || env.OBJECT_STORE_DEFAULT_PROTOCOL;
++  const client = getObjectStoreClient(protocol);
++
++  if (!client) {
++    throw new Error(`Object store is not configured for protocol: ${protocol || "default"}`);
++  }
++
++  const key = `packets/${environment.project.externalRef}/${environment.slug}/${filename}`;
++
++  logger.debug("Uploading to object store", { key, protocol: protocol || "default" });
++
++  await client.putObject(key, data, contentType);
++
++  // Return filename with protocol prefix if specified
++  return formatStorageUri(filename, protocol);
++}
++
++export async function downloadPacketFromObjectStore(
++  packet: IOPacket,
++  environment: AuthenticatedEnvironment
++): Promise<IOPacket> {
++  if (packet.dataType !== "application/store") {
++    return packet;
++  }
++
++  // There shouldn't be an offloaded packet with undefined data…
++  if (!packet.data) {
++    logger.error("Object store packet has undefined data", { packet, environment });
++    return {
++      dataType: "application/json",
++      data: undefined,
++    };
++  }
++
++  const { protocol, path } = parseStorageUri(packet.data);
++  const client = getObjectStoreClient(protocol);
++
++  if (!client) {
++    throw new Error(`Object store is not configured for protocol: ${protocol || "default"}`);
++  }
++
++  const key = `packets/${environment.project.externalRef}/${environment.slug}/${path}`;
++
++  logger.debug("Downloading from object store", { key, protocol: protocol || "default" });
++
++  const data = await client.getObject(key);
++
++  return { data, dataType: "application/json" };
++}
++
++export type GeneratePacketPresignOptions = {
++  /**
++   * When true (v1 packet PUT only), unprefixed keys use the legacy default object store only.
++   * When false/omitted (v2 packet PUT), unprefixed keys also use OBJECT_STORE_DEFAULT_PROTOCOL.
++   * Ignored for GET — reads never infer protocol from env for unprefixed keys.
++   */
++  forceNoPrefix?: boolean;
++};
++
++/**
++ * Resolve object-store protocol for packet presigns.
++ * GET: never apply OBJECT_STORE_DEFAULT_PROTOCOL to unprefixed keys.
++ * PUT: optional forceNoPrefix for v1 legacy upload behavior.
++ */
++export function resolveStoreProtocolForPacketPresign(
++  filename: string,
++  method: "PUT" | "GET",
++  forceNoPrefix?: boolean
++): { path: string; storeProtocol: string | undefined } {
++  const { protocol: explicitProtocol, path } = parseStorageUri(filename);
++
++  if (method === "GET") {
++    return { path, storeProtocol: explicitProtocol };
++  }
++
++  if (explicitProtocol !== undefined) {
++    return { path, storeProtocol: explicitProtocol };
++  }
++
++  if (forceNoPrefix) {
++    return { path, storeProtocol: undefined };
++  }
++
++  return { path, storeProtocol: env.OBJECT_STORE_DEFAULT_PROTOCOL };
++}
++
++export async function generatePresignedRequest(
++  projectRef: string,
++  envSlug: string,
++  filename: string,
++  method: "PUT" | "GET" = "PUT",
++  options?: GeneratePacketPresignOptions
++): Promise<
++  | {
++      success: false;
++      error: string;
++    }
++  | {
++      success: true;
++      request: Request;
++      /** Canonical pointer for IOPacket.data (PUT only). */
++      storagePath?: string;
++    }
++> {
++  const { path, storeProtocol } = resolveStoreProtocolForPacketPresign(
++    filename,
++    method,
++    options?.forceNoPrefix
++  );
++
++  const config = getObjectStoreConfig(storeProtocol);
++  if (!config?.baseUrl) {
++    return {
++      success: false,
++      error: `Object store is not configured for protocol: ${storeProtocol || "default"}`,
++    };
++  }
++
++  const client = getObjectStoreClient(storeProtocol);
++  if (!client) {
++    return {
++      success: false,
++      error: `Object store is not configured for protocol: ${storeProtocol || "default"}`,
++    };
++  }
++
++  const key = `packets/${projectRef}/${envSlug}/${path}`;
++
++  try {
++    const url = await client.presign(key, method, 300); // 5 minutes
++
++    logger.debug("Generated presigned URL", {
++      url,
++      projectRef,
++      envSlug,
++      filename,
++      protocol: storeProtocol || "default",
++    });
++
++    const storagePath = method === "PUT" ? formatStorageUri(path, storeProtocol) : undefined;
++
++    return {
++      success: true,
++      request: new Request(url, { method }),
++      storagePath,
++    };
++  } catch (error) {
++    return {
++      success: false,
++      error: `Failed to generate presigned URL: ${
++        error instanceof Error ? error.message : String(error)
++      }`,
++    };
++  }
++}
++
++export async function generatePresignedUrl(
++  projectRef: string,
++  envSlug: string,
++  filename: string,
++  method: "PUT" | "GET" = "PUT",
++  options?: GeneratePacketPresignOptions
++): Promise<
++  | {
++      success: false;
++      error: string;
++    }
++  | {
++      success: true;
++      url: string;
++      storagePath?: string;
++    }
++> {
++  const signed = await generatePresignedRequest(projectRef, envSlug, filename, method, options);
++
++  if (!signed.success) {
++    return {
++      success: false,
++      error: signed.error,
++    };
++  }
++
++  return {
++    success: true,
++    url: signed.request.url,
++    storagePath: signed.storagePath,
++  };
++}
+diff --git a/apps/webapp/app/v3/objectStoreClient.server.ts b/apps/webapp/app/v3/objectStoreClient.server.ts
+new file mode 100644
+index 00000000000..d7a85924220
+--- /dev/null
++++ b/apps/webapp/app/v3/objectStoreClient.server.ts
+@@ -0,0 +1,200 @@
++import { AwsClient } from "aws4fetch";
++import { GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
++import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
++
++interface IObjectStoreClient {
++  putObject(key: string, body: ReadableStream | string, contentType: string): Promise<string>;
++  getObject(key: string): Promise<string>;
++  presign(key: string, method: "PUT" | "GET", expiresIn: number): Promise<string>;
++}
++
++type Aws4FetchConfig = {
++  baseUrl: string;
++  accessKeyId: string;
++  secretAccessKey: string;
++  region?: string;
++  service?: string;
++};
++
++class Aws4FetchClient implements IObjectStoreClient {
++  private readonly awsClient: AwsClient;
++
++  constructor(private readonly config: Aws4FetchConfig) {
++    this.awsClient = new AwsClient({
++      accessKeyId: config.accessKeyId,
++      secretAccessKey: config.secretAccessKey,
++      region: config.region,
++      // We set the default value to "s3" in the schema to enhance interoperability with various
++      // S3-compatible services. Setting this env var to an empty string restores the old behaviour.
++      service: config.service || undefined,
++    });
++  }
++
++  private buildUrl(key: string): string {
++    const url = new URL(this.config.baseUrl);
++    url.pathname = `/${key}`;
++    return url.toString();
++  }
++
++  async putObject(key: string, body: ReadableStream | string, contentType: string): Promise<string> {
++    const objectUrl = this.buildUrl(key);
++    const response = await this.awsClient.fetch(objectUrl, {
++      method: "PUT",
++      headers: { "Content-Type": contentType },
++      body,
++    });
++    if (!response.ok) {
++      throw new Error(`Failed to upload to object store: ${response.statusText}`);
++    }
++    return objectUrl;
++  }
++
++  async getObject(key: string): Promise<string> {
++    const response = await this.awsClient.fetch(this.buildUrl(key));
++    if (!response.ok) {
++      throw new Error(`Failed to download from object store: ${response.statusText}`);
++    }
++    return response.text();
++  }
++
++  async presign(key: string, method: "PUT" | "GET", expiresIn: number): Promise<string> {
++    const url = new URL(this.config.baseUrl);
++    url.pathname = `/${key}`;
++    url.searchParams.set("X-Amz-Expires", String(expiresIn));
++
++    const signed = await this.awsClient.sign(new Request(url, { method }), {
++      aws: { signQuery: true },
++    });
++    return signed.url;
++  }
++}
++
++type AwsSdkConfig = {
++  bucket: string;
++  baseUrl: string;
++  region?: string;
++};
++
++class AwsSdkClient implements IObjectStoreClient {
++  private readonly s3Client: S3Client;
++
++  constructor(private readonly config: AwsSdkConfig) {
++    this.s3Client = new S3Client({
++      endpoint: config.baseUrl,
++      forcePathStyle: true,
++      ...(config.region ? { region: config.region } : {}),
++    });
++  }
++
++  /**
++   * Callers use a single logical key (same as aws4fetch path: `bucket/object/...`).
++   * S3 APIs take Bucket + Key where Key must not repeat the bucket name.
++   */
++  private toS3ObjectKey(logicalKey: string): string {
++    const prefix = `${this.config.bucket}/`;
++    if (logicalKey.startsWith(prefix)) {
++      return logicalKey.slice(prefix.length);
++    }
++    return logicalKey;
++  }
++
++  private logicalObjectUrl(logicalKey: string): string {
++    const url = new URL(this.config.baseUrl);
++    url.pathname = `/${logicalKey}`;
++    return url.href;
++  }
++
++  async putObject(key: string, body: ReadableStream | string, contentType: string): Promise<string> {
++    const s3Key = this.toS3ObjectKey(key);
++    await this.s3Client.send(
++      new PutObjectCommand({
++        Bucket: this.config.bucket,
++        Key: s3Key,
++        Body: body,
++        ContentType: contentType,
++      })
++    );
++    return this.logicalObjectUrl(key);
++  }
++
++  async getObject(key: string): Promise<string> {
++    const s3Key = this.toS3ObjectKey(key);
++    const response = await this.s3Client.send(
++      new GetObjectCommand({ Bucket: this.config.bucket, Key: s3Key })
++    );
++    if (!response.Body) {
++      throw new Error(`Empty response body from object store for key: ${key}`);
++    }
++    return response.Body.transformToString();
++  }
++
++  async presign(key: string, method: "PUT" | "GET", expiresIn: number): Promise<string> {
++    const s3Key = this.toS3ObjectKey(key);
++    const command =
++      method === "PUT"
++        ? new PutObjectCommand({ Bucket: this.config.bucket, Key: s3Key })
++        : new GetObjectCommand({ Bucket: this.config.bucket, Key: s3Key });
++
++    return getSignedUrl(this.s3Client, command, { expiresIn });
++  }
++}
++
++export type ObjectStoreClientConfig = {
++  baseUrl: string;
++  bucket?: string;
++  accessKeyId?: string;
++  secretAccessKey?: string;
++  region?: string;
++  service?: string;
++};
++
++export class ObjectStoreClient implements IObjectStoreClient {
++  private constructor(
++    private readonly impl: IObjectStoreClient,
++    /** When set, logical keys may start with `${bucket}/…`; AwsSdkClient strips that prefix for S3 APIs. */
++    readonly bucket: string | undefined
++  ) {}
++
++  static create(config: ObjectStoreClientConfig): ObjectStoreClient {
++    if (config.accessKeyId && config.secretAccessKey) {
++      return new ObjectStoreClient(
++        new Aws4FetchClient({
++          baseUrl: config.baseUrl,
++          accessKeyId: config.accessKeyId,
++          secretAccessKey: config.secretAccessKey,
++          region: config.region,
++          service: config.service,
++        }),
++        config.bucket
++      );
++    }
++
++    // IAM credential chain — AWS SDK S3Client handles credential refresh automatically
++    if (!config.bucket) {
++      throw new Error(
++        "OBJECT_STORE_BUCKET is required when not using access key credentials (IAM mode)"
++      );
++    }
++
++    return new ObjectStoreClient(
++      new AwsSdkClient({
++        bucket: config.bucket,
++        baseUrl: config.baseUrl,
++        region: config.region,
++      }),
++      config.bucket
++    );
++  }
++
++  putObject(key: string, body: ReadableStream | string, contentType: string): Promise<string> {
++    return this.impl.putObject(key, body, contentType);
++  }
++
++  getObject(key: string): Promise<string> {
++    return this.impl.getObject(key);
++  }
++
++  presign(key: string, method: "PUT" | "GET", expiresIn: number): Promise<string> {
++    return this.impl.presign(key, method, expiresIn);
++  }
++}
+diff --git a/apps/webapp/app/v3/r2.server.ts b/apps/webapp/app/v3/r2.server.ts
+deleted file mode 100644
+index 67170094075..00000000000
+--- a/apps/webapp/app/v3/r2.server.ts
++++ /dev/null
+@@ -1,240 +0,0 @@
+-import { AwsClient } from "aws4fetch";
+-import { env } from "~/env.server";
+-import { AuthenticatedEnvironment } from "~/services/apiAuth.server";
+-import { logger } from "~/services/logger.server";
+-import { singleton } from "~/utils/singleton";
+-import { startActiveSpan } from "./tracer.server";
+-import { IOPacket } from "@trigger.dev/core/v3";
+-
+-export const r2 = singleton("r2", initializeR2);
+-
+-function initializeR2() {
+-  if (!env.OBJECT_STORE_ACCESS_KEY_ID || !env.OBJECT_STORE_SECRET_ACCESS_KEY) {
+-    return;
+-  }
+-
+-  return new AwsClient({
+-    accessKeyId: env.OBJECT_STORE_ACCESS_KEY_ID,
+-    secretAccessKey: env.OBJECT_STORE_SECRET_ACCESS_KEY,
+-    region: env.OBJECT_STORE_REGION,
+-    // We now set the default value to "s3" in the schema to enhance interoperability with various S3-compatible services.
+-    // Setting this env var to an empty string will restore the previous behavior of not setting a service.
+-    service: env.OBJECT_STORE_SERVICE ? env.OBJECT_STORE_SERVICE : undefined,
+-  });
+-}
+-
+-export async function uploadPacketToObjectStore(
+-  filename: string,
+-  data: ReadableStream | string,
+-  contentType: string,
+-  environment: AuthenticatedEnvironment
+-): Promise<string> {
+-  return await startActiveSpan("uploadPacketToObjectStore()", async (span) => {
+-    if (!r2) {
+-      throw new Error("Object store credentials are not set");
+-    }
+-
+-    if (!env.OBJECT_STORE_BASE_URL) {
+-      throw new Error("Object store base URL is not set");
+-    }
+-
+-    span.setAttributes({
+-      projectRef: environment.project.externalRef,
+-      environmentSlug: environment.slug,
+-      filename: filename,
+-    });
+-
+-    const url = new URL(env.OBJECT_STORE_BASE_URL);
+-    url.pathname = `/packets/${environment.project.externalRef}/${environment.slug}/${filename}`;
+-
+-    logger.debug("Uploading to object store", { url: url.href });
+-
+-    const response = await r2.fetch(url.toString(), {
+-      method: "PUT",
+-      headers: {
+-        "Content-Type": contentType,
+-      },
+-      body: data,
+-    });
+-
+-    if (!response.ok) {
+-      throw new Error(`Failed to upload output to ${url}: ${response.statusText}`);
+-    }
+-
+-    return url.href;
+-  });
+-}
+-
+-export async function downloadPacketFromObjectStore(
+-  packet: IOPacket,
+-  environment: AuthenticatedEnvironment
+-): Promise<IOPacket> {
+-  if (packet.dataType !== "application/store") {
+-    return packet;
+-  }
+-
+-  return await startActiveSpan("downloadPacketFromObjectStore()", async (span) => {
+-    if (!r2) {
+-      throw new Error("Object store credentials are not set");
+-    }
+-
+-    if (!env.OBJECT_STORE_BASE_URL) {
+-      throw new Error("Object store base URL is not set");
+-    }
+-
+-    span.setAttributes({
+-      projectRef: environment.project.externalRef,
+-      environmentSlug: environment.slug,
+-      filename: packet.data,
+-    });
+-
+-    const url = new URL(env.OBJECT_STORE_BASE_URL);
+-    url.pathname = `/packets/${environment.project.externalRef}/${environment.slug}/${packet.data}`;
+-
+-    logger.debug("Downloading from object store", { url: url.href });
+-
+-    const response = await r2.fetch(url.toString());
+-
+-    if (!response.ok) {
+-      throw new Error(`Failed to download input from ${url}: ${response.statusText}`);
+-    }
+-
+-    const data = await response.text();
+-
+-    const rawPacket = {
+-      data,
+-      dataType: "application/json",
+-    };
+-
+-    return rawPacket;
+-  });
+-}
+-
+-export async function uploadDataToObjectStore(
+-  filename: string,
+-  data: string,
+-  contentType: string,
+-  prefix?: string
+-): Promise<string> {
+-  return await startActiveSpan("uploadDataToObjectStore()", async (span) => {
+-    if (!r2) {
+-      throw new Error("Object store credentials are not set");
+-    }
+-
+-    if (!env.OBJECT_STORE_BASE_URL) {
+-      throw new Error("Object store base URL is not set");
+-    }
+-
+-    span.setAttributes({
+-      prefix,
+-      filename,
+-    });
+-
+-    const url = new URL(env.OBJECT_STORE_BASE_URL);
+-    url.pathname = `${prefix}/${filename}`;
+-
+-    logger.debug("Uploading to object store", { url: url.href });
+-
+-    const response = await r2.fetch(url.toString(), {
+-      method: "PUT",
+-      headers: {
+-        "Content-Type": contentType,
+-      },
+-      body: data,
+-    });
+-
+-    if (!response.ok) {
+-      throw new Error(`Failed to upload data to ${url}: ${response.statusText}`);
+-    }
+-
+-    return url.href;
+-  });
+-}
+-
+-export async function generatePresignedRequest(
+-  projectRef: string,
+-  envSlug: string,
+-  filename: string,
+-  method: "PUT" | "GET" = "PUT"
+-): Promise<
+-  | {
+-      success: false;
+-      error: string;
+-    }
+-  | {
+-      success: true;
+-      request: Request;
+-    }
+-> {
+-  if (!env.OBJECT_STORE_BASE_URL) {
+-    return {
+-      success: false,
+-      error: "Object store base URL is not set",
+-    };
+-  }
+-
+-  if (!r2) {
+-    return {
+-      success: false,
+-      error: "Object store client is not initialized",
+-    };
+-  }
+-
+-  const url = new URL(env.OBJECT_STORE_BASE_URL);
+-  url.pathname = `/packets/${projectRef}/${envSlug}/${filename}`;
+-  url.searchParams.set("X-Amz-Expires", "300"); // 5 minutes
+-
+-  const signed = await r2.sign(
+-    new Request(url, {
+-      method,
+-    }),
+-    {
+-      aws: { signQuery: true },
+-    }
+-  );
+-
+-  logger.debug("Generated presigned URL", {
+-    url: signed.url,
+-    headers: Object.fromEntries(signed.headers),
+-    projectRef,
+-    envSlug,
+-    filename,
+-  });
+-
+-  return {
+-    success: true,
+-    request: signed,
+-  };
+-}
+-
+-export async function generatePresignedUrl(
+-  projectRef: string,
+-  envSlug: string,
+-  filename: string,
+-  method: "PUT" | "GET" = "PUT"
+-): Promise<
+-  | {
+-      success: false;
+-      error: string;
+-    }
+-  | {
+-      success: true;
+-      url: string;
+-    }
+-> {
+-  const signed = await generatePresignedRequest(projectRef, envSlug, filename, method);
+-
+-  if (!signed.success) {
+-    return {
+-      success: false,
+-      error: signed.error,
+-    };
+-  }
+-
+-  signed;
+-
+-  return {
+-    success: true,
+-    url: signed.request.url,
+-  };
+-}
+diff --git a/apps/webapp/app/v3/services/batchTriggerV3.server.ts b/apps/webapp/app/v3/services/batchTriggerV3.server.ts
+index f0531f8448a..22aa64b5e16 100644
+--- a/apps/webapp/app/v3/services/batchTriggerV3.server.ts
++++ b/apps/webapp/app/v3/services/batchTriggerV3.server.ts
+@@ -25,7 +25,7 @@ import { generateFriendlyId } from "../friendlyIdentifiers";
+ import { legacyRunEngineWorker } from "../legacyRunEngineWorker.server";
+ import { marqs } from "../marqs/index.server";
+ import { guardQueueSizeLimitsForEnv } from "../queueSizeLimits.server";
+-import { downloadPacketFromObjectStore, uploadPacketToObjectStore } from "../r2.server";
++import { downloadPacketFromObjectStore, uploadPacketToObjectStore } from "../objectStore.server";
+ import { isFinalAttemptStatus, isFinalRunStatus } from "../taskStatus";
+ import { startActiveSpan } from "../tracer.server";
+ import { BaseService, ServiceValidationError } from "./baseService.server";
+@@ -930,10 +930,10 @@ export class BatchTriggerV3Service extends BaseService {
+ 
+       const filename = `${pathPrefix}/payload.json`;
+ 
+-      await uploadPacketToObjectStore(filename, packet.data, packet.dataType, environment);
++      const uploadedFilename = await uploadPacketToObjectStore(filename, packet.data, packet.dataType, environment);
+ 
+       return {
+-        data: filename,
++        data: uploadedFilename,
+         dataType: "application/store",
+       };
+     });
+diff --git a/apps/webapp/app/v3/services/triggerTaskV1.server.ts b/apps/webapp/app/v3/services/triggerTaskV1.server.ts
+index d36130109c9..e9e1f291e2d 100644
+--- a/apps/webapp/app/v3/services/triggerTaskV1.server.ts
++++ b/apps/webapp/app/v3/services/triggerTaskV1.server.ts
+@@ -26,7 +26,7 @@ import { getV3EventRepository } from "../eventRepository/index.server";
+ import { generateFriendlyId } from "../friendlyIdentifiers";
+ import { findCurrentWorkerFromEnvironment } from "../models/workerDeployment.server";
+ import { guardQueueSizeLimitsForEnv } from "../queueSizeLimits.server";
+-import { uploadPacketToObjectStore } from "../r2.server";
++import { uploadPacketToObjectStore } from "../objectStore.server";
+ import { removeQueueConcurrencyLimits, updateQueueConcurrencyLimits } from "../runQueue.server";
+ import { isFinalAttemptStatus, isFinalRunStatus } from "../taskStatus";
+ import { startActiveSpan } from "../tracer.server";
+@@ -756,10 +756,10 @@ export class TriggerTaskServiceV1 extends BaseService {
+ 
+       const filename = `${pathPrefix}/payload.json`;
+ 
+-      await uploadPacketToObjectStore(filename, packet.data, packet.dataType, environment);
++      const uploadedFilename = await uploadPacketToObjectStore(filename, packet.data, packet.dataType, environment);
+ 
+       return {
+-        data: filename,
++        data: uploadedFilename,
+         dataType: "application/store",
+       };
+     });
+diff --git a/apps/webapp/test/objectStore.test.ts b/apps/webapp/test/objectStore.test.ts
+new file mode 100644
+index 00000000000..bbd12d23124
+--- /dev/null
++++ b/apps/webapp/test/objectStore.test.ts
+@@ -0,0 +1,649 @@
++import { postgresAndMinioTest } from "@internal/testcontainers";
++import { type IOPacket } from "@trigger.dev/core/v3";
++import { type PrismaClient } from "@trigger.dev/database";
++import { afterAll, describe, expect, it, vi } from "vitest";
++import { env } from "~/env.server";
++import { processWaitpointCompletionPacket } from "~/runEngine/concerns/waitpointCompletionPacket.server";
++import {
++  downloadPacketFromObjectStore,
++  formatStorageUri,
++  generatePresignedRequest,
++  generatePresignedUrl,
++  hasObjectStoreClient,
++  parseStorageUri,
++  resolveStoreProtocolForPacketPresign,
++  uploadPacketToObjectStore,
++} from "~/v3/objectStore.server";
++
++// Extend the timeout for container tests
++vi.setConfig({ testTimeout: 60_000 });
++
++// Helper to create a test environment
++async function createTestEnvironment(prisma: PrismaClient) {
++  const suffix = Date.now().toString(36);
++
++  const org = await prisma.organization.create({
++    data: {
++      title: `Test Org ${suffix}`,
++      slug: `test-org-${suffix}`,
++    },
++  });
++
++  const project = await prisma.project.create({
++    data: {
++      name: `Test Project ${suffix}`,
++      slug: `test-project-${suffix}`,
++      externalRef: `proj_test${suffix}`,
++      organizationId: org.id,
++    },
++  });
++
++  const environment = await prisma.runtimeEnvironment.create({
++    data: {
++      slug: "dev",
++      type: "DEVELOPMENT",
++      organizationId: org.id,
++      projectId: project.id,
++      apiKey: `test_key_${suffix}`,
++      pkApiKey: `test_pk_key_${suffix}`,
++      shortcode: suffix.slice(0, 4),
++    },
++    include: {
++      project: true,
++      organization: true,
++    },
++  });
++
++  return environment;
++}
++
++// Save original env values for restoration in afterAll
++const originalEnv = process.env;
++const originalEnvObj = {
++  OBJECT_STORE_BASE_URL: env.OBJECT_STORE_BASE_URL,
++  OBJECT_STORE_BUCKET: env.OBJECT_STORE_BUCKET,
++  OBJECT_STORE_ACCESS_KEY_ID: env.OBJECT_STORE_ACCESS_KEY_ID,
++  OBJECT_STORE_SECRET_ACCESS_KEY: env.OBJECT_STORE_SECRET_ACCESS_KEY,
++  OBJECT_STORE_REGION: env.OBJECT_STORE_REGION,
++  OBJECT_STORE_DEFAULT_PROTOCOL: env.OBJECT_STORE_DEFAULT_PROTOCOL,
++  TASK_PAYLOAD_OFFLOAD_THRESHOLD: env.TASK_PAYLOAD_OFFLOAD_THRESHOLD,
++};
++
++describe("Object Storage", () => {
++  describe("URI parsing functions", () => {
++    it("should parse URI with protocol", () => {
++      const result = parseStorageUri("s3://run_abc123/payload.json");
++      expect(result).toEqual({
++        protocol: "s3",
++        path: "run_abc123/payload.json",
++      });
++    });
++
++    it("should parse URI with R2 protocol", () => {
++      const result = parseStorageUri("r2://batch_xyz/item_0/payload.json");
++      expect(result).toEqual({
++        protocol: "r2",
++        path: "batch_xyz/item_0/payload.json",
++      });
++    });
++
++    it("should parse legacy URI without protocol", () => {
++      const result = parseStorageUri("run_abc123/payload.json");
++      expect(result).toEqual({
++        protocol: undefined,
++        path: "run_abc123/payload.json",
++      });
++    });
++
++    it("should format URI with protocol", () => {
++      const result = formatStorageUri("run_abc123/payload.json", "s3");
++      expect(result).toBe("s3://run_abc123/payload.json");
++    });
++
++    it("should format URI without protocol", () => {
++      const result = formatStorageUri("run_abc123/payload.json");
++      expect(result).toBe("run_abc123/payload.json");
++    });
++  });
++
++  describe("resolveStoreProtocolForPacketPresign", () => {
++    afterEach(() => {
++      env.OBJECT_STORE_DEFAULT_PROTOCOL = originalEnvObj.OBJECT_STORE_DEFAULT_PROTOCOL;
++    });
++
++    it("GET uses legacy default for unprefixed keys even when OBJECT_STORE_DEFAULT_PROTOCOL is set", () => {
++      env.OBJECT_STORE_DEFAULT_PROTOCOL = "s3";
++      expect(resolveStoreProtocolForPacketPresign("a/b.json", "GET").storeProtocol).toBeUndefined();
++    });
++
++    it("PUT without forceNoPrefix uses OBJECT_STORE_DEFAULT_PROTOCOL for unprefixed keys", () => {
++      env.OBJECT_STORE_DEFAULT_PROTOCOL = "s3";
++      expect(resolveStoreProtocolForPacketPresign("a/b.json", "PUT", false).storeProtocol).toBe(
++        "s3"
++      );
++    });
++
++    it("PUT with forceNoPrefix skips OBJECT_STORE_DEFAULT_PROTOCOL for unprefixed keys", () => {
++      env.OBJECT_STORE_DEFAULT_PROTOCOL = "s3";
++      expect(resolveStoreProtocolForPacketPresign("a/b.json", "PUT", true).storeProtocol).toBeUndefined();
++    });
++
++    it("explicit protocol in key wins for PUT with forceNoPrefix", () => {
++      env.OBJECT_STORE_DEFAULT_PROTOCOL = "r2";
++      expect(resolveStoreProtocolForPacketPresign("s3://x/y.json", "PUT", true).storeProtocol).toBe(
++        "s3"
++      );
++    });
++  });
++
++  postgresAndMinioTest(
++    "should upload and download data without protocol (legacy)",
++    async ({ minioConfig, prisma }) => {
++      // Override env directly for the default provider
++      env.OBJECT_STORE_BASE_URL = minioConfig.baseUrl;
++      env.OBJECT_STORE_ACCESS_KEY_ID = minioConfig.accessKeyId;
++      env.OBJECT_STORE_SECRET_ACCESS_KEY = minioConfig.secretAccessKey;
++      env.OBJECT_STORE_REGION = minioConfig.region;
++      env.OBJECT_STORE_DEFAULT_PROTOCOL = undefined;
++
++      const environment = await createTestEnvironment(prisma);
++
++      const testData = JSON.stringify({ test: "data", value: 123 });
++      const filename = "test_run/payload.json";
++
++      // Upload
++      const uploadedFilename = await uploadPacketToObjectStore(
++        filename,
++        testData,
++        "application/json",
++        environment as any
++      );
++
++      // Should return filename without protocol (legacy)
++      expect(uploadedFilename).toBe(filename);
++
++      // Download
++      const packet: IOPacket = {
++        data: uploadedFilename,
++        dataType: "application/store",
++      };
++
++      const downloadedPacket = await downloadPacketFromObjectStore(packet, environment as any);
++
++      expect(downloadedPacket.dataType).toBe("application/json");
++      expect(downloadedPacket.data).toBe(testData);
++
++      // Cleanup
++      await prisma.runtimeEnvironment.delete({ where: { id: environment.id } });
++      await prisma.project.delete({ where: { id: environment.projectId } });
++      await prisma.organization.delete({ where: { id: environment.organizationId } });
++    }
++  );
++
++  postgresAndMinioTest(
++    "should upload and download data with protocol prefix",
++    async ({ minioConfig, prisma }) => {
++      // Named provider — controlled via process.env (read dynamically)
++      process.env.OBJECT_STORE_S3_BASE_URL = minioConfig.baseUrl;
++      process.env.OBJECT_STORE_S3_ACCESS_KEY_ID = minioConfig.accessKeyId;
++      process.env.OBJECT_STORE_S3_SECRET_ACCESS_KEY = minioConfig.secretAccessKey;
++      process.env.OBJECT_STORE_S3_REGION = minioConfig.region;
++      process.env.OBJECT_STORE_S3_SERVICE = "s3";
++
++      const environment = await createTestEnvironment(prisma);
++
++      const testData = JSON.stringify({ test: "protocol-data", value: 456 });
++      const filename = "test_run2/payload.json";
++
++      // Upload with explicit protocol — bypasses env.OBJECT_STORE_DEFAULT_PROTOCOL
++      const uploadedFilename = await uploadPacketToObjectStore(
++        filename,
++        testData,
++        "application/json",
++        environment as any,
++        "s3"
++      );
++
++      // Should return filename with s3:// protocol
++      expect(uploadedFilename).toBe("s3://test_run2/payload.json");
++
++      // Download
++      const packet: IOPacket = {
++        data: uploadedFilename,
++        dataType: "application/store",
++      };
++
++      const downloadedPacket = await downloadPacketFromObjectStore(packet, environment as any);
++
++      expect(downloadedPacket.dataType).toBe("application/json");
++      expect(downloadedPacket.data).toBe(testData);
++
++      // Cleanup
++      await prisma.runtimeEnvironment.delete({ where: { id: environment.id } });
++      await prisma.project.delete({ where: { id: environment.projectId } });
++      await prisma.organization.delete({ where: { id: environment.organizationId } });
++    }
++  );
++
++  postgresAndMinioTest(
++    "should support migration from default provider to named provider",
++    async ({ minioConfig, prisma }) => {
++      const environment = await createTestEnvironment(prisma);
++
++      // Step 1: Upload old data without protocol (using default provider)
++      env.OBJECT_STORE_BASE_URL = minioConfig.baseUrl;
++      env.OBJECT_STORE_ACCESS_KEY_ID = minioConfig.accessKeyId;
++      env.OBJECT_STORE_SECRET_ACCESS_KEY = minioConfig.secretAccessKey;
++      env.OBJECT_STORE_REGION = minioConfig.region;
++      env.OBJECT_STORE_DEFAULT_PROTOCOL = undefined;
++
++      const oldData = JSON.stringify({ legacy: true });
++      const oldFilename = "old_run/payload.json";
++
++      const uploadedOldFilename = await uploadPacketToObjectStore(
++        oldFilename,
++        oldData,
++        "application/json",
++        environment as any
++      );
++
++      expect(uploadedOldFilename).toBe(oldFilename); // No protocol
++
++      // Step 2: Configure new provider (S3) and set default protocol
++      process.env.OBJECT_STORE_S3_BASE_URL = minioConfig.baseUrl; // Same MinIO for testing
++      process.env.OBJECT_STORE_S3_ACCESS_KEY_ID = minioConfig.accessKeyId;
++      process.env.OBJECT_STORE_S3_SECRET_ACCESS_KEY = minioConfig.secretAccessKey;
++      process.env.OBJECT_STORE_S3_REGION = minioConfig.region;
++      process.env.OBJECT_STORE_S3_SERVICE = "s3";
++
++      // Step 3: Upload new data with explicit protocol
++      const newData = JSON.stringify({ new: true });
++      const newFilename = "new_run/payload.json";
++
++      const uploadedNewFilename = await uploadPacketToObjectStore(
++        newFilename,
++        newData,
++        "application/json",
++        environment as any,
++        "s3"
++      );
++
++      expect(uploadedNewFilename).toBe("s3://new_run/payload.json"); // Has protocol
++
++      // Step 4: Verify both can be downloaded
++      // Old data (no protocol, uses default provider)
++      const oldPacket: IOPacket = {
++        data: uploadedOldFilename,
++        dataType: "application/store",
++      };
++      const downloadedOld = await downloadPacketFromObjectStore(oldPacket, environment as any);
++      expect(downloadedOld.data).toBe(oldData);
++
++      // New data (with protocol, uses named provider)
++      const newPacket: IOPacket = {
++        data: uploadedNewFilename,
++        dataType: "application/store",
++      };
++      const downloadedNew = await downloadPacketFromObjectStore(newPacket, environment as any);
++      expect(downloadedNew.data).toBe(newData);
++
++      // Cleanup
++      await prisma.runtimeEnvironment.delete({ where: { id: environment.id } });
++      await prisma.project.delete({ where: { id: environment.projectId } });
++      await prisma.organization.d
+
+... [truncated, 150144 chars total]

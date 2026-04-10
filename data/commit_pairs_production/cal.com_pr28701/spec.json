@@ -1,0 +1,14 @@
+{
+  "feature_name": "Unified Webhook ID Resolution",
+  "description": "Implement a unified approach for resolving webhook ID parameters across all webhook handlers and middleware. Ensure that both 'id' and 'webhookId' parameter paths are handled consistently to prevent validation bypasses and edge cases.",
+  "functional_requirements": [
+    "Update the base webhook schema to include 'webhookId' as a standard field alongside existing ID fields",
+    "Modify the webhook middleware to resolve lookup IDs by checking both 'id' and 'webhookId' parameters with consistent priority",
+    "Update webhook handlers to properly strip 'webhookId' from request data before passing to downstream operations like create and edit",
+    "Simplify the get webhook schema to directly reuse the base schema instead of duplicating validation logic",
+    "Ensure all webhook operations (read, edit, delete) work correctly with both parameter naming conventions",
+    "Maintain backward compatibility so existing API calls using 'id' parameter continue to work without modification"
+  ],
+  "project_name": "cal.com",
+  "source_pr": "https://github.com/calcom/cal.com/pull/28701"
+}

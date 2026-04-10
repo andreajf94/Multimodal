@@ -1,0 +1,65 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "error_handling",
+      "recommendation": "Clamped wait time calculation to prevent negative values when rate limit reset timestamp is in the past",
+      "rationale": "When the rate limit reset timestamp occurs before the current time, subtracting Date.now() from reset produces a negative value. This results in confusing error messages like 'Try again in -5 seconds.' By using Math.max(0, ...), we ensure the displayed wait time is always non-negative, providing clear user feedback.",
+      "alternatives_considered": [
+        "Returning absolute value (Math.abs) - would still be misleading as it suggests waiting when no wait is needed",
+        "Returning 0 directly when reset < Date.now() - similar outcome but less elegant",
+        "Changing the error message format - would break consistency with existing error handling"
+      ],
+      "files_affected": [
+        "packages/lib/checkRateLimitAndThrowError.ts"
+      ]
+    },
+    {
+      "dimension": "testing",
+      "recommendation": "Added test case specifically for the negative wait time scenario",
+      "rationale": "The test ensures the fix works correctly and prevents regression. It mocks a rate limiter response with a reset timestamp 5 seconds in the past, then verifies the error message contains '0 seconds' rather than a negative value. This follows the project's testing philosophy of adding tests for bug fixes.",
+      "alternatives_considered": [
+        "Not adding a test - would risk regression",
+        "Adding the test in a separate file - would fragment test logic",
+        "Testing only the calculation logic in isolation - less comprehensive"
+      ],
+      "files_affected": [
+        "packages/lib/checkRateLimitAndThrowError.test.ts"
+      ]
+    },
+    {
+      "dimension": "api_design",
+      "recommendation": "Maintained existing error structure and message format while fixing the calculation",
+      "rationale": "The HttpError with statusCode 429 and the same message template was preserved to maintain API consistency. Only the secondsToWait calculation was modified, ensuring backward compatibility for clients parsing these error messages.",
+      "alternatives_considered": [
+        "Changing error message format - would break client integrations",
+        "Adding a new error type - would complicate error handling",
+        "Returning different status codes - would violate HTTP semantics"
+      ],
+      "files_affected": [
+        "packages/lib/checkRateLimitAndThrowError.ts"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Fix Rate Limit Error Message Calculation",
+      "description": "Update the wait time calculation in rate limit error messages to prevent negative values when the reset timestamp is in the past, ensuring clear user communication",
+      "files_to_modify": [
+        "packages/lib/checkRateLimitAndThrowError.ts",
+        "packages/lib/checkRateLimitAndThrowError.test.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "This change addresses a user experience issue in rate limiting error messages. The core problem was that when a rate limit reset timestamp occurred in the past (relative to the current time), the calculation `reset - Date.now()` produced a negative value, resulting in confusing error messages like 'Try again in -5 seconds.'\n\nThe fix was implemented by applying `Math.max(0, ...)` to the wait time calculation, ensuring the displayed wait time is always non-negative. This minimal change preserves the existing error structure and API contract while fixing the display issue. The implementation follows the project's architectural principles of maintaining backward compatibility and clear error messaging.\n\nA corresponding test was added to verify the fix and prevent regression. The test mocks a rate limiter response with a reset timestamp 5 seconds in the past and asserts that the resulting error message contains '0 seconds' rather than a negative value. This approach aligns with the codebase's testing culture, where bug fixes are accompanied by tests to ensure long-term reliability.",
+  "source_pr": "https://github.com/calcom/cal.com/pull/28765",
+  "before_sha": "cdeaca4dc2d6388561fdc4675d08d5844f4e3b54",
+  "after_sha": "3c52f5723105a9c65bb24c4fd3ef12f1d85a2485",
+  "diff_stats": {
+    "additions": 18,
+    "deletions": 1,
+    "files_changed": 2
+  }
+}

@@ -1,0 +1,128 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "data_modeling",
+      "recommendation": "Consolidated model capabilities and feature flags into a single 'features' array in the presenter, merging database capabilities with boolean feature flags from the catalog",
+      "rationale": "Simplified the data model by combining separate boolean fields (supportsStructuredOutput, supportsParallelToolCalls, supportsStreamingToolCalls) with string capabilities into a unified array. This makes filtering and display logic more consistent and reduces the number of fields to manage.",
+      "alternatives_considered": [
+        "Keeping separate fields for different types of features",
+        "Creating a more complex nested structure with categories",
+        "Maintaining the original split between capabilities and boolean flags"
+      ],
+      "files_affected": [
+        "apps/webapp/app/presenters/v3/ModelRegistryPresenter.server.ts"
+      ]
+    },
+    {
+      "dimension": "ui_component_design",
+      "recommendation": "Enhanced primitive UI components (AppliedFilter, Button, Checkbox) with improved spacing, tooltip integration, and disabled state styling",
+      "rationale": "Improved visual consistency and user experience across the models page by refining core building blocks. The Button component now properly integrates tooltips with shortcut keys, AppliedFilter has better spacing, and Checkbox has clearer disabled state styling.",
+      "alternatives_considered": [
+        "Creating new specialized components instead of modifying primitives",
+        "Using CSS-only solutions without component changes",
+        "Leaving primitive components unchanged and working around limitations"
+      ],
+      "files_affected": [
+        "apps/webapp/app/components/primitives/AppliedFilter.tsx",
+        "apps/webapp/app/components/primitives/Buttons.tsx",
+        "apps/webapp/app/components/primitives/Checkbox.tsx"
+      ]
+    },
+    {
+      "dimension": "ui_layout_and_navigation",
+      "recommendation": "Transformed the models index page from a card-based layout to a comprehensive table view with resizable panels, side-by-side model comparison, and detailed filtering",
+      "rationale": "Improved information density and comparison capabilities for users managing multiple AI models. The table layout allows users to see more models at once, compare key metrics side-by-side, and toggle detailed views without losing context.",
+      "alternatives_considered": [
+        "Keeping the card-based layout with incremental improvements",
+        "Creating a separate table view alongside cards",
+        "Using a grid layout instead of a traditional table"
+      ],
+      "files_affected": [
+        "apps/webapp/app/routes/_app.orgs.$organizationSlug.projects.$projectParam.env.$envParam.models._index/route.tsx"
+      ]
+    },
+    {
+      "dimension": "api_design",
+      "recommendation": "Updated model detail route to use the consolidated 'features' array and renamed 'capabilities' display to 'features' for consistency",
+      "rationale": "Ensured consistency between the list view and detail view by using the same data structure. This prevents confusion where capabilities and features might be displayed differently across pages.",
+      "alternatives_considered": [
+        "Keeping different naming conventions for list vs detail views",
+        "Creating a mapping layer in the UI instead of changing the presenter",
+        "Displaying capabilities and features as separate sections"
+      ],
+      "files_affected": [
+        "apps/webapp/app/routes/_app.orgs.$organizationSlug.projects.$projectParam.env.$envParam.models.$modelId/route.tsx"
+      ]
+    },
+    {
+      "dimension": "user_experience",
+      "recommendation": "Implemented a sophisticated model comparison system with interactive selection, comparison dialog, and side-by-side metrics visualization",
+      "rationale": "Users frequently need to compare AI models across multiple dimensions (price, performance, features). The comparison system allows selecting 2-4 models, viewing them in a detailed comparison table, and identifying best performers across different metrics.",
+      "alternatives_considered": [
+        "Simple side-by-side display without interactive selection",
+        "Exporting data for external comparison",
+        "Limited comparison of only 2 models at a time"
+      ],
+      "files_affected": [
+        "apps/webapp/app/routes/_app.orgs.$organizationSlug.projects.$projectParam.env.$envParam.models._index/route.tsx"
+      ]
+    },
+    {
+      "dimension": "filtering_and_search",
+      "recommendation": "Enhanced filtering system with provider icons, unified feature filtering, and persistent filter state management",
+      "rationale": "As the number of AI models grows, users need more sophisticated filtering. The new system provides visual cues (provider icons), combines all filterable attributes (capabilities and feature flags), and maintains filter state across interactions.",
+      "alternatives_considered": [
+        "Simple text-based filtering only",
+        "Separate filter panels for different attribute types",
+        "Server-side filtering instead of client-side"
+      ],
+      "files_affected": [
+        "apps/webapp/app/routes/_app.orgs.$organizationSlug.projects.$projectParam.env.$envParam.models._index/route.tsx"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Consolidate Model Features Data Structure",
+      "description": "Unified model capabilities and feature flags into a single 'features' array to simplify data handling and ensure consistency across the application",
+      "files_to_modify": [
+        "apps/webapp/app/presenters/v3/ModelRegistryPresenter.server.ts",
+        "apps/webapp/app/routes/_app.orgs.$organizationSlug.projects.$projectParam.env.$envParam.models.$modelId/route.tsx"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-002",
+      "title": "Enhance Primitive UI Components",
+      "description": "Improved spacing, tooltip integration, and disabled state styling for core UI components used throughout the models page",
+      "files_to_modify": [
+        "apps/webapp/app/components/primitives/AppliedFilter.tsx",
+        "apps/webapp/app/components/primitives/Buttons.tsx",
+        "apps/webapp/app/components/primitives/Checkbox.tsx"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-003",
+      "title": "Redesign Models Index Page Layout",
+      "description": "Transformed the models listing from card-based to table-based layout with resizable panels, detailed filtering, and model comparison capabilities",
+      "files_to_modify": [
+        "apps/webapp/app/routes/_app.orgs.$organizationSlug.projects.$projectParam.env.$envParam.models._index/route.tsx"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "large"
+    }
+  ],
+  "implementation_summary": "The Models Page UI Enhancement focused on transforming the user experience from a simple card-based listing to a comprehensive management interface for AI models. The core architectural decision was to consolidate the data model by merging separate capability arrays and boolean feature flags into a unified 'features' array, simplifying both backend data handling and frontend display logic.\n\nKey patterns used include: 1) Component composition - enhancing primitive UI components (Buttons, Checkbox, AppliedFilter) that are reused throughout the application, 2) Progressive disclosure - using resizable panels and toggleable detail views to manage information density, and 3) Comparative analysis - implementing a sophisticated model comparison system that allows users to select 2-4 models and view side-by-side metrics across multiple dimensions.\n\nThe changes integrate with the existing codebase by leveraging the established design system (primitives components), maintaining compatibility with existing data models (through the presenter layer), and following the existing routing patterns. The enhancement maintains all existing functionality while significantly improving the user's ability to filter, compare, and understand the available AI models in their project. The table-based approach particularly benefits power users who need to manage many models and make informed decisions based on price, performance, and feature comparisons.",
+  "source_pr": "https://github.com/triggerdotdev/trigger.dev/pull/3308",
+  "before_sha": "f75d4d62afc86e50bfbaa5e0208be976ec168b68",
+  "after_sha": "bf736a79fcd91bd113fc379195273863569abc1f",
+  "diff_stats": {
+    "additions": 1032,
+    "deletions": 412,
+    "files_changed": 9
+  }
+}

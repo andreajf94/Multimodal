@@ -1,0 +1,1826 @@
+diff --git a/.env.example b/.env.example
+index a09e5be89a77..61bc770ccb0f 100644
+--- a/.env.example
++++ b/.env.example
+@@ -32,6 +32,15 @@ CRON_SECRET=
+ # Set the minimum log level(debug, info, warn, error, fatal)
+ LOG_LEVEL=info
+ 
++# BullMQ worker startup is enabled by default outside tests. Override to 0 to disable.
++# BULLMQ_WORKER_ENABLED=1
++
++# Number of BullMQ worker instances started per Formbricks server process.
++# BULLMQ_WORKER_COUNT=1
++
++# Number of concurrent jobs each BullMQ worker can process.
++# BULLMQ_WORKER_CONCURRENCY=1
++
+ ##############
+ #  DATABASE  #
+ ##############
+diff --git a/apps/web/app/api/(internal)/pipeline/types/pipelines.ts b/apps/web/app/api/(internal)/pipeline/types/pipelines.ts
+index ab01cdbded3b..0d847160b913 100644
+--- a/apps/web/app/api/(internal)/pipeline/types/pipelines.ts
++++ b/apps/web/app/api/(internal)/pipeline/types/pipelines.ts
+@@ -1,12 +1,2 @@
+-import { z } from "zod";
+-import { ZWebhook } from "@formbricks/database/zod/webhooks";
+-import { ZResponse } from "@formbricks/types/responses";
+-
+-export const ZPipelineInput = z.object({
+-  event: ZWebhook.shape.triggers.element,
+-  response: ZResponse,
+-  environmentId: z.string(),
+-  surveyId: z.string(),
+-});
+-
+-export type TPipelineInput = z.infer<typeof ZPipelineInput>;
++export { ZResponsePipelineJobData as ZPipelineInput } from "@formbricks/jobs";
++export type { TResponsePipelineJobData as TPipelineInput } from "@formbricks/jobs";
+diff --git a/apps/web/app/lib/types/pipelines.ts b/apps/web/app/lib/types/pipelines.ts
+index 1e256ce44e42..fb31a78102bc 100644
+--- a/apps/web/app/lib/types/pipelines.ts
++++ b/apps/web/app/lib/types/pipelines.ts
+@@ -1,9 +1 @@
+-import { PipelineTriggers } from "@prisma/client";
+-import { TResponse } from "@formbricks/types/responses";
+-
+-export interface TPipelineInput {
+-  event: PipelineTriggers;
+-  response: TResponse;
+-  environmentId: string;
+-  surveyId: string;
+-}
++export type { TResponsePipelineJobData as TPipelineInput } from "@formbricks/jobs";
+diff --git a/apps/web/instrumentation-jobs.test.ts b/apps/web/instrumentation-jobs.test.ts
+new file mode 100644
+index 000000000000..942a93baed46
+--- /dev/null
++++ b/apps/web/instrumentation-jobs.test.ts
+@@ -0,0 +1,99 @@
++import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
++
++const mockStartJobsRuntime = vi.fn();
++const mockDebug = vi.fn();
++const mockError = vi.fn();
++const mockGetJobsWorkerBootstrapConfig = vi.fn();
++
++vi.mock("@formbricks/jobs", () => ({
++  startJobsRuntime: mockStartJobsRuntime,
++}));
++
++vi.mock("@/lib/jobs/config", () => ({
++  getJobsWorkerBootstrapConfig: mockGetJobsWorkerBootstrapConfig,
++}));
++
++vi.mock("@formbricks/logger", () => ({
++  logger: {
++    debug: mockDebug,
++    error: mockError,
++    info: vi.fn(),
++    warn: vi.fn(),
++  },
++}));
++
++describe("instrumentation-jobs", () => {
++  beforeEach(() => {
++    vi.resetModules();
++    vi.clearAllMocks();
++  });
++
++  afterEach(async () => {
++    const { resetJobsWorkerRegistrationForTests } = await import("./instrumentation-jobs");
++    await resetJobsWorkerRegistrationForTests();
++  });
++
++  test("skips worker startup when disabled", async () => {
++    mockGetJobsWorkerBootstrapConfig.mockReturnValue({
++      enabled: false,
++      runtimeOptions: null,
++    });
++
++    const { registerJobsWorker } = await import("./instrumentation-jobs");
++    const result = await registerJobsWorker();
++
++    expect(result).toBeNull();
++    expect(mockStartJobsRuntime).not.toHaveBeenCalled();
++    expect(mockDebug).toHaveBeenCalledWith("BullMQ worker startup skipped");
++  });
++
++  test("starts the worker only once", async () => {
++    const mockRuntime = {
++      close: vi.fn().mockResolvedValue(undefined),
++    };
++
++    mockGetJobsWorkerBootstrapConfig.mockReturnValue({
++      enabled: true,
++      runtimeOptions: {
++        concurrency: 4,
++        redisUrl: "redis://localhost:6379",
++        workerCount: 2,
++      },
++    });
++
++    mockStartJobsRuntime.mockResolvedValue(mockRuntime);
++
++    const { registerJobsWorker } = await import("./instrumentation-jobs");
++    const first = await registerJobsWorker();
++    const second = await registerJobsWorker();
++
++    expect(first).toBe(mockRuntime);
++    expect(second).toBe(mockRuntime);
++    expect(mockStartJobsRuntime).toHaveBeenCalledTimes(1);
++    expect(mockStartJobsRuntime).toHaveBeenCalledWith({
++      concurrency: 4,
++      redisUrl: "redis://localhost:6379",
++      workerCount: 2,
++    });
++  });
++
++  test("logs and rethrows startup failures", async () => {
++    const startupError = new Error("startup failed");
++
++    mockGetJobsWorkerBootstrapConfig.mockReturnValue({
++      enabled: true,
++      runtimeOptions: {
++        concurrency: 1,
++        redisUrl: "redis://localhost:6379",
++        workerCount: 1,
++      },
++    });
++
++    mockStartJobsRuntime.mockRejectedValue(startupError);
++
++    const { registerJobsWorker } = await import("./instrumentation-jobs");
++
++    await expect(registerJobsWorker()).rejects.toThrow("startup failed");
++    expect(mockError).toHaveBeenCalledWith({ err: startupError }, "BullMQ worker registration failed");
++  });
++});
+diff --git a/apps/web/instrumentation-jobs.ts b/apps/web/instrumentation-jobs.ts
+new file mode 100644
+index 000000000000..d7fddeca0d51
+--- /dev/null
++++ b/apps/web/instrumentation-jobs.ts
+@@ -0,0 +1,54 @@
++import type { JobsRuntimeHandle } from "@formbricks/jobs";
++import { startJobsRuntime } from "@formbricks/jobs";
++import { logger } from "@formbricks/logger";
++import { getJobsWorkerBootstrapConfig } from "@/lib/jobs/config";
++
++const globalForJobsRuntime = globalThis as {
++  formbricksJobsRuntime: JobsRuntimeHandle | undefined;
++  formbricksJobsRuntimeInitializing: Promise<JobsRuntimeHandle> | undefined;
++} as unknown as {
++  formbricksJobsRuntime: JobsRuntimeHandle | undefined;
++  formbricksJobsRuntimeInitializing: Promise<JobsRuntimeHandle> | undefined;
++};
++
++export const registerJobsWorker = async (): Promise<JobsRuntimeHandle | null> => {
++  const jobsWorkerBootstrapConfig = getJobsWorkerBootstrapConfig();
++
++  if (!jobsWorkerBootstrapConfig.enabled || !jobsWorkerBootstrapConfig.runtimeOptions) {
++    logger.debug("BullMQ worker startup skipped");
++    return null;
++  }
++
++  if (globalForJobsRuntime.formbricksJobsRuntime) {
++    return globalForJobsRuntime.formbricksJobsRuntime;
++  }
++
++  if (globalForJobsRuntime.formbricksJobsRuntimeInitializing) {
++    return await globalForJobsRuntime.formbricksJobsRuntimeInitializing;
++  }
++
++  globalForJobsRuntime.formbricksJobsRuntimeInitializing = startJobsRuntime(
++    jobsWorkerBootstrapConfig.runtimeOptions
++  ).then((runtime) => {
++    globalForJobsRuntime.formbricksJobsRuntime = runtime;
++    globalForJobsRuntime.formbricksJobsRuntimeInitializing = undefined;
++    return runtime;
++  });
++
++  try {
++    return await globalForJobsRuntime.formbricksJobsRuntimeInitializing;
++  } catch (error) {
++    globalForJobsRuntime.formbricksJobsRuntimeInitializing = undefined;
++    logger.error({ err: error }, "BullMQ worker registration failed");
++    throw error;
++  }
++};
++
++export const resetJobsWorkerRegistrationForTests = async (): Promise<void> => {
++  if (globalForJobsRuntime.formbricksJobsRuntime) {
++    await globalForJobsRuntime.formbricksJobsRuntime.close();
++  }
++
++  globalForJobsRuntime.formbricksJobsRuntime = undefined;
++  globalForJobsRuntime.formbricksJobsRuntimeInitializing = undefined;
++};
+diff --git a/apps/web/instrumentation.ts b/apps/web/instrumentation.ts
+index 70cf423914a4..5d74ad63dc70 100644
+--- a/apps/web/instrumentation.ts
++++ b/apps/web/instrumentation.ts
+@@ -21,6 +21,9 @@ export const register = async () => {
+     if (PROMETHEUS_ENABLED || process.env.OTEL_EXPORTER_OTLP_ENDPOINT) {
+       await import("./instrumentation-node");
+     }
++
++    const { registerJobsWorker } = await import("./instrumentation-jobs");
++    await registerJobsWorker();
+   }
+   // Sentry init loads after OTEL to avoid TracerProvider conflicts
+   // Sentry tracing is disabled (tracesSampleRate: 0) -- SigNoz handles distributed tracing
+diff --git a/apps/web/lib/env.ts b/apps/web/lib/env.ts
+index 0d0c4939505c..5d799de50f92 100644
+--- a/apps/web/lib/env.ts
++++ b/apps/web/lib/env.ts
+@@ -128,6 +128,9 @@ const parsedEnv = createEnv({
+     DEBUG_SHOW_RESET_LINK: z.enum(["1", "0"]).optional(),
+     AUTH_DEFAULT_TEAM_ID: z.string().optional(),
+     AUTH_SKIP_INVITE_FOR_SSO: z.enum(["1", "0"]).optional(),
++    BULLMQ_WORKER_CONCURRENCY: z.coerce.number().int().min(1).optional(),
++    BULLMQ_WORKER_COUNT: z.coerce.number().int().min(1).optional(),
++    BULLMQ_WORKER_ENABLED: z.enum(["1", "0"]).optional(),
+     E2E_TESTING: z.enum(["1", "0"]).optional(),
+     EMAIL_AUTH_DISABLED: z.enum(["1", "0"]).optional(),
+     EMAIL_VERIFICATION_DISABLED: z.enum(["1", "0"]).optional(),
+@@ -272,6 +275,9 @@ const parsedEnv = createEnv({
+     DEBUG_SHOW_RESET_LINK: process.env.DEBUG_SHOW_RESET_LINK,
+     AUTH_DEFAULT_TEAM_ID: process.env.AUTH_SSO_DEFAULT_TEAM_ID,
+     AUTH_SKIP_INVITE_FOR_SSO: process.env.AUTH_SKIP_INVITE_FOR_SSO,
++    BULLMQ_WORKER_CONCURRENCY: process.env.BULLMQ_WORKER_CONCURRENCY,
++    BULLMQ_WORKER_COUNT: process.env.BULLMQ_WORKER_COUNT,
++    BULLMQ_WORKER_ENABLED: process.env.BULLMQ_WORKER_ENABLED,
+     E2E_TESTING: process.env.E2E_TESTING,
+     EMAIL_AUTH_DISABLED: process.env.EMAIL_AUTH_DISABLED,
+     EMAIL_VERIFICATION_DISABLED: process.env.EMAIL_VERIFICATION_DISABLED,
+diff --git a/apps/web/lib/jobs/config.test.ts b/apps/web/lib/jobs/config.test.ts
+new file mode 100644
+index 000000000000..c3b259915752
+--- /dev/null
++++ b/apps/web/lib/jobs/config.test.ts
+@@ -0,0 +1,72 @@
++import { beforeEach, describe, expect, test, vi } from "vitest";
++
++describe("jobs runtime config", () => {
++  beforeEach(() => {
++    vi.resetModules();
++  });
++
++  test("defaults to one worker with concurrency one outside tests", async () => {
++    vi.doMock("@/lib/env", () => ({
++      env: {
++        BULLMQ_WORKER_CONCURRENCY: undefined,
++        BULLMQ_WORKER_COUNT: undefined,
++        BULLMQ_WORKER_ENABLED: undefined,
++        NODE_ENV: "development",
++        REDIS_URL: "redis://localhost:6379",
++      },
++    }));
++
++    const { getJobsWorkerBootstrapConfig } = await import("./config");
++
++    expect(getJobsWorkerBootstrapConfig()).toEqual({
++      enabled: true,
++      runtimeOptions: {
++        concurrency: 1,
++        redisUrl: "redis://localhost:6379",
++        workerCount: 1,
++      },
++    });
++  });
++
++  test("disables the worker by default in tests", async () => {
++    vi.doMock("@/lib/env", () => ({
++      env: {
++        BULLMQ_WORKER_CONCURRENCY: undefined,
++        BULLMQ_WORKER_COUNT: undefined,
++        BULLMQ_WORKER_ENABLED: undefined,
++        NODE_ENV: "test",
++        REDIS_URL: undefined,
++      },
++    }));
++
++    const { getJobsWorkerBootstrapConfig } = await import("./config");
++
++    expect(getJobsWorkerBootstrapConfig()).toEqual({
++      enabled: false,
++      runtimeOptions: null,
++    });
++  });
++
++  test("uses explicit worker tuning overrides", async () => {
++    vi.doMock("@/lib/env", () => ({
++      env: {
++        BULLMQ_WORKER_CONCURRENCY: 6,
++        BULLMQ_WORKER_COUNT: 3,
++        BULLMQ_WORKER_ENABLED: "1",
++        NODE_ENV: "production",
++        REDIS_URL: "redis://cache.internal:6379",
++      },
++    }));
++
++    const { getJobsWorkerBootstrapConfig } = await import("./config");
++
++    expect(getJobsWorkerBootstrapConfig()).toEqual({
++      enabled: true,
++      runtimeOptions: {
++        concurrency: 6,
++        redisUrl: "redis://cache.internal:6379",
++        workerCount: 3,
++      },
++    });
++  });
++});
+diff --git a/apps/web/lib/jobs/config.ts b/apps/web/lib/jobs/config.ts
+new file mode 100644
+index 000000000000..ab0e28b40df2
+--- /dev/null
++++ b/apps/web/lib/jobs/config.ts
+@@ -0,0 +1,38 @@
++import "server-only";
++import type { JobsRuntimeOptions } from "@formbricks/jobs";
++import { env } from "@/lib/env";
++
++const DEFAULT_BULLMQ_WORKER_CONCURRENCY = 1;
++const DEFAULT_BULLMQ_WORKER_COUNT = 1;
++
++export interface JobsWorkerBootstrapConfig {
++  enabled: boolean;
++  runtimeOptions: JobsRuntimeOptions | null;
++}
++
++export const BULLMQ_WORKER_CONCURRENCY = env.BULLMQ_WORKER_CONCURRENCY ?? DEFAULT_BULLMQ_WORKER_CONCURRENCY;
++export const BULLMQ_WORKER_COUNT = env.BULLMQ_WORKER_COUNT ?? DEFAULT_BULLMQ_WORKER_COUNT;
++export const BULLMQ_WORKER_ENABLED =
++  env.BULLMQ_WORKER_ENABLED !== undefined ? env.BULLMQ_WORKER_ENABLED === "1" : env.NODE_ENV !== "test";
++
++export const getJobsWorkerBootstrapConfig = (): JobsWorkerBootstrapConfig => {
++  if (!BULLMQ_WORKER_ENABLED) {
++    return {
++      enabled: false,
++      runtimeOptions: null,
++    };
++  }
++
++  if (!env.REDIS_URL) {
++    throw new Error("REDIS_URL is required to start the BullMQ worker");
++  }
++
++  return {
++    enabled: true,
++    runtimeOptions: {
++      concurrency: BULLMQ_WORKER_CONCURRENCY,
++      redisUrl: env.REDIS_URL,
++      workerCount: BULLMQ_WORKER_COUNT,
++    },
++  };
++};
+diff --git a/apps/web/next.config.mjs b/apps/web/next.config.mjs
+index 243e2bb24c7f..ef499fc2daa1 100644
+--- a/apps/web/next.config.mjs
++++ b/apps/web/next.config.mjs
+@@ -30,6 +30,8 @@ const nextConfig = {
+     "@opentelemetry/sdk-trace-base",
+     "@opentelemetry/semantic-conventions",
+     "@prisma/instrumentation",
++    "bullmq",
++    "ioredis",
+     "pino",
+     "pino-pretty",
+     "pino-opentelemetry-transport",
+diff --git a/apps/web/package.json b/apps/web/package.json
+index c54c3b089c1d..b320f2ade32b 100644
+--- a/apps/web/package.json
++++ b/apps/web/package.json
+@@ -30,6 +30,7 @@
+     "@formbricks/email": "workspace:*",
+     "@formbricks/i18n-utils": "workspace:*",
+     "@formbricks/js-core": "workspace:*",
++    "@formbricks/jobs": "workspace:*",
+     "@formbricks/logger": "workspace:*",
+     "@formbricks/storage": "workspace:*",
+     "@formbricks/surveys": "workspace:*",
+diff --git a/charts/formbricks/values.yaml b/charts/formbricks/values.yaml
+index 7e02f76a43a0..e5a6f67ab3ab 100644
+--- a/charts/formbricks/values.yaml
++++ b/charts/formbricks/values.yaml
+@@ -310,6 +310,10 @@ redis:
+   externalRedisUrl: ""
+   fullnameOverride: "formbricks-redis"
+   architecture: standalone
++  commonConfiguration: |-
++    appendonly yes
++    save ""
++    maxmemory-policy noeviction
+   auth:
+     enabled: true
+     existingSecret: "formbricks-app-secrets"
+diff --git a/docker-compose.dev.yml b/docker-compose.dev.yml
+index cb454d512e2c..f6e97333dc0c 100644
+--- a/docker-compose.dev.yml
++++ b/docker-compose.dev.yml
+@@ -18,7 +18,7 @@ services:
+ 
+   valkey:
+     image: valkey/valkey@sha256:12ba4f45a7c3e1d0f076acd616cb230834e75a77e8516dde382720af32832d6d
+-    command: "valkey-server"
++    command: "valkey-server --maxmemory-policy noeviction"
+     ports:
+       - 6379:6379
+     volumes:
+diff --git a/docker/docker-compose.yml b/docker/docker-compose.yml
+index 364c82211b57..d0e067566e64 100644
+--- a/docker/docker-compose.yml
++++ b/docker/docker-compose.yml
+@@ -222,7 +222,7 @@ services:
+   redis:
+     restart: always
+     image: valkey/valkey@sha256:12ba4f45a7c3e1d0f076acd616cb230834e75a77e8516dde382720af32832d6d
+-    command: valkey-server --appendonly yes
++    command: valkey-server --appendonly yes --maxmemory-policy noeviction
+     volumes:
+       - redis:/data
+     ports:
+diff --git a/docs/docs.json b/docs/docs.json
+index 13c201449f0c..7de1d7af146d 100644
+--- a/docs/docs.json
++++ b/docs/docs.json
+@@ -308,6 +308,7 @@
+             "group": "Technical Handbook",
+             "pages": [
+               "development/technical-handbook/overview",
++              "development/technical-handbook/background-job-processing",
+               "development/technical-handbook/database-model",
+               "development/technical-handbook/tenant-separation"
+             ]
+diff --git a/docs/self-hosting/configuration/environment-variables.mdx b/docs/self-hosting/configuration/environment-variables.mdx
+index 7121e98fa70a..61360bac9403 100644
+--- a/docs/self-hosting/configuration/environment-variables.mdx
++++ b/docs/self-hosting/configuration/environment-variables.mdx
+@@ -18,6 +18,9 @@ These variables are present inside your machine's docker-compose file. Restart t
+ | ENCRYPTION_KEY               | Secret used by Formbricks for data encryption and audit log hashing.                                                 | required                                                | (Generated by the user, must not exceed 32 bytes, `openssl rand -hex 32`) |
+ | CRON_SECRET                  | API Secret for running cron jobs.                                                                                    | required                                                | (Generated by the user, must not exceed 32 bytes, `openssl rand -hex 32`) |
+ | LOG_LEVEL                    | Minimum log level (debug, info, warn, error, fatal)                                                                  | optional                                                | info                                                                      |
++| BULLMQ_WORKER_ENABLED        | Enables the in-process BullMQ worker when set to 1. Defaults to enabled outside tests.                              | optional                                                | 1                                                                         |
++| BULLMQ_WORKER_COUNT          | Number of BullMQ worker instances started per Formbricks server process. Must be a positive integer.                 | optional                                                | 1                                                                         |
++| BULLMQ_WORKER_CONCURRENCY    | Number of concurrent jobs each BullMQ worker instance can process. Must be a positive integer.                       | optional                                                | 1                                                                         |
+ | S3_ACCESS_KEY                | Access key for S3.                                                                                                   | optional                                                | (resolved by the AWS SDK)                                                 |
+ | S3_SECRET_KEY                | Secret key for S3.                                                                                                   | optional                                                | (resolved by the AWS SDK)                                                 |
+ | S3_REGION                    | Region for S3.                                                                                                       | optional                                                | (resolved by the AWS SDK)                                                 |
+diff --git a/packages/jobs/.eslintrc.cjs b/packages/jobs/.eslintrc.cjs
+new file mode 100644
+index 000000000000..6459e6fb42e9
+--- /dev/null
++++ b/packages/jobs/.eslintrc.cjs
+@@ -0,0 +1,7 @@
++module.exports = {
++  extends: ["@formbricks/eslint-config/library.js"],
++  parserOptions: {
++    project: "tsconfig.json",
++    tsconfigRootDir: __dirname,
++  },
++};
+diff --git a/packages/jobs/package.json b/packages/jobs/package.json
+new file mode 100644
+index 000000000000..d5aeefb3f04f
+--- /dev/null
++++ b/packages/jobs/package.json
+@@ -0,0 +1,42 @@
++{
++  "name": "@formbricks/jobs",
++  "packageManager": "pnpm@10.32.1",
++  "private": true,
++  "version": "0.1.0",
++  "type": "module",
++  "main": "./dist/index.cjs",
++  "types": "./dist/index.d.ts",
++  "files": [
++    "dist"
++  ],
++  "exports": {
++    ".": {
++      "types": "./dist/index.d.ts",
++      "import": "./dist/index.js",
++      "require": "./dist/index.cjs"
++    }
++  },
++  "scripts": {
++    "clean": "rimraf .turbo node_modules coverage dist",
++    "build": "tsc && vite build",
++    "lint": "eslint . --ext .ts,.js",
++    "test": "vitest run",
++    "test:coverage": "vitest run --coverage"
++  },
++  "dependencies": {
++    "@formbricks/database": "workspace:*",
++    "@formbricks/logger": "workspace:*",
++    "@formbricks/types": "workspace:*",
++    "bullmq": "5.61.0",
++    "ioredis": "5.8.1",
++    "zod": "4.3.6"
++  },
++  "devDependencies": {
++    "@formbricks/config-typescript": "workspace:*",
++    "@formbricks/eslint-config": "workspace:*",
++    "@vitest/coverage-v8": "4.0.18",
++    "vite": "7.3.1",
++    "vite-plugin-dts": "4.5.4",
++    "vitest": "4.0.18"
++  }
++}
+diff --git a/packages/jobs/src/connection.test.ts b/packages/jobs/src/connection.test.ts
+new file mode 100644
+index 000000000000..7f50db08eb94
+--- /dev/null
++++ b/packages/jobs/src/connection.test.ts
+@@ -0,0 +1,91 @@
++import IORedis from "ioredis";
++import { beforeEach, describe, expect, test, vi } from "vitest";
++import {
++  closeRedisConnection,
++  createProducerConnection,
++  createWorkerConnection,
++  getRedisUrlFromEnv,
++} from "./connection";
++
++const { mockDisconnect, mockOn, mockQuit } = vi.hoisted(() => ({
++  mockOn: vi.fn(),
++  mockQuit: vi.fn(),
++  mockDisconnect: vi.fn(),
++}));
++
++vi.mock("ioredis", () => ({
++  default: vi.fn(function MockRedis() {
++    return {
++      on: mockOn,
++      quit: mockQuit,
++      disconnect: mockDisconnect,
++      status: "ready",
++    };
++  }),
++}));
++
++vi.mock("@formbricks/logger", () => ({
++  logger: {
++    error: vi.fn(),
++    info: vi.fn(),
++    warn: vi.fn(),
++    debug: vi.fn(),
++  },
++}));
++
++describe("@formbricks/jobs connection helpers", () => {
++  beforeEach(() => {
++    vi.clearAllMocks();
++    delete process.env.REDIS_URL;
++  });
++
++  test("creates producer connections with fail-fast options", () => {
++    createProducerConnection({ redisUrl: "redis://localhost:6379" });
++
++    expect(IORedis).toHaveBeenCalledWith(
++      "redis://localhost:6379",
++      expect.objectContaining({
++        connectionName: "formbricks-jobs-producer",
++        connectTimeout: 3000,
++        enableOfflineQueue: false,
++        maxRetriesPerRequest: 1,
++      })
++    );
++    expect(mockOn).toHaveBeenCalledWith("error", expect.any(Function));
++  });
++
++  test("creates worker connections with blocking-safe options", () => {
++    createWorkerConnection({ redisUrl: "redis://localhost:6379" });
++
++    expect(IORedis).toHaveBeenCalledWith(
++      "redis://localhost:6379",
++      expect.objectContaining({
++        connectionName: "formbricks-jobs-worker",
++        connectTimeout: 3000,
++        maxRetriesPerRequest: null,
++      })
++    );
++    expect(mockOn).toHaveBeenCalledWith("error", expect.any(Function));
++  });
++
++  test("reads REDIS_URL from the environment", () => {
++    process.env.REDIS_URL = "redis://localhost:6379";
++
++    expect(getRedisUrlFromEnv()).toBe("redis://localhost:6379");
++  });
++
++  test("throws when REDIS_URL is missing", () => {
++    expect(() => getRedisUrlFromEnv()).toThrow("REDIS_URL is required for BullMQ");
++  });
++
++  test("quits an active Redis connection", async () => {
++    await closeRedisConnection({
++      quit: mockQuit.mockResolvedValue(undefined),
++      disconnect: mockDisconnect,
++      status: "ready",
++    } as unknown as IORedis);
++
++    expect(mockQuit).toHaveBeenCalledTimes(1);
++    expect(mockDisconnect).not.toHaveBeenCalled();
++  });
++});
+diff --git a/packages/jobs/src/connection.ts b/packages/jobs/src/connection.ts
+new file mode 100644
+index 000000000000..176bb8a482bd
+--- /dev/null
++++ b/packages/jobs/src/connection.ts
+@@ -0,0 +1,71 @@
++import IORedis, { type RedisOptions } from "ioredis";
++import { logger } from "@formbricks/logger";
++
++export interface JobsConnectionConfig {
++  redisUrl: string;
++  connectionName?: string;
++}
++
++const getCommonConnectionOptions = (
++  connectionName?: string
++): Pick<RedisOptions, "connectionName" | "lazyConnect" | "enableReadyCheck" | "connectTimeout"> => ({
++  connectionName,
++  lazyConnect: false,
++  enableReadyCheck: true,
++  connectTimeout: 3000,
++});
++
++const addConnectionErrorLogging = (connection: IORedis, label: string): IORedis => {
++  connection.on("error", (error) => {
++    logger.error({ err: error, label }, "BullMQ Redis connection error");
++  });
++
++  return connection;
++};
++
++export const createProducerConnection = ({
++  redisUrl,
++  connectionName = "formbricks-jobs-producer",
++}: JobsConnectionConfig): IORedis =>
++  addConnectionErrorLogging(
++    new IORedis(redisUrl, {
++      ...getCommonConnectionOptions(connectionName),
++      maxRetriesPerRequest: 1,
++      enableOfflineQueue: false,
++    }),
++    "producer"
++  );
++
++export const createWorkerConnection = ({
++  redisUrl,
++  connectionName = "formbricks-jobs-worker",
++}: JobsConnectionConfig): IORedis =>
++  addConnectionErrorLogging(
++    new IORedis(redisUrl, {
++      ...getCommonConnectionOptions(connectionName),
++      maxRetriesPerRequest: null,
++    }),
++    "worker"
++  );
++
++export const getRedisUrlFromEnv = (): string => {
++  const redisUrl = process.env.REDIS_URL;
++
++  if (!redisUrl) {
++    throw new Error("REDIS_URL is required for BullMQ");
++  }
++
++  return redisUrl;
++};
++
++export const closeRedisConnection = async (connection: IORedis): Promise<void> => {
++  if (connection.status === "end") {
++    return;
++  }
++
++  try {
++    await connection.quit();
++  } catch {
++    connection.disconnect();
++  }
++};
+diff --git a/packages/jobs/src/constants.ts b/packages/jobs/src/constants.ts
+new file mode 100644
+index 000000000000..a9976d29da6a
+--- /dev/null
++++ b/packages/jobs/src/constants.ts
+@@ -0,0 +1,32 @@
++import type { JobSchedulerTemplateOptions, JobsOptions } from "bullmq";
++
++export const JOBS_QUEUE_NAME = "background-jobs";
++export const JOBS_PREFIX = "formbricks:jobs";
++
++export const JOB_NAMES = {
++  testLog: "system.test-log",
++  responsePipeline: "response-pipeline.process",
++} as const;
++
++export const JOBS_DEFAULT_JOB_OPTIONS: JobsOptions = {
++  attempts: 3,
++  backoff: {
++    type: "exponential",
++    delay: 1000,
++  },
++  removeOnComplete: {
++    age: 24 * 60 * 60,
++    count: 1000,
++  },
++  removeOnFail: {
++    age: 7 * 24 * 60 * 60,
++    count: 5000,
++  },
++};
++
++export const JOBS_DEFAULT_JOB_SCHEDULER_TEMPLATE_OPTIONS: JobSchedulerTemplateOptions = {
++  attempts: JOBS_DEFAULT_JOB_OPTIONS.attempts,
++  backoff: JOBS_DEFAULT_JOB_OPTIONS.backoff,
++  removeOnComplete: JOBS_DEFAULT_JOB_OPTIONS.removeOnComplete,
++  removeOnFail: JOBS_DEFAULT_JOB_OPTIONS.removeOnFail,
++};
+diff --git a/packages/jobs/src/contracts.ts b/packages/jobs/src/contracts.ts
+new file mode 100644
+index 000000000000..c108f33c8be7
+--- /dev/null
++++ b/packages/jobs/src/contracts.ts
+@@ -0,0 +1,69 @@
++import type { ZodType } from "zod";
++import type {
++  TBackgroundJobScheduleIdentity,
++  TRecurringBackgroundJobSchedule,
++  TRunAtBackgroundJobSchedule,
++} from "@/src/schedules";
++import type { TResponsePipelineJobData, TTestLogJobData } from "@/src/types";
++
++export interface JobExecutionContext {
++  attempt: number;
++  jobId: string;
++  jobName: string;
++  queueName: string;
++}
++
++export interface EnqueuedJob {
++  jobId: string;
++  jobName: string;
++  queueName: string;
++}
++
++export interface UpsertedRecurringJobSchedule extends EnqueuedJob {
++  scheduleId: string;
++  scope: string;
++}
++
++export type JobHandler<TData> = (data: TData, context: JobExecutionContext) => Promise<void>;
++
++export interface BackgroundJobDefinition<TData> {
++  handle: JobHandler<TData>;
++  name: string;
++  schema: ZodType<TData>;
++}
++
++export interface AnyBackgroundJobDefinition {
++  handle: JobHandler<unknown>;
++  name: string;
++  schema: ZodType;
++}
++
++export const toAnyBackgroundJobDefinition = <TData>(
++  definition: BackgroundJobDefinition<TData>
++): AnyBackgroundJobDefinition => ({
++  handle: async (data, context) => {
++    await definition.handle(data as TData, context);
++  },
++  name: definition.name,
++  schema: definition.schema as ZodType,
++});
++
++export interface BackgroundJobProducer {
++  enqueueResponsePipeline: (data: TResponsePipelineJobData) => Promise<EnqueuedJob>;
++  enqueueTestLog: (data: TTestLogJobData) => Promise<EnqueuedJob>;
++  scheduleResponsePipelineAt: (
++    schedule: TRunAtBackgroundJobSchedule,
++    data: TResponsePipelineJobData
++  ) => Promise<EnqueuedJob>;
++  scheduleTestLogAt: (schedule: TRunAtBackgroundJobSchedule, data: TTestLogJobData) => Promise<EnqueuedJob>;
++  upsertRecurringResponsePipelineSchedule: (
++    identity: TBackgroundJobScheduleIdentity,
++    schedule: TRecurringBackgroundJobSchedule,
++    data: TResponsePipelineJobData
++  ) => Promise<UpsertedRecurringJobSchedule>;
++  upsertRecurringTestLogSchedule: (
++    identity: TBackgroundJobScheduleIdentity,
++    schedule: TRecurringBackgroundJobSchedule,
++    data: TTestLogJobData
++  ) => Promise<UpsertedRecurringJobSchedule>;
++}
+diff --git a/packages/jobs/src/definitions.ts b/packages/jobs/src/definitions.ts
+new file mode 100644
+index 000000000000..0e5314a9f5f4
+--- /dev/null
++++ b/packages/jobs/src/definitions.ts
+@@ -0,0 +1,23 @@
++import { JOB_NAMES } from "@/src/constants";
++import { type AnyBackgroundJobDefinition, toAnyBackgroundJobDefinition } from "@/src/contracts";
++import { processResponsePipelineJob } from "@/src/processors/response-pipeline";
++import { processTestLogJob } from "@/src/processors/test-log";
++import { ZResponsePipelineJobData, ZTestLogJobData } from "@/src/types";
++
++export const backgroundJobDefinitions = {
++  [JOB_NAMES.responsePipeline]: toAnyBackgroundJobDefinition({
++    handle: processResponsePipelineJob,
++    name: JOB_NAMES.responsePipeline,
++    schema: ZResponsePipelineJobData,
++  }),
++  [JOB_NAMES.testLog]: toAnyBackgroundJobDefinition({
++    handle: processTestLogJob,
++    name: JOB_NAMES.testLog,
++    schema: ZTestLogJobData,
++  }),
++} as const satisfies Record<string, AnyBackgroundJobDefinition>;
++
++export type TBackgroundJobName = keyof typeof backgroundJobDefinitions;
++
++export const getBackgroundJobDefinition = (jobName: string): AnyBackgroundJobDefinition | undefined =>
++  backgroundJobDefinitions[jobName as TBackgroundJobName];
+diff --git a/packages/jobs/src/index.ts b/packages/jobs/src/index.ts
+new file mode 100644
+index 000000000000..838267d36052
+--- /dev/null
++++ b/packages/jobs/src/index.ts
+@@ -0,0 +1,54 @@
++export {
++  closeRedisConnection,
++  createProducerConnection,
++  createWorkerConnection,
++  getRedisUrlFromEnv,
++} from "./connection";
++export { JOB_NAMES, JOBS_DEFAULT_JOB_OPTIONS, JOBS_PREFIX, JOBS_QUEUE_NAME } from "./constants";
++export type {
++  BackgroundJobDefinition,
++  BackgroundJobProducer,
++  EnqueuedJob,
++  JobExecutionContext,
++  JobHandler,
++  UpsertedRecurringJobSchedule,
++} from "./contracts";
++export { backgroundJobDefinitions, getBackgroundJobDefinition } from "./definitions";
++export {
++  createJobsQueue,
++  enqueueResponsePipelineJob,
++  enqueueTestLogJob,
++  getBackgroundJobProducer,
++  getJobsQueue,
++  resetJobsQueueFactory,
++  scheduleResponsePipelineJobAt,
++  scheduleTestLogJobAt,
++  upsertRecurringResponsePipelineJobSchedule,
++  upsertRecurringTestLogJobSchedule,
++} from "./queue";
++export { getJobProcessor, jobProcessors, processJob } from "./processors/registry";
++export { processResponsePipelineJob } from "./processors/response-pipeline";
++export { processTestLogJob } from "./processors/test-log";
++export { startJobsRuntime } from "./runtime";
++export {
++  ZBackgroundJobScheduleIdentity,
++  ZBackgroundJobScheduleId,
++  ZBackgroundJobScheduleScope,
++  ZRecurringBackgroundJobSchedule,
++  ZRecurringCronBackgroundJobSchedule,
++  ZRecurringEveryBackgroundJobSchedule,
++  ZRunAtBackgroundJobSchedule,
++  getDelayForRunAtSchedule,
++  getRecurringJobSchedulerId,
++  toBullMQRepeatOptions,
++} from "./schedules";
++export type { JobsConnectionConfig } from "./connection";
++export type { JobsQueueHandle } from "./queue";
++export type { JobsRuntimeHandle, JobsRuntimeOptions } from "./runtime";
++export type {
++  TBackgroundJobScheduleIdentity,
++  TRecurringBackgroundJobSchedule,
++  TRunAtBackgroundJobSchedule,
++} from "./schedules";
++export { ZResponsePipelineJobData, ZTestLogJobData } from "./types";
++export type { TResponsePipelineJobData, TTestLogJobData } from "./types";
+diff --git a/packages/jobs/src/jobs-integration.test.ts b/packages/jobs/src/jobs-integration.test.ts
+new file mode 100644
+index 000000000000..649e748d677f
+--- /dev/null
++++ b/packages/jobs/src/jobs-integration.test.ts
+@@ -0,0 +1,164 @@
++import { QueueEvents } from "bullmq";
++import IORedis from "ioredis";
++import { afterAll, beforeAll, describe, expect, test, vi } from "vitest";
++import { logger } from "@formbricks/logger";
++import { JOBS_DEFAULT_JOB_OPTIONS, JOBS_PREFIX, JOBS_QUEUE_NAME, JOB_NAMES } from "./constants";
++import {
++  enqueueTestLogJob,
++  getBackgroundJobProducer,
++  resetJobsQueueFactory,
++  scheduleTestLogJobAt,
++} from "./queue";
++import { startJobsRuntime } from "./runtime";
++
++let redisUrl: string | undefined;
++let runtime: Awaited<ReturnType<typeof startJobsRuntime>> | null = null;
++let queueEvents: QueueEvents | null = null;
++let queueEventsConnection: IORedis | null = null;
++let isRedisAvailable = false;
++
++async function isQueueReady(url: string): Promise<boolean> {
++  try {
++    const probe = await startJobsRuntime({ redisUrl: url });
++    await probe.close();
++    return true;
++  } catch (error) {
++    logger.info({ error }, "BullMQ integration tests skipped because Redis is not available");
++    return false;
++  }
++}
++
++describe("BullMQ integration tests", () => {
++  beforeAll(async () => {
++    redisUrl = process.env.REDIS_URL;
++
++    if (!redisUrl) {
++      logger.info("BullMQ integration tests skipped because REDIS_URL is not configured");
++      return;
++    }
++
++    isRedisAvailable = await isQueueReady(redisUrl);
++    if (!isRedisAvailable) {
++      return;
++    }
++
++    runtime = await startJobsRuntime({ redisUrl });
++    queueEventsConnection = new IORedis(redisUrl, {
++      connectionName: "formbricks-jobs-queue-events",
++      maxRetriesPerRequest: null,
++    });
++    queueEvents = new QueueEvents(JOBS_QUEUE_NAME, {
++      connection: queueEventsConnection,
++      prefix: JOBS_PREFIX,
++    });
++    await queueEvents.waitUntilReady();
++  });
++
++  afterAll(async () => {
++    if (queueEvents) {
++      await queueEvents.close();
++    }
++
++    if (queueEventsConnection) {
++      await queueEventsConnection.quit();
++    }
++
++    if (runtime) {
++      await runtime.close();
++    }
++
++    await resetJobsQueueFactory();
++  });
++
++  test("processes the test log job end-to-end", async () => {
++    if (!isRedisAvailable || !queueEvents) {
++      logger.info("Skipping BullMQ integration test: Redis not available");
++      return;
++    }
++
++    const job = await enqueueTestLogJob({ message: "integration success" });
++
++    await expect(job.waitUntilFinished(queueEvents)).resolves.toBeUndefined();
++    expect(job.name).toBe(JOB_NAMES.testLog);
++    expect(job.opts.attempts).toBe(JOBS_DEFAULT_JOB_OPTIONS.attempts);
++    expect(job.opts.backoff).toEqual(JOBS_DEFAULT_JOB_OPTIONS.backoff);
++  }, 15000);
++
++  test("retries and fails the test log job when instructed", async () => {
++    if (!isRedisAvailable || !queueEvents) {
++      logger.info("Skipping BullMQ integration test: Redis not available");
++      return;
++    }
++
++    const errorSpy = vi.spyOn(logger, "error");
++    const job = await enqueueTestLogJob({ message: "integration failure", shouldFail: true });
++
++    await expect(job.waitUntilFinished(queueEvents)).rejects.toThrow();
++
++    expect(errorSpy).toHaveBeenCalledWith(
++      expect.objectContaining({
++        attemptsMade: JOBS_DEFAULT_JOB_OPTIONS.attempts,
++        jobId: job.id,
++        jobName: JOB_NAMES.testLog,
++      }),
++      "BullMQ job failed"
++    );
++  }, 15000);
++
++  test("processes delayed jobs after their scheduled time", async () => {
++    if (!isRedisAvailable || !queueEvents) {
++      logger.info("Skipping BullMQ integration test: Redis not available");
++      return;
++    }
++
++    const startedAt = Date.now();
++    const job = await scheduleTestLogJobAt(
++      { runAt: new Date(startedAt + 500) },
++      { message: "integration delayed success" }
++    );
++
++    await expect(job.waitUntilFinished(queueEvents)).resolves.toBeUndefined();
++    expect(Date.now() - startedAt).toBeGreaterThanOrEqual(350);
++  }, 15000);
++
++  test("upserts recurring schedules using the engine-neutral producer interface", async () => {
++    if (!isRedisAvailable) {
++      logger.info("Skipping BullMQ integration test: Redis not available");
++      return;
++    }
++
++    const producer = getBackgroundJobProducer();
++    const debugSpy = vi.spyOn(logger, "debug");
++    const message = `integration recurring ${Date.now().toString()}`;
++    const scheduleId = `integration-recurring-${Date.now().toString()}`;
++
++    const scheduledJob = await producer.upsertRecurringTestLogSchedule(
++      {
++        scheduleId,
++        scope: "integration-tests",
++      },
++      {
++        everyMs: 200,
++        kind: "every",
++        limit: 2,
++      },
++      { message }
++    );
++
++    await vi.waitFor(
++      () => {
++        const processorLogs = debugSpy.mock.calls.filter((call) => call[1] === message);
++        expect(processorLogs).toHaveLength(2);
++      },
++      { interval: 100, timeout: 10_000 }
++    );
++
++    expect(scheduledJob).toMatchObject({
++      jobName: JOB_NAMES.testLog,
++      queueName: JOBS_QUEUE_NAME,
++      scheduleId,
++      scope: "integration-tests",
++    });
++    expect(scheduledJob.jobId).toEqual(expect.any(String));
++  }, 15000);
++});
+diff --git a/packages/jobs/src/processors.test.ts b/packages/jobs/src/processors.test.ts
+new file mode 100644
+index 000000000000..b5c272dc4c93
+--- /dev/null
++++ b/packages/jobs/src/processors.test.ts
+@@ -0,0 +1,63 @@
++import { beforeEach, describe, expect, test, vi } from "vitest";
++import { JOB_NAMES } from "./constants";
++import { getBackgroundJobDefinition } from "./definitions";
++import { getJobProcessor, processJob } from "./processors/registry";
++
++const { mockDebug, mockError } = vi.hoisted(() => ({
++  mockDebug: vi.fn(),
++  mockError: vi.fn(),
++}));
++
++vi.mock("@formbricks/logger", () => ({
++  logger: {
++    error: mockError,
++    info: vi.fn(),
++    warn: vi.fn(),
++    debug: mockDebug,
++  },
++}));
++
++describe("@formbricks/jobs processor registry", () => {
++  beforeEach(() => {
++    vi.clearAllMocks();
++  });
++
++  test("returns registered processors", () => {
++    expect(getJobProcessor(JOB_NAMES.testLog)).toBeDefined();
++    expect(getJobProcessor(JOB_NAMES.responsePipeline)).toBeDefined();
++    expect(getBackgroundJobDefinition(JOB_NAMES.testLog)).toBeDefined();
++  });
++
++  test("dispatches test log jobs", async () => {
++    await processJob({
++      attemptsMade: 0,
++      data: { message: "processor test" },
++      id: "job-1",
++      name: JOB_NAMES.testLog,
++      queueName: "background-jobs",
++    } as never);
++
++    expect(mockDebug).toHaveBeenCalledWith(
++      expect.objectContaining({
++        attempt: 1,
++        jobId: "job-1",
++        jobName: JOB_NAMES.testLog,
++      }),
++      "processor test"
++    );
++  });
++
++  test("throws for unknown jobs", async () => {
++    await expect(
++      processJob({
++        attemptsMade: 0,
++        data: {},
++        id: "job-2",
++        name: "unknown.job",
++        queueName: "background-jobs",
++      } as never)
++    ).rejects.toThrow("No BullMQ processor registered for job: unknown.job");
++
++    expect(mockError).toHaveBeenCalled();
++  });
++});
+diff --git a/packages/jobs/src/processors/registry.ts b/packages/jobs/src/processors/registry.ts
+new file mode 100644
+index 000000000000..61d8bb1ecca1
+--- /dev/null
++++ b/packages/jobs/src/processors/registry.ts
+@@ -0,0 +1,28 @@
++import type { Job } from "bullmq";
++import { logger } from "@formbricks/logger";
++import type { AnyBackgroundJobDefinition } from "@/src/contracts";
++import { backgroundJobDefinitions, getBackgroundJobDefinition } from "@/src/definitions";
++
++export const jobProcessors: Record<string, AnyBackgroundJobDefinition> = backgroundJobDefinitions;
++
++export const getJobProcessor = (jobName: string): AnyBackgroundJobDefinition | undefined =>
++  getBackgroundJobDefinition(jobName);
++
++export const processJob = async (job: Job): Promise<void> => {
++  const definition = getJobProcessor(job.name);
++
++  if (!definition) {
++    const error = new Error(`No BullMQ processor registered for job: ${job.name}`);
++    logger.error({ jobId: job.id, jobName: job.name, queueName: job.queueName }, error.message);
++    throw error;
++  }
++
++  const data = definition.schema.parse(job.data);
++
++  await definition.handle(data, {
++    attempt: job.attemptsMade + 1,
++    jobId: String(job.id),
++    jobName: job.name,
++    queueName: job.queueName,
++  });
++};
+diff --git a/packages/jobs/src/processors/response-pipeline.ts b/packages/jobs/src/processors/response-pipeline.ts
+new file mode 100644
+index 000000000000..8f53616034ea
+--- /dev/null
++++ b/packages/jobs/src/processors/response-pipeline.ts
+@@ -0,0 +1,20 @@
++import { logger } from "@formbricks/logger";
++import type { JobHandler } from "@/src/contracts";
++import type { TResponsePipelineJobData } from "@/src/types";
++
++export const processResponsePipelineJob: JobHandler<TResponsePipelineJobData> = (data, context) => {
++  logger.debug(
++    {
++      attempt: context.attempt,
++      environmentId: data.environmentId,
++      surveyId: data.surveyId,
++      event: data.event,
++      jobId: context.jobId,
++      jobName: context.jobName,
++      queueName: context.queueName,
++    },
++    "Processed placeholder response pipeline job"
++  );
++
++  return Promise.resolve();
++};
+diff --git a/packages/jobs/src/processors/test-log.ts b/packages/jobs/src/processors/test-log.ts
+new file mode 100644
+index 000000000000..70f40e0cc21d
+--- /dev/null
++++ b/packages/jobs/src/processors/test-log.ts
+@@ -0,0 +1,22 @@
++import { logger } from "@formbricks/logger";
++import type { JobHandler } from "@/src/contracts";
++import type { TTestLogJobData } from "@/src/types";
++
++export const processTestLogJob: JobHandler<TTestLogJobData> = (data, context) => {
++  logger.debug(
++    {
++      attempt: context.attempt,
++      context: data.context,
++      jobId: context.jobId,
++      jobName: context.jobName,
++      queueName: context.queueName,
++    },
++    data.message
++  );
++
++  if (data.shouldFail) {
++    return Promise.reject(new Error(`Test log job failed intentionally: ${data.message}`));
++  }
++
++  return Promise.resolve();
++};
+diff --git a/packages/jobs/src/queue.test.ts b/packages/jobs/src/queue.test.ts
+new file mode 100644
+index 000000000000..749640e62bdf
+--- /dev/null
++++ b/packages/jobs/src/queue.test.ts
+@@ -0,0 +1,224 @@
++import { Queue } from "bullmq";
++import type IORedis from "ioredis";
++import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
++import {
++  JOBS_DEFAULT_JOB_OPTIONS,
++  JOBS_DEFAULT_JOB_SCHEDULER_TEMPLATE_OPTIONS,
++  JOBS_PREFIX,
++  JOBS_QUEUE_NAME,
++  JOB_NAMES,
++} from "./constants";
++import {
++  createJobsQueue,
++  enqueueTestLogJob,
++  getBackgroundJobProducer,
++  getJobsQueue,
++  resetJobsQueueFactory,
++  scheduleTestLogJobAt,
++  upsertRecurringTestLogJobSchedule,
++} from "./queue";
++import { getRecurringJobSchedulerId } from "./schedules";
++
++const {
++  mockCloseRedisConnection,
++  mockQueueAdd,
++  mockQueueClose,
++  mockQueueUpsertJobScheduler,
++  mockQueueWaitUntilReady,
++} = vi.hoisted(() => ({
++  mockCloseRedisConnection: vi.fn(),
++  mockQueueAdd: vi.fn(),
++  mockQueueClose: vi.fn(),
++  mockQueueUpsertJobScheduler: vi.fn(),
++  mockQueueWaitUntilReady: vi.fn(),
++}));
++
++const mockConnection = {
++  on: vi.fn(),
++  quit: vi.fn().mockResolvedValue(undefined),
++  disconnect: vi.fn(),
++  status: "ready",
++} as unknown as IORedis;
++
++vi.mock("@formbricks/logger", () => ({
++  logger: {
++    error: vi.fn(),
++    info: vi.fn(),
++    warn: vi.fn(),
++    debug: vi.fn(),
++  },
++}));
++
++vi.mock("./connection", () => ({
++  createProducerConnection: vi.fn(() => mockConnection),
++  getRedisUrlFromEnv: vi.fn(() => "redis://localhost:6379"),
++  closeRedisConnection: mockCloseRedisConnection.mockResolvedValue(undefined),
++}));
++
++vi.mock("bullmq", () => ({
++  Queue: vi.fn(function MockQueue() {
++    mockQueueWaitUntilReady.mockResolvedValue(undefined);
++
++    return {
++      add: mockQueueAdd,
++      close: mockQueueClose,
++      upsertJobScheduler: mockQueueUpsertJobScheduler,
++      waitUntilReady: mockQueueWaitUntilReady,
++    };
++  }),
++}));
++
++describe("@formbricks/jobs queue helpers", () => {
++  beforeEach(async () => {
++    await resetJobsQueueFactory();
++    vi.clearAllMocks();
++    vi.useFakeTimers();
++    vi.setSystemTime(new Date("2026-04-07T10:00:00.000Z"));
++  });
++
++  afterEach(() => {
++    vi.useRealTimers();
++  });
++
++  test("creates the shared queue with the expected defaults", () => {
++    createJobsQueue({ connection: mockConnection });
++
++    expect(Queue).toHaveBeenCalledWith(
++      JOBS_QUEUE_NAME,
++      expect.objectContaining({
++        connection: mockConnection,
++        defaultJobOptions: JOBS_DEFAULT_JOB_OPTIONS,
++        prefix: JOBS_PREFIX,
++      })
++    );
++  });
++
++  test("memoizes the producer queue", async () => {
++    const first = await getJobsQueue();
++    const second = await getJobsQueue();
++
++    expect(first.queue).toBe(second.queue);
++    expect(Queue).toHaveBeenCalledTimes(1);
++  });
++
++  test("enqueues the test log job with the shared queue", async () => {
++    const mockJob = { id: "job-1" };
++    mockQueueAdd.mockResolvedValue(mockJob);
++
++    const job = await enqueueTestLogJob({ message: "hello world" });
++
++    expect(job).toBe(mockJob);
++    expect(mockQueueAdd).toHaveBeenCalledWith(JOB_NAMES.testLog, { message: "hello world" }, undefined);
++  });
++
++  test("exposes an engine-neutral producer interface", async () => {
++    const producer = getBackgroundJobProducer();
++    mockQueueAdd.mockResolvedValue({
++      id: "job-2",
++      name: JOB_NAMES.testLog,
++      queueName: JOBS_QUEUE_NAME,
++    });
++
++    const job = await producer.enqueueTestLog({ message: "hello interface" });
++
++    expect(job).toEqual({
++      jobId: "job-2",
++      jobName: JOB_NAMES.testLog,
++      queueName: JOBS_QUEUE_NAME,
++    });
++  });
++
++  test("schedules a delayed job using the runAt schedule type", async () => {
++    mockQueueAdd.mockResolvedValue({ id: "job-3" });
++
++    await scheduleTestLogJobAt(
++      { runAt: new Date("2026-04-07T10:00:05.000Z") },
++      { message: "hello delayed world" }
++    );
++
++    expect(mockQueueAdd).toHaveBeenCalledWith(
++      JOB_NAMES.testLog,
++      { message: "hello delayed world" },
++      { delay: 5000 }
++    );
++  });
++
++  test("upserts a recurring scheduler using engine-neutral schedule types", async () => {
++    mockQueueUpsertJobScheduler.mockResolvedValue({
++      id: "job-4",
++      name: JOB_NAMES.testLog,
++      queueName: JOBS_QUEUE_NAME,
++    });
++
++    await upsertRecurringTestLogJobSchedule(
++      {
++        scheduleId: "nightly-test-log",
++        scope: "environment_123",
++      },
++      {
++        cronPattern: "0 2 * * *",
++        kind: "cron",
++        timeZone: "UTC",
++      },
++      { message: "hello recurring world" }
++    );
++
++    expect(mockQueueUpsertJobScheduler).toHaveBeenCalledWith(
++      getRecurringJobSchedulerId(JOB_NAMES.testLog, {
++        scheduleId: "nightly-test-log",
++        scope: "environment_123",
++      }),
++      {
++        endDate: undefined,
++        immediately: undefined,
++        limit: undefined,
++        pattern: "0 2 * * *",
++        startDate: undefined,
++        tz: "UTC",
++      },
++      {
++        data: { message: "hello recurring world" },
++        name: JOB_NAMES.testLog,
++        opts: JOBS_DEFAULT_JOB_SCHEDULER_TEMPLATE_OPTIONS,
++      }
++    );
++  });
++
++  test("exposes scheduling through the engine-neutral producer interface", async () => {
++    const producer = getBackgroundJobProducer();
++    mockQueueUpsertJobScheduler.mockResolvedValue({
++      id: "job-5",
++      name: JOB_NAMES.testLog,
++      queueName: JOBS_QUEUE_NAME,
++    });
++
++    const job = await producer.upsertRecurringTestLogSchedule(
++      {
++        scheduleId: "interface-recurring",
++        scope: "organization_123",
++      },
++      {
++        everyMs: 60_000,
++        kind: "every",
++      },
++      { message: "hello scheduled interface" }
++    );
++
++    expect(job).toEqual({
++      jobId: "job-5",
++      jobName: JOB_NAMES.testLog,
++      queueName: JOBS_QUEUE_NAME,
++      scheduleId: "interface-recurring",
++      scope: "organization_123",
++    });
++  });
++
++  test("cleans up producer resources when queue initialization fails", async () => {
++    mockQueueWaitUntilReady.mockRejectedValueOnce(new Error("redis unavailable"));
++
++    await expect(getJobsQueue()).rejects.toThrow("redis unavailable");
++
++    expect(mockQueueClose).toHaveBeenCalledTimes(1);
++    expect(mockCloseRedisConnection).toHaveBeenCalledWith(mockConnection);
++  });
++});
+diff --git a/packages/jobs/src/queue.ts b/packages/jobs/src/queue.ts
+new file mode 100644
+index 000000000000..13d950cded82
+--- /dev/null
++++ b/packages/jobs/src/queue.ts
+@@ -0,0 +1,309 @@
++import { type Job, type JobsOptions, Queue } from "bullmq";
++import type IORedis from "ioredis";
++import { logger } from "@formbricks/logger";
++import { closeRedisConnection, createProducerConnection, getRedisUrlFromEnv } from "@/src/connection";
++import {
++  JOBS_DEFAULT_JOB_OPTIONS,
++  JOBS_DEFAULT_JOB_SCHEDULER_TEMPLATE_OPTIONS,
++  JOBS_PREFIX,
++  JOBS_QUEUE_NAME,
++  JOB_NAMES,
++} from "@/src/constants";
++import type { BackgroundJobProducer, EnqueuedJob, UpsertedRecurringJobSchedule } from "@/src/contracts";
++import { getBackgroundJobDefinition } from "@/src/definitions";
++import {
++  type TBackgroundJobScheduleIdentity,
++  type TRecurringBackgroundJobSchedule,
++  type TRunAtBackgroundJobSchedule,
++  getDelayForRunAtSchedule,
++  getRecurringJobSchedulerId,
++  toBullMQRepeatOptions,
++} from "@/src/schedules";
++import { type TResponsePipelineJobData, type TTestLogJobData } from "@/src/types";
++
++export interface JobsQueueHandle {
++  connection: IORedis;
++  queue: Queue;
++}
++
++interface TGlobalJobsQueueState {
++  formbricksJobsQueue: Queue | undefined;
++  formbricksJobsProducerConnection: IORedis | undefined;
++  formbricksJobsQueueInitializing: Promise<JobsQueueHandle> | undefined;
++}
++
++const globalForJobsQueue = globalThis as unknown as TGlobalJobsQueueState;
++
++let queueSingleton = globalForJobsQueue.formbricksJobsQueue;
++let connectionSingleton = globalForJobsQueue.formbricksJobsProducerConnection;
++
++const hasActiveConnection = (connection?: IORedis): connection is IORedis =>
++  connection !== undefined && connection.status !== "end";
++
++export const createJobsQueue = ({
++  connection,
++  prefix = JOBS_PREFIX,
++}: {
++  connection: IORedis;
++  prefix?: string;
++}): Queue =>
++  new Queue(JOBS_QUEUE_NAME, {
++    connection,
++    defaultJobOptions: JOBS_DEFAULT_JOB_OPTIONS,
++    prefix,
++  });
++
++export const getJobsQueue = async (): Promise<JobsQueueHandle> => {
++  if (queueSingleton && hasActiveConnection(connectionSingleton)) {
++    return {
++      queue: queueSingleton,
++      connection: connectionSingleton,
++    };
++  }
++
++  if (
++    globalForJobsQueue.formbricksJobsQueue &&
++    hasActiveConnection(globalForJobsQueue.formbricksJobsProducerConnection)
++  ) {
++    queueSingleton = globalForJobsQueue.formbricksJobsQueue;
++    connectionSingleton = globalForJobsQueue.formbricksJobsProducerConnection;
++
++    return {
++      queue: globalForJobsQueue.formbricksJobsQueue,
++      connection: globalForJobsQueue.formbricksJobsProducerConnection,
++    };
++  }
++
++  if (globalForJobsQueue.formbricksJobsQueueInitializing) {
++    return await globalForJobsQueue.formbricksJobsQueueInitializing;
++  }
++
++  globalForJobsQueue.formbricksJobsQueueInitializing = (async (): Promise<JobsQueueHandle> => {
++    const connection = createProducerConnection({ redisUrl: getRedisUrlFromEnv() });
++    const queue = createJobsQueue({ connection });
++
++    try {
++      await queue.waitUntilReady();
++    } catch (error) {
++      try {
++        await queue.close();
++      } finally {
++        await closeRedisConnection(connection);
++      }
++
++      throw error;
++    }
++
++    queueSingleton = queue;
++    connectionSingleton = connection;
++    globalForJobsQueue.formbricksJobsQueue = queue;
++    globalForJobsQueue.formbricksJobsProducerConnection = connection;
++
++    return {
++      queue,
++      connection,
++    };
++  })();
++
++  try {
++    return await globalForJobsQueue.formbricksJobsQueueInitializing;
++  } finally {
++    globalForJobsQueue.formbricksJobsQueueInitializing = undefined;
++  }
++};
++
++const toEnqueuedJob = (job: Pick<Job, "id" | "name" | "queueName">): EnqueuedJob => ({
++  jobId: String(job.id),
++  jobName: job.name,
++  queueName: job.queueName,
++});
++
++const toUpsertedRecurringJobSchedule = (
++  job: Pick<Job, "id" | "name" | "queueName">,
++  identity: TBackgroundJobScheduleIdentity
++): UpsertedRecurringJobSchedule => ({
++  ...toEnqueuedJob(job),
++  scheduleId: identity.scheduleId,
++  scope: identity.scope,
++});
++
++const enqueueBackgroundJob = async <TData>(
++  jobName: string,
++  data: TData,
++  options?: JobsOptions
++): Promise<Job> => {
++  const definition = getBackgroundJobDefinition(jobName);
++
++  if (!definition) {
++    throw new Error(`No background job definition registered for job: ${jobName}`);
++  }
++
++  const parsedData = definition.schema.parse(data);
++  const { queue } = await getJobsQueue();
++  return await queue.add(definition.name, parsedData, options);
++};
++
++const scheduleBackgroundJobAt = async <TData>(
++  jobName: string,
++  schedule: TRunAtBackgroundJobSchedule,
++  data: TData
++): Promise<Job> => {
++  const delay = getDelayForRunAtSchedule(schedule);
++
++  return await enqueueBackgroundJob(jobName, data, { delay });
++};
++
++const upsertRecurringBackgroundJobSchedule = async <TData>(
++  jobName: string,
++  identity: TBackgroundJobScheduleIdentity,
++  schedule: TRecurringBackgroundJobSchedule,
++  data: TData
++): Promise<Job> => {
++  const definition = getBackgroundJobDefinition(jobName);
++
++  if (!definition) {
++    throw new Error(`No background job definition registered for job: ${jobName}`);
++  }
++
++  const parsedData = definition.schema.parse(data);
++  const { queue } = await getJobsQueue();
++
++  return await queue.upsertJobScheduler(
++    getRecurringJobSchedulerId(definition.name, identity),
++    toBullMQRepeatOptions(schedule),
++    {
++      data: parsedData,
++      name: definition.name,
++      opts: JOBS_DEFAULT_JOB_SCHEDULER_TEMPLATE_OPTIONS,
++    }
++  );
++};
++
++export const enqueueTestLogJob = async (data: TTestLogJobData): Promise<Job> => {
++  try {
++    return await enqueueBackgroundJob(JOB_NAMES.testLog, data);
++  } catch (error) {
++    logger.error({ err: error, jobName: JOB_NAMES.testLog }, "Failed to enqueue BullMQ test log job");
++    throw error;
++  }
++};
++
++export const enqueueResponsePipelineJob = async (data: TResponsePipelineJobData): Promise<Job> => {
++  try {
++    return await enqueueBackgroundJob(JOB_NAMES.responsePipeline, data);
++  } catch (error) {
++    logger.error(
++      { err: error, jobName: JOB_NAMES.responsePipeline },
++      "Failed to enqueue BullMQ response pipeline job"
++    );
++    throw error;
++  }
++};
++
++export const scheduleTestLogJobAt = async (
++  schedule: TRunAtBackgroundJobSchedule,
++  data: TTestLogJobData
++): Promise<Job> => {
++  try {
++    return await scheduleBackgroundJobAt(JOB_NAMES.testLog, schedule, data);
++  } catch (error) {
++    logger.error(
++      { err: error, jobName: JOB_NAMES.testLog, schedule },
++      "Failed to schedule BullMQ test log job"
++    );
++    throw error;
++  }
++};
++
++export const scheduleResponsePipelineJobAt = async (
++  schedule: TRunAtBackgroundJobSchedule,
++  data: TResponsePipelineJobData
++): Promise<Job> => {
++  try {
++    return await scheduleBackgroundJobAt(JOB_NAMES.responsePipeline, schedule, data);
++  } catch (error) {
++    logger.error(
++      { err: error, jobName: JOB_NAMES.responsePipeline, schedule },
++      "Failed to schedule BullMQ response pipeline job"
++    );
++    throw error;
++  }
++};
++
++export const upsertRecurringTestLogJobSchedule = async (
++  identity: TBackgroundJobScheduleIdentity,
++  schedule: TRecurringBackgroundJobSchedule,
++  data: TTestLogJobData
++): Promise<Job> => {
++  try {
++    return await upsertRecurringBackgroundJobSchedule(JOB_NAMES.testLog, identity, schedule, data);
++  } catch (error) {
++    logger.error(
++      {
++        err: error,
++        jobName: JOB_NAMES.testLog,
++        schedule,
++        scheduleId: identity.scheduleId,
++        scope: identity.scope,
++      },
++      "Failed to upsert BullMQ test log schedule"
++    );
++    throw error;
++  }
++};
++
++export const upsertRecurringResponsePipelineJobSchedule = async (
++  identity: TBackgroundJobScheduleIdentity,
++  schedule: TRecurringBackgroundJobSchedule,
++  data: TResponsePipelineJobData
++): Promise<Job> => {
++  try {
++    return await upsertRecurringBackgroundJobSchedule(JOB_NAMES.responsePipeline, identity, schedule, data);
++  } catch (error) {
++    logger.error(
++      {
++        err: error,
++        jobName: JOB_NAMES.responsePipeline,
++        schedule,
++        scheduleId: identity.scheduleId,
++        scope: identity.scope,
++      },
++      "Failed to upsert BullMQ response pipeline schedule"
++    );
++    throw error;
++  }
++};
++
++export const getBackgroundJobProducer = (): BackgroundJobProducer => ({
++  enqueueResponsePipeline: async (data) => toEnqueuedJob(await enqueueResponsePipelineJob(data)),
++  enqueueTestLog: async (data) => toEnqueuedJob(await enqueueTestLogJob(data)),
++  scheduleResponsePipelineAt: async (schedule, data) =>
++    toEnqueuedJob(await scheduleResponsePipelineJobAt(schedule, data)),
++  scheduleTestLogAt: async (schedule, data) => toEnqueuedJob(await scheduleTestLogJobAt(schedule, data)),
++  upsertRecurringResponsePipelineSchedule: async (identity, schedule, data) =>
++    toUpsertedRecurringJobSchedule(
++      await upsertRecurringResponsePipelineJobSchedule(identity, schedule, data),
++      identity
++    ),
++  upsertRecurringTestLogSchedule: async (identity, schedule, data) =>
++    toUpsertedRecurringJobSchedule(
++      await upsertRecurringTestLogJobSchedule(identity, schedule, data),
++      identity
++    ),
++});
++
++export const resetJobsQueueFactory = async (): Promise<void> => {
++  if (queueSingleton) {
++    await queueSingleton.close();
++  }
++
++  if (connectionSingleton) {
++    await closeRedisConnection(connectionSingleton);
++  }
++
++  queueSingleton = undefined;
++  connectionSingleton = undefined;
++  globalForJobsQueue.formbricksJobsQueue = undefined;
++  globalForJobsQueue.formbricksJobsProducerConnection = undefined;
++  globalForJobsQueue.formbricksJobsQueueInitializing = undefined;
++};
+diff --git a/packages/jobs/src/runtime.test.ts b/packages/jobs/src/runtime.test.ts
+new file mode 100644
+index 000000000000..3e7654c57c9c
+--- /dev/null
++++ b/packages/jobs/src/runtime.test.ts
+@@ -0,0 +1,142 @@
++import { Worker } from "bullmq";
++import type IORedis from "ioredis";
++import { beforeEach, describe, expect, test, vi } from "vitest";
++import { JOBS_PREFIX, JOBS_QUEUE_NAME } from "./constants";
++import { startJobsRuntime } from "./runtime";
++
++const {
++  mockConnectionDisconnect,
++  mockConnectionQuit,
++  mockQueueClose,
++  mockQueueWaitUntilReady,
++  mockWorkerClose,
++  mockWorkerOn,
++  mockWorkerWaitUntilReady,
++} = vi.hoisted(() => ({
++  mockConnectionDisconnect: vi.fn(),
++  mockQueueWaitUntilReady: vi.fn().mockResolvedValue(undefined),
++  mockQueueClose: vi.fn().mockResolvedValue(undefined),
++  mockWorkerWaitUntilReady: vi.fn().mockResolvedValue(undefined),
++  mockWorkerClose: vi.fn().mockResolvedValue(undefined),
++  mockWorkerOn: vi.fn(),
++  mockConnectionQuit: vi.fn().mockResolvedValue(undefined),
++}));
++
++const createMockConnection = (): IORedis =>
++  ({
++    on: vi.fn(),
++    quit: mockConnectionQuit,
++    disconnect: mockConnectionDisconnect,
++    status: "ready",
++  }) as unknown as IORedis;
++
++vi.mock("@formbricks/logger", () => ({
++  logger: {
++    error: vi.fn(),
++    info: vi.fn(),
++    warn: vi.fn(),
++    
+
+... [truncated, 94299 chars total]

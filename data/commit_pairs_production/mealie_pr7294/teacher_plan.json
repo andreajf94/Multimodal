@@ -1,0 +1,102 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "data_modeling",
+      "recommendation": "Modified slug generation logic to preserve existing slugs during hydration and only regenerate when recipe name changes",
+      "rationale": "The original implementation always regenerated slugs during model hydration, which caused unnecessary slug changes when loading recipes from the database. This broke URL stability and caused issues with recipe links. The fix ensures slugs remain stable unless the recipe name actually changes.",
+      "alternatives_considered": [
+        "Adding a separate flag to track if name has changed",
+        "Storing slug generation timestamp to detect stale slugs",
+        "Completely separating slug generation from model validation"
+      ],
+      "files_affected": [
+        "mealie/schema/recipe/recipe.py"
+      ]
+    },
+    {
+      "dimension": "api_design",
+      "recommendation": "Modified repository update method to check for name changes before regenerating slug",
+      "rationale": "The repository layer is the appropriate place to handle business logic for when slugs should be regenerated. By checking if the new name differs from the existing name in the database, we can decide whether to preserve the existing slug or generate a new one. This keeps the validation logic in the schema simple while handling the update logic in the repository.",
+      "alternatives_considered": [
+        "Adding slug regeneration logic to the schema's update method",
+        "Creating a separate service layer for slug management",
+        "Using database triggers to handle slug updates"
+      ],
+      "files_affected": [
+        "mealie/repos/repository_recipes.py"
+      ]
+    },
+    {
+      "dimension": "testing",
+      "recommendation": "Added comprehensive test coverage for slug preservation scenarios",
+      "rationale": "Added unit tests to verify schema-level slug preservation and integration tests to verify repository and API behavior. Tests cover: 1) Schema hydration preserves existing slugs, 2) PATCH operations without name changes preserve slugs, 3) PUT operations with name changes regenerate slugs, 4) Direct database updates preserve slugs. This ensures all code paths are tested.",
+      "alternatives_considered": [
+        "Only testing at the API level",
+        "Adding property-based testing for edge cases",
+        "Creating separate test files for slug-specific tests"
+      ],
+      "files_affected": [
+        "tests/unit_tests/schema_tests/test_recipe.py",
+        "tests/integration_tests/user_recipe_tests/test_recipe_crud.py",
+        "tests/integration_tests/public_explorer_tests/test_public_recipes.py"
+      ]
+    },
+    {
+      "dimension": "backward_compatibility",
+      "recommendation": "Maintained existing slug generation behavior for new recipes and name changes",
+      "rationale": "The changes only affect when slugs are regenerated, not how they're generated. New recipes still get slugs generated from their names, and recipes with name changes still get new slugs. This ensures existing functionality remains intact while fixing the hydration issue.",
+      "alternatives_considered": [
+        "Changing the slug generation algorithm entirely",
+        "Adding versioning to slug generation logic",
+        "Creating a migration to fix existing inconsistent slugs"
+      ],
+      "files_affected": [
+        "mealie/schema/recipe/recipe.py",
+        "mealie/repos/repository_recipes.py"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Fix slug regeneration during model hydration",
+      "description": "Modified the Recipe schema's slug validator to preserve existing slugs during hydration instead of always regenerating them from the name field",
+      "files_to_modify": [
+        "mealie/schema/recipe/recipe.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-002",
+      "title": "Add slug preservation logic to recipe updates",
+      "description": "Updated the repository update method to check if recipe name has changed before regenerating slug, preserving existing slugs when only other fields are updated",
+      "files_to_modify": [
+        "mealie/repos/repository_recipes.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-003",
+      "title": "Add test coverage for slug preservation",
+      "description": "Added unit and integration tests to verify slug preservation during hydration, PATCH operations without name changes, and slug regeneration during name changes",
+      "files_to_modify": [
+        "tests/unit_tests/schema_tests/test_recipe.py",
+        "tests/integration_tests/user_recipe_tests/test_recipe_crud.py",
+        "tests/integration_tests/public_explorer_tests/test_public_recipes.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    }
+  ],
+  "implementation_summary": "The implementation addresses the issue of unstable recipe slugs by modifying both the schema validation and repository update logic. In the schema layer (mealie/schema/recipe/recipe.py), the slug validator was updated to check if a slug already exists before generating a new one. The key change was adding `if slug or not info.data.get(\"name\"):` which preserves existing slugs during model hydration from the database.\n\nIn the repository layer (mealie/repos/repository_recipes.py), the update method was enhanced to compare the new name with the existing name before deciding whether to regenerate the slug. If the name hasn't changed, the existing slug is preserved; if it has changed, a new slug is generated using the existing `create_recipe_slug` function. This ensures that PATCH operations that don't modify the name won't change the slug, while PUT operations with name changes will generate appropriate new slugs.\n\nThe testing strategy is comprehensive, covering both unit and integration tests. Unit tests verify that the schema correctly preserves existing slugs during hydration. Integration tests verify real-world scenarios: PATCH operations without name changes preserve slugs, PUT operations with name changes regenerate slugs, and direct database updates maintain slug stability. The test data in public explorer tests was also updated to include names alongside slugs to ensure proper test coverage.\n\nThis approach maintains backward compatibility while fixing the core issue. New recipes still get slugs generated from their names, and the slug generation algorithm remains unchanged. The solution is minimal and focused, modifying only the necessary parts of the codebase to achieve the desired behavior without introducing unnecessary complexity.",
+  "source_pr": "https://github.com/mealie-recipes/mealie/pull/7294",
+  "before_sha": "63c549ae5cfc2e1d74bbecc6278107e5ee7b00f7",
+  "after_sha": "c029a639fb66ec27af2a35ae3bf612ef4acd1159",
+  "diff_stats": {
+    "additions": 77,
+    "deletions": 4,
+    "files_changed": 5
+  }
+}

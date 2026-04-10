@@ -1,0 +1,121 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "memory_optimization",
+      "recommendation": "Replaced in-memory manifest accumulation with streaming writes using StreamingManifestWriter class",
+      "rationale": "The original implementation accumulated all manifest records in memory (manifest_dict) before writing, causing high memory usage for large exports. The streaming approach writes records incrementally to a temporary file, significantly reducing peak memory consumption while maintaining data integrity.",
+      "alternatives_considered": [
+        "Buffering in smaller chunks",
+        "Using database cursors directly",
+        "Compressing data in memory"
+      ],
+      "files_affected": [
+        "src/documents/management/commands/document_exporter.py"
+      ]
+    },
+    {
+      "dimension": "file_handling",
+      "recommendation": "Implemented atomic file operations with temporary files and BLAKE2b hash comparison",
+      "rationale": "The StreamingManifestWriter writes to a .tmp file first, then performs atomic rename only after successful completion. This prevents partial/corrupted manifests and supports the --compare-json option using cryptographically secure BLAKE2b hashes instead of MD5 for integrity verification.",
+      "alternatives_considered": [
+        "Direct file overwrites",
+        "Using file locks",
+        "Transactional database approach"
+      ],
+      "files_affected": [
+        "src/documents/management/commands/document_exporter.py"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Added context manager pattern with proper cleanup on exceptions",
+      "rationale": "The StreamingManifestWriter implements __enter__ and __exit__ methods to ensure temporary files are cleaned up on exceptions while preserving the original manifest file. This maintains system consistency even when exports fail mid-process.",
+      "alternatives_considered": [
+        "Try-catch blocks around each write",
+        "Signal-based cleanup",
+        "Manual cleanup in calling code"
+      ],
+      "files_affected": [
+        "src/documents/management/commands/document_exporter.py"
+      ]
+    },
+    {
+      "dimension": "data_encryption",
+      "recommendation": "Changed from batch encryption to per-record encryption with O(1) lookup",
+      "rationale": "Previously encrypted all sensitive fields in a batch after manifest accumulation. Now encrypts records inline during streaming using CRYPT_FIELDS_BY_MODEL dictionary for efficient field lookup, enabling encryption to work with the streaming architecture.",
+      "alternatives_considered": [
+        "Separate encryption pass",
+        "Delayed encryption",
+        "Field-level encryption flags"
+      ],
+      "files_affected": [
+        "src/documents/management/commands/document_exporter.py",
+        "src/documents/management/commands/mixins.py"
+      ]
+    },
+    {
+      "dimension": "testing",
+      "recommendation": "Added test for folder_prefix with split_manifest combination",
+      "rationale": "The new test ensures the streaming implementation works correctly with the complex interaction between use_folder_prefix and split_manifest options, which create nested directory structures and multiple manifest files.",
+      "alternatives_considered": [
+        "No new tests",
+        "Broader integration tests",
+        "Performance-focused tests"
+      ],
+      "files_affected": [
+        "src/documents/tests/test_management_exporter.py"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Implement StreamingManifestWriter class",
+      "description": "Create a new class that incrementally writes JSON records to a temporary file with atomic finalization and proper error handling",
+      "files_to_modify": [
+        "src/documents/management/commands/document_exporter.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-002",
+      "title": "Refactor export command to use streaming writes",
+      "description": "Replace in-memory manifest accumulation with streaming writes, restructure document processing loop, and integrate per-record encryption",
+      "files_to_modify": [
+        "src/documents/management/commands/document_exporter.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "large"
+    },
+    {
+      "id": "T-003",
+      "title": "Update encryption infrastructure for streaming",
+      "description": "Modify CryptMixin to support per-record encryption with efficient model-to-field mapping",
+      "files_to_modify": [
+        "src/documents/management/commands/mixins.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-004",
+      "title": "Add comprehensive test coverage",
+      "description": "Test the combination of folder_prefix and split_manifest options with the new streaming implementation",
+      "files_to_modify": [
+        "src/documents/tests/test_management_exporter.py"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation addresses memory optimization in the document exporter by introducing a streaming architecture that replaces in-memory manifest accumulation. The core change is the StreamingManifestWriter class, which incrementally writes JSON records to a temporary file and performs atomic replacement upon successful completion. This class uses a context manager pattern for robust error handling, ensuring temporary files are cleaned up on exceptions while preserving existing manifests.\n\nKey architectural changes include: 1) Restructuring the export command to process records in batches and write them immediately rather than accumulating everything in memory, 2) Moving encryption from a batch operation to per-record encryption using an optimized lookup dictionary (CRYPT_FIELDS_BY_MODEL), 3) Enhancing file comparison to use BLAKE2b hashes instead of MD5 for better security, and 4) Maintaining backward compatibility with existing options like --split-manifest and --compare-json.\n\nThe implementation follows the existing Django management command patterns while introducing a more memory-efficient approach. The streaming writer handles the complexity of JSON array formatting (commas, newlines, brackets) internally, allowing the main export logic to focus on document processing. This change significantly reduces peak memory usage during large exports while maintaining all existing functionality and adding proper atomic file operations for data integrity.",
+  "source_pr": "https://github.com/paperless-ngx/paperless-ngx/pull/12273",
+  "before_sha": "f5c0c21922b4711a8cb89a62178b5969d41b59e7",
+  "after_sha": "2cdb1424efb1dc0fc7e988a7a1b9473ecf5eb9f2",
+  "diff_stats": {
+    "additions": 215,
+    "deletions": 107,
+    "files_changed": 3
+  }
+}

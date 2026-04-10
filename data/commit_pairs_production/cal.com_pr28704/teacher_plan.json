@@ -1,0 +1,87 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "error_handling",
+      "recommendation": "Added conditional checks to prevent service instantiation and method execution when API key is missing",
+      "rationale": "The service should fail gracefully when required configuration is absent rather than throwing runtime errors. By checking for the API key at both service initialization and method execution, we ensure safe defaults are returned with appropriate warnings.",
+      "alternatives_considered": [
+        "Throw explicit configuration errors",
+        "Use dependency injection to provide engine instance conditionally",
+        "Implement a null object pattern for the engine"
+      ],
+      "files_affected": [
+        "packages/lib/server/service/lingoDotDev.ts"
+      ]
+    },
+    {
+      "dimension": "ci_cd",
+      "recommendation": "Added conditional execution to GitHub workflow based on secret availability",
+      "rationale": "Prevents workflow failures when the CI_LINGO_DOT_DEV_API_KEY secret is not configured in the GitHub environment. This allows the workflow to be safely skipped rather than failing with authentication errors.",
+      "alternatives_considered": [
+        "Continue workflow with error handling",
+        "Use workflow-level try-catch",
+        "Implement separate workflow for environments without the key"
+      ],
+      "files_affected": [
+        ".github/workflows/i18n.yml"
+      ]
+    },
+    {
+      "dimension": "logging_monitoring",
+      "recommendation": "Added warning logs when service methods are skipped due to missing configuration",
+      "rationale": "Provides visibility into when the i18n automation is not functioning, helping developers diagnose configuration issues without breaking the application. The warnings are logged but don't prevent application execution.",
+      "alternatives_considered": [
+        "Silently skip",
+        "Throw errors",
+        "Use metrics instead of logs"
+      ],
+      "files_affected": [
+        "packages/lib/server/service/lingoDotDev.ts"
+      ]
+    },
+    {
+      "dimension": "performance",
+      "recommendation": "Conditionally instantiate the LingoDotDevEngine only when API key is present",
+      "rationale": "Avoids unnecessary object creation and potential initialization overhead when the service won't be used. The engine is created as a static property, so this check happens once at module load time.",
+      "alternatives_considered": [
+        "Always instantiate and check at method level",
+        "Use lazy initialization",
+        "Factory pattern with conditional creation"
+      ],
+      "files_affected": [
+        "packages/lib/server/service/lingoDotDev.ts"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Graceful GitHub workflow skipping",
+      "description": "Add conditional execution to i18n workflow to skip when API key secret is not available",
+      "files_to_modify": [
+        ".github/workflows/i18n.yml"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-002",
+      "title": "Safe service fallback implementation",
+      "description": "Modify LingoDotDevService to handle missing API key configuration with safe defaults and warnings",
+      "files_to_modify": [
+        "packages/lib/server/service/lingoDotDev.ts"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    }
+  ],
+  "implementation_summary": "The changes implement a graceful fallback mechanism for the Lingo.dev i18n integration across two layers: CI/CD workflow and service layer. At the workflow level, a conditional check prevents the i18n job from running when the required API key secret is not configured, avoiding authentication failures in GitHub Actions. This is achieved by adding an `if: ${{ secrets.CI_LINGO_DOT_DEV_API_KEY != '' }}` condition to the job definition.\n\nAt the service layer, the LingoDotDevService now conditionally instantiates the engine only when the LINGO_DOT_DEV_API_KEY environment variable is present. This prevents unnecessary object creation and potential initialization errors. Each public method (localizeText, batchLocalizeText, localizeTexts) includes a check for the engine's availability and returns safe defaults (null, empty array, or original texts) with appropriate warning logs when the engine is not available. The warning logs provide visibility into the missing configuration without breaking application functionality.\n\nThe implementation follows defensive programming principles and aligns with the codebase's existing patterns for handling optional integrations. By returning safe defaults rather than throwing errors, the changes ensure that the absence of the i18n automation doesn't disrupt core scheduling functionality. The approach is consistent with the codebase's emphasis on graceful degradation and operational resilience, as seen in other integration patterns throughout the application.",
+  "source_pr": "https://github.com/calcom/cal.com/pull/28704",
+  "before_sha": "9b3bbb9f72609e8a77e8e4cc4f0a8f5a39120305",
+  "after_sha": "c106740d17e69c53da5770048c8372fd8469b51c",
+  "diff_stats": {
+    "additions": 26,
+    "deletions": 9,
+    "files_changed": 2
+  }
+}

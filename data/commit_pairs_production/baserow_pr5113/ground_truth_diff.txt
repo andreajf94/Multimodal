@@ -1,0 +1,80 @@
+diff --git a/changelog/entries/unreleased/bug/5002_allow_advanced_formula_for_json_body_content_of_http_request.json b/changelog/entries/unreleased/bug/5002_allow_advanced_formula_for_json_body_content_of_http_request.json
+new file mode 100644
+index 0000000000..afd57a8a93
+--- /dev/null
++++ b/changelog/entries/unreleased/bug/5002_allow_advanced_formula_for_json_body_content_of_http_request.json
+@@ -0,0 +1,9 @@
++{
++    "type": "bug",
++    "message": "Allow advanced formula for JSON body content of HTTP request node",
++    "issue_origin": "github",
++    "issue_number": 5002,
++    "domain": "integration",
++    "bullet_points": [],
++    "created_at": "2026-04-08"
++}
+\ No newline at end of file
+diff --git a/web-frontend/modules/integrations/core/components/services/CoreHTTPRequestServiceForm.vue b/web-frontend/modules/integrations/core/components/services/CoreHTTPRequestServiceForm.vue
+index 0638b369b4..7ff3ea2732 100644
+--- a/web-frontend/modules/integrations/core/components/services/CoreHTTPRequestServiceForm.vue
++++ b/web-frontend/modules/integrations/core/components/services/CoreHTTPRequestServiceForm.vue
+@@ -168,11 +168,6 @@
+     >
+       <InjectedFormulaInput
+         v-model="values.body_content"
+-        :enabled-modes="
+-          values.body_type === 'plain'
+-            ? BASEROW_FORMULA_MODES
+-            : ['raw', 'simple']
+-        "
+         :placeholder="$t('coreHTTPRequestServiceForm.bodyPlaceholder')"
+       />
+     </FormGroup>
+@@ -266,7 +261,6 @@ import {
+   helpers,
+ } from '@vuelidate/validators'
+ import { uuid } from '@baserow/modules/core/utils/string'
+-import { BASEROW_FORMULA_MODES } from '@baserow/modules/core/formula/constants'
+ 
+ export default {
+   name: 'CoreHTTPRequestService',
+@@ -301,9 +295,6 @@ export default {
+     }
+   },
+   computed: {
+-    BASEROW_FORMULA_MODES() {
+-      return BASEROW_FORMULA_MODES
+-    },
+     methods() {
+       return [
+         { name: 'GET', value: 'GET' },
+diff --git a/web-frontend/modules/integrations/core/components/services/CoreSMTPEmailServiceForm.vue b/web-frontend/modules/integrations/core/components/services/CoreSMTPEmailServiceForm.vue
+index ad9129caab..e45d631e1a 100644
+--- a/web-frontend/modules/integrations/core/components/services/CoreSMTPEmailServiceForm.vue
++++ b/web-frontend/modules/integrations/core/components/services/CoreSMTPEmailServiceForm.vue
+@@ -115,11 +115,7 @@
+     >
+       <InjectedFormulaInput
+         v-model="values.body"
+-        :enabled-modes="
+-          values.body_type === 'plain'
+-            ? BASEROW_FORMULA_MODES
+-            : ['raw', 'simple']
+-        "
++        :enabled-modes="bodyFormulaMode"
+         :placeholder="$t('smtpEmailForm.bodyPlaceholder')"
+         textarea
+       />
+@@ -184,8 +180,10 @@ export default {
+     }
+   },
+   computed: {
+-    BASEROW_FORMULA_MODES() {
+-      return BASEROW_FORMULA_MODES
++    bodyFormulaMode() {
++      return this.values.body_type !== 'html'
++        ? BASEROW_FORMULA_MODES
++        : ['raw', 'simple']
+     },
+     showInstanceSmtpOption() {
+       return Boolean(this.service?.instance_smtp_settings_enabled)

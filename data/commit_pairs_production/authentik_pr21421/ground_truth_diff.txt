@@ -1,0 +1,751 @@
+diff --git a/authentik/policies/api/bindings.py b/authentik/policies/api/bindings.py
+index 855ab1e53268..4ed89e2f085d 100644
+--- a/authentik/policies/api/bindings.py
++++ b/authentik/policies/api/bindings.py
+@@ -57,9 +57,11 @@ class PolicyBindingSerializer(ModelSerializer):
+         required=True,
+     )
+ 
+-    policy_obj = PolicySerializer(required=False, read_only=True, source="policy")
+-    group_obj = PartialGroupSerializer(required=False, read_only=True, source="group")
+-    user_obj = PartialUserSerializer(required=False, read_only=True, source="user")
++    policy_obj = PolicySerializer(required=False, allow_null=True, read_only=True, source="policy")
++    group_obj = PartialGroupSerializer(
++        required=False, allow_null=True, read_only=True, source="group"
++    )
++    user_obj = PartialUserSerializer(required=False, allow_null=True, read_only=True, source="user")
+ 
+     class Meta:
+         model = PolicyBinding
+diff --git a/authentik/providers/saml/api/providers.py b/authentik/providers/saml/api/providers.py
+index 6c3ed9181d45..e15cf96c5dcb 100644
+--- a/authentik/providers/saml/api/providers.py
++++ b/authentik/providers/saml/api/providers.py
+@@ -232,8 +232,8 @@ class Meta:
+ class SAMLMetadataSerializer(PassiveSerializer):
+     """SAML Provider Metadata serializer"""
+ 
+-    metadata = CharField(read_only=True)
+-    download_url = CharField(read_only=True, required=False, allow_null=True)
++    metadata = CharField()
++    download_url = CharField(required=False, allow_null=True)
+ 
+ 
+ class SAMLProviderImportSerializer(PassiveSerializer):
+@@ -315,7 +315,7 @@ def metadata(self, request: Request, pk: int) -> Response:
+                 return response
+             return Response({"metadata": metadata}, content_type="application/json")
+         except Provider.application.RelatedObjectDoesNotExist:
+-            return Response({"metadata": ""}, content_type="application/json")
++            raise Http404 from None
+ 
+     @permission_required(
+         None,
+diff --git a/authentik/providers/saml/tests/test_api.py b/authentik/providers/saml/tests/test_api.py
+index a723f13fd152..22170b4636a5 100644
+--- a/authentik/providers/saml/tests/test_api.py
++++ b/authentik/providers/saml/tests/test_api.py
+@@ -157,7 +157,7 @@ def test_metadata_invalid(self):
+         response = self.client.get(
+             reverse("authentik_api:samlprovider-metadata", kwargs={"pk": provider.pk}),
+         )
+-        self.assertEqual(200, response.status_code)
++        self.assertEqual(404, response.status_code)
+         response = self.client.get(
+             reverse("authentik_api:samlprovider-metadata", kwargs={"pk": "abc"}),
+         )
+diff --git a/packages/client-go/model_device_user_binding.go b/packages/client-go/model_device_user_binding.go
+index eb6c0395da9e..bcbc2e84a43d 100644
+--- a/packages/client-go/model_device_user_binding.go
++++ b/packages/client-go/model_device_user_binding.go
+@@ -21,14 +21,14 @@ var _ MappedNullable = &DeviceUserBinding{}
+ 
+ // DeviceUserBinding PolicyBinding Serializer
+ type DeviceUserBinding struct {
+-	Pk        string         `json:"pk"`
+-	Policy    NullableString `json:"policy,omitempty"`
+-	Group     NullableString `json:"group,omitempty"`
+-	User      NullableInt32  `json:"user,omitempty"`
+-	PolicyObj Policy         `json:"policy_obj"`
+-	GroupObj  PartialGroup   `json:"group_obj"`
+-	UserObj   PartialUser    `json:"user_obj"`
+-	Target    string         `json:"target"`
++	Pk        string               `json:"pk"`
++	Policy    NullableString       `json:"policy,omitempty"`
++	Group     NullableString       `json:"group,omitempty"`
++	User      NullableInt32        `json:"user,omitempty"`
++	PolicyObj NullablePolicy       `json:"policy_obj"`
++	GroupObj  NullablePartialGroup `json:"group_obj"`
++	UserObj   NullablePartialUser  `json:"user_obj"`
++	Target    string               `json:"target"`
+ 	// Negates the outcome of the policy. Messages are unaffected.
+ 	Negate  *bool `json:"negate,omitempty"`
+ 	Enabled *bool `json:"enabled,omitempty"`
+@@ -49,7 +49,7 @@ type _DeviceUserBinding DeviceUserBinding
+ // This constructor will assign default values to properties that have it defined,
+ // and makes sure properties required by API are set, but the set of arguments
+ // will change when the set of required properties is changed
+-func NewDeviceUserBinding(pk string, policyObj Policy, groupObj PartialGroup, userObj PartialUser, target string, order int32, connector NullableString, connectorObj Connector) *DeviceUserBinding {
++func NewDeviceUserBinding(pk string, policyObj NullablePolicy, groupObj NullablePartialGroup, userObj NullablePartialUser, target string, order int32, connector NullableString, connectorObj Connector) *DeviceUserBinding {
+ 	this := DeviceUserBinding{}
+ 	this.Pk = pk
+ 	this.PolicyObj = policyObj
+@@ -224,75 +224,81 @@ func (o *DeviceUserBinding) UnsetUser() {
+ }
+ 
+ // GetPolicyObj returns the PolicyObj field value
++// If the value is explicit nil, the zero value for Policy will be returned
+ func (o *DeviceUserBinding) GetPolicyObj() Policy {
+-	if o == nil {
++	if o == nil || o.PolicyObj.Get() == nil {
+ 		var ret Policy
+ 		return ret
+ 	}
+ 
+-	return o.PolicyObj
++	return *o.PolicyObj.Get()
+ }
+ 
+ // GetPolicyObjOk returns a tuple with the PolicyObj field value
+ // and a boolean to check if the value has been set.
++// NOTE: If the value is an explicit nil, `nil, true` will be returned
+ func (o *DeviceUserBinding) GetPolicyObjOk() (*Policy, bool) {
+ 	if o == nil {
+ 		return nil, false
+ 	}
+-	return &o.PolicyObj, true
++	return o.PolicyObj.Get(), o.PolicyObj.IsSet()
+ }
+ 
+ // SetPolicyObj sets field value
+ func (o *DeviceUserBinding) SetPolicyObj(v Policy) {
+-	o.PolicyObj = v
++	o.PolicyObj.Set(&v)
+ }
+ 
+ // GetGroupObj returns the GroupObj field value
++// If the value is explicit nil, the zero value for PartialGroup will be returned
+ func (o *DeviceUserBinding) GetGroupObj() PartialGroup {
+-	if o == nil {
++	if o == nil || o.GroupObj.Get() == nil {
+ 		var ret PartialGroup
+ 		return ret
+ 	}
+ 
+-	return o.GroupObj
++	return *o.GroupObj.Get()
+ }
+ 
+ // GetGroupObjOk returns a tuple with the GroupObj field value
+ // and a boolean to check if the value has been set.
++// NOTE: If the value is an explicit nil, `nil, true` will be returned
+ func (o *DeviceUserBinding) GetGroupObjOk() (*PartialGroup, bool) {
+ 	if o == nil {
+ 		return nil, false
+ 	}
+-	return &o.GroupObj, true
++	return o.GroupObj.Get(), o.GroupObj.IsSet()
+ }
+ 
+ // SetGroupObj sets field value
+ func (o *DeviceUserBinding) SetGroupObj(v PartialGroup) {
+-	o.GroupObj = v
++	o.GroupObj.Set(&v)
+ }
+ 
+ // GetUserObj returns the UserObj field value
++// If the value is explicit nil, the zero value for PartialUser will be returned
+ func (o *DeviceUserBinding) GetUserObj() PartialUser {
+-	if o == nil {
++	if o == nil || o.UserObj.Get() == nil {
+ 		var ret PartialUser
+ 		return ret
+ 	}
+ 
+-	return o.UserObj
++	return *o.UserObj.Get()
+ }
+ 
+ // GetUserObjOk returns a tuple with the UserObj field value
+ // and a boolean to check if the value has been set.
++// NOTE: If the value is an explicit nil, `nil, true` will be returned
+ func (o *DeviceUserBinding) GetUserObjOk() (*PartialUser, bool) {
+ 	if o == nil {
+ 		return nil, false
+ 	}
+-	return &o.UserObj, true
++	return o.UserObj.Get(), o.UserObj.IsSet()
+ }
+ 
+ // SetUserObj sets field value
+ func (o *DeviceUserBinding) SetUserObj(v PartialUser) {
+-	o.UserObj = v
++	o.UserObj.Set(&v)
+ }
+ 
+ // GetTarget returns the Target field value
+@@ -573,9 +579,9 @@ func (o DeviceUserBinding) ToMap() (map[string]interface{}, error) {
+ 	if o.User.IsSet() {
+ 		toSerialize["user"] = o.User.Get()
+ 	}
+-	toSerialize["policy_obj"] = o.PolicyObj
+-	toSerialize["group_obj"] = o.GroupObj
+-	toSerialize["user_obj"] = o.UserObj
++	toSerialize["policy_obj"] = o.PolicyObj.Get()
++	toSerialize["group_obj"] = o.GroupObj.Get()
++	toSerialize["user_obj"] = o.UserObj.Get()
+ 	toSerialize["target"] = o.Target
+ 	if !IsNil(o.Negate) {
+ 		toSerialize["negate"] = o.Negate
+diff --git a/packages/client-go/model_policy_binding.go b/packages/client-go/model_policy_binding.go
+index ed4c3585f959..5dd865db305e 100644
+--- a/packages/client-go/model_policy_binding.go
++++ b/packages/client-go/model_policy_binding.go
+@@ -21,14 +21,14 @@ var _ MappedNullable = &PolicyBinding{}
+ 
+ // PolicyBinding PolicyBinding Serializer
+ type PolicyBinding struct {
+-	Pk        string         `json:"pk"`
+-	Policy    NullableString `json:"policy,omitempty"`
+-	Group     NullableString `json:"group,omitempty"`
+-	User      NullableInt32  `json:"user,omitempty"`
+-	PolicyObj Policy         `json:"policy_obj"`
+-	GroupObj  PartialGroup   `json:"group_obj"`
+-	UserObj   PartialUser    `json:"user_obj"`
+-	Target    string         `json:"target"`
++	Pk        string               `json:"pk"`
++	Policy    NullableString       `json:"policy,omitempty"`
++	Group     NullableString       `json:"group,omitempty"`
++	User      NullableInt32        `json:"user,omitempty"`
++	PolicyObj NullablePolicy       `json:"policy_obj"`
++	GroupObj  NullablePartialGroup `json:"group_obj"`
++	UserObj   NullablePartialUser  `json:"user_obj"`
++	Target    string               `json:"target"`
+ 	// Negates the outcome of the policy. Messages are unaffected.
+ 	Negate  *bool `json:"negate,omitempty"`
+ 	Enabled *bool `json:"enabled,omitempty"`
+@@ -46,7 +46,7 @@ type _PolicyBinding PolicyBinding
+ // This constructor will assign default values to properties that have it defined,
+ // and makes sure properties required by API are set, but the set of arguments
+ // will change when the set of required properties is changed
+-func NewPolicyBinding(pk string, policyObj Policy, groupObj PartialGroup, userObj PartialUser, target string, order int32) *PolicyBinding {
++func NewPolicyBinding(pk string, policyObj NullablePolicy, groupObj NullablePartialGroup, userObj NullablePartialUser, target string, order int32) *PolicyBinding {
+ 	this := PolicyBinding{}
+ 	this.Pk = pk
+ 	this.PolicyObj = policyObj
+@@ -219,75 +219,81 @@ func (o *PolicyBinding) UnsetUser() {
+ }
+ 
+ // GetPolicyObj returns the PolicyObj field value
++// If the value is explicit nil, the zero value for Policy will be returned
+ func (o *PolicyBinding) GetPolicyObj() Policy {
+-	if o == nil {
++	if o == nil || o.PolicyObj.Get() == nil {
+ 		var ret Policy
+ 		return ret
+ 	}
+ 
+-	return o.PolicyObj
++	return *o.PolicyObj.Get()
+ }
+ 
+ // GetPolicyObjOk returns a tuple with the PolicyObj field value
+ // and a boolean to check if the value has been set.
++// NOTE: If the value is an explicit nil, `nil, true` will be returned
+ func (o *PolicyBinding) GetPolicyObjOk() (*Policy, bool) {
+ 	if o == nil {
+ 		return nil, false
+ 	}
+-	return &o.PolicyObj, true
++	return o.PolicyObj.Get(), o.PolicyObj.IsSet()
+ }
+ 
+ // SetPolicyObj sets field value
+ func (o *PolicyBinding) SetPolicyObj(v Policy) {
+-	o.PolicyObj = v
++	o.PolicyObj.Set(&v)
+ }
+ 
+ // GetGroupObj returns the GroupObj field value
++// If the value is explicit nil, the zero value for PartialGroup will be returned
+ func (o *PolicyBinding) GetGroupObj() PartialGroup {
+-	if o == nil {
++	if o == nil || o.GroupObj.Get() == nil {
+ 		var ret PartialGroup
+ 		return ret
+ 	}
+ 
+-	return o.GroupObj
++	return *o.GroupObj.Get()
+ }
+ 
+ // GetGroupObjOk returns a tuple with the GroupObj field value
+ // and a boolean to check if the value has been set.
++// NOTE: If the value is an explicit nil, `nil, true` will be returned
+ func (o *PolicyBinding) GetGroupObjOk() (*PartialGroup, bool) {
+ 	if o == nil {
+ 		return nil, false
+ 	}
+-	return &o.GroupObj, true
++	return o.GroupObj.Get(), o.GroupObj.IsSet()
+ }
+ 
+ // SetGroupObj sets field value
+ func (o *PolicyBinding) SetGroupObj(v PartialGroup) {
+-	o.GroupObj = v
++	o.GroupObj.Set(&v)
+ }
+ 
+ // GetUserObj returns the UserObj field value
++// If the value is explicit nil, the zero value for PartialUser will be returned
+ func (o *PolicyBinding) GetUserObj() PartialUser {
+-	if o == nil {
++	if o == nil || o.UserObj.Get() == nil {
+ 		var ret PartialUser
+ 		return ret
+ 	}
+ 
+-	return o.UserObj
++	return *o.UserObj.Get()
+ }
+ 
+ // GetUserObjOk returns a tuple with the UserObj field value
+ // and a boolean to check if the value has been set.
++// NOTE: If the value is an explicit nil, `nil, true` will be returned
+ func (o *PolicyBinding) GetUserObjOk() (*PartialUser, bool) {
+ 	if o == nil {
+ 		return nil, false
+ 	}
+-	return &o.UserObj, true
++	return o.UserObj.Get(), o.UserObj.IsSet()
+ }
+ 
+ // SetUserObj sets field value
+ func (o *PolicyBinding) SetUserObj(v PartialUser) {
+-	o.UserObj = v
++	o.UserObj.Set(&v)
+ }
+ 
+ // GetTarget returns the Target field value
+@@ -486,9 +492,9 @@ func (o PolicyBinding) ToMap() (map[string]interface{}, error) {
+ 	if o.User.IsSet() {
+ 		toSerialize["user"] = o.User.Get()
+ 	}
+-	toSerialize["policy_obj"] = o.PolicyObj
+-	toSerialize["group_obj"] = o.GroupObj
+-	toSerialize["user_obj"] = o.UserObj
++	toSerialize["policy_obj"] = o.PolicyObj.Get()
++	toSerialize["group_obj"] = o.GroupObj.Get()
++	toSerialize["user_obj"] = o.UserObj.Get()
+ 	toSerialize["target"] = o.Target
+ 	if !IsNil(o.Negate) {
+ 		toSerialize["negate"] = o.Negate
+diff --git a/packages/client-go/model_saml_metadata.go b/packages/client-go/model_saml_metadata.go
+index 77a26b67cadc..76a3d25b3d1a 100644
+--- a/packages/client-go/model_saml_metadata.go
++++ b/packages/client-go/model_saml_metadata.go
+@@ -22,7 +22,7 @@ var _ MappedNullable = &SAMLMetadata{}
+ // SAMLMetadata SAML Provider Metadata serializer
+ type SAMLMetadata struct {
+ 	Metadata             string         `json:"metadata"`
+-	DownloadUrl          NullableString `json:"download_url"`
++	DownloadUrl          NullableString `json:"download_url,omitempty"`
+ 	AdditionalProperties map[string]interface{}
+ }
+ 
+@@ -32,10 +32,9 @@ type _SAMLMetadata SAMLMetadata
+ // This constructor will assign default values to properties that have it defined,
+ // and makes sure properties required by API are set, but the set of arguments
+ // will change when the set of required properties is changed
+-func NewSAMLMetadata(metadata string, downloadUrl NullableString) *SAMLMetadata {
++func NewSAMLMetadata(metadata string) *SAMLMetadata {
+ 	this := SAMLMetadata{}
+ 	this.Metadata = metadata
+-	this.DownloadUrl = downloadUrl
+ 	return &this
+ }
+ 
+@@ -71,18 +70,16 @@ func (o *SAMLMetadata) SetMetadata(v string) {
+ 	o.Metadata = v
+ }
+ 
+-// GetDownloadUrl returns the DownloadUrl field value
+-// If the value is explicit nil, the zero value for string will be returned
++// GetDownloadUrl returns the DownloadUrl field value if set, zero value otherwise (both if not set or set to explicit null).
+ func (o *SAMLMetadata) GetDownloadUrl() string {
+-	if o == nil || o.DownloadUrl.Get() == nil {
++	if o == nil || IsNil(o.DownloadUrl.Get()) {
+ 		var ret string
+ 		return ret
+ 	}
+-
+ 	return *o.DownloadUrl.Get()
+ }
+ 
+-// GetDownloadUrlOk returns a tuple with the DownloadUrl field value
++// GetDownloadUrlOk returns a tuple with the DownloadUrl field value if set, nil otherwise
+ // and a boolean to check if the value has been set.
+ // NOTE: If the value is an explicit nil, `nil, true` will be returned
+ func (o *SAMLMetadata) GetDownloadUrlOk() (*string, bool) {
+@@ -92,11 +89,30 @@ func (o *SAMLMetadata) GetDownloadUrlOk() (*string, bool) {
+ 	return o.DownloadUrl.Get(), o.DownloadUrl.IsSet()
+ }
+ 
+-// SetDownloadUrl sets field value
++// HasDownloadUrl returns a boolean if a field has been set.
++func (o *SAMLMetadata) HasDownloadUrl() bool {
++	if o != nil && o.DownloadUrl.IsSet() {
++		return true
++	}
++
++	return false
++}
++
++// SetDownloadUrl gets a reference to the given NullableString and assigns it to the DownloadUrl field.
+ func (o *SAMLMetadata) SetDownloadUrl(v string) {
+ 	o.DownloadUrl.Set(&v)
+ }
+ 
++// SetDownloadUrlNil sets the value for DownloadUrl to be an explicit nil
++func (o *SAMLMetadata) SetDownloadUrlNil() {
++	o.DownloadUrl.Set(nil)
++}
++
++// UnsetDownloadUrl ensures that no value is present for DownloadUrl, not even an explicit nil
++func (o *SAMLMetadata) UnsetDownloadUrl() {
++	o.DownloadUrl.Unset()
++}
++
+ func (o SAMLMetadata) MarshalJSON() ([]byte, error) {
+ 	toSerialize, err := o.ToMap()
+ 	if err != nil {
+@@ -108,7 +124,9 @@ func (o SAMLMetadata) MarshalJSON() ([]byte, error) {
+ func (o SAMLMetadata) ToMap() (map[string]interface{}, error) {
+ 	toSerialize := map[string]interface{}{}
+ 	toSerialize["metadata"] = o.Metadata
+-	toSerialize["download_url"] = o.DownloadUrl.Get()
++	if o.DownloadUrl.IsSet() {
++		toSerialize["download_url"] = o.DownloadUrl.Get()
++	}
+ 
+ 	for key, value := range o.AdditionalProperties {
+ 		toSerialize[key] = value
+@@ -123,7 +141,6 @@ func (o *SAMLMetadata) UnmarshalJSON(data []byte) (err error) {
+ 	// that every required field exists as a key in the generic map.
+ 	requiredProperties := []string{
+ 		"metadata",
+-		"download_url",
+ 	}
+ 
+ 	allProperties := make(map[string]interface{})
+diff --git a/packages/client-rust/src/models/device_user_binding.rs b/packages/client-rust/src/models/device_user_binding.rs
+index 3102af1c1f35..09fb8bac724d 100644
+--- a/packages/client-rust/src/models/device_user_binding.rs
++++ b/packages/client-rust/src/models/device_user_binding.rs
+@@ -36,12 +36,12 @@ pub struct DeviceUserBinding {
+         skip_serializing_if = "Option::is_none"
+     )]
+     pub user: Option<Option<i32>>,
+-    #[serde(rename = "policy_obj")]
+-    pub policy_obj: models::Policy,
+-    #[serde(rename = "group_obj")]
+-    pub group_obj: models::PartialGroup,
+-    #[serde(rename = "user_obj")]
+-    pub user_obj: models::PartialUser,
++    #[serde(rename = "policy_obj", deserialize_with = "Option::deserialize")]
++    pub policy_obj: Option<models::Policy>,
++    #[serde(rename = "group_obj", deserialize_with = "Option::deserialize")]
++    pub group_obj: Option<models::PartialGroup>,
++    #[serde(rename = "user_obj", deserialize_with = "Option::deserialize")]
++    pub user_obj: Option<models::PartialUser>,
+     #[serde(rename = "target")]
+     pub target: uuid::Uuid,
+     /// Negates the outcome of the policy. Messages are unaffected.
+@@ -69,9 +69,9 @@ impl DeviceUserBinding {
+     /// PolicyBinding Serializer
+     pub fn new(
+         pk: uuid::Uuid,
+-        policy_obj: models::Policy,
+-        group_obj: models::PartialGroup,
+-        user_obj: models::PartialUser,
++        policy_obj: Option<models::Policy>,
++        group_obj: Option<models::PartialGroup>,
++        user_obj: Option<models::PartialUser>,
+         target: uuid::Uuid,
+         order: i32,
+         connector: Option<uuid::Uuid>,
+diff --git a/packages/client-rust/src/models/policy_binding.rs b/packages/client-rust/src/models/policy_binding.rs
+index 2b5f8f3ae59f..740d10ad36f6 100644
+--- a/packages/client-rust/src/models/policy_binding.rs
++++ b/packages/client-rust/src/models/policy_binding.rs
+@@ -36,12 +36,12 @@ pub struct PolicyBinding {
+         skip_serializing_if = "Option::is_none"
+     )]
+     pub user: Option<Option<i32>>,
+-    #[serde(rename = "policy_obj")]
+-    pub policy_obj: models::Policy,
+-    #[serde(rename = "group_obj")]
+-    pub group_obj: models::PartialGroup,
+-    #[serde(rename = "user_obj")]
+-    pub user_obj: models::PartialUser,
++    #[serde(rename = "policy_obj", deserialize_with = "Option::deserialize")]
++    pub policy_obj: Option<models::Policy>,
++    #[serde(rename = "group_obj", deserialize_with = "Option::deserialize")]
++    pub group_obj: Option<models::PartialGroup>,
++    #[serde(rename = "user_obj", deserialize_with = "Option::deserialize")]
++    pub user_obj: Option<models::PartialUser>,
+     #[serde(rename = "target")]
+     pub target: uuid::Uuid,
+     /// Negates the outcome of the policy. Messages are unaffected.
+@@ -63,9 +63,9 @@ impl PolicyBinding {
+     /// PolicyBinding Serializer
+     pub fn new(
+         pk: uuid::Uuid,
+-        policy_obj: models::Policy,
+-        group_obj: models::PartialGroup,
+-        user_obj: models::PartialUser,
++        policy_obj: Option<models::Policy>,
++        group_obj: Option<models::PartialGroup>,
++        user_obj: Option<models::PartialUser>,
+         target: uuid::Uuid,
+         order: i32,
+     ) -> PolicyBinding {
+diff --git a/packages/client-rust/src/models/saml_metadata.rs b/packages/client-rust/src/models/saml_metadata.rs
+index 4e53d3f9d476..15820da888c6 100644
+--- a/packages/client-rust/src/models/saml_metadata.rs
++++ b/packages/client-rust/src/models/saml_metadata.rs
+@@ -15,16 +15,21 @@ use crate::models;
+ pub struct SamlMetadata {
+     #[serde(rename = "metadata")]
+     pub metadata: String,
+-    #[serde(rename = "download_url", deserialize_with = "Option::deserialize")]
+-    pub download_url: Option<String>,
++    #[serde(
++        rename = "download_url",
++        default,
++        with = "::serde_with::rust::double_option",
++        skip_serializing_if = "Option::is_none"
++    )]
++    pub download_url: Option<Option<String>>,
+ }
+ 
+ impl SamlMetadata {
+     /// SAML Provider Metadata serializer
+-    pub fn new(metadata: String, download_url: Option<String>) -> SamlMetadata {
++    pub fn new(metadata: String) -> SamlMetadata {
+         SamlMetadata {
+             metadata,
+-            download_url,
++            download_url: None,
+         }
+     }
+ }
+diff --git a/packages/client-ts/src/models/DeviceUserBinding.ts b/packages/client-ts/src/models/DeviceUserBinding.ts
+index ad2f09c30b6b..8287d63a2b3d 100644
+--- a/packages/client-ts/src/models/DeviceUserBinding.ts
++++ b/packages/client-ts/src/models/DeviceUserBinding.ts
+@@ -56,19 +56,19 @@ export interface DeviceUserBinding {
+      * @type {Policy}
+      * @memberof DeviceUserBinding
+      */
+-    readonly policyObj: Policy;
++    readonly policyObj: Policy | null;
+     /**
+      *
+      * @type {PartialGroup}
+      * @memberof DeviceUserBinding
+      */
+-    readonly groupObj: PartialGroup;
++    readonly groupObj: PartialGroup | null;
+     /**
+      *
+      * @type {PartialUser}
+      * @memberof DeviceUserBinding
+      */
+-    readonly userObj: PartialUser;
++    readonly userObj: PartialUser | null;
+     /**
+      *
+      * @type {string}
+diff --git a/packages/client-ts/src/models/PolicyBinding.ts b/packages/client-ts/src/models/PolicyBinding.ts
+index f38cdc5eda54..59df38ace570 100644
+--- a/packages/client-ts/src/models/PolicyBinding.ts
++++ b/packages/client-ts/src/models/PolicyBinding.ts
+@@ -54,19 +54,19 @@ export interface PolicyBinding {
+      * @type {Policy}
+      * @memberof PolicyBinding
+      */
+-    readonly policyObj: Policy;
++    readonly policyObj: Policy | null;
+     /**
+      *
+      * @type {PartialGroup}
+      * @memberof PolicyBinding
+      */
+-    readonly groupObj: PartialGroup;
++    readonly groupObj: PartialGroup | null;
+     /**
+      *
+      * @type {PartialUser}
+      * @memberof PolicyBinding
+      */
+-    readonly userObj: PartialUser;
++    readonly userObj: PartialUser | null;
+     /**
+      *
+      * @type {string}
+diff --git a/packages/client-ts/src/models/SAMLMetadata.ts b/packages/client-ts/src/models/SAMLMetadata.ts
+index 4ed4985b8c4b..9309a047e3e5 100644
+--- a/packages/client-ts/src/models/SAMLMetadata.ts
++++ b/packages/client-ts/src/models/SAMLMetadata.ts
+@@ -23,13 +23,13 @@ export interface SAMLMetadata {
+      * @type {string}
+      * @memberof SAMLMetadata
+      */
+-    readonly metadata: string;
++    metadata: string;
+     /**
+      *
+      * @type {string}
+      * @memberof SAMLMetadata
+      */
+-    readonly downloadUrl: string | null;
++    downloadUrl?: string | null;
+ }
+ 
+ /**
+@@ -37,7 +37,6 @@ export interface SAMLMetadata {
+  */
+ export function instanceOfSAMLMetadata(value: object): value is SAMLMetadata {
+     if (!("metadata" in value) || value["metadata"] === undefined) return false;
+-    if (!("downloadUrl" in value) || value["downloadUrl"] === undefined) return false;
+     return true;
+ }
+ 
+@@ -51,7 +50,7 @@ export function SAMLMetadataFromJSONTyped(json: any, ignoreDiscriminator: boolea
+     }
+     return {
+         metadata: json["metadata"],
+-        downloadUrl: json["download_url"],
++        downloadUrl: json["download_url"] == null ? undefined : json["download_url"],
+     };
+ }
+ 
+@@ -60,12 +59,15 @@ export function SAMLMetadataToJSON(json: any): SAMLMetadata {
+ }
+ 
+ export function SAMLMetadataToJSONTyped(
+-    value?: Omit<SAMLMetadata, "metadata" | "download_url"> | null,
++    value?: SAMLMetadata | null,
+     ignoreDiscriminator: boolean = false,
+ ): any {
+     if (value == null) {
+         return value;
+     }
+ 
+-    return {};
++    return {
++        metadata: value["metadata"],
++        download_url: value["downloadUrl"],
++    };
+ }
+diff --git a/schema.yml b/schema.yml
+index a0908c45e4fd..7ac46018a281 100644
+--- a/schema.yml
++++ b/schema.yml
+@@ -37024,14 +37024,17 @@ components:
+           allOf:
+           - $ref: '#/components/schemas/Policy'
+           readOnly: true
++          nullable: true
+         group_obj:
+           allOf:
+           - $ref: '#/components/schemas/PartialGroup'
+           readOnly: true
++          nullable: true
+         user_obj:
+           allOf:
+           - $ref: '#/components/schemas/PartialUser'
+           readOnly: true
++          nullable: true
+         target:
+           type: string
+           format: uuid
+@@ -51351,14 +51354,17 @@ components:
+           allOf:
+           - $ref: '#/components/schemas/Policy'
+           readOnly: true
++          nullable: true
+         group_obj:
+           allOf:
+           - $ref: '#/components/schemas/PartialGroup'
+           readOnly: true
++          nullable: true
+         user_obj:
+           allOf:
+           - $ref: '#/components/schemas/PartialUser'
+           readOnly: true
++          nullable: true
+         target:
+           type: string
+           format: uuid
+@@ -53218,13 +53224,10 @@ components:
+       properties:
+         metadata:
+           type: string
+-          readOnly: true
+         download_url:
+           type: string
+-          readOnly: true
+           nullable: true
+       required:
+-      - download_url
+       - metadata
+     SAMLNameIDPolicyEnum:
+       enum:
+diff --git a/web/src/admin/policies/BoundPoliciesList.ts b/web/src/admin/policies/BoundPoliciesList.ts
+index fc1a764fceb4..1094bf19c9a5 100644
+--- a/web/src/admin/policies/BoundPoliciesList.ts
++++ b/web/src/admin/policies/BoundPoliciesList.ts
+@@ -109,13 +109,13 @@ export class BoundPoliciesList<T extends PolicyBinding = PolicyBinding> extends
+     }
+ 
+     getObjectEditButton(item: PolicyBinding): SlottedTemplateResult {
+-        if (item.policy) {
++        if (item.policyObj) {
+             return html`<ak-forms-modal>
+-                ${StrictUnsafe<CustomFormElementTagName>(item.policyObj?.component, {
++                ${StrictUnsafe<CustomFormElementTagName>(item.policyObj.component, {
+                     slot: "form",
+-                    instancePk: item.policyObj?.pk,
++                    instancePk: item.policyObj.pk,
+                     submitLabel: msg("Save Changes"),
+-                    headline: msg(str`Update ${item.policyObj?.name}`, {
++                    headline: msg(str`Update ${item.policyObj.name}`, {
+                         id: "form.headline.update",
+                     }),
+                 })}
+@@ -124,19 +124,19 @@ export class BoundPoliciesList<T extends PolicyBinding = PolicyBinding> extends
+                     ${msg("Edit Policy")}
+                 </button>
+             </ak-forms-modal>`;
+-        } else if (item.group) {
++        } else if (item.groupObj) {
+             return html`<ak-forms-modal>
+                 <span slot="submit">${msg("Save Changes")}</span>
+                 <span slot="header">${msg("Update Group")}</span>
+-                <ak-group-form slot="form" .instancePk=${item.groupObj?.pk}> </ak-group-form>
++                <ak-group-form slot="form" .instancePk=${item.groupObj.pk}> </ak-group-form>
+                 <button slot="trigger" class="pf-c-button pf-m-secondary">
+                     ${msg("Edit Group")}
+                 </button>
+             </ak-forms-modal>`;
+-        } else if (item.user) {
++        } else if (item.userObj) {
+             return html`<button
+                 class="pf-c-button pf-m-secondary"
+-                ${UserForm.asEditModalInvoker(item.userObj?.pk)}
++                ${UserForm.asEditModalInvoker(item.userObj.pk)}
+             >
+                 ${msg("Edit User")}
+             </button>`;

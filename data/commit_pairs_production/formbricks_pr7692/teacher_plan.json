@@ -1,0 +1,101 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "infrastructure_configuration",
+      "recommendation": "Added host/port configuration fields to the Envoy OpenTelemetry metrics sink as an alternative to backendRefs",
+      "rationale": "The existing backendRefs approach requires Service discovery through Gateway API references, which doesn't work well for collectors in different Kubernetes namespaces. Adding direct host/port configuration provides a simpler, more flexible alternative that works across namespace boundaries without requiring complex cross-namespace service references.",
+      "alternatives_considered": [
+        "Extending backendRefs with namespace overrides",
+        "Creating a separate Service resource in the same namespace",
+        "Using Kubernetes ExternalName services"
+      ],
+      "files_affected": [
+        "charts/formbricks/values.yaml",
+        "charts/formbricks/templates/envoy-gateway-resources.yaml"
+      ]
+    },
+    {
+      "dimension": "validation_and_error_handling",
+      "recommendation": "Implemented validation logic to ensure only one configuration method (host/port OR backendRefs) is used at a time",
+      "rationale": "Preventing simultaneous use of both configuration methods avoids ambiguous behavior and potential conflicts. The validation ensures clear, predictable configuration by enforcing a mutually exclusive choice between the two approaches, making deployment configurations easier to understand and debug.",
+      "alternatives_considered": [
+        "Allowing both with priority rules",
+        "Merging configurations",
+        "Runtime detection and warning"
+      ],
+      "files_affected": [
+        "charts/formbricks/templates/envoy-validation.yaml"
+      ]
+    },
+    {
+      "dimension": "documentation",
+      "recommendation": "Updated Helm chart documentation to explain the new host/port configuration option and its cross-namespace use case",
+      "rationale": "Clear documentation helps users understand when to use each configuration method. The documentation explicitly recommends host/port for cross-namespace collectors, guiding users toward the appropriate solution for their deployment scenario without requiring them to discover this through trial and error.",
+      "alternatives_considered": [
+        "Separate documentation file",
+        "Inline comments only",
+        "Example configurations"
+      ],
+      "files_affected": [
+        "charts/formbricks/README.md",
+        "charts/formbricks/values.yaml"
+      ]
+    },
+    {
+      "dimension": "backward_compatibility",
+      "recommendation": "Maintained existing backendRefs functionality while adding the new host/port option",
+      "rationale": "Existing deployments using backendRefs continue to work without modification. The conditional template logic ensures backward compatibility by only including host/port when specified, otherwise falling back to the existing backendRefs configuration. This allows gradual migration and doesn't break existing installations.",
+      "alternatives_considered": [
+        "Deprecating backendRefs",
+        "Forcing migration to new approach",
+        "Creating a new configuration section"
+      ],
+      "files_affected": [
+        "charts/formbricks/templates/envoy-gateway-resources.yaml"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Add host/port configuration for Envoy OpenTelemetry metrics",
+      "description": "Implement the core configuration fields and template logic to support direct host/port specification for OpenTelemetry collectors as an alternative to backendRefs",
+      "files_to_modify": [
+        "charts/formbricks/values.yaml",
+        "charts/formbricks/templates/envoy-gateway-resources.yaml"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-002",
+      "title": "Add validation for configuration exclusivity",
+      "description": "Implement Helm template validation to ensure users don't configure both host/port and backendRefs simultaneously, and require at least one configuration method when OpenTelemetry is enabled",
+      "files_to_modify": [
+        "charts/formbricks/templates/envoy-validation.yaml"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-003",
+      "title": "Update documentation for new configuration option",
+      "description": "Update Helm chart documentation to explain the new host/port configuration and when to use it versus backendRefs, particularly for cross-namespace collector scenarios",
+      "files_to_modify": [
+        "charts/formbricks/README.md",
+        "charts/formbricks/values.yaml"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation adds support for direct host/port configuration in the Formbricks Helm chart for Envoy OpenTelemetry metric sinks, addressing cross-namespace compatibility issues. The approach maintains backward compatibility by keeping the existing backendRefs functionality while providing a new, simpler alternative for deployments where collectors reside in different Kubernetes namespaces.\n\nKey patterns used include conditional template rendering in Helm (using `{{- if }}` blocks) to switch between configuration modes, and validation logic that runs during `helm template` or `helm install` to catch configuration errors early. The validation ensures users can't accidentally configure both methods simultaneously, which would create ambiguous behavior, and also ensures at least one method is specified when OpenTelemetry is enabled.\n\nThe changes integrate cleanly with the existing Helm chart structure by extending the existing `envoy.formbricks.proxy.telemetry.openTelemetry` configuration section. The template logic in `envoy-gateway-resources.yaml` uses conditional rendering to include either the host/port fields or the backendRefs block, but never both. This maintains the existing API surface for current users while adding the new capability for those needing cross-namespace collector support.\n\nAn important design choice was to provide clear guidance in both the values.yaml comments and README documentation about when to use each approach. The documentation explicitly recommends host/port for cross-namespace scenarios, helping users make the right choice without needing deep Kubernetes networking knowledge. The default port of 4317 follows OpenTelemetry conventions, making the configuration intuitive for users familiar with OTLP.",
+  "source_pr": "https://github.com/formbricks/formbricks/pull/7692",
+  "before_sha": "3d16e859c6cf2423a1663931d7c419fef4252d4b",
+  "after_sha": "1064f684358df0374803856df31af4a75c0a4363",
+  "diff_stats": {
+    "additions": 23,
+    "deletions": 0,
+    "files_changed": 4
+  }
+}

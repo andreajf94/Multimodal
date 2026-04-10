@@ -1,0 +1,759 @@
+diff --git a/.codecov.yml b/.codecov.yml
+index e6b4d03475..9e8269ead4 100644
+--- a/.codecov.yml
++++ b/.codecov.yml
+@@ -14,15 +14,19 @@ component_management:
+ # https://docs.codecov.com/docs/carryforward-flags
+ flags:
+   # Backend Python versions
+-  backend-python-3.10:
++  backend-python-3.11:
+     paths:
+       - src/**
+     carryforward: true
+-  backend-python-3.11:
++  backend-python-3.12:
+     paths:
+       - src/**
+     carryforward: true
+-  backend-python-3.12:
++  backend-python-3.13:
++    paths:
++      - src/**
++    carryforward: true
++  backend-python-3.14:
+     paths:
+       - src/**
+     carryforward: true
+@@ -41,9 +45,10 @@ coverage:
+     project:
+       backend:
+         flags:
+-          - backend-python-3.10
+           - backend-python-3.11
+           - backend-python-3.12
++          - backend-python-3.13
++          - backend-python-3.14
+         paths:
+           - src/**
+         # https://docs.codecov.com/docs/commit-status#threshold
+@@ -59,9 +64,10 @@ coverage:
+     patch:
+       backend:
+         flags:
+-          - backend-python-3.10
+           - backend-python-3.11
+           - backend-python-3.12
++          - backend-python-3.13
++          - backend-python-3.14
+         paths:
+           - src/**
+         target: 100%
+diff --git a/.github/workflows/ci-backend.yml b/.github/workflows/ci-backend.yml
+index d9dbfc08d2..f8bcbe2f32 100644
+--- a/.github/workflows/ci-backend.yml
++++ b/.github/workflows/ci-backend.yml
+@@ -31,7 +31,7 @@ jobs:
+     runs-on: ubuntu-24.04
+     strategy:
+       matrix:
+-        python-version: ['3.10', '3.11', '3.12']
++        python-version: ['3.11', '3.12', '3.13', '3.14']
+       fail-fast: false
+     steps:
+       - name: Checkout
+diff --git a/CONTRIBUTING.md b/CONTRIBUTING.md
+index 20d7bfd364..9e5539b2aa 100644
+--- a/CONTRIBUTING.md
++++ b/CONTRIBUTING.md
+@@ -13,7 +13,9 @@ If you want to implement something big:
+ 
+ ## Python
+ 
+-Paperless supports python 3.10 - 3.12 at this time. We format Python code with [ruff](https://docs.astral.sh/ruff/formatter/).
++Paperless-ngx currently supports Python 3.11, 3.12, 3.13, and 3.14. As a policy, we aim to support at least the three most recent Python versions, and drop support for versions as they reach end-of-life. Older versions may be supported if dependencies permit, but this is not guaranteed.
++
++We format Python code with [ruff](https://docs.astral.sh/ruff/formatter/).
+ 
+ ## Branches
+ 
+diff --git a/docs/setup.md b/docs/setup.md
+index f9b79d0467..b08d6d7c9b 100644
+--- a/docs/setup.md
++++ b/docs/setup.md
+@@ -172,7 +172,7 @@ to enable polling and disable inotify. See [here](configuration.md#polling).
+ #### Prerequisites
+ 
+ -   Paperless runs on Linux only, Windows is not supported.
+--   Python 3 is required with versions 3.10 - 3.12 currently supported. Newer versions may work, but some dependencies may not be fully compatible.
++-   Python 3.11, 3.12, 3.13, or 3.14 is required. As a policy, Paperless-ngx aims to support at least the three most recent Python versions and drops support for versions as they reach end-of-life. Newer versions may work, but some dependencies may not be fully compatible.
+ 
+ #### Installation
+ 
+diff --git a/pyproject.toml b/pyproject.toml
+index 288d8b7573..6a11163cc9 100644
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -3,10 +3,9 @@ name = "paperless-ngx"
+ version = "2.20.10"
+ description = "A community-supported supercharged document management system: scan, index and archive all your physical documents"
+ readme = "README.md"
+-requires-python = ">=3.10"
++requires-python = ">=3.11"
+ classifiers = [
+   "Programming Language :: Python :: 3 :: Only",
+-  "Programming Language :: Python :: 3.10",
+   "Programming Language :: Python :: 3.11",
+   "Programming Language :: Python :: 3.12",
+   "Programming Language :: Python :: 3.13",
+@@ -177,7 +176,7 @@ torch = [
+ ]
+ 
+ [tool.ruff]
+-target-version = "py310"
++target-version = "py311"
+ line-length = 88
+ src = [
+   "src",
+diff --git a/src/documents/conditionals.py b/src/documents/conditionals.py
+index b017f410cf..fa10ff58ab 100644
+--- a/src/documents/conditionals.py
++++ b/src/documents/conditionals.py
+@@ -1,5 +1,5 @@
++from datetime import UTC
+ from datetime import datetime
+-from datetime import timezone
+ from typing import Any
+ 
+ from django.conf import settings
+@@ -139,7 +139,7 @@ def thumbnail_last_modified(request: Any, pk: int) -> datetime | None:
+         # No cache, get the timestamp and cache the datetime
+         last_modified = datetime.fromtimestamp(
+             doc.thumbnail_path.stat().st_mtime,
+-            tz=timezone.utc,
++            tz=UTC,
+         )
+         cache.set(doc_key, last_modified, CACHE_50_MINUTES)
+         return last_modified
+diff --git a/src/documents/consumer.py b/src/documents/consumer.py
+index 1811608750..b00c4aee36 100644
+--- a/src/documents/consumer.py
++++ b/src/documents/consumer.py
+@@ -2,7 +2,7 @@
+ import hashlib
+ import os
+ import tempfile
+-from enum import Enum
++from enum import StrEnum
+ from pathlib import Path
+ from typing import TYPE_CHECKING
+ from typing import Final
+@@ -82,7 +82,7 @@ class ConsumerError(Exception):
+     pass
+ 
+ 
+-class ConsumerStatusShortMessage(str, Enum):
++class ConsumerStatusShortMessage(StrEnum):
+     DOCUMENT_ALREADY_EXISTS = "document_already_exists"
+     DOCUMENT_ALREADY_EXISTS_IN_TRASH = "document_already_exists_in_trash"
+     ASN_ALREADY_EXISTS = "asn_already_exists"
+diff --git a/src/documents/index.py b/src/documents/index.py
+index 7d75119ff9..3a3b59e37a 100644
+--- a/src/documents/index.py
++++ b/src/documents/index.py
+@@ -5,10 +5,10 @@
+ import re
+ from collections import Counter
+ from contextlib import contextmanager
++from datetime import UTC
+ from datetime import datetime
+ from datetime import time
+ from datetime import timedelta
+-from datetime import timezone
+ from shutil import rmtree
+ from time import sleep
+ from typing import TYPE_CHECKING
+@@ -437,7 +437,7 @@ def docs(self):
+ class LocalDateParser(English):
+     def reverse_timezone_offset(self, d):
+         return (d.replace(tzinfo=django_timezone.get_current_timezone())).astimezone(
+-            timezone.utc,
++            UTC,
+         )
+ 
+     def date_from(self, *args, **kwargs):
+@@ -641,8 +641,8 @@ def repl(m):
+                 end = datetime(local_now.year - 1, 12, 31, 23, 59, 59, tzinfo=tz)
+ 
+         # Convert to UTC and format
+-        start_str = start.astimezone(timezone.utc).strftime("%Y%m%d%H%M%S")
+-        end_str = end.astimezone(timezone.utc).strftime("%Y%m%d%H%M%S")
++        start_str = start.astimezone(UTC).strftime("%Y%m%d%H%M%S")
++        end_str = end.astimezone(UTC).strftime("%Y%m%d%H%M%S")
+         return f"{field}:[{start_str} TO {end_str}]"
+ 
+     return re.sub(pattern, repl, query_string, flags=re.IGNORECASE)
+diff --git a/src/documents/plugins/date_parsing/base.py b/src/documents/plugins/date_parsing/base.py
+index c6df1a70f2..9605fe8084 100644
+--- a/src/documents/plugins/date_parsing/base.py
++++ b/src/documents/plugins/date_parsing/base.py
+@@ -5,11 +5,7 @@
+ from collections.abc import Iterator
+ from dataclasses import dataclass
+ from types import TracebackType
+-
+-try:
+-    from typing import Self
+-except ImportError:
+-    from typing_extensions import Self
++from typing import Self
+ 
+ import dateparser
+ 
+diff --git a/src/documents/plugins/helpers.py b/src/documents/plugins/helpers.py
+index 148426b813..e5cfde3b81 100644
+--- a/src/documents/plugins/helpers.py
++++ b/src/documents/plugins/helpers.py
+@@ -9,7 +9,7 @@
+     from channels_redis.pubsub import RedisPubSubChannelLayer
+ 
+ 
+-class ProgressStatusOptions(str, enum.Enum):
++class ProgressStatusOptions(enum.StrEnum):
+     STARTED = "STARTED"
+     WORKING = "WORKING"
+     SUCCESS = "SUCCESS"
+diff --git a/src/documents/tests/date_parsing/conftest.py b/src/documents/tests/date_parsing/conftest.py
+index ea9e2447da..3cc1bab524 100644
+--- a/src/documents/tests/date_parsing/conftest.py
++++ b/src/documents/tests/date_parsing/conftest.py
+@@ -24,7 +24,7 @@ def base_config() -> DateParserConfig:
+             12,
+             0,
+             0,
+-            tzinfo=datetime.timezone.utc,
++            tzinfo=datetime.UTC,
+         ),
+         filename_date_order="YMD",
+         content_date_order="DMY",
+@@ -45,7 +45,7 @@ def config_with_ignore_dates() -> DateParserConfig:
+             12,
+             0,
+             0,
+-            tzinfo=datetime.timezone.utc,
++            tzinfo=datetime.UTC,
+         ),
+         filename_date_order="DMY",
+         content_date_order="MDY",
+diff --git a/src/documents/tests/date_parsing/test_date_parsing.py b/src/documents/tests/date_parsing/test_date_parsing.py
+index a587b32cc2..f43303d224 100644
+--- a/src/documents/tests/date_parsing/test_date_parsing.py
++++ b/src/documents/tests/date_parsing/test_date_parsing.py
+@@ -101,50 +101,50 @@ class TestFilterDate:
+         [
+             # Valid Dates
+             pytest.param(
+-                datetime.datetime(2024, 1, 10, tzinfo=datetime.timezone.utc),
+-                datetime.datetime(2024, 1, 10, tzinfo=datetime.timezone.utc),
++                datetime.datetime(2024, 1, 10, tzinfo=datetime.UTC),
++                datetime.datetime(2024, 1, 10, tzinfo=datetime.UTC),
+                 id="valid_past_date",
+             ),
+             pytest.param(
+-                datetime.datetime(2024, 1, 15, 12, 0, 0, tzinfo=datetime.timezone.utc),
+-                datetime.datetime(2024, 1, 15, 12, 0, 0, tzinfo=datetime.timezone.utc),
++                datetime.datetime(2024, 1, 15, 12, 0, 0, tzinfo=datetime.UTC),
++                datetime.datetime(2024, 1, 15, 12, 0, 0, tzinfo=datetime.UTC),
+                 id="exactly_at_reference",
+             ),
+             pytest.param(
+-                datetime.datetime(1901, 1, 1, tzinfo=datetime.timezone.utc),
+-                datetime.datetime(1901, 1, 1, tzinfo=datetime.timezone.utc),
++                datetime.datetime(1901, 1, 1, tzinfo=datetime.UTC),
++                datetime.datetime(1901, 1, 1, tzinfo=datetime.UTC),
+                 id="year_1901_valid",
+             ),
+             # Date is > reference_time
+             pytest.param(
+-                datetime.datetime(2024, 1, 16, tzinfo=datetime.timezone.utc),
++                datetime.datetime(2024, 1, 16, tzinfo=datetime.UTC),
+                 None,
+                 id="future_date_day_after",
+             ),
+             # date.date() in ignore_dates
+             pytest.param(
+-                datetime.datetime(2024, 1, 1, 0, 0, 0, tzinfo=datetime.timezone.utc),
++                datetime.datetime(2024, 1, 1, 0, 0, 0, tzinfo=datetime.UTC),
+                 None,
+                 id="ignored_date_midnight_jan1",
+             ),
+             pytest.param(
+-                datetime.datetime(2024, 1, 1, 10, 30, 0, tzinfo=datetime.timezone.utc),
++                datetime.datetime(2024, 1, 1, 10, 30, 0, tzinfo=datetime.UTC),
+                 None,
+                 id="ignored_date_midday_jan1",
+             ),
+             pytest.param(
+-                datetime.datetime(2024, 12, 25, 15, 0, 0, tzinfo=datetime.timezone.utc),
++                datetime.datetime(2024, 12, 25, 15, 0, 0, tzinfo=datetime.UTC),
+                 None,
+                 id="ignored_date_dec25_future",
+             ),
+             # date.year <= 1900
+             pytest.param(
+-                datetime.datetime(1899, 12, 31, tzinfo=datetime.timezone.utc),
++                datetime.datetime(1899, 12, 31, tzinfo=datetime.UTC),
+                 None,
+                 id="year_1899",
+             ),
+             pytest.param(
+-                datetime.datetime(1900, 1, 1, tzinfo=datetime.timezone.utc),
++                datetime.datetime(1900, 1, 1, tzinfo=datetime.UTC),
+                 None,
+                 id="year_1900_boundary",
+             ),
+@@ -176,7 +176,7 @@ def test_filter_date_respects_ignore_dates(
+             1,
+             12,
+             0,
+-            tzinfo=datetime.timezone.utc,
++            tzinfo=datetime.UTC,
+         )
+         another_ignored = datetime.datetime(
+             2024,
+@@ -184,7 +184,7 @@ def test_filter_date_respects_ignore_dates(
+             25,
+             15,
+             30,
+-            tzinfo=datetime.timezone.utc,
++            tzinfo=datetime.UTC,
+         )
+         allowed_date = datetime.datetime(
+             2024,
+@@ -192,7 +192,7 @@ def test_filter_date_respects_ignore_dates(
+             2,
+             12,
+             0,
+-            tzinfo=datetime.timezone.utc,
++            tzinfo=datetime.UTC,
+         )
+ 
+         assert parser._filter_date(ignored_date) is None
+@@ -204,7 +204,7 @@ def test_filter_date_timezone_aware(
+         regex_parser: RegexDateParserPlugin,
+     ) -> None:
+         """Should work with timezone-aware datetimes."""
+-        date_utc = datetime.datetime(2024, 1, 10, 12, 0, tzinfo=datetime.timezone.utc)
++        date_utc = datetime.datetime(2024, 1, 10, 12, 0, tzinfo=datetime.UTC)
+ 
+         result = regex_parser._filter_date(date_utc)
+ 
+@@ -221,8 +221,8 @@ class TestRegexDateParser:
+                 "report-2023-12-25.txt",
+                 "Event recorded on 25/12/2022.",
+                 [
+-                    datetime.datetime(2023, 12, 25, tzinfo=datetime.timezone.utc),
+-                    datetime.datetime(2022, 12, 25, tzinfo=datetime.timezone.utc),
++                    datetime.datetime(2023, 12, 25, tzinfo=datetime.UTC),
++                    datetime.datetime(2022, 12, 25, tzinfo=datetime.UTC),
+                 ],
+                 id="filename-y-m-d_and_content-d-m-y",
+             ),
+@@ -230,8 +230,8 @@ class TestRegexDateParser:
+                 "img_2023.01.02.jpg",
+                 "Taken on 01/02/2023",
+                 [
+-                    datetime.datetime(2023, 1, 2, tzinfo=datetime.timezone.utc),
+-                    datetime.datetime(2023, 2, 1, tzinfo=datetime.timezone.utc),
++                    datetime.datetime(2023, 1, 2, tzinfo=datetime.UTC),
++                    datetime.datetime(2023, 2, 1, tzinfo=datetime.UTC),
+                 ],
+                 id="ambiguous-dates-respect-orders",
+             ),
+@@ -239,7 +239,7 @@ class TestRegexDateParser:
+                 "notes.txt",
+                 "bad date 99/99/9999 and 25/12/2022",
+                 [
+-                    datetime.datetime(2022, 12, 25, tzinfo=datetime.timezone.utc),
++                    datetime.datetime(2022, 12, 25, tzinfo=datetime.UTC),
+                 ],
+                 id="parse-exception-skips-bad-and-yields-good",
+             ),
+@@ -275,24 +275,24 @@ def fake_parse(
+                 or "2023.12.25" in date_string
+                 or "2023-12-25" in date_string
+             ):
+-                return datetime.datetime(2023, 12, 25, tzinfo=datetime.timezone.utc)
++                return datetime.datetime(2023, 12, 25, tzinfo=datetime.UTC)
+ 
+             # content DMY 25/12/2022
+             if "25/12/2022" in date_string or "25-12-2022" in date_string:
+-                return datetime.datetime(2022, 12, 25, tzinfo=datetime.timezone.utc)
++                return datetime.datetime(2022, 12, 25, tzinfo=datetime.UTC)
+ 
+             # filename YMD 2023.01.02
+             if "2023.01.02" in date_string or "2023-01-02" in date_string:
+-                return datetime.datetime(2023, 1, 2, tzinfo=datetime.timezone.utc)
++                return datetime.datetime(2023, 1, 2, tzinfo=datetime.UTC)
+ 
+             # ambiguous 01/02/2023 -> respect DATE_ORDER setting
+             if "01/02/2023" in date_string:
+                 if date_order == "DMY":
+-                    return datetime.datetime(2023, 2, 1, tzinfo=datetime.timezone.utc)
++                    return datetime.datetime(2023, 2, 1, tzinfo=datetime.UTC)
+                 if date_order == "YMD":
+-                    return datetime.datetime(2023, 1, 2, tzinfo=datetime.timezone.utc)
++                    return datetime.datetime(2023, 1, 2, tzinfo=datetime.UTC)
+                 # fallback
+-                return datetime.datetime(2023, 2, 1, tzinfo=datetime.timezone.utc)
++                return datetime.datetime(2023, 2, 1, tzinfo=datetime.UTC)
+ 
+             # simulate parse failure for malformed input
+             if "99/99/9999" in date_string or "bad date" in date_string:
+@@ -328,7 +328,7 @@ def test_parse_filters_future_and_ignored_dates(
+                 12,
+                 0,
+                 0,
+-                tzinfo=datetime.timezone.utc,
++                tzinfo=datetime.UTC,
+             ),
+             filename_date_order="YMD",
+             content_date_order="DMY",
+@@ -344,13 +344,13 @@ def fake_parse(
+         ) -> datetime.datetime | None:
+             if "10/12/2023" in date_string or "10-12-2023" in date_string:
+                 # ignored date
+-                return datetime.datetime(2023, 12, 10, tzinfo=datetime.timezone.utc)
++                return datetime.datetime(2023, 12, 10, tzinfo=datetime.UTC)
+             if "01/02/2024" in date_string or "01-02-2024" in date_string:
+                 # future relative to reference_time -> filtered
+-                return datetime.datetime(2024, 2, 1, tzinfo=datetime.timezone.utc)
++                return datetime.datetime(2024, 2, 1, tzinfo=datetime.UTC)
+             if "05/01/2023" in date_string or "05-01-2023" in date_string:
+                 # valid
+-                return datetime.datetime(2023, 1, 5, tzinfo=datetime.timezone.utc)
++                return datetime.datetime(2023, 1, 5, tzinfo=datetime.UTC)
+             return None
+ 
+         mocker.patch(target, side_effect=fake_parse)
+@@ -358,7 +358,7 @@ def fake_parse(
+         content = "Ignored: 10/12/2023, Future: 01/02/2024, Keep: 05/01/2023"
+         results = list(parser.parse("whatever.txt", content))
+ 
+-        assert results == [datetime.datetime(2023, 1, 5, tzinfo=datetime.timezone.utc)]
++        assert results == [datetime.datetime(2023, 1, 5, tzinfo=datetime.UTC)]
+ 
+     def test_parse_handles_no_matches_and_returns_empty_list(
+         self,
+@@ -392,7 +392,7 @@ def test_parse_skips_filename_when_filename_date_order_none(
+                 12,
+                 0,
+                 0,
+-                tzinfo=datetime.timezone.utc,
++                tzinfo=datetime.UTC,
+             ),
+             filename_date_order=None,
+             content_date_order="DMY",
+@@ -409,9 +409,9 @@ def fake_parse(
+         ) -> datetime.datetime | None:
+             # return distinct datetimes so we can tell which source was parsed
+             if "25/12/2022" in date_string:
+-                return datetime.datetime(2022, 12, 25, tzinfo=datetime.timezone.utc)
++                return datetime.datetime(2022, 12, 25, tzinfo=datetime.UTC)
+             if "2023-12-25" in date_string:
+-                return datetime.datetime(2023, 12, 25, tzinfo=datetime.timezone.utc)
++                return datetime.datetime(2023, 12, 25, tzinfo=datetime.UTC)
+             return None
+ 
+         mock = mocker.patch(target, side_effect=fake_parse)
+@@ -429,5 +429,5 @@ def fake_parse(
+         assert "25/12/2022" in called_date_string
+         # And the parser should have yielded the corresponding datetime
+         assert results == [
+-            datetime.datetime(2022, 12, 25, tzinfo=datetime.timezone.utc),
++            datetime.datetime(2022, 12, 25, tzinfo=datetime.UTC),
+         ]
+diff --git a/src/documents/tests/test_file_handling.py b/src/documents/tests/test_file_handling.py
+index 2c7086ff85..8417c4ce7a 100644
+--- a/src/documents/tests/test_file_handling.py
++++ b/src/documents/tests/test_file_handling.py
+@@ -336,7 +336,11 @@ def test_added_year_month_day(self) -> None:
+             added=d1,
+         )
+ 
+-        self.assertEqual(generate_filename(doc1), Path("1232-01-09.pdf"))
++        # Account for 3.14 padding changes
++        expected_year: str = d1.strftime("%Y")
++        expected_filename: Path = Path(f"{expected_year}-01-09.pdf")
++
++        self.assertEqual(generate_filename(doc1), expected_filename)
+ 
+         doc1.added = timezone.make_aware(datetime.datetime(2020, 11, 16, 1, 1, 1))
+ 
+diff --git a/src/documents/tests/test_filters.py b/src/documents/tests/test_filters.py
+index e14a0214e5..fa575bcd0b 100644
+--- a/src/documents/tests/test_filters.py
++++ b/src/documents/tests/test_filters.py
+@@ -21,7 +21,7 @@ class TestDateLocalization:
+         14,
+         30,
+         5,
+-        tzinfo=datetime.timezone.utc,
++        tzinfo=datetime.UTC,
+     )
+ 
+     TEST_DATETIME_STRING: str = "2023-10-26T14:30:05+00:00"
+diff --git a/src/documents/tests/test_workflows.py b/src/documents/tests/test_workflows.py
+index c0f6801e94..78d42437dd 100644
+--- a/src/documents/tests/test_workflows.py
++++ b/src/documents/tests/test_workflows.py
+@@ -4698,7 +4698,7 @@ class TestDateWorkflowLocalization(
+         14,
+         30,
+         5,
+-        tzinfo=datetime.timezone.utc,
++        tzinfo=datetime.UTC,
+     )
+ 
+     @pytest.mark.parametrize(
+diff --git a/src/documents/versioning.py b/src/documents/versioning.py
+index af92991bc3..844a5a1366 100644
+--- a/src/documents/versioning.py
++++ b/src/documents/versioning.py
+@@ -1,7 +1,7 @@
+ from __future__ import annotations
+ 
+ from dataclasses import dataclass
+-from enum import Enum
++from enum import StrEnum
+ from typing import TYPE_CHECKING
+ from typing import Any
+ 
+@@ -11,7 +11,7 @@
+     from django.http import HttpRequest
+ 
+ 
+-class VersionResolutionError(str, Enum):
++class VersionResolutionError(StrEnum):
+     INVALID = "invalid"
+     NOT_FOUND = "not_found"
+ 
+diff --git a/uv.lock b/uv.lock
+index 923583fc2a..cd187c1ccb 100644
+--- a/uv.lock
++++ b/uv.lock
+@@ -1,15 +1,13 @@
+ version = 1
+ revision = 3
+-requires-python = ">=3.10"
++requires-python = ">=3.11"
+ resolution-markers = [
+     "python_full_version >= '3.12' and sys_platform == 'darwin'",
+-    "python_full_version == '3.11.*' and sys_platform == 'darwin'",
+-    "python_full_version < '3.11' and sys_platform == 'darwin'",
++    "python_full_version < '3.12' and sys_platform == 'darwin'",
+     "python_full_version == '3.12.*' and platform_machine == 'x86_64' and sys_platform == 'linux'",
+     "python_full_version == '3.12.*' and platform_machine == 'aarch64' and sys_platform == 'linux'",
+     "(python_full_version >= '3.12' and platform_machine != 'aarch64' and platform_machine != 'x86_64' and sys_platform == 'linux') or (python_full_version >= '3.13' and platform_machine == 'aarch64' and sys_platform == 'linux') or (python_full_version >= '3.13' and platform_machine == 'x86_64' and sys_platform == 'linux')",
+-    "python_full_version == '3.11.*' and sys_platform == 'linux'",
+-    "python_full_version < '3.11' and sys_platform == 'linux'",
++    "python_full_version < '3.12' and sys_platform == 'linux'",
+ ]
+ supported-markers = [
+     "sys_platform == 'darwin'",
+@@ -32,7 +30,6 @@ source = { registry = "https://pypi.org/simple" }
+ dependencies = [
+     { name = "aiohappyeyeballs", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
+     { name = "aiosignal", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
+-    { name = "async-timeout", marker = "(python_full_version < '3.11' and sys_platform == 'darwin') or (python_full_version < '3.11' and sys_platform == 'linux')" },
+     { name = "attrs", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
+     { name = "frozenlist", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
+     { name = "multidict", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
+@@ -41,21 +38,6 @@ dependencies = [
+ ]
+ sdist = { url = "https://files.pythonhosted.org/packages/50/42/32cf8e7704ceb4481406eb87161349abb46a57fee3f008ba9cb610968646/aiohttp-3.13.3.tar.gz", hash = "sha256:a949eee43d3782f2daae4f4a2819b2cb9b0c5d3b7f7a927067cc84dafdbb9f88", size = 7844556, upload-time = "2026-01-03T17:33:05.204Z" }
+ wheels = [
+-    { url = "https://files.pythonhosted.org/packages/36/d6/5aec9313ee6ea9c7cde8b891b69f4ff4001416867104580670a31daeba5b/aiohttp-3.13.3-cp310-cp310-macosx_10_9_universal2.whl", hash = "sha256:d5a372fd5afd301b3a89582817fdcdb6c34124787c70dbcc616f259013e7eef7", size = 738950, upload-time = "2026-01-03T17:29:13.002Z" },
+-    { url = "https://files.pythonhosted.org/packages/68/03/8fa90a7e6d11ff20a18837a8e2b5dd23db01aabc475aa9271c8ad33299f5/aiohttp-3.13.3-cp310-cp310-macosx_10_9_x86_64.whl", hash = "sha256:147e422fd1223005c22b4fe080f5d93ced44460f5f9c105406b753612b587821", size = 496099, upload-time = "2026-01-03T17:29:15.268Z" },
+-    { url = "https://files.pythonhosted.org/packages/d2/23/b81f744d402510a8366b74eb420fc0cc1170d0c43daca12d10814df85f10/aiohttp-3.13.3-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:859bd3f2156e81dd01432f5849fc73e2243d4a487c4fd26609b1299534ee1845", size = 491072, upload-time = "2026-01-03T17:29:16.922Z" },
+-    { url = "https://files.pythonhosted.org/packages/d5/e1/56d1d1c0dd334cd203dd97706ce004c1aa24b34a813b0b8daf3383039706/aiohttp-3.13.3-cp310-cp310-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:dca68018bf48c251ba17c72ed479f4dafe9dbd5a73707ad8d28a38d11f3d42af", size = 1671588, upload-time = "2026-01-03T17:29:18.539Z" },
+-    { url = "https://files.pythonhosted.org/packages/5f/34/8d7f962604f4bc2b4e39eb1220dac7d4e4cba91fb9ba0474b4ecd67db165/aiohttp-3.13.3-cp310-cp310-manylinux2014_armv7l.manylinux_2_17_armv7l.manylinux_2_31_armv7l.whl", hash = "sha256:fee0c6bc7db1de362252affec009707a17478a00ec69f797d23ca256e36d5940", size = 1640334, upload-time = "2026-01-03T17:29:21.028Z" },
+-    { url = "https://files.pythonhosted.org/packages/94/1d/fcccf2c668d87337ddeef9881537baee13c58d8f01f12ba8a24215f2b804/aiohttp-3.13.3-cp310-cp310-manylinux2014_ppc64le.manylinux_2_17_ppc64le.manylinux_2_28_ppc64le.whl", hash = "sha256:c048058117fd649334d81b4b526e94bde3ccaddb20463a815ced6ecbb7d11160", size = 1722656, upload-time = "2026-01-03T17:29:22.531Z" },
+-    { url = "https://files.pythonhosted.org/packages/aa/98/c6f3b081c4c606bc1e5f2ec102e87d6411c73a9ef3616fea6f2d5c98c062/aiohttp-3.13.3-cp310-cp310-manylinux2014_s390x.manylinux_2_17_s390x.manylinux_2_28_s390x.whl", hash = "sha256:215a685b6fbbfcf71dfe96e3eba7a6f58f10da1dfdf4889c7dd856abe430dca7", size = 1817625, upload-time = "2026-01-03T17:29:24.276Z" },
+-    { url = "https://files.pythonhosted.org/packages/2c/c0/cfcc3d2e11b477f86e1af2863f3858c8850d751ce8dc39c4058a072c9e54/aiohttp-3.13.3-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:de2c184bb1fe2cbd2cefba613e9db29a5ab559323f994b6737e370d3da0ac455", size = 1672604, upload-time = "2026-01-03T17:29:26.099Z" },
+-    { url = "https://files.pythonhosted.org/packages/1e/77/6b4ffcbcac4c6a5d041343a756f34a6dd26174ae07f977a64fe028dda5b0/aiohttp-3.13.3-cp310-cp310-manylinux_2_31_riscv64.manylinux_2_39_riscv64.whl", hash = "sha256:75ca857eba4e20ce9f546cd59c7007b33906a4cd48f2ff6ccf1ccfc3b646f279", size = 1554370, upload-time = "2026-01-03T17:29:28.121Z" },
+-    { url = "https://files.pythonhosted.org/packages/f2/f0/e3ddfa93f17d689dbe014ba048f18e0c9f9b456033b70e94349a2e9048be/aiohttp-3.13.3-cp310-cp310-musllinux_1_2_aarch64.whl", hash = "sha256:81e97251d9298386c2b7dbeb490d3d1badbdc69107fb8c9299dd04eb39bddc0e", size = 1642023, upload-time = "2026-01-03T17:29:30.002Z" },
+-    { url = "https://files.pythonhosted.org/packages/eb/45/c14019c9ec60a8e243d06d601b33dcc4fd92379424bde3021725859d7f99/aiohttp-3.13.3-cp310-cp310-musllinux_1_2_armv7l.whl", hash = "sha256:c0e2d366af265797506f0283487223146af57815b388623f0357ef7eac9b209d", size = 1649680, upload-time = "2026-01-03T17:29:31.782Z" },
+-    { url = "https://files.pythonhosted.org/packages/9c/fd/09c9451dae5aa5c5ed756df95ff9ef549d45d4be663bafd1e4954fd836f0/aiohttp-3.13.3-cp310-cp310-musllinux_1_2_ppc64le.whl", hash = "sha256:4e239d501f73d6db1522599e14b9b321a7e3b1de66ce33d53a765d975e9f4808", size = 1692407, upload-time = "2026-01-03T17:29:33.392Z" },
+-    { url = "https://files.pythonhosted.org/packages/a6/81/938bc2ec33c10efd6637ccb3d22f9f3160d08e8f3aa2587a2c2d5ab578eb/aiohttp-3.13.3-cp310-cp310-musllinux_1_2_riscv64.whl", hash = "sha256:0db318f7a6f065d84cb1e02662c526294450b314a02bd9e2a8e67f0d8564ce40", size = 1543047, upload-time = "2026-01-03T17:29:34.855Z" },
+-    { url = "https://files.pythonhosted.org/packages/f7/23/80488ee21c8d567c83045e412e1d9b7077d27171591a4eb7822586e8c06a/aiohttp-3.13.3-cp310-cp310-musllinux_1_2_s390x.whl", hash = "sha256:bfc1cc2fe31a6026a8a88e4ecfb98d7f6b1fec150cfd708adbfd1d2f42257c29", size = 1715264, upload-time = "2026-01-03T17:29:36.389Z" },
+-    { url = "https://files.pythonhosted.org/packages/e2/83/259a8da6683182768200b368120ab3deff5370bed93880fb9a3a86299f34/aiohttp-3.13.3-cp310-cp310-musllinux_1_2_x86_64.whl", hash = "sha256:af71fff7bac6bb7508956696dce8f6eec2bbb045eceb40343944b1ae62b5ef11", size = 1657275, upload-time = "2026-01-03T17:29:38.162Z" },
+     { url = "https://files.pythonhosted.org/packages/f1/4c/a164164834f03924d9a29dc3acd9e7ee58f95857e0b467f6d04298594ebb/aiohttp-3.13.3-cp311-cp311-macosx_10_9_universal2.whl", hash = "sha256:5b6073099fb654e0a068ae678b10feff95c5cae95bbfcbfa7af669d361a8aa6b", size = 746051, upload-time = "2026-01-03T17:29:43.287Z" },
+     { url = "https://files.pythonhosted.org/packages/82/71/d5c31390d18d4f58115037c432b7e0348c60f6f53b727cad33172144a112/aiohttp-3.13.3-cp311-cp311-macosx_10_9_x86_64.whl", hash = "sha256:1cb93e166e6c28716c8c6aeb5f99dfb6d5ccf482d29fe9bf9a794110e6d0ab64", size = 499234, upload-time = "2026-01-03T17:29:44.822Z" },
+     { url = "https://files.pythonhosted.org/packages/0e/c9/741f8ac91e14b1d2e7100690425a5b2b919a87a5075406582991fb7de920/aiohttp-3.13.3-cp311-cp311-macosx_11_0_arm64.whl", hash = "sha256:28e027cf2f6b641693a09f631759b4d9ce9165099d2b5d92af9bd4e197690eea", size = 494979, upload-time = "2026-01-03T17:29:46.405Z" },
+@@ -181,7 +163,6 @@ name = "anyio"
+ version = "4.12.1"
+ source = { registry = "https://pypi.org/simple" }
+ dependencies = [
+-    { name = "exceptiongroup", marker = "(python_full_version < '3.11' and sys_platform == 'darwin') or (python_full_version < '3.11' and sys_platform == 'linux')" },
+     { name = "idna", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
+     { name = "typing-extensions", marker = "(python_full_version < '3.13' and sys_platform == 'darwin') or (python_full_version < '3.13' and sys_platform == 'linux')" },
+ ]
+@@ -194,9 +175,6 @@ wheels = [
+ name = "asgiref"
+ version = "3.11.0"
+ source = { registry = "https://pypi.org/simple" }
+-dependencies = [
+-    { name = "typing-extensions", marker = "(python_full_version < '3.11' and sys_platform == 'darwin') or (python_full_version < '3.11' and sys_platform == 'linux')" },
+-]
+ sdist = { url = "https://files.pythonhosted.org/packages/76/b9/4db2509eabd14b4a8c71d1b24c8d5734c52b8560a7b1e1a8b56c8d25568b/asgiref-3.11.0.tar.gz", hash = "sha256:13acff32519542a1736223fb79a715acdebe24286d98e8b164a73085f40da2c4", size = 37969, upload-time = "2025-11-19T15:32:20.106Z" }
+ wheels = [
+     { url = "https://files.pythonhosted.org/packages/91/be/317c2c55b8bbec407257d45f5c8d1b6867abc76d12043f2d3d58c538a4ea/asgiref-3.11.0-py3-none-any.whl", hash = "sha256:1db9021efadb0d9512ce8ffaf72fcef601c7b73a8807a1bb2ef143dc6b14846d", size = 24096, upload-time = "2025-11-19T15:32:19.004Z" },
+@@ -220,47 +198,20 @@ wheels = [
+     { url = "https://files.pythonhosted.org/packages/3a/2a/7cc015f5b9f5db42b7d48157e23356022889fc354a2813c15934b7cb5c0e/attrs-25.4.0-py3-none-any.whl", hash = "sha256:adcf7e2a1fb3b36ac48d97835bb6d8ade15b8dcce26aba8bf1d14847b57a3373", size = 67615, upload-time = "2025-10-06T13:54:43.17Z" },
+ ]
+ 
+-[[package]]
+-name = "autobahn"
+-version = "24.4.2"
+-source = { registry = "https://pypi.org/simple" }
+-resolution-markers = [
+-    "python_full_version < '3.11' and sys_platform == 'darwin'",
+-    "python_full_version < '3.11' and sys_platform == 'linux'",
+-]
+-dependencies = [
+-    { name = "cryptography", marker = "(python_full_version < '3.11' and sys_platform == 'darwin') or (python_full_version < '3.11' and sys_platform == 'linux')" },
+-    { name = "hyperlink", marker = "(python_full_version < '3.11' and sys_platform == 'darwin') or (python_full_version < '3.11' and sys_platform == 'linux')" },
+-    { name = "setuptools", marker = "(python_full_version < '3.11' and sys_platform == 'darwin') or (python_full_version < '3.11' and sys_platform == 'linux')" },
+-    { name = "txaio", version = "25.9.2", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version < '3.11' and sys_platform == 'darwin') or (python_full_version < '3.11' and sys_platform == 'linux')" },
+-]
+-sdist = { url = "https://files.pythonhosted.org/packages/38/f2/8dffb3b709383ba5b47628b0cc4e43e8d12d59eecbddb62cfccac2e7cf6a/autobahn-24.4.2.tar.gz", hash = "sha256:a2d71ef1b0cf780b6d11f8b205fd2c7749765e65795f2ea7d823796642ee92c9", size = 482700, upload-time = "2024-08-02T09:26:48.241Z" }
+-wheels = [
+-    { url = "https://files.pythonhosted.org/packages/13/ee/a6475f39ef6c6f41c33da6b193e0ffd2c6048f52e1698be6253c59301b72/autobahn-24.4.2-py2.py3-none-any.whl", hash = "sha256:c56a2abe7ac78abbfb778c02892d673a4de58fd004d088cd7ab297db25918e81", size = 666965, upload-time = "2024-08-02T09:26:44.274Z" },
+-]
+-
+ [[package]]
+ name = "autobahn"
+ version = "25.12.2"
+ source = { registry = "https://pypi.org/simple" }
+-resolution-markers = [
+-    "python_full_version >= '3.12' and sys_platform == 'darwin'",
+-    "python_full_version == '3.11.*' and sys_platform == 'darwin'",
+-    "python_full_version == '3.12.*' and platform_machine == 'x86_64' and sys_platform == 'linux'",
+-    "python_full_version == '3.12.*' and platform_machine == 'aarch64' and sys_platform == 'linux'",
+-    "(python_full_version >= '3.12' and platform_machine != 'aarch64' and platform_machine != 'x86_64' and sys_platform == 'linux') or (python_full_version >= '3.13' and platform_machine == 'aarch64' and sys_platform == 'linux') or (python_full_version >= '3.13' and platform_machine == 'x86_64' and sys_platform == 'linux')",
+-    "python_full_version == '3.11.*' and sys_platform == 'linux'",
+-]
+ dependencies = [
+-    { name = "cbor2", marker = "(python_full_version >= '3.11' and sys_platform == 'darwin') or (python_full_version >= '3.11' and sys_platform == 'linux')" },
+-    { name = "cffi", marker = "(python_full_version >= '3.11' and sys_platform == 'darwin') or (python_full_version >= '3.11' and sys_platform == 'linux')" },
+-    { name = "cryptography", marker = "(python_full_version >= '3.11' and sys_platform == 'darwin') or (python_full_version >= '3.11' and sys_platform == 'linux')" },
+-    { name = "hyperlink", marker = "(python_full_version >= '3.11' and sys_platform == 'darwin') or (python_full_version >= '3.11' and sys_platform == 'linux')" },
+-    { name = "msgpack", marker = "(python_full_version >= '3.11' and platform_python_implementation == 'CPython' and sys_platform == 'darwin') or (python_full_version >= '3.11' and platform_python_implementation == 'CPython' and sys_platform == 'linux')" },
+-    { name = "py-ubjson", marker = "(python_full_version >= '3.11' and sys_platform == 'darwin') or (python_full_version >= '3.11' and sys_platform == 'linux')" },
+-    { name = "txaio", version = "25.12.2", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version >= '3.11' and sys_platform == 'darwin') or (python_full_version >= '3.11' and sys_platform == 'linux')" },
+-    { name = "u-msgpack-python", marker = "(python_full_version >= '3.11' and platform_python_implementation != 'CPython' and sys_platform == 'darwin') or (python_full_version >= '3.11' and platform_python_implementation != 'CPython' and sys_platform == 'linux')" },
+-    { name = "ujson", marker = "(python_full_version >= '3.11' and sys_platform == 'darwin') or (python_full_version >= '3.11' and sys_platform == 'linux')" },
++    { name = "cbor2", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
++    { name = "cffi", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
++    { name = "cryptography", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
++    { name = "hyperlink", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
++    { name = "msgpack", marker = "(platform_python_implementation == 'CPython' and sys_platform == 'darwin') or (platform_python_implementation == 'CPython' and sys_platform == 'linux')" },
++    { name = "py-ubjson", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
++    { name = "txaio", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
++    { name = "u-msgpack-python", marker = "(platform_python_implementation != 'CPython' and sys_platform == 'darwin') or (platform_python_implementation != 'CPython' and sys_platform == 'linux')" },
++    { name = "ujson", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
+ ]
+ sdist = { url = "https://files.pythonhosted.org/packages/54/d5/9adf0f5b9eb244e58e898e9f3db4b00c09835ef4b6c37d491886e0376b4f/autobahn-25.12.2.tar.gz", hash = "sha256:754c06a54753aeb7e8d10c5cbf03249ad9e2a1a32bca8be02865c6f00628a98c", size = 13893652, upload-time = "2025-12-15T11:13:19.086Z" }
+ wheels = [
+@@ -365,14 +316,6 @@ version = "1.2.0"
+ source = { registry = "https://pypi.org/simple" }
+ sdist = { url = "https://files.pythonhosted.org/packages/f7/16/c92ca344d646e71a43b8bb353f0a6490d7f6e06210f8554c8f874e454285/brotli-1.2.0.tar.gz", hash = "sha256:e310f77e41941c13340a95976fe66a8a95b01e783d430eeaf7a2f87e0a57dd0a", size = 7388632, upload-time = "2025-11-05T18:39:42.86Z" }
+ wheels = [
+-    { url = "https://files.pythonhosted.org/packages/64/10/a090475284fc4a71aed40a96f32e44a7fe5bda39687353dd977720b211b6/brotli-1.2.0-cp310-cp310-macosx_10_9_universal2.whl", hash = "sha256:3b90b767916ac44e93a8e28ce6adf8d551e43affb512f2377c732d486ac6514e", size = 863089, upload-time = "2025-11-05T18:38:01.181Z" },
+-    { url = "https://files.pythonhosted.org/packages/03/41/17416630e46c07ac21e378c3464815dd2e120b441e641bc516ac32cc51d2/brotli-1.2.0-cp310-cp310-macosx_10_9_x86_64.whl", hash = "sha256:6be67c19e0b0c56365c6a76e393b932fb0e78b3b56b711d180dd7013cb1fd984", size = 445442, upload-time = "2025-11-05T18:38:02.434Z" },
+-    { url = "https://files.pythonhosted.org/packages/24/31/90cc06584deb5d4fcafc0985e37741fc6b9717926a78674bbb3ce018957e/brotli-1.2.0-cp310-cp310-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:0bbd5b5ccd157ae7913750476d48099aaf507a79841c0d04a9db4415b14842de", size = 1532658, upload-time = "2025-11-05T18:38:03.588Z" },
+-    { url = "https://files.pythonhosted.org/packages/62/17/33bf0c83bcbc96756dfd712201d87342732fad70bb3472c27e833a44a4f9/brotli-1.2.0-cp310-cp310-manylinux2014_ppc64le.manylinux_2_17_ppc64le.manylinux_2_28_ppc64le.whl", hash = "sha256:3f3c908bcc404c90c77d5a073e55271a0a498f4e0756e48127c35d91cf155947", size = 1631241, upload-time = "2025-11-05T18:38:04.582Z" },
+-    { url = "https://files.pythonhosted.org/packages/48/10/f47854a1917b62efe29bc98ac18e5d4f71df03f629184575b862ef2e743b/brotli-1.2.0-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:1b557b29782a643420e08d75aea889462a4a8796e9a6cf5621ab05a3f7da8ef2", size = 1424307, upload-time = "2025-11-05T18:38:05.587Z" },
+-    { url = "https://files.pythonhosted.org/packages/e4/b7/f88eb461719259c17483484ea8456925ee057897f8e64487d76e24e5e38d/brotli-1.2.0-cp310-cp310-musllinux_1_2_aarch64.whl", hash = "sha256:81da1b229b1889f25adadc929aeb9dbc4e922bd18561b65b08dd9343cfccca84", size = 1488208, upload-time = "2025-11-05T18:38:06.613Z" },
+-    { url = "https://files.pythonhosted.org/packages/26/59/41bbcb983a0c48b0b8004203e74706c6b6e99a04f3c7ca6f4f41f364db50/brotli-1.2.0-cp310-cp310-musllinux_1_2_ppc64le.whl", hash = "sha256:ff09cd8c5eec3b9d02d2408db41be150d8891c5566addce57513bf546e3d6c6d", size = 1597574, upload-time = "2025-11-05T18:38:07.838Z" },
+-    { url = "https://files.pythonhosted.org/packages/8e/e6/8c89c3bdabbe802febb4c5c6ca224a395e97913b5df0dff11b54f23c1788/brotli-1.2.0-cp310-cp310-musllinux_1_2_x86_64.whl", hash = "sha256:a1778532b978d2536e79c05dac2d8cd857f6c55cd0c95ace5b03740824e0e2f1", size = 1492109, upload-time = "2025-11-05T18:38:08.816Z" },
+     { url = "https://files.pythonhosted.org/packages/7a/ef/f285668811a9e1ddb47a18cb0b437d5fc2760d537a2fe8a57875ad6f8448/brotli-1.2.0-cp311-cp311-macosx_10_9_universal2.whl", hash = "sha256:15b33fe93cedc4caaff8a0bd1eb7e3dab1c61bb22a0bf5bdfdfd97cd7da79744", size = 863110, upload-time = "2025-11-05T18:38:12.978Z" },
+     { url = "https://files.pythonhosted.org/packages/50/62/a3b77593587010c789a9d6eaa527c79e0848b7b860402cc64bc0bc28a86c/brotli-1.2.0-cp311-cp311-macosx_10_9_x86_64.whl", hash = "sha256:898be2be399c221d2671d29eed26b6b2713a02c2119168ed914e7d00ceadb56f", size = 445438, upload-time = "2025-11-05T18:38:14.208Z" },
+     { url = "https://files.pythonhosted.org/packages/cd/e1/7fadd47f40ce5549dc44493877db40292277db373da5053aff181656e16e/brotli-1.2.0-cp311-cp311-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:350c8348f0e76fff0a0fd6c26755d2653863279d086d3aa2c290a6a7251135dd", size = 1534420, upload-time = "2025-11-05T18:38:15.111Z" },
+@@ -422,11 +365,6 @@ version = "5.8.0"
+ source = { registry = "https://pypi.org/simple" }
+ sdist = { url = "https://files.pythonhosted.org/packages/d9/8e/8b4fdde28e42ffcd741a37f4ffa9fb59cd4fe01625b544dfcfd9ccb54f01/cbor2-5.8.0.tar.gz", hash = "sha256:b19c35fcae9688ac01ef75bad5db27300c2537eb4ee00ed07e05d8456a0d4931", size = 107825, upload-time = "2025-12-30T18:44:22.455Z" }
+ wheels = [
+-    { url = "https://files.pythonhosted.org/packages/3c/05/486166d9e998d65d70810e63eeacc8c5f13d167d8797cf2d73a588beb335/cbor2-5.8.0-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:2263c0c892194f10012ced24c322d025d9d7b11b41da1c357f3b3fe06676e6b7", size = 69882, upload-time = "2025-12-30T18:43:25.365Z" },
+-    { url = "https://files.pythonhosted.org/packages/4e/d0/ee976eaaf21c211eef651e1a921c109c3c3a3785d98307d74a70d142f341/cbor2-5.8.0-cp310-cp310-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:6ffe4ca079f6f8ed393f5c71a8de22651cb27bd50e74e2bcd6bc9c8f853a732b", size = 260696, upload-time = "2025-12-30T18:43:27.784Z" },
+-    { url = "https://files.pythonhosted.org/packages/66/7f/81cabd3aee6cc54b101a5214d5c3e541d275d7c05647c7dfc266c6aacf6f/cbor2-5.8.0-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:0427bd166230fe4c4b72965c6f2b6273bf29016d97cf08b258fa48db851ea598", size = 252135, upload-time = "2025-12-30T18:43:29.418Z" },
+-    { url = "https://files.pythonhosted.org/packages/c2/0b/f38e8c579e7e2d88d446549bce35bde7d845199300bc456b4123d6e6f0af/cbor2-5.8.0-cp310-cp310-musllinux_1_2_aarch64.whl", hash = "sha256:c23a04947c37964d70028ca44ea2a8709f09b8adc0090f9b5710fa957e9bc545", size = 255342, upload-time = "2025-12-30T18:43:30.966Z" },
+-    { url = "https://files.pythonhosted.org/packages/5d/02/8413f1bd42c8f665fb85374151599cb4957848f0f307d08334a08dee544c/cbor2-5.8.0-cp310-cp310-musllinux_1_2_x86_64.whl", hash = "sha256:218d5c7d2e8d13c7eded01a1b3fe2a9a1e51a7a843cefb8d38cb4bbbc6ad9bf7", size = 247191, upload-time = "2025-12-30T18:43:32.555Z" },
+     { url = "https://files.pythonhosted.org/packages/88/4b/623435ef9b98e86b6956a41863d39ff4fe4d67983948b5834f55499681dd/cbor2-5.8.0-cp311-cp311-macosx_11_0_arm64.whl", hash = "sha256:18ac191640093e6c7fbcb174c006ffec4106c3d8ab788e70272c1c4d933cbe11", size = 69875, upload-time = "2025-12-30T18:43:35.888Z" },
+     { url = "https://files.pythonhosted.org/packages/58/17/f664201080b2a7d0f57c16c8e9e5922013b92f202e294863ec7e75b7ff7f/cbor2-5.8.0-cp311-cp311-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:fddee9103a17d7bed5753f0c7fc6663faa506eb953e50d8287804eccf7b048e6", size = 268316, upload-time = "2025-12-30T18:43:37.161Z" },
+     { url = "https://files.pythonhosted.org/packages/d0/e1/072745b4ff01afe9df2cd627f8fc51a1acedb5d3d1253765625d2929db91/cbor2-5.8.0-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:8d2ea26fad620aba5e88d7541be8b10c5034a55db9a23809b7cb49f36803f05b", size = 258874, upload-time = "2025-12-30T18:43:38.878Z" },
+@@ -460,7 +398,6 @@ dependencies = [
+     { name = "click-didyoumean", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
+     { name = "click-plugins", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
+     { name = "click-repl", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
+-    { name = "exceptiongroup", marker = "(python_full_version < '3.11' and sys_platform == 'darwin') or (python_full_version < '3.11' and sys_platform == 'linux')" },
+     { name = "kombu", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
+     { name = "python-dateutil", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
+     { name = "tzlocal", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
+@@ -506,16 +443,6 @@ dependencies = [
+ ]
+ sdist = { url = "https://files.pythonhosted.org/packages/eb/56/b1ba7935a17738ae8453301356628e8147c79dbb825bcbc73dc7401f9846/cffi-2.0.0.tar.gz", hash = "sha256:44d1b5909021139fe36001ae048dbdde8214afa20200eda0f64c068cac5d5529", size = 523588, upload-time = "2025-09-08T23:24:04.541Z" }
+ wheels = [
+-    { url = "https://files.pythonhosted.org/packages/93/d7/516d984057745a6cd96575eea814fe1edd6646ee6efd552fb7b0921dec83/cffi-2.0.0-cp310-cp310-macosx_10_13_x86_64.whl", hash = "sha256:0cf2d91ecc3fcc0625c2c530fe004f82c110405f101548512cce44322fa8ac44", size = 184283, upload-time = "2025-09-08T23:22:08.01Z" },
+-    { url = "https://files.pythonhosted.org/packages/9e/84/ad6a0b408daa859246f57c03efd28e5dd1b33c21737c2db84cae8c237aa5/cffi-2.0.0-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:f73b96c41e3b2adedc34a7356e64c8eb96e03a3782b535e043a986276ce12a49", size = 180504, upload-time = "2025-09-08T23:22:10.637Z" },
+-    { url = "https://files.pythonhosted.org/packages/50/bd/b1a6362b80628111e6653c961f987faa55262b4002fcec42308cad1db680/cffi-2.0.0-cp310-cp310-manylinux1_i686.manylinux2014_i686.manylinux_2_17_i686.manylinux_2_5_i686.whl", hash = "sha256:53f77cbe57044e88bbd5ed26ac1d0514d2acf0591dd6bb02a3ae37f76811b80c", size = 208811, upload-time = "2025-09-08T23:22:12.267Z" },
+-    { url = "https://files.pythonhosted.org/packages/4f/27/6933a8b2562d7bd1fb595074cf99cc81fc3789f6a6c05cdabb46284a3188/cffi-2.0.0-cp310-cp310-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:3e837e369566884707ddaf85fc1744b47575005c0a229de3327f8f9a20f4efeb", size = 216402, upload-time = "2025-09-08T23:22:13.455Z" },
+-    { url = "https://files.pythonhosted.org/packages/05/eb/b86f2a2645b62adcfff53b0dd97e8dfafb5c8aa864bd0d9a2c2049a0d551/cffi-2.0.0-cp310-cp310-manylinux2014_ppc64le.manylinux_2_17_ppc64le.whl", hash = "sha256:5eda85d6d1879e692d546a078b44251cdd08dd1cfb98dfb77b670c97cee49ea0", size = 203217, upload-time = "2025-09-08T23:22:14.596Z" },
+-    { url = "https://files.pythonhosted.org/packages/9f/e0/6cbe77a53acf5acc7c08cc186c9928864bd7c005f9efd0d126884858a5fe/cffi-2.0.0-cp310-cp310-manylinux2014_s390x.manylinux_2_17_s390x.whl", hash = "sha256:9332088d75dc3241c702d852d4671613136d90fa6881da7d770a483fd05248b4", size = 203079, upload-time = "2025-09-08T23:22:15.769Z" },
+-    { url = "https://files.pythonhosted.org/packages/98/29/9b366e70e243eb3d14a5cb488dfd3a0b6b2f1fb001a203f653b93ccfac88/cffi-2.0.0-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:fc7de24befaeae77ba923797c7c87834c73648a05a4bde34b3b7e5588973a453", size = 216475, upload-time = "2025-09-08T23:22:17.427Z" },
+-    { url = "https://files.pythonhosted.org/packages/21/7a/13b24e70d2f90a322f2900c5d8e1f14fa7e2a6b3332b7309ba7b2ba51a5a/cffi-2.0.0-cp310-cp310-musllinux_1_2_aarch64.whl", hash = "sha256:cf364028c016c03078a23b503f02058f1814320a56ad535686f90565636a9495", size = 218829, upload-time = "2025-09-08T23:22:19.069Z" },
+-    { url = "https://files.pythonhosted.org/packages/60/99/c9dc110974c59cc981b1f5b66e1d8af8af764e00f0293266824d9c4254bc/cffi-2.0.0-cp310-cp310-musllinux_1_2_i686.whl", hash = "sha256:e11e82b744887154b182fd3e7e8512418446501191994dbf9c9fc1f32cc8efd5", size = 211211, upload-time = "2025-09-08T23:22:20.588Z" },
+-    { url = "https://files.pythonhosted.org/packages/49/72/ff2d12dbf21aca1b32a40ed792ee6b40f6dc3a9cf1644bd7ef6e95e0ac5e/cffi-2.0.0-cp310-cp310-musllinux_1_2_x86_64.whl", hash = "sha256:8ea985900c5c95ce9db1745f7933eeef5d314f0565b27625d9a10ec9881e1bfb", size = 218036, upload-time = "2025-09-08T23:22:22.143Z" },
+     { url = "https://files.pythonhosted.org/packages/12/4a/3dfd5f7850cbf0d06dc84ba9aa00db766b52ca38d8b86e3a38314d52498c/cffi-2.0.0-cp311-cp311-macosx_10_13_x86_64.whl", hash = "sha256:b4c854ef3adc177950a8dfc81a86f5115d2abd545751a304c5bcf2c2c7283cfe", size = 184344, upload-time = "2025-09-08T23:22:26.456Z" },
+     { url = "https://files.pythonhosted.org/packages/4f/8b/f0e4c441227ba756aafbe78f117485b25bb26b1c059d01f137fa6d14896b/cffi-2.0.0-cp311-cp311-macosx_11_0_arm64.whl", hash = "sha256:2de9a304e27f7596cd03d16f1b7c72219bd944e99cc52b84d0145aefb07cbd3c", size = 180560, upload-time = "2025-09-08T23:22:28.197Z" },
+     { url = "https://files.pythonhosted.org/packages/b1/b7/1200d354378ef52ec227395d95c2576330fd22a869f7a70e88e1447eb234/cffi-2.0.0-cp311-cp311-manylinux1_i686.manylinux2014_i686.manylinux_2_17_i686.manylinux_2_5_i686.whl", hash = "sha256:baf5215e0ab74c16e2dd324e8ec067ef59e41125d3eade2b863d294fd5035c92", size = 209613, upload-time = "2025-09-08T23:22:29.475Z" },
+@@ -596,19 +523,6 @@ version = "3.4.4"
+ source = { registry = "https://pypi.org/simple" }
+ sdist = { url = "https://files.pythonhosted.org/packages/13/69/33ddede1939fdd074bce5434295f38fae7136463422fe4fd3e0e89b98062/charset_normalizer-3.4.4.tar.gz", hash = "sha256:94537985111c35f28720e43603b8e7b43a6ecfb2ce1d3058bbe955b73404e21a", size = 129418, upload-time = "2025-10-14T04:42:32.879Z" }
+ wheels = [
+-    { url = "https://files.pythonhosted.org/packages/1f/b8/6d51fc1d52cbd52cd4ccedd5b5b2f0f6a11bbf6765c782298b0f3e808541/charset_normalizer-3.4.4-cp310-cp310-macosx_10_9_universal2.whl", hash = "sha256:e824f1492727fa856dd6eda4f7cee25f8518a12f3c4a56a74e8095695089cf6d", size = 209709, upload-time = "2025-10-14T04:40:11.385Z" },
+-    { url = "https://files.pythonhosted.org/packages/5c/af/1f9d7f7faafe2ddfb6f72a2e07a548a629c61ad510fe60f9630309908fef/charset_normalizer-3.4.4-cp310-cp310-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:4bd5d4137d500351a30687c2d3971758aac9a19208fc110ccb9d7188fbe709e8", size = 148814, upload-time = "2025-10-14T04:40:13.135Z" },
+-    { url = "https://files.pythonhosted.org/packages/79/3d/f2e3ac2bbc056ca0c204298ea4e3d9db9b4afe437812638759db2c976b5f/charset_normalizer-3.4.4-cp310-cp310-manylinux2014_armv7l.manylinux_2_17_armv7l.manylinux_2_31_armv7l.whl", hash = "sha256:027f6de494925c0ab2a55eab46ae5129951638a49a34d87f4c3eda90f696b4ad", size = 144467, upload-time = "2025-10-14T04:40:14.728Z" },
+-    { url = "https://files.pythonhosted.org/packages/ec/85/1bf997003815e60d57de7bd972c57dc6950446a3e4ccac43bc3070721856/charset_normalizer-3.4.4-cp310-cp310-manylinux2014_ppc64le.manylinux_2_17_ppc64le.manylinux_2_28_ppc64le.whl", hash = "sha256:f820802628d2694cb7e56db99213f930856014862f3fd943d290ea8438d07ca8", size = 162280, upload-time = "2025-10-14T04:40:16.14Z" },
+-    { url = "https://files.pythonhosted.org/packages/3e/8e/6aa1952f56b192f54921c436b87f2aaf7c7a7c3d0d1a765547d64fd83c13/charset_normalizer-3.4.4-cp310-cp310-manylinux2014_s390x.manylinux_2_17_s390x.manylinux_2_28_s390x.whl", hash = "sha256:798d75d81754988d2565bff1b97ba5a44411867c0cf32b77a7e8f8d84796b10d", size = 159454, upload-time = "2025-10-14T04:40:17.567Z" },
+-    { url = "https://files.pythonhosted.org/packages/36/3b/60cbd1f8e93aa25d1c669c649b7a655b0b5fb4c571858910ea9332678558/charset_normalizer-3.4.4-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:9d1bb833febdff5c8927f922386db610b49db6e0d4f4ee29601d71e7c2694313", size = 153609, upload-time = "2025-10-14T04:40:19.08Z" },
+-    { url = "https://files.pythonhosted.org/packages/64/91/6a13396948b8fd3c4b4fd5bc74d045f5637d78c9675585e8e9fbe5636554/charset_normalizer-3.4.4-cp310-cp310-manylinux_2_31_riscv64.manylinux_2_39_riscv64.whl", hash = "sha256:9cd98cdc06614a2f768d2b7286d66805f94c48cde050acdbbb7db2600ab3197e", size = 151849, upload-time = "2025-10-14T04:40:20.607Z" },
+-    { url = "https://files.pythonhosted.org/packages/b7/7a/59482e28b9981d105691e968c544cc0df3b7d6133152fb3dcdc8f135da7a/charset_normalizer-3.4.4-cp310-cp310-musllinux_1_2_aarch64.whl", hash = "sha256:077fbb858e903c73f6c9db43374fd213b0b6a778106bc7032446a8e8b5b38b93", size = 151586, upload-time = "2025-10-14T04:40:21.719Z" },
+-    { url = "https://files.pythonhosted.org/packages/92/59/f64ef6a1c4bdd2baf892b04cd78792ed8684fbc48d4c2afe467d96b4df57/charset_normalizer-3.4.4-cp310-cp310-musllinux_1_2_armv7l.whl", hash = "sha256:244bfb999c71b35de57821b8ea746b24e863398194a4014e4c76adc2bbdfeff0", size = 145290, upload-time = "2025-10-14T04:40:23.069Z" },
+-    { url = "https://files.pythonhosted.org/packages/6b/63/3bf9f279ddfa641ffa1962b0db6a57a9c294361cc2f5fcac997049a00e9c/charset_normalizer-3.4.4-cp310-cp310-musllinux_1_2_ppc64le.whl", hash = "sha256:64b55f9dce520635f018f907ff1b0df1fdc31f2795a922fb49dd14fbcdf48c84", size = 163663, upload-time = "2025-10-14T04:40:24.17Z" },
+-    { url = "https://files.pythonhosted.org/packages/ed/09/c9e38fc8fa9e0849b172b581fd9803bdf6e694041127933934184e19f8c3/charset_normalizer-3.4.4-cp310-cp310-musllinux_1_2_riscv64.whl", hash = "sha256:faa3a41b2b66b6e50f84ae4a68c64fcd0c44355741c6374813a800cd6695db9e", size = 151964, upload-time = "2025-10-14T04:40:25.368Z" },
+-    { url = "https://files.pythonhosted.org/packages/d2/d1/d28b747e512d0da79d8b6a1ac18b7ab2ecfd81b2944c4c710e166d8dd09c/charset_normalizer-3.4.4-cp310-cp310-musllinux_1_2_s390x.whl", hash = "sha256:6515f3182dbe4ea06ced2d9e8666d97b46ef4c75e326b79bb624110f122551db", size = 161064, upload-time = "2025-10-14T04:40:26.806Z" },
+-    { url = "https://files.pythonhosted.org/packages/bb/9a/31d62b611d901c3b9e5500c36aab0ff5eb442043fb3a1c254200d3d397d9/charset_normalizer-3.4.4-cp310-cp310-musllinux_1_2_x86_64.whl", hash = "sha256:cc00f04ed596e9dc0da42ed17ac5e596c6ccba999ba6bd92b0e0aef2f170f2d6", size = 155015, upload-time = "2025-10-14T04:40:28.284Z" },
+     { url = "https://files.pythonhosted.org/packages/ed/27/c6491ff4954e58a10f69ad90aca8a1b6fe9c5d3c6f380907af3c37435b59/charset_normalizer-3.4.4-cp311-cp311-macosx_10_9_universal2.whl", hash = "sha256:6e1fcf0720908f200cd21aa4e6750a48ff6ce4afe7ff5a79a90d5ed8a08296f8", size = 206988, upload-time = "2025-10-14T04:40:33.79Z" },
+     { url = "https://files.pythonhosted.org/packages/94/59/2e87300fe67ab820b5428580a53cad894272dbb97f38a7a814a2a1ac1011/charset_normalizer-3.4.4-cp311-cp311-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:5f819d5fe9234f9f82d75bdfa9aef3a3d72c4d24a6e57aeaebba32a704553aa0", size = 147324, upload-time = "2025-10-14T04:40:34.961Z" },
+     { url = "https://files.pythonhosted.org/packages/07/fb/0cf61dc84b2b088391830f6274cb57c82e4da8bbc2efeac8c025edb88772/charset_normalizer-3.4.4-cp311-cp311-manylinux2014_armv7l.manylinux_2_17_armv7l.manylinux_2_31_armv7l.whl", hash = "sha256:a59cb51917aa591b1c4e6a43c132f0cdc3c76dbad6155df4e28ee626cc77a0a3", size = 142742, upload-time = "2025-10-14T04:40:36.105Z" },
+@@ -746,16 +660,6 @@ version = "7.13.2"
+ source = { registry = "https://pypi.org/simple" }
+ sdist = { url = "https://files.pythonhosted.org/packages/ad/49/349848445b0e53660e258acbcc9b0d014895b6739237920886672240f84b/coverage-7.13.2.tar.gz", hash = "sha256:044c6951ec37146b72a50cc81ef02217d27d4c3640efd2640311393cbbf143d3", size = 826523, upload-time = "2026-01-25T13:00:04.889Z" }
+ wheels = [
+-    { url = "https://files.pythonhosted.org/packages/a4/2d/63e37369c8e81a643afe54f76073b020f7b97ddbe698c5c944b51b0a2bc5/coverage-7.13.2-cp310-cp310-macosx_10_9_x86_64.whl", hash = "sha256:f4af3b01763909f477ea17c962e2cca8f39b350a4e46e3a30838b2c12e31b81b", size = 218842, upload-time = "2026-01-25T12:57:15.3Z" },
+-    { url = "https://files.pythonhosted.org/packages/57/06/86ce882a8d58cbcb3030e298788988e618da35420d16a8c66dac34f138d0/coverage-7.13.2-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:36393bd2841fa0b59498f75466ee9bdec4f770d3254f031f23e8fd8e140ffdd2", size = 219360, upload-time = "2026-01-25T12:57:17.572Z" },
+-    { url = "https://files.pythonhosted.org/packages/cd/84/70b0eb1ee19ca4ef559c559054c59e5b2ae4ec9af61398670189e5d276e9/coverage-7.13.2-cp310-cp310-manylinux1_i686.manylinux_2_28_i686.manylinux_2_5_i686.whl", hash = "sha256:9cc7573518b7e2186bd229b1a0fe24a807273798832c27032c4510f47ffdb896", size = 246123, upload-time = "2026-01-25T12:57:19.087Z" },
+-    { url = "https://files.pythonhosted.org/packages/35/fb/05b9830c2e8275ebc031e0019387cda99113e62bb500ab328bb72578183b/coverage-7.13.2-cp310-cp310-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl", hash = "sha256:ca9566769b69a5e216a4e176d54b9df88f29d750c5b78dbb899e379b4e14b30c", size = 247930, upload-time = "2026-01-25T12:57:20.929Z" },
+-    { url = "https://files.pythonhosted.org/packages/81/aa/3f37858ca2eed4f09b10ca3c6ddc9041be0a475626cd7fd2712f4a2d526f/coverage-7.13.2-cp310-cp310-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:9c9bdea644e94fd66d75a6f7e9a97bb822371e1fe7eadae2cacd50fcbc28e4dc", size = 249804, upload-time = "2026-01-25T12:57:22.904Z" },
+-    { url = "https://files.pythonhosted.org/packages/b6/b3/c904f40c56e60a2d9678a5ee8df3d906d297d15fb8bec5756c3b0a67e2df/coverage-7.13.2-cp310-cp310-manylinux_2_31_riscv64.manylinux_2_39_riscv64.whl", hash = "sha256:5bd447332ec4f45838c1ad42268ce21ca87c40deb86eabd59888859b66be22a5", size = 246815, upload-time = "2026-01-25T12:57:24.314Z" },
+-    { url = "https://files.pythonhosted.org/packages/41/91/ddc1c5394ca7fd086342486440bfdd6b9e9bda512bf774599c7c7a0081e0/coverage-7.13.2-cp310-cp310-musllinux_1_2_aarch64.whl", hash = "sha256:7c79ad5c28a16a1277e1187cf83ea8dafdcc689a784228a7d390f19776db7c31", size = 247843, upload-time = "2026-01-25T12:57:26.544Z" },
+-    { url = "https://files.pythonhosted.org/packages/87/d2/cdff8f4cd33697883c224ea8e003e9c77c0f1a837dc41d95a94dd26aad67/coverage-7.13.2-cp310-cp310-musllinux_1_2_i686.whl", hash = "sha256:76e06ccacd1fb6ada5d076ed98a8c6f66e2e6acd3df02819e2ee29fd637b76ad", size = 245850, upload-time = "2026-01-25T12:57:28.507Z" },
+-    { url = "https://files.pythonhosted.org/packages/f5/42/e837febb7866bf2553ab53dd62ed52f9bb36d60c7e017c55376ad21fbb05/coverage-7.13.2-cp310-cp310-musllinux_1_2_riscv64.whl", hash = "sha256:49d49e9a5e9f4dc3d3dac95278a020afa6d6bdd41f63608a76fa05a719d5b66f", size = 246116, upload-time = "2026-01-25T12:57:30.16Z" },
+-    { url = "https://files.pythonhosted.org/packages/09/b1/4a3f935d7df154df02ff4f71af8d61298d713a7ba305d050ae475bfbdde2/coverage-7.13.2-cp310-cp310-musllinux_1_2_x86_64.whl", hash = "sha256:ed2bce0e7bfa53f7b0b01c722da289ef6ad4c18ebd52b1f93704c21f116360c8", size = 246720, upload-time = "2026-01-25T12:57:32.165Z" },
+     { url = "https://files.pythonhosted.org/packages/6c/01/abca50583a8975bb6e1c59eff67ed8e48bb127c07dad5c28d9e96ccc09ec/coverage-7.13.2-cp311-cp311-macosx_10_9_x86_64.whl", hash = "sha256:060ebf6f2c51aff5ba38e1f43a2095e087389b1c69d559fde6049a4b0001320e", size = 218971, upload-time = "2026-01-25T12:57:36.953Z" },
+     { url = "https://files.pythonhosted.org/packages/eb/0e/b6489f344d99cd1e5b4d5e1be52dfd3f8a3dc5112aa6c33948da8cabad4e/coverage-7.13.2-cp311-cp311-macosx_11_0_arm64.whl", hash = "sha256:c1ea8ca9db5e7469cd364552985e15911548ea5b69c48a17291f0cac70484b2e", size = 219473, upload-time = "2026-01-25T12:57:38.934Z" },
+     { url = "https://files.pythonhosted.org/packages/17/11/db2f414915a8e4ec53f60b17956c27f21fb68fcf20f8a455ce7c2ccec638/coverage-7.13.2-cp311-cp311-manylinux1_i686.manylinux_2_28_i686.manylinux_2_5_i686.whl", hash = "sha256:b780090d15fd58f07
+
+... [truncated, 288971 chars total]

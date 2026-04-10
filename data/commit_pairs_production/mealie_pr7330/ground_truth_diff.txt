@@ -1,0 +1,288 @@
+diff --git a/frontend/pages/g/[groupSlug]/r/create/html.vue b/frontend/pages/g/[groupSlug]/r/create/html.vue
+index ed1893fc573..fdb73d9f5dc 100644
+--- a/frontend/pages/g/[groupSlug]/r/create/html.vue
++++ b/frontend/pages/g/[groupSlug]/r/create/html.vue
+@@ -19,7 +19,7 @@
+           >https://schema.org/Recipe</a>
+         </p>
+         <v-switch
+-          v-model="isEditJSON"
++          v-model="state.isEditJSON"
+           :label="$t('recipe.json-editor')"
+           color="primary"
+           class="mt-2"
+@@ -40,7 +40,7 @@
+           style="max-width: 500px"
+         />
+         <RecipeJsonEditor
+-          v-if="isEditJSON"
++          v-if="state.isEditJSON"
+           v-model="newRecipeData"
+           height="250px"
+           mode="code"
+diff --git a/mealie/services/scraper/scraper_strategies.py b/mealie/services/scraper/scraper_strategies.py
+index c05ef59d28b..924bb1b4c5a 100644
+--- a/mealie/services/scraper/scraper_strategies.py
++++ b/mealie/services/scraper/scraper_strategies.py
+@@ -426,7 +426,7 @@ async def parse(self, on_progress: Callable[[str], Awaitable[None]] | None = Non
+         if on_progress:
+             await on_progress(self.translator.t("recipe.create-progress.creating-recipe-with-ai"))
+ 
+-        return super().parse()
++        return await super().parse()
+ 
+ 
+ class TranscribedAudio(TypedDict):
+diff --git a/tests/integration_tests/user_recipe_tests/test_recipe_create_from_openai.py b/tests/integration_tests/user_recipe_tests/test_recipe_create_from_openai.py
+new file mode 100644
+index 00000000000..94afa715f1e
+--- /dev/null
++++ b/tests/integration_tests/user_recipe_tests/test_recipe_create_from_openai.py
+@@ -0,0 +1,183 @@
++import json
++
++import pytest
++from fastapi.testclient import TestClient
++
++import mealie.services.scraper.recipe_scraper as recipe_scraper_module
++import mealie.services.scraper.scraper_strategies as scraper_strategies_module
++from mealie.schema.openai.general import OpenAIText
++from mealie.services.openai import OpenAIService
++from mealie.services.recipe.recipe_data_service import RecipeDataService
++from mealie.services.scraper.scraper_strategies import RecipeScraperOpenAI
++from tests.utils import api_routes
++from tests.utils.factories import random_string
++from tests.utils.fixture_schemas import TestUser
++from tests.utils.helpers import parse_sse_events
++
++
++@pytest.fixture()
++def recipe_name() -> str:
++    return random_string()
++
++
++@pytest.fixture()
++def recipe_ld_json(recipe_name: str) -> str:
++    return json.dumps(
++        {
++            "@context": "https://schema.org",
++            "@type": "Recipe",
++            "name": recipe_name,
++            "recipeIngredient": [random_string() for _ in range(3)],
++            "recipeInstructions": [
++                {"@type": "HowToStep", "text": random_string()},
++                {"@type": "HowToStep", "text": random_string()},
++            ],
++        }
++    )
++
++
++@pytest.fixture()
++def bare_html() -> str:
++    return f"<html><body><p>{random_string()}</p></body></html>"
++
++
++@pytest.fixture()
++def recipe_url() -> str:
++    return f"https://example.com/recipe/{random_string()}"
++
++
++@pytest.fixture(autouse=True)
++def openai_scraper_setup(monkeypatch: pytest.MonkeyPatch, bare_html: str):
++    """Restrict to only RecipeScraperOpenAI, enable it unconditionally, and prevent real HTTP calls."""
++    monkeypatch.setattr(recipe_scraper_module, "DEFAULT_SCRAPER_STRATEGIES", [RecipeScraperOpenAI])
++
++    settings_stub = type("_Settings", (), {"OPENAI_ENABLED": True})()
++    monkeypatch.setattr(scraper_strategies_module, "get_app_settings", lambda: settings_stub)
++
++    async def mock_safe_scrape_html(url: str) -> str:
++        return bare_html
++
++    monkeypatch.setattr(recipe_scraper_module, "safe_scrape_html", mock_safe_scrape_html)
++    monkeypatch.setattr(RecipeDataService, "scrape_image", lambda *_: "TEST_IMAGE")
++
++
++def test_create_by_url_via_openai(
++    api_client: TestClient,
++    unique_user: TestUser,
++    monkeypatch: pytest.MonkeyPatch,
++    recipe_ld_json: str,
++    recipe_url: str,
++    recipe_name: str,
++):
++    async def mock_get_response(self, prompt, message, *args, **kwargs) -> OpenAIText | None:
++        return OpenAIText(text=recipe_ld_json)
++
++    monkeypatch.setattr(OpenAIService, "get_response", mock_get_response)
++
++    api_client.delete(api_routes.recipes_slug("openai-test-cake"), headers=unique_user.token)
++    response = api_client.post(
++        api_routes.recipes_create_url,
++        json={"url": recipe_url, "include_tags": False},
++        headers=unique_user.token,
++    )
++
++    assert response.status_code == 201
++    slug = json.loads(response.text)
++
++    recipe = api_client.get(api_routes.recipes_slug(slug), headers=unique_user.token).json()
++    assert recipe["name"] == recipe_name
++    assert len(recipe["recipeIngredient"]) == 3
++    assert len(recipe["recipeInstructions"]) == 2
++
++
++def test_create_by_html_or_json_via_openai(
++    api_client: TestClient,
++    unique_user: TestUser,
++    monkeypatch: pytest.MonkeyPatch,
++    recipe_ld_json: str,
++    bare_html: str,
++    recipe_name: str,
++):
++    async def mock_get_response(self, prompt, message, *args, **kwargs) -> OpenAIText | None:
++        return OpenAIText(text=recipe_ld_json)
++
++    monkeypatch.setattr(OpenAIService, "get_response", mock_get_response)
++
++    api_client.delete(api_routes.recipes_slug("openai-test-cake"), headers=unique_user.token)
++    response = api_client.post(
++        api_routes.recipes_create_html_or_json,
++        json={"data": bare_html, "include_tags": False},
++        headers=unique_user.token,
++    )
++
++    assert response.status_code == 201
++    slug = json.loads(response.text)
++
++    recipe = api_client.get(api_routes.recipes_slug(slug), headers=unique_user.token).json()
++    assert recipe["name"] == recipe_name
++
++
++def test_create_stream_via_openai_emits_progress(
++    api_client: TestClient,
++    unique_user: TestUser,
++    monkeypatch: pytest.MonkeyPatch,
++    recipe_ld_json: str,
++    bare_html: str,
++):
++    async def mock_get_response(self, prompt, message, *args, **kwargs) -> OpenAIText | None:
++        return OpenAIText(text=recipe_ld_json)
++
++    monkeypatch.setattr(OpenAIService, "get_response", mock_get_response)
++
++    api_client.delete(api_routes.recipes_slug("openai-test-cake"), headers=unique_user.token)
++    response = api_client.post(
++        api_routes.recipes_create_html_or_json_stream,
++        json={"data": bare_html, "include_tags": False},
++        headers=unique_user.token,
++    )
++
++    assert response.status_code == 200
++    events = parse_sse_events(response.text)
++    event_types = [e["event"] for e in events]
++
++    assert "done" in event_types
++    assert any(e["event"] == "progress" for e in events)
++
++
++def test_create_by_url_openai_returns_none(
++    api_client: TestClient,
++    unique_user: TestUser,
++    monkeypatch: pytest.MonkeyPatch,
++    recipe_url: str,
++):
++    """When OpenAI returns None the endpoint should return 400."""
++
++    async def mock_get_response(self, prompt, message, *args, **kwargs) -> OpenAIText | None:
++        return None
++
++    monkeypatch.setattr(OpenAIService, "get_response", mock_get_response)
++
++    response = api_client.post(
++        api_routes.recipes_create_url,
++        json={"url": recipe_url, "include_tags": False},
++        headers=unique_user.token,
++    )
++    assert response.status_code == 400
++
++
++def test_create_by_url_openai_disabled(
++    api_client: TestClient,
++    unique_user: TestUser,
++    monkeypatch: pytest.MonkeyPatch,
++    recipe_url: str,
++):
++    """When OPENAI_ENABLED is False, can_scrape() returns False and the endpoint returns 400."""
++    disabled_settings = type("_Settings", (), {"OPENAI_ENABLED": False})()
++    monkeypatch.setattr(scraper_strategies_module, "get_app_settings", lambda: disabled_settings)
++
++    response = api_client.post(
++        api_routes.recipes_create_url,
++        json={"url": recipe_url, "include_tags": False},
++        headers=unique_user.token,
++    )
++    assert response.status_code == 400
+diff --git a/tests/integration_tests/user_recipe_tests/test_recipe_crud.py b/tests/integration_tests/user_recipe_tests/test_recipe_crud.py
+index d8d61340e0e..334eaa1ecaa 100644
+--- a/tests/integration_tests/user_recipe_tests/test_recipe_crud.py
++++ b/tests/integration_tests/user_recipe_tests/test_recipe_crud.py
+@@ -33,6 +33,7 @@
+ from tests.utils import api_routes
+ from tests.utils.factories import random_int, random_string
+ from tests.utils.fixture_schemas import TestUser
++from tests.utils.helpers import parse_sse_events
+ from tests.utils.recipe_data import get_recipe_test_cases
+ 
+ recipe_test_data = get_recipe_test_cases()
+@@ -96,23 +97,6 @@ async def get_html(self, url: str) -> str:
+     return get_html
+ 
+ 
+-def parse_sse_events(text: str) -> list[dict]:
+-    """Parse SSE response text into a list of events with 'event' and 'data' keys."""
+-    events = []
+-    current: dict = {}
+-    for line in text.splitlines():
+-        if line.startswith("event:"):
+-            current["event"] = line[len("event:") :].strip()
+-        elif line.startswith("data:"):
+-            current["data"] = json.loads(line[len("data:") :].strip())
+-        elif line == "" and current:
+-            events.append(current)
+-            current = {}
+-    if current:
+-        events.append(current)
+-    return events
+-
+-
+ def test_create_by_url(
+     api_client: TestClient,
+     unique_user: TestUser,
+diff --git a/tests/utils/helpers.py b/tests/utils/helpers.py
+index 3a50ed95e07..890876cae01 100644
+--- a/tests/utils/helpers.py
++++ b/tests/utils/helpers.py
+@@ -1,3 +1,23 @@
++import json
++
++
+ class MatchAny:
+     def __eq__(self, _: object) -> bool:
+         return True
++
++
++def parse_sse_events(text: str) -> list[dict]:
++    """Parse SSE response text into a list of events with 'event' and 'data' keys."""
++    events = []
++    current: dict = {}
++    for line in text.splitlines():
++        if line.startswith("event:"):
++            current["event"] = line[len("event:") :].strip()
++        elif line.startswith("data:"):
++            current["data"] = json.loads(line[len("data:") :].strip())
++        elif line == "" and current:
++            events.append(current)
++            current = {}
++    if current:
++        events.append(current)
++    return events

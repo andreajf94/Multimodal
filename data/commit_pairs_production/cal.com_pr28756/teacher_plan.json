@@ -1,0 +1,93 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "documentation",
+      "recommendation": "Created a standalone troubleshooting guide instead of updating existing documentation files, and added it to the documentation navigation structure",
+      "rationale": "The troubleshooting content is extensive (200+ lines) and covers multiple distinct problem domains (Stripe, URLs, Docker, API v2, SSL). A standalone guide provides better organization and discoverability than scattering updates across multiple existing docs. Adding it to docs.json ensures it appears in the documentation navigation, making it accessible to users.",
+      "alternatives_considered": [
+        "Updating existing self-hosting documentation files piecemeal",
+        "Adding troubleshooting sections to each relevant existing guide",
+        "Creating a GitHub wiki page instead of integrated documentation"
+      ],
+      "files_affected": [
+        "docs/docs.json",
+        "docs/self-hosting/troubleshooting.mdx"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Documented specific error scenarios with clear symptoms, causes, and solutions, focusing on actionable fixes",
+      "rationale": "Troubleshooting documentation is most effective when it follows a pattern: symptom \u2192 cause \u2192 solution. This structure helps users quickly identify their issue and apply the fix. The guide includes specific error messages (CLIENT_FETCH_ERROR), environment variable names, and Docker service names that match actual codebase behavior.",
+      "alternatives_considered": [
+        "Generic troubleshooting advice without specific error messages",
+        "Only listing solutions without explaining causes",
+        "Creating separate guides for each error type"
+      ],
+      "files_affected": [
+        "docs/self-hosting/troubleshooting.mdx"
+      ]
+    },
+    {
+      "dimension": "configuration_management",
+      "recommendation": "Clarified environment variable requirements across different deployment contexts (Docker, Vercel, API v2)",
+      "rationale": "The codebase has complex configuration requirements with environment variables spread across .env, .env.appStore, and service-specific requirements. The guide addresses common pitfalls: build-time vs runtime variables (NEXT_PUBLIC_WEBAPP_URL), optional vs required variables (NEXTAUTH_URL), and service-specific requirements (API v2 environment variables not in root .env.example).",
+      "alternatives_considered": [
+        "Listing all environment variables without context",
+        "Assuming users will read all .env.example files",
+        "Not distinguishing between different deployment methods"
+      ],
+      "files_affected": [
+        "docs/self-hosting/troubleshooting.mdx"
+      ]
+    },
+    {
+      "dimension": "api_design",
+      "recommendation": "Documented API v2 service requirements and environment variable discrepancies",
+      "rationale": "API v2 (NestJS) has different environment variable requirements than the main web app, and missing variables cause service crashes. The guide explicitly lists required API v2 variables and notes that STRIPE_API_KEY is the v2 equivalent of STRIPE_PRIVATE_KEY, addressing a common point of confusion in the dual-API architecture.",
+      "alternatives_considered": [
+        "Not documenting API v2-specific issues",
+        "Assuming users will check apps/api/v2/.env.example",
+        "Treating all environment variables uniformly across services"
+      ],
+      "files_affected": [
+        "docs/self-hosting/troubleshooting.mdx"
+      ]
+    },
+    {
+      "dimension": "security",
+      "recommendation": "Provided secure alternatives to disabling TLS verification and explained the risks",
+      "rationale": "The guide addresses SSL/TLS issues behind reverse proxies by recommending proper header forwarding (X-Forwarded-Proto) instead of disabling certificate verification. It explicitly warns against NODE_TLS_REJECT_UNAUTHORIZED=0 for production and explains the security risks, aligning with the codebase's security-conscious architecture.",
+      "alternatives_considered": [
+        "Simply recommending to disable TLS verification",
+        "Not addressing SSL issues at all",
+        "Providing insecure workarounds without warnings"
+      ],
+      "files_affected": [
+        "docs/self-hosting/troubleshooting.mdx"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Create comprehensive self-hosting troubleshooting guide",
+      "description": "Create a new troubleshooting guide that addresses common deployment issues reported in GitHub issues, covering Stripe configuration, URL redirects, Docker-specific problems, API v2 service requirements, and SSL/TLS configuration",
+      "files_to_modify": [
+        "docs/docs.json"
+      ],
+      "files_to_create": [
+        "docs/self-hosting/troubleshooting.mdx"
+      ],
+      "estimated_effort": "medium"
+    }
+  ],
+  "implementation_summary": "The implementation creates a comprehensive troubleshooting guide for self-hosted Cal.com deployments, addressing gaps identified from real user issues (referenced GitHub issues #25993, #21921). The guide follows a structured approach: each section identifies a specific symptom, explains the root cause, and provides actionable solutions with code examples.\n\nKey patterns used include: 1) Problem-solution structure for quick troubleshooting, 2) Clear differentiation between deployment contexts (Docker vs Vercel, API v1 vs API v2), 3) Emphasis on security best practices (avoiding NODE_TLS_REJECT_UNAUTHORIZED=0 in production), and 4) Reference to existing codebase patterns (environment variable organization, service architecture).\n\nThe guide integrates with the existing documentation system by being added to docs.json's navigation structure under the self-hosting section. It complements rather than replaces existing documentation, focusing specifically on troubleshooting scenarios that users encounter during deployment. The content reflects actual codebase behavior, such as the API v2 service's strict environment variable requirements and the dual Stripe key configuration (STRIPE_PRIVATE_KEY for web, STRIPE_API_KEY for API v2).",
+  "source_pr": "https://github.com/calcom/cal.com/pull/28756",
+  "before_sha": "25857c07e11bd9681a18f1551276884ba633f2fb",
+  "after_sha": "facc0745d3c4bc77f97f56a5458dbe06f2f5f173",
+  "diff_stats": {
+    "additions": 220,
+    "deletions": 1,
+    "files_changed": 2
+  }
+}

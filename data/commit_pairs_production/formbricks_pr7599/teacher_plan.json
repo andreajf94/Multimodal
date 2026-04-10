@@ -1,0 +1,179 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "ui_ux_design",
+      "recommendation": "Enhanced navigation structure with workspace and organization switchers in the sidebar",
+      "rationale": "The previous navigation only had a user dropdown. The new design adds dedicated workspace (project) and organization switchers with settings access, improving discoverability and reducing clicks. This creates a clear hierarchy: workspace \u2192 organization \u2192 account.",
+      "alternatives_considered": [
+        "Keeping the old single dropdown approach",
+        "Adding switchers only to the top breadcrumb",
+        "Creating separate pages for switching"
+      ],
+      "files_affected": [
+        "apps/web/app/(app)/environments/[environmentId]/components/MainNavigation.tsx"
+      ]
+    },
+    {
+      "dimension": "data_fetching",
+      "recommendation": "Lazy loading of projects and organizations with error handling and retry logic",
+      "rationale": "Projects and organizations are loaded only when their respective dropdowns are opened, reducing initial page load. Error states are handled gracefully with retry buttons. This prevents unnecessary API calls while maintaining good UX.",
+      "alternatives_considered": [
+        "Loading all data upfront on page load",
+        "Using React Query for caching",
+        "Server-side fetching with Next.js"
+      ],
+      "files_affected": [
+        "apps/web/app/(app)/environments/[environmentId]/components/MainNavigation.tsx"
+      ]
+    },
+    {
+      "dimension": "state_management",
+      "recommendation": "Local state management with React hooks for dropdowns and modals",
+      "rationale": "Used useState for dropdown open states, loading states, and modal visibility. useTransition for navigation transitions to prevent UI blocking. This keeps the component self-contained without requiring global state.",
+      "alternatives_considered": [
+        "Using Zustand or Redux for global state",
+        "URL-based state management",
+        "Context API for navigation state"
+      ],
+      "files_affected": [
+        "apps/web/app/(app)/environments/[environmentId]/components/MainNavigation.tsx"
+      ]
+    },
+    {
+      "dimension": "internationalization",
+      "recommendation": "Added new translation keys and updated existing ones across all 14 supported languages",
+      "rationale": "All new UI text (like 'Change workspace', 'Change organization') needed translation. Also fixed existing translation inconsistencies (e.g., 'Etwas zufrieden' \u2192 'Einigerma\u00dfen zufrieden' in German).",
+      "alternatives_considered": [
+        "Using English-only text initially",
+        "Adding translations only for major languages",
+        "Using machine translation APIs"
+      ],
+      "files_affected": [
+        "apps/web/i18n.lock",
+        "apps/web/locales/de-DE.json",
+        "apps/web/locales/en-US.json",
+        "apps/web/locales/es-ES.json",
+        "apps/web/locales/fr-FR.json",
+        "apps/web/locales/hu-HU.json",
+        "apps/web/locales/ja-JP.json",
+        "apps/web/locales/nl-NL.json",
+        "apps/web/locales/pt-BR.json",
+        "apps/web/locales/pt-PT.json",
+        "apps/web/locales/ro-RO.json",
+        "apps/web/locales/ru-RU.json",
+        "apps/web/locales/sv-SE.json",
+        "apps/web/locales/zh-Hans-CN.json",
+        "apps/web/locales/zh-Hant-TW.json"
+      ]
+    },
+    {
+      "dimension": "accessibility",
+      "recommendation": "Added proper ARIA labels and keyboard navigation support",
+      "rationale": "Dropdown triggers have aria-label attributes for screen readers when collapsed. Focus management uses focus-visible rings. Button elements are used instead of divs for clickable items.",
+      "alternatives_considered": [
+        "Using divs with onClick handlers",
+        "Relying on default browser behavior",
+        "Adding accessibility as an afterthought"
+      ],
+      "files_affected": [
+        "apps/web/app/(app)/environments/[environmentId]/components/MainNavigation.tsx"
+      ]
+    },
+    {
+      "dimension": "component_design",
+      "recommendation": "Consistent styling patterns and icon usage across navigation elements",
+      "rationale": "All switchers use the same visual pattern: icon + label + chevron. Consistent spacing, hover states, and loading indicators. Updated project-breadcrumb to use FoldersIcon instead of HotelIcon for consistency.",
+      "alternatives_considered": [
+        "Different styling for each switcher type",
+        "Keeping old HotelIcon in breadcrumb",
+        "Using different icon libraries"
+      ],
+      "files_affected": [
+        "apps/web/app/(app)/environments/[environmentId]/components/MainNavigation.tsx",
+        "apps/web/app/(app)/environments/[environmentId]/components/project-breadcrumb.tsx"
+      ]
+    },
+    {
+      "dimension": "error_handling",
+      "recommendation": "Comprehensive error handling with user-friendly messages and retry options",
+      "rationale": "Network failures when loading projects/organizations show descriptive errors with 'Try again' buttons. Uses getFormattedErrorMessage utility to handle different error formats. Prevents silent failures.",
+      "alternatives_considered": [
+        "Generic error messages",
+        "Silent failures with console logs",
+        "Automatic retries without user control"
+      ],
+      "files_affected": [
+        "apps/web/app/(app)/environments/[environmentId]/components/MainNavigation.tsx"
+      ]
+    },
+    {
+      "dimension": "api_design",
+      "recommendation": "Prop drilling additional data from parent layout to navigation component",
+      "rationale": "EnvironmentLayout passes organizationProjectsLimit, isMultiOrgEnabled, isLicenseActive, and isAccessControlAllowed to MainNavigation. This allows the navigation to make permission-based decisions without additional API calls.",
+      "alternatives_considered": [
+        "Fetching this data within MainNavigation",
+        "Using context providers",
+        "Storing in global state"
+      ],
+      "files_affected": [
+        "apps/web/app/(app)/environments/[environmentId]/components/EnvironmentLayout.tsx"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Enhanced sidebar navigation with workspace and organization switchers",
+      "description": "Add dropdown switchers for workspace (project) and organization in the main sidebar with settings access, lazy loading, and error handling",
+      "files_to_modify": [
+        "apps/web/app/(app)/environments/[environmentId]/components/MainNavigation.tsx"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "T-002",
+      "title": "Internationalization updates for new navigation features",
+      "description": "Add translation keys for new UI text and fix existing translation inconsistencies across all 14 supported languages",
+      "files_to_modify": [
+        "apps/web/i18n.lock",
+        "apps/web/locales/de-DE.json",
+        "apps/web/locales/en-US.json",
+        "apps/web/locales/es-ES.json",
+        "apps/web/locales/fr-FR.json",
+        "apps/web/locales/hu-HU.json",
+        "apps/web/locales/ja-JP.json",
+        "apps/web/locales/nl-NL.json",
+        "apps/web/locales/pt-BR.json",
+        "apps/web/locales/pt-PT.json",
+        "apps/web/locales/ro-RO.json",
+        "apps/web/locales/ru-RU.json",
+        "apps/web/locales/sv-SE.json",
+        "apps/web/locales/zh-Hans-CN.json",
+        "apps/web/locales/zh-Hant-TW.json"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    },
+    {
+      "id": "T-003",
+      "title": "Prop updates and icon consistency",
+      "description": "Update EnvironmentLayout to pass additional props to MainNavigation and ensure consistent icon usage across navigation components",
+      "files_to_modify": [
+        "apps/web/app/(app)/environments/[environmentId]/components/EnvironmentLayout.tsx",
+        "apps/web/app/(app)/environments/[environmentId]/components/project-breadcrumb.tsx"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "The implementation enhances the navigation user experience by restructuring the sidebar to include dedicated workspace (project) and organization switchers alongside the existing user dropdown. This creates a clear hierarchical navigation pattern where users can switch between different contexts without leaving their current page.\n\nKey patterns used include lazy loading with useEffect hooks that trigger data fetching only when dropdowns are opened, comprehensive error handling with user-friendly retry options, and consistent visual design across all navigation elements. The implementation leverages existing modal components (CreateProjectModal, CreateOrganizationModal, ProjectLimitModal) for creating new entities, maintaining consistency with the rest of the application.\n\nThe changes integrate seamlessly with the existing codebase by following established patterns: using the existing translation system, reusing UI components from the modules directory, and maintaining the same styling approach with Tailwind CSS. The navigation now provides better context awareness with settings access directly from the switchers, reducing the number of clicks needed to access common configuration pages. The addition of proper accessibility attributes and keyboard navigation support ensures the enhanced navigation is usable by all users.",
+  "source_pr": "https://github.com/formbricks/formbricks/pull/7599",
+  "before_sha": "1064f684358df0374803856df31af4a75c0a4363",
+  "after_sha": "d96304d86d7809eabb330c4a25074f31ea4ed244",
+  "diff_stats": {
+    "additions": 572,
+    "deletions": 55,
+    "files_changed": 19
+  }
+}

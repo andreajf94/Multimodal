@@ -1,0 +1,67 @@
+{
+  "architecture_decisions": [
+    {
+      "dimension": "dependency_management",
+      "recommendation": "Replaced direct tokio function calls with imported module functions to reduce coupling and improve code organization",
+      "rationale": "Direct calls like `tokio::time::sleep()` and `tokio::task::spawn_blocking()` create tight coupling to the tokio crate's module structure. By importing these functions at the module level (`use tokio::time::sleep` and `use tokio::task::spawn_blocking`), we make dependencies explicit and easier to manage. This follows Rust's best practices for clean imports and reduces the risk of breaking changes if tokio reorganizes its internal module structure.",
+      "alternatives_considered": [
+        "Keeping direct calls as-is (simpler but less maintainable)",
+        "Creating wrapper functions in ak-common (adds abstraction but increases code)",
+        "Using fully qualified paths everywhere (verbose but explicit)"
+      ],
+      "files_affected": [
+        "packages/ak-common/src/arbiter.rs",
+        "packages/ak-common/src/config/mod.rs"
+      ]
+    },
+    {
+      "dimension": "code_organization",
+      "recommendation": "Used selective imports to make dependencies clearer and reduce namespace pollution",
+      "rationale": "By importing specific functions (`sleep`, `spawn_blocking`) rather than using full module paths inline, the code becomes more readable and shows exactly what external functionality is being used. This makes it easier to track dependencies and understand what each module requires. The imports are scoped appropriately - `sleep` is imported within the test module where it's used, while `spawn_blocking` is imported at the config module level where it's used in production code.",
+      "alternatives_considered": [
+        "Using `use tokio::time::*` or `use tokio::task::*` (imports everything, potentially causing conflicts)",
+        "Keeping inline full paths (less readable but very explicit)",
+        "Creating re-exports in ak-common (adds indirection)"
+      ],
+      "files_affected": [
+        "packages/ak-common/src/arbiter.rs",
+        "packages/ak-common/src/config/mod.rs"
+      ]
+    },
+    {
+      "dimension": "testing",
+      "recommendation": "Maintained test functionality while improving import structure in test modules",
+      "rationale": "The test in `arbiter.rs` continues to work exactly as before, but now uses an imported `sleep` function. This demonstrates that the refactoring doesn't change behavior - it only changes how dependencies are accessed. The test remains isolated in its own module with appropriate imports scoped to that module.",
+      "alternatives_considered": [
+        "Moving test helpers to separate module (cleaner but more files)",
+        "Using mock time in tests (more complex but deterministic)",
+        "Keeping original inline calls in tests only (inconsistent with production code)"
+      ],
+      "files_affected": [
+        "packages/ak-common/src/arbiter.rs"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Refactor ak-common imports to reduce coupling",
+      "description": "Update arbiter and config modules to use proper imports instead of direct dependency calls, improving code organization and maintainability",
+      "files_to_modify": [
+        "packages/ak-common/src/arbiter.rs",
+        "packages/ak-common/src/config/mod.rs"
+      ],
+      "files_to_create": [],
+      "estimated_effort": "small"
+    }
+  ],
+  "implementation_summary": "This change implements a straightforward but important refactoring to improve the dependency management in the ak-common package. The core approach involves replacing inline calls to tokio functions with proper module imports, making dependencies explicit and reducing coupling between ak-common and the tokio crate's internal structure.\n\nIn `arbiter.rs`, the `tokio::time::sleep()` call within test code was replaced with an imported `sleep` function from `tokio::time`. This change is scoped to the test module, keeping production code unaffected. In `config/mod.rs`, the `tokio::task::spawn_blocking()` call was replaced with an imported `spawn_blocking` function from `tokio::task`, making the dependency clear at the module level.\n\nThe refactoring follows Rust best practices for clean imports and maintains backward compatibility - all functionality remains unchanged. This is a preparatory step that makes the codebase more maintainable by clarifying dependencies and reducing the risk of breakage if external crates change their module structures. The changes are minimal and focused, demonstrating the principle of making dependencies explicit rather than implicit through inline module paths.",
+  "source_pr": "https://github.com/goauthentik/authentik/pull/21478",
+  "before_sha": "300e77b30c537afefbffe1bd70975b5a215fc708",
+  "after_sha": "ad9f0feb6802c0fe3b53039506514a0a1c48a4c9",
+  "diff_stats": {
+    "additions": 4,
+    "deletions": 3,
+    "files_changed": 2
+  }
+}

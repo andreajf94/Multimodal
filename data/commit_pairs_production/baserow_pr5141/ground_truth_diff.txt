@@ -1,0 +1,87 @@
+diff --git a/changelog/entries/unreleased/bug/5140_fix_import_workspace_crashes_on_retry_after_failed_backend_i.json b/changelog/entries/unreleased/bug/5140_fix_import_workspace_crashes_on_retry_after_failed_backend_i.json
+new file mode 100644
+index 0000000000..d452dc134d
+--- /dev/null
++++ b/changelog/entries/unreleased/bug/5140_fix_import_workspace_crashes_on_retry_after_failed_backend_i.json
+@@ -0,0 +1,9 @@
++{
++    "type": "bug",
++    "message": "Fix import workspace crashes on retry after failed backend import",
++    "issue_origin": "github",
++    "issue_number": 5140,
++    "domain": "core",
++    "bullet_points": [],
++    "created_at": "2026-04-07"
++}
+\ No newline at end of file
+diff --git a/web-frontend/modules/core/components/import/ImportWorkspaceForm.vue b/web-frontend/modules/core/components/import/ImportWorkspaceForm.vue
+deleted file mode 100644
+index 8f90d386ad..0000000000
+--- a/web-frontend/modules/core/components/import/ImportWorkspaceForm.vue
++++ /dev/null
+@@ -1,17 +0,0 @@
+-<template>
+-  <form @submit.prevent="submit">
+-    <FormGroup :style="{ width: '100%' }" small-label required>
+-      <slot name="select-applications"> </slot>
+-
+-      <template #after-input>
+-        <slot></slot>
+-      </template>
+-    </FormGroup>
+-  </form>
+-</template>
+-
+-<script>
+-export default {
+-  name: 'ImportWorkspaceForm',
+-}
+-</script>
+diff --git a/web-frontend/modules/core/components/import/ImportWorkspaceModal.vue b/web-frontend/modules/core/components/import/ImportWorkspaceModal.vue
+index cdaaa4d246..9ed8f7d610 100644
+--- a/web-frontend/modules/core/components/import/ImportWorkspaceModal.vue
++++ b/web-frontend/modules/core/components/import/ImportWorkspaceModal.vue
+@@ -92,8 +92,6 @@
+           />
+         </div>
+ 
+-        <ImportWorkspaceForm ref="form" @submitted="importWorkspace" />
+-
+         <div
+           class="import-workspace__button-section"
+           :class="{
+@@ -115,7 +113,7 @@
+             size="large"
+             :loading="importing"
+             :disabled="importing"
+-            @click="submitForm"
++            @click="importWorkspace"
+           >
+             {{ $t('importWorkspaceModal.import') }}
+           </Button>
+@@ -134,7 +132,6 @@ import { mimetype2icon } from '@baserow/modules/core/utils/fileTypeToIcon'
+ import job from '@baserow/modules/core/mixins/job'
+ import modal from '@baserow/modules/core/mixins/modal'
+ import error from '@baserow/modules/core/mixins/error'
+-import ImportWorkspaceForm from '@baserow/modules/core/components/import/ImportWorkspaceForm.vue'
+ import { notifyIf } from '@baserow/modules/core/utils/error'
+ import { ImportApplicationsJobType } from '@baserow/modules/core/jobTypes'
+ import { ResponseErrorMessage } from '@baserow/modules/core/plugins/clientHandler'
+@@ -161,7 +158,6 @@ export default {
+   components: {
+     UploadFileDropzone,
+     SelectedFileDetails,
+-    ImportWorkspaceForm,
+     ImportApplicationSelector,
+   },
+   mixins: [modal, error, job],
+@@ -217,9 +213,6 @@ export default {
+     },
+   },
+   methods: {
+-    submitForm() {
+-      this.$refs.form.submit()
+-    },
+     show(...args) {
+       this.hideError()
+       this.checkPendingImport()

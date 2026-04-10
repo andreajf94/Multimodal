@@ -1,0 +1,113 @@
+diff --git a/.env.example b/.env.example
+index 950a475fb4..d9d4308243 100644
+--- a/.env.example
++++ b/.env.example
+@@ -35,6 +35,8 @@ NEXT_PRIVATE_OIDC_PROMPT="login"
+ NEXT_PUBLIC_WEBAPP_URL="http://localhost:3000"
+ # URL used by the web app to request itself (e.g. local background jobs)
+ NEXT_PRIVATE_INTERNAL_WEBAPP_URL="http://localhost:3000"
++# OPTIONAL: Comma-separated hostnames or IPs whose webhooks are allowed to resolve to private/loopback addresses. (e.g., internal.example.com,192.168.1.5).
++NEXT_PRIVATE_WEBHOOK_SSRF_BYPASS_HOSTS=
+ 
+ # [[SERVER]]
+ # OPTIONAL: The port the server will listen on. Defaults to 3000.
+diff --git a/packages/lib/server-only/webhooks/assert-webhook-url.ts b/packages/lib/server-only/webhooks/assert-webhook-url.ts
+index 853f231c14..d221b4b594 100644
+--- a/packages/lib/server-only/webhooks/assert-webhook-url.ts
++++ b/packages/lib/server-only/webhooks/assert-webhook-url.ts
+@@ -6,6 +6,7 @@ import { withTimeout } from '../../utils/timeout';
+ import { isPrivateUrl } from './is-private-url';
+ 
+ const ZIpSchema = z.string().ip();
++
+ const WEBHOOK_DNS_LOOKUP_TIMEOUT_MS = 250;
+ 
+ type TLookupAddress = {
+@@ -26,9 +27,55 @@ const normalizeHostname = (hostname: string) => hostname.toLowerCase().replace(/
+ const toAddressUrl = (address: string) =>
+   address.includes(':') ? `http://[${address}]` : `http://${address}`;
+ 
++/**
++ * Parse the NEXT_PRIVATE_WEBHOOK_SSRF_BYPASS_HOSTS environment variable into
++ * a Set of lowercased hostnames/IPs that are allowed to resolve to private
++ * addresses. The Set is built once at module load and never changes.
++ *
++ * Empty or unset = no bypasses (safe default).
++ */
++const webhookSSRFBypassHosts = (): Set<string> => {
++  const raw = process.env['NEXT_PRIVATE_WEBHOOK_SSRF_BYPASS_HOSTS'] ?? '';
++
++  const hosts = new Set<string>();
++
++  for (const entry of raw.split(',')) {
++    const trimmed = entry.trim().toLowerCase();
++
++    if (trimmed.length > 0) {
++      hosts.add(trimmed);
++    }
++  }
++
++  return hosts;
++};
++
++const WEBHOOK_SSRF_BYPASS_HOSTS = webhookSSRFBypassHosts();
++
++/**
++ * Check whether the hostname of the given URL is present in the SSRF bypass
++ * list. Matches against URL.hostname which covers both DNS names and raw IP
++ * addresses uniformly.
++ */
++const isBypassedHost = (url: string): boolean => {
++  if (WEBHOOK_SSRF_BYPASS_HOSTS.size === 0) {
++    return false;
++  }
++
++  try {
++    const hostname = normalizeHostname(new URL(url).hostname);
++
++    return WEBHOOK_SSRF_BYPASS_HOSTS.has(hostname);
++  } catch {
++    return false;
++  }
++};
++
+ /**
+  * Asserts that a webhook URL does not resolve to a private or loopback
+  * address. Throws an AppError with WEBHOOK_INVALID_REQUEST if it does.
++ *
++ * Hosts listed in NEXT_PRIVATE_WEBHOOK_SSRF_BYPASS_HOSTS skip all checks.
+  */
+ export const assertNotPrivateUrl = async (
+   url: string,
+@@ -36,6 +83,10 @@ export const assertNotPrivateUrl = async (
+     lookup?: TLookupFn;
+   },
+ ) => {
++  if (isBypassedHost(url)) {
++    return;
++  }
++
+   if (isPrivateUrl(url)) {
+     throw new AppError(AppErrorCode.WEBHOOK_INVALID_REQUEST, {
+       message: 'Webhook URL resolves to a private or loopback address',
+@@ -50,6 +101,7 @@ export const assertNotPrivateUrl = async (
+     }
+ 
+     const resolveHostname = options?.lookup ?? lookup;
++
+     const lookupResult = await withTimeout(
+       resolveHostname(hostname, {
+         all: true,
+diff --git a/turbo.json b/turbo.json
+index f1e4cd0efb..216fa8915f 100644
+--- a/turbo.json
++++ b/turbo.json
+@@ -140,6 +140,7 @@
+     "E2E_TEST_AUTHENTICATE_USER_PASSWORD",
+     "DANGEROUS_BYPASS_RATE_LIMITS",
+     "NEXT_PUBLIC_USE_INTERNAL_URL_BROWSERLESS",
+-    "NEXT_PRIVATE_OIDC_PROMPT"
++    "NEXT_PRIVATE_OIDC_PROMPT",
++    "NEXT_PRIVATE_WEBHOOK_SSRF_BYPASS_HOSTS"
+   ]
+ }
