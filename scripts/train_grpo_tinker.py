@@ -33,7 +33,7 @@ from tinker.types.tensor_data import TensorData
 import torch
 import wandb
 
-from repodesign.training.reward import compute_rewards, _normalize_path, parse_diff_files, init_tfidf_corpus
+from repodesign.training.reward import compute_rewards, _normalize_path, parse_diff_files
 from repodesign.training.vl_renderer import Qwen3VLRenderer, load_diagram_images
 from repodesign.training.data_gen import summarize_repo_ir_for_prompt
 
@@ -521,9 +521,6 @@ def train(config: Config, repo_irs_dir: str):
 
     # Curriculum sampler
     sampler = StratifiedSampler(train_examples, seed=42)
-
-    # Pre-fit TF-IDF on full teacher corpus so IDF weights are meaningful
-    init_tfidf_corpus([ex["teacher_plan"] for ex in examples])
 
     # Setup Tinker
     logger.info(f"Connecting to Tinker with model {config.model_name}...")
