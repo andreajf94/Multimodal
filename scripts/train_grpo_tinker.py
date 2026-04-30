@@ -259,6 +259,7 @@ class StratifiedSampler:
     def __init__(self, examples: list[dict], seed: int = 42):
         self.rng = random.Random(seed)
         self.ema_rewards: dict[str, float | None] = {}
+        self.has_created_files: set[str] = set()
 
         # Annotate each example with a difficulty score
         annotated = []
@@ -267,6 +268,8 @@ class StratifiedSampler:
                        + len(ex["diff_files"].get("created", [])))
             annotated.append((n_files, ex))
             self.ema_rewards[ex["repo_name"]] = None
+            if ex["diff_files"].get("created"):
+                self.has_created_files.add(ex["repo_name"])
 
         # Sort and split into tertiles
         annotated.sort(key=lambda x: x[0])
@@ -280,10 +283,12 @@ class StratifiedSampler:
         med_max    = annotated[t2 - 1][0] if t2 > t1 else 0
         hard_min   = annotated[t2][0]     if t2 < n  else 0
 
+        n_created = len(self.has_created_files)
         logger.info(
             f"StratifiedSampler: {len(self.easy)} easy (≤{easy_max} files), "
             f"{len(self.medium)} medium ({easy_max+1}–{med_max}), "
-            f"{len(self.hard)} hard (≥{hard_min})"
+            f"{len(self.hard)} hard (≥{hard_min}), "
+            f"{n_created}/{n} have created files (boosted 1.5x)"
         )
 
     # ------------------------------------------------------------------
@@ -337,7 +342,11 @@ class StratifiedSampler:
 
     # ------------------------------------------------------------------
     def _weights(self, pool: list[dict]) -> list[float]:
-        """Sampling weights within a bin: prioritise the learning zone."""
+        """Sampling weights within a bin: prioritise the learning zone.
+
+        Examples with GT created files get a 1.5x boost so the model
+        sees them more often (only 31% of data has created files).
+        """
         weights = []
         for ex in pool:
             ema = self.ema_rewards.get(ex["repo_name"])
@@ -349,6 +358,8 @@ class StratifiedSampler:
                 w = 0.5                        # stuck — brief reprieve
             else:
                 w = 1.5                        # learning zone — prioritise
+            if ex["repo_name"] in self.has_created_files:
+                w *= 1.5
             weights.append(w)
         return weights
 
@@ -442,6 +453,7 @@ def run_eval(
         "created_file_accuracy": [], "semantic_similarity": [],
         "structural_quality": [],
     }
+    created_acc_applicable: list[float] = []
 
     sampling_params = types.SamplingParams(
         max_tokens=config.max_tokens,
@@ -484,6 +496,8 @@ def run_eval(
             all_rewards.append(r["total"])
             for key in all_metrics:
                 all_metrics[key].append(r.get(key, 0.0))
+            if r.get("has_gt_created", False):
+                created_acc_applicable.append(r["created_file_accuracy"])
 
         except Exception as e:
             logger.warning(f"Eval failed for {ex.get('repo_name', '?')}: {e}")
@@ -495,6 +509,7 @@ def run_eval(
         }
         for key, vals in all_metrics.items():
             metrics[f"eval/{key}"] = sum(vals) / len(vals) if vals else 0
+        metrics["eval/created_f1_when_applicable"] = sum(created_acc_applicable) / len(created_acc_applicable) if created_acc_applicable else 0
         ml_logger.log(metrics, step=step)
 
 
@@ -604,6 +619,7 @@ def train(config: Config, repo_irs_dir: str):
             all_rewards: list[float] = []
             all_existing_acc: list[float] = []
             all_created_acc: list[float] = []
+            all_created_acc_applicable: list[float] = []
             all_fmt_exact: list[float] = []
             all_fmt_partial: list[float] = []
             all_sem_sim: list[float] = []
@@ -670,6 +686,8 @@ def train(config: Config, repo_irs_dir: str):
                     for r in reward_results:
                         all_existing_acc.append(r["existing_file_accuracy"])
                         all_created_acc.append(r["created_file_accuracy"])
+                        if r.get("has_gt_created", False):
+                            all_created_acc_applicable.append(r["created_file_accuracy"])
                         all_fmt_exact.append(r["format_compliance"])
                         all_fmt_partial.append(r["format_partial"])
                         all_sem_sim.append(r["semantic_similarity"])
@@ -752,6 +770,7 @@ def train(config: Config, repo_irs_dir: str):
 
             metrics["reward/existing_file_accuracy"] = sum(all_existing_acc) / len(all_existing_acc) if all_existing_acc else 0
             metrics["reward/created_file_accuracy"] = sum(all_created_acc) / len(all_created_acc) if all_created_acc else 0
+            metrics["reward/created_f1_when_applicable"] = sum(all_created_acc_applicable) / len(all_created_acc_applicable) if all_created_acc_applicable else 0
             metrics["reward/format_compliance"] = sum(all_fmt_exact) / len(all_fmt_exact) if all_fmt_exact else 0
             metrics["reward/format_partial"] = sum(all_fmt_partial) / len(all_fmt_partial) if all_fmt_partial else 0
             metrics["reward/semantic_similarity"] = sum(all_sem_sim) / len(all_sem_sim) if all_sem_sim else 0

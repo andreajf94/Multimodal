@@ -228,22 +228,36 @@ def _best_alignment_score(gt_paths: set[str], gen_paths: set[str]) -> float:
     return 2 * precision * recall / (precision + recall)
 
 
-def created_file_accuracy(completions: list[str], diff_files: list[dict]) -> list[float]:
+def created_file_accuracy(completions: list[str], diff_files: list[dict]) -> list[tuple[float, bool]]:
     """Fuzzy F1 of files_to_create vs ground truth created files.
 
-    Max score: 1.5.
+    Max score: 1.5.  Min score: -0.15 (hallucination penalty).
     Uses nearest-neighbor alignment with component-level path similarity
     so that predicting the right directory + similar filename gets partial
     credit instead of zero.
 
-    When ground truth has no created files, returns 0.0.
+    Returns list of (score, has_gt_created) tuples so callers can compute
+    created_f1_when_applicable (avg over examples that actually have GT created files).
+
+    When GT has no created files:
+      - If the model also predicts none → 0.0 (neutral)
+      - If the model hallucinated created files → -0.15 (penalty)
     """
-    scores = []
+    results = []
     for text, diff_info in zip(completions, diff_files):
         gt_created = {_normalize_path(f) for f in diff_info.get("created", [])}
 
         if not gt_created:
-            scores.append(0.0)
+            plan = _parse_plan_json(text)
+            if plan is not None:
+                gen_created = set()
+                for ticket in plan.get("tickets", []):
+                    gen_created.update(ticket.get("files_to_create", []))
+                gen_created = {f for f in gen_created if f and f.strip()}
+                if gen_created:
+                    results.append((-0.15, False))
+                    continue
+            results.append((0.0, False))
             continue
 
         plan = _parse_plan_json(text)
@@ -253,16 +267,16 @@ def created_file_accuracy(completions: list[str], diff_files: list[dict]) -> lis
                 gen_created.update(ticket.get("files_to_create", []))
             gen_created = {_normalize_path(f) for f in gen_created if f}
         else:
-            scores.append(0.0)
+            results.append((0.0, True))
             continue
 
         if not gen_created:
-            scores.append(0.0)
+            results.append((0.0, True))
             continue
 
         f1 = _best_alignment_score(gt_created, gen_created)
-        scores.append(f1 * 1.5)
-    return scores
+        results.append((f1 * 1.5, True))
+    return results
 
 
 # ---------------------------------------------------------------------------
@@ -456,29 +470,24 @@ def compute_rewards(
     fmt_exact = format_compliance(completions)
     fmt_partial = format_partial(completions)
 
-    # Only compute content rewards for format-compliant completions
-    # For non-compliant ones, these will all be 0
     existing_acc = existing_file_accuracy(completions, diff_files)
-    created_acc = created_file_accuracy(completions, diff_files)
+    created_acc_results = created_file_accuracy(completions, diff_files)
+    created_acc = [r[0] for r in created_acc_results]
+    has_gt_created = [r[1] for r in created_acc_results]
     sem_sim = semantic_similarity(completions, teacher_plans)
     struct = structural_quality(completions)
 
-    # Check which completions parse as JSON at all (even if incomplete)
     json_parses = [_parse_plan_json(c) is not None for c in completions]
 
     results = []
     for i in range(len(completions)):
         if fmt_exact[i] > 0:
-            # Fully format-compliant: full reward
             total = (fmt_exact[i] + fmt_partial[i] + existing_acc[i]
                      + created_acc[i] + sem_sim[i] + struct[i])
         elif json_parses[i]:
-            # JSON parses but failed compliance (e.g. empty arrays):
-            # still evaluate content so model prefers partial output over nothing
             total = (fmt_partial[i] + existing_acc[i]
                      + created_acc[i] + sem_sim[i] + struct[i])
         else:
-            # Unparseable garbage: only partial credit
             total = fmt_partial[i]
             existing_acc[i] = 0.0
             created_acc[i] = 0.0
@@ -490,6 +499,7 @@ def compute_rewards(
             "format_partial": fmt_partial[i],
             "existing_file_accuracy": existing_acc[i],
             "created_file_accuracy": created_acc[i],
+            "has_gt_created": has_gt_created[i],
             "semantic_similarity": sem_sim[i],
             "structural_quality": struct[i],
             "total": total,
