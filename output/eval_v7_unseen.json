@@ -1,0 +1,986 @@
+[
+  {
+    "repo_name": "celery_pr10159",
+    "spec": {
+      "feature_name": "Fix chain/callback dispatch on dedup fast-path for redelivered tasks",
+      "description": "Fix a bug where acks_late with worker_deduplicate_successful_tasks caused chains/callbacks to be permanently lost when a worker crashed after storing SUCCESS but before the broker ack.",
+      "functional_requirements": [
+        "Dispatch pending chain/callbacks on the dedup fast-path for redelivered tasks",
+        "Preserve existing dedup behavior for tasks without chains",
+        "Add integration tests for chain dispatch on redelivery",
+        "Add unit tests for the trace module changes"
+      ],
+      "project_name": "celery",
+      "scale_tier": "enterprise"
+    },
+    "ground_truth": {
+      "modified": [
+        ".github/workflows/python-package.yml",
+        "celery/app/trace.py",
+        "t/integration/conftest.py",
+        "t/integration/tasks.py",
+        "t/integration/test_canvas.py",
+        "t/unit/tasks/test_trace.py"
+      ],
+      "created": [
+        "t/integration/test_dedup_chain_dispatch.py"
+      ]
+    },
+    "best_completion": "{\n  \"architecture_decisions\": [\n    {\n      \"dimension\": \"Task Execution Flow\",\n      \"recommendation\": \"Modify the trace module to dispatch chain/callbacks during the dedup fast-path for redelivered tasks with acks_late enabled.\",\n      \"rationale\": \"The current deduplication logic bypasses chain dispatch when a task is redelivered, leading to permanently lost callbacks. By adding dispatch logic to the fast-path, we preserve the dedup behavior while ensuring chains continue to execute.\",\n      \"alternatives_considered\": [\n        \"Allow all redelivered tasks to trigger chain dispatch regardless of dedup state (would break idempotency)\",\n        \"Move chain dispatch to broker acknowledgment (would increase latency and complexity)\"\n      ],\n      \"files_affected\": [\n        \"celery/app/trace.py\"\n      ]\n    },\n    {\n      \"dimension\": \"Test Coverage\",\n      \"recommendation\": \"Add integration tests specifically for chain dispatch on redelivered tasks with acks_late and worker_deduplicate_successful_tasks enabled.\",\n      \"rationale\": \"This ensures the fix works across different broker and concurrency backends, and validates edge cases around worker crashes and redelivery.\",\n      \"alternatives_considered\": [\n        \"Rely only on unit tests (would miss integration issues)\",\n        \"Add tests only for Redis backend (would miss broker-specific edge cases)\"\n      ],\n      \"files_affected\": [\n        \"t/integration/test_dedup_chain_dispatch.py\"\n      ]\n    },\n    {\n      \"dimension\": \"Error Handling\",\n      \"recommendation\": \"Preserve existing deduplication behavior for tasks without chains to maintain backward compatibility and performance.\",\n      \"rationale\": \"Most tasks don't use chains, so we shouldn't introduce overhead or behavioral changes for them. Only tasks with pending callbacks should trigger additional dispatch logic.\",\n      \"alternatives_considered\": [\n        \"Always trigger chain dispatch for redelivered tasks (would add unnecessary overhead)\",\n        \"Completely disable dedup for tasks with chains (would break idempotency guarantees)\"\n      ],\n      \"files_affected\": [\n        \"celery/app/trace.py\"\n      ]\n    },\n    {\n      \"dimension\": \"Documentation\",\n      \"recommendation\": \"Update documentation to clarify the behavior of worker_deduplicate_successful_tasks when used with chains and acks_late.\",\n      \"rationale\": \"Users need to understand the interaction between these features to avoid unexpected behavior. Clear documentation prevents misconfiguration.\",\n      \"alternatives_considered\": [\n        \"Do not update documentation (would leave users confused about edge cases)\",\n        \"Add warning in code comments only (would be invisible to most users)\"\n      ],\n      \"files_affected\": [\n        \"docs/userguide/tasks.rst\"\n      ]\n    },\n    {\n      \"dimension\": \"Testing Infrastructure\",\n      \"recommendation\": \"Extend the existing test suite with unit tests specifically targeting the trace module changes.\",\n      \"rationale\": \"Unit tests provide fast feedback on the core logic changes and ensure the trace module behaves correctly across different scenarios.\",\n      \"alternatives_considered\": [\n        \"Rely solely on integration tests (would make debugging harder)\",\n        \"Do not add unit tests (would reduce test coverage for core logic)\"\n      ],\n      \"files_affected\": [\n        \"t/unit/tasks/test_trace.py\"\n      ]\n    }\n  ],\n  \"tickets\": [\n    {\n      \"id\": \"T-001\",\n      \"title\": \"Modify trace module to dispatch chains on redelivered tasks\",\n      \"description\": \"Update the task execution trace to dispatch pending chain callbacks when a task is redelivered and has acks_late enabled, while preserving deduplication for tasks without chains.\",\n      \"files_to_modify\": [\n        \"celery/app/trace.py\"\n      ],\n      \"files_to_create\": [],\n      \"estimated_effort\": \"medium\",\n      \"dependencies\": []\n    },\n    {\n      \"id\": \"T-002\",\n      \"title\": \"Add integration tests for chain dispatch on redelivery\",\n      \"description\": \"Create comprehensive integration tests that verify chain callbacks are dispatched correctly when tasks are redelivered with acks_late and worker_deduplicate_successful_tasks enabled.\",\n      \"files_to_modify\": [],\n      \"files_to_create\": [\n        \"t/integration/test_dedup_chain_dispatch.py\"\n      ],\n      \"estimated_effort\": \"large\",\n      \"dependencies\": [\"T-001\"]\n    },\n    {\n      \"id\": \"T-003\",\n      \"title\": \"Add unit tests for trace module changes\",\n      \"description\": \"Write unit tests that validate the behavior of the trace module under various scenarios including redelivered tasks with and without chains.\",\n      \"files_to_modify\": [\n        \"t/unit/tasks/test_trace.py\"\n      ],\n      \"files_to_create\": [],\n      \"estimated_effort\": \"medium\",\n      \"dependencies\": [\"T-001\"]\n    },\n    {\n      \"id\": \"T-004\",\n      \"title\": \"Update documentation on deduplication and chains interaction\",\n      \"description\": \"Update user guide documentation to explain how worker_deduplicate_successful_tasks interacts with chains and acks_late, including limitations and recommendations.\",\n      \"files_to_modify\": [\n        \"docs/userguide/tasks.rst\"\n      ],\n      \"files_to_create\": [],\n      \"estimated_effort\": \"small\",\n      \"dependencies\": [\"T-001\"]\n    },\n    {\n      \"id\": \"T-005\",\n      \"title\": \"Add test configuration for deduplication with chains\",\n      \"description\": \"Extend test configuration to include scenarios with acks_late and worker_deduplicate_successful_tasks enabled for testing chain dispatch on redelivery.\",\n      \"files_to_modify\": [\n        \"t/integration/conftest.py\"\n      ],\n      \"files_to_create\": [],\n      \"estimated_effort\": \"small\",\n      \"dependencies\": [\"T-001\"]\n    },\n    {\n      \"id\": \"T-006\",\n      \"title\": \"Verify fix works with different concurrency models\",\n      \"description\": \"Ensure the chain dispatch fix works correctly with all supported concurrency models (prefork, eventlet, gevent, solo, thread).\",\n      \"files_to_modify\": [\n        \"t/integration/test_dedup_chain_dispatch.py\"\n      ],\n      \"files_to_create\": [],\n      \"estimated_effort\": \"medium\",\n      \"dependencies\": [\"T-002\"]\n    }\n  ],\n  \"implementation_summary\": \"The implementation will focus on enhancing the task execution trace to properly handle chain and callback dispatch during redelivery scenarios when using the deduplication feature. The core change will be made in celery/app/trace.py, where we'll modify the fast-path execution to detect redelivered tasks with pending chains and dispatch them appropriately while maintaining the existing deduplication behavior for tasks without chains. This approach ensures backward compatibility and preserves performance for the majority of use cases while fixing the critical bug that caused chains to be permanently lost. We'll implement comprehensive test coverage including both unit tests that validate the trace module logic and integration tests that verify the fix works across different broker and concurrency backends. The tests will specifically simulate worker crashes after task completion but before broker acknowledgment to ensure the fix addresses the reported issue. Documentation will be updated to clarify the interaction between deduplication, chains, and acks_late features so users can understand the behavior and configure their applications appropriately. This implementation follows Celery's existing architectural patterns and integrates seamlessly with the task execution framework while adding the necessary logic to handle the edge case of redelivered tasks with pending callbacks.\"\n}\n<|endoftext|>",
+    "best_rewards": {
+      "format_compliance": 0.5,
+      "format_partial": 0.25,
+      "existing_file_accuracy": 0.8181818181818181,
+      "created_file_accuracy": 1.5,
+      "has_gt_created": true,
+      "semantic_similarity": 2.131219553947449,
+      "structural_quality": 0.5,
+      "total": 5.699401372129268
+    },
+    "all_rewards": [
+      {
+        "format_compliance": 0.5,
+        "format_partial": 0.25,
+        "existing_file_accuracy": 0.6000000000000001,
+        "created_file_accuracy": 1.2657737046175537,
+        "has_gt_created": true,
+        "semantic_similarity": 1.995870280265808,
+        "structural_quality": 0.5,
+        "total": 5.1116439848833615
+      },
+      {
+        "format_compliance": 0.5,
+        "format_partial": 0.25,
+        "existing_file_accuracy": 0.5454545454545454,
+        "created_file_accuracy": 1.5,
+        "has_gt_created": true,
+        "semantic_similarity": 2.048209637403488,
+        "structural_quality": 0.5,
+        "total": 5.343664182858033
+      },
+      {
+        "format_compliance": 0.5,
+        "format_partial": 0.25,
+        "existing_file_accuracy": 0.46153846153846145,
+        "created_file_accuracy": 0.0,
+        "has_gt_created": true,
+        "semantic_similarity": 1.7959754526615144,
+        "structural_quality": 0.5,
+        "total": 3.5075139141999756
+      },
+      {
+        "format_compliance": 0.5,
+        "format_partial": 0.25,
+        "existing_file_accuracy": 0.8181818181818181,
+        "created_file_accuracy": 1.5,
+        "has_gt_created": true,
+        "semantic_similarity": 2.131219553947449,
+        "structural_quality": 0.5,
+        "total": 5.699401372129268
+      }
+    ],
+    "time_seconds": 559.541289806366
+  },
+  {
+    "repo_name": "celery_pr10184",
+    "spec": {
+      "feature_name": "Fix: prioritize request ignore_result over task definition",
+      "description": "Fix a bug where apply_async(ignore_result=False) on a task with ignore_result=True would fail to return results. Introduce get_actual_ignore_result for proper priority lookup.",
+      "functional_requirements": [
+        "Implement get_actual_ignore_result with priority: Request > Task definition",
+        "Fix apply_async to respect per-call ignore_result override",
+        "Update documentation for ignore_result behavior",
+        "Add unit tests for priority lookup in both trace and request modules"
+      ],
+      "project_name": "celery",
+      "scale_tier": "enterprise"
+    },
+    "ground_truth": {
+      "modified": [
+        "celery/app/trace.py",
+        "celery/worker/request.py",
+        "docs/userguide/tasks.rst",
+        "t/unit/tasks/test_trace.py",
+        "t/unit/worker/test_request.py"
+      ],
+      "created": []
+    },
+    "best_completion": "{\n  \"architecture_decisions\": [\n    {\n      \"dimension\": \"Functionality\",\n      \"recommendation\": \"Implement get_actual_ignore_result method that respects request-level override over task-level definition\",\n      \"rationale\": \"This resolves the bug where per-call ignore_result=False was being ignored when the task was defined with ignore_result=True. The priority must be Request > Task Definition for correctness.\",\n      \"alternatives_considered\": [\"Modify apply_async directly\", \"Add a new parameter to Task.__call__\"],\n      \"files_affected\": [\"celery/app/trace.py\", \"celery/worker/request.py\"]\n    },\n    {\n      \"dimension\": \"Testing\",\n      \"recommendation\": \"Add unit tests in both trace and request modules to validate priority logic\",\n      \"rationale\": \"Since this is a core behavior affecting result handling, tests must be added in both the trace (where task execution paths are defined) and request (where task calls are processed) modules to ensure consistency.\",\n      \"alternatives_considered\": [\"Test only in trace module\", \"Test only in request module\"],\n      \"files_affected\": [\"t/unit/tasks/test_trace.py\", \"t/unit/worker/test_request.py\"]\n    },\n    {\n      \"dimension\": \"Documentation\",\n      \"recommendation\": \"Update userguide/tasks.rst to clarify that ignore_result can be overridden per-call\",\n      \"rationale\": \"Users need to know that they can override the task-level ignore_result setting with apply_async(ignore_result=False). This is a breaking change in behavior that must be clearly documented.\",\n      \"alternatives_considered\": [\"Add note in changelog only\", \"Add comment in code\"],\n      \"files_affected\": [\"docs/userguide/tasks.rst\"]\n    },\n    {\n      \"dimension\": \"Code Structure\",\n      \"recommendation\": \"Expose get_actual_ignore_result as a public API on Task for extensibility\",\n      \"rationale\": \"This allows third-party libraries and custom task subclasses to reuse the same priority resolution logic without duplicating code.\",\n      \"alternatives_considered\": [\"Keep it private\", \"Implement as a standalone function\"],\n      \"files_affected\": [\"celery/app/trace.py\"]\n    },\n    {\n      \"dimension\": \"Backward Compatibility\",\n      \"recommendation\": \"Ensure existing behavior is preserved for tasks without ignore_result overrides\",\n      \"rationale\": \"Most existing code relies on ignore_result being read from task definition. The new behavior should only activate when explicitly overridden via apply_async().\",\n      \"alternatives_considered\": [\"Change default priority\", \"Deprecate task-level ignore_result\"],\n      \"files_affected\": [\"celery/app/trace.py\", \"celery/worker/request.py\"]\n    }\n  ],\n  \"tickets\": [\n    {\n      \"id\": \"T-001\",\n      \"title\": \"Implement get_actual_ignore_result method in trace.py\",\n      \"description\": \"Add a new method to resolve the final ignore_result value by checking request first, then task definition. This should be exposed on the Task class for extensibility.\",\n      \"files_to_modify\": [\"celery/app/trace.py\"],\n      \"files_to_create\": [],\n      \"estimated_effort\": \"small\",\n      \"dependencies\": []\n    },\n    {\n      \"id\": \"T-002\",\n      \"title\": \"Update worker request to use get_actual_ignore_result\",\n      \"description\": \"Modify the Request class in worker/request.py to use the new get_actual_ignore_result method instead of directly accessing task.ignore_result.\",\n      \"files_to_modify\": [\"celery/worker/request.py\"],\n      \"files_to_create\": [],\n      \"estimated_effort\": \"small\",\n      \"dependencies\": [\"T-001\"]\n    },\n    {\n      \"id\": \"T-003\",\n      \"title\": \"Add unit tests for ignore_result priority in trace module\",\n      \"description\": \"Create tests in t/unit/tasks/test_trace.py to verify that apply_async(ignore_result=False) overrides task.ignore_result=True.\",\n      \"files_to_modify\": [\"t/unit/tasks/test_trace.py\"],\n      \"files_to_create\": [],\n      \"estimated_effort\": \"medium\",\n      \"dependencies\": [\"T-001\"]\n    },\n    {\n      \"id\": \"T-004\",\n      \"title\": \"Add unit tests for ignore_result priority in request module\",\n      \"description\": \"Add tests in t/unit/worker/test_request.py to ensure the Request class correctly applies the override logic from the task to the executed request.\",\n      \"files_to_modify\": [\"t/unit/worker/test_request.py\"],\n      \"files_to_create\": [],\n      \"estimated_effort\": \"medium\",\n      \"dependencies\": [\"T-002\"]\n    },\n    {\n      \"id\": \"T-005\",\n      \"title\": \"Update documentation for ignore_result behavior\",\n      \"description\": \"Modify docs/userguide/tasks.rst to document that apply_async(ignore_result=False) can override the task-level ignore_result setting.\",\n      \"files_to_modify\": [\"docs/userguide/tasks.rst\"],\n      \"files_to_create\": [],\n      \"estimated_effort\": \"small\",\n      \"dependencies\": [\"T-001\"]\n    },\n    {\n      \"id\": \"T-006\",\n      \"title\": \"Update changelog for ignore_result behavior fix\",\n      \"description\": \"Add an entry in docs/history/changelog-5.1.rst documenting the bug fix and changed behavior for ignore_result priority.\",\n      \"files_to_modify\": [\"docs/history/changelog-5.1.rst\"],\n      \"files_to_create\": [],\n      \"estimated_effort\": \"small\",\n      \"dependencies\": [\"T-001\", \"T-005\"]\n    }\n  ],\n  \"implementation_summary\": \"The implementation focuses on resolving a critical bug where task-level ignore_result=True was overriding per-call ignore_result=False in apply_async. We will implement a new get_actual_ignore_result method that establishes a clear priority order: Request > Task Definition. This method will be exposed on the Task class for extensibility and used by the Request class in worker/request.py to ensure consistent behavior. The solution will be validated with comprehensive unit tests in both the trace and request modules to ensure the priority logic works correctly across the execution pipeline. Documentation will be updated in userguide/tasks.rst to clearly communicate this behavior change to users. The implementation maintains backward compatibility by only changing behavior when explicitly overridden via apply_async, preserving existing code behavior. This approach follows Celery's established patterns for task execution and worker request processing while adding a much-needed layer of flexibility for result handling.\"\n}\n<|endoftext|>",
+    "best_rewards": {
+      "format_compliance": 0.5,
+      "format_partial": 0.25,
+      "existing_file_accuracy": 1.3636363636363635,
+      "created_file_accuracy": 0.0,
+      "has_gt_created": false,
+      "semantic_similarity": 2.407165950536728,
+      "structural_quality": 0.5,
+      "total": 5.020802314173091
+    },
+    "all_rewards": [
+      {
+        "format_compliance": 0.5,
+        "format_partial": 0.25,
+        "existing_file_accuracy": 1.3636363636363635,
+        "created_file_accuracy": 0.0,
+        "has_gt_created": false,
+        "semantic_similarity": 2.3871850848197935,
+        "structural_quality": 0.4666666666666667,
+        "total": 4.967488115122824
+      },
+      {
+        "format_compliance": 0.5,
+        "format_partial": 0.25,
+        "existing_file_accuracy": 1.25,
+        "created_file_accuracy": 0.0,
+        "has_gt_created": false,
+        "semantic_similarity": 2.1344891399145127,
+        "structural_quality": 0.5,
+        "total": 4.634489139914512
+      },
+      {
+        "format_compliance": 0.5,
+        "format_partial": 0.25,
+        "existing_file_accuracy": 1.3636363636363635,
+        "created_file_accuracy": 0.0,
+        "has_gt_created": false,
+        "semantic_similarity": 2.407165950536728,
+        "structural_quality": 0.5,
+        "total": 5.020802314173091
+      },
+      {
+        "format_compliance": 0.5,
+        "format_partial": 0.25,
+        "existing_file_accuracy": 1.3636363636363635,
+        "created_file_accuracy": 0.0,
+        "has_gt_created": false,
+        "semantic_similarity": 2.2927414655685423,
+        "structural_quality": 0.5,
+        "total": 4.906377829204906
+      }
+    ],
+    "time_seconds": 4526.193770170212
+  },
+  {
+    "repo_name": "django_pr20828",
+    "spec": {
+      "feature_name": "Ignore URLs inside comments during collectstatic",
+      "description": "During collectstatic, URL substitutions were being applied to URLs found inside CSS/JS comments. This fix makes the static files storage skip URLs inside comments.",
+      "functional_requirements": [
+        "Skip URL substitutions inside CSS block comments",
+        "Skip URL substitutions inside JS line comments",
+        "Add test CSS and JS files with commented URLs",
+        "Maintain existing URL substitution behavior for non-commented URLs"
+      ],
+      "project_name": "django",
+      "scale_tier": "enterprise"
+    },
+    "ground_truth": {
+      "modified": [
+        "django/contrib/staticfiles/storage.py",
+        "docs/ref/contrib/staticfiles.txt",
+        "tests/staticfiles_tests/project/documents/cached/css/ignored.css",
+        "tests/staticfiles_tests/project/documents/cached/module.js",
+        "tests/staticfiles_tests/test_storage.py"
+      ],
+      "created": []
+    },
+    "best_completion": "{\n  \"architecture_decisions\": [\n    {\n      \"dimension\": \"static_files_storage\",\n      \"recommendation\": \"Modify the static files storage to parse CSS/JS content and skip URL substitutions within comments\",\n      \"rationale\": \"This ensures that URL substitutions are only applied to actual code and not commented-out content, preventing broken links in production while maintaining backward compatibility for non-commented URLs.\",\n      \"alternatives_considered\": [\n        \"Using regular expressions to skip comments (less reliable with nested/escaped content)\",\n        \"Skipping substitution entirely for files with comments (would break legitimate substitutions)\",\n        \"Adding a configuration flag to disable comment handling (increases complexity without benefit)\"\n      ],\n      \"files_affected\": [\n        \"django/contrib/staticfiles/storage.py\"\n      ]\n    },\n    {\n      \"dimension\": \"testCoverage\",\n      \"recommendation\": \"Create test CSS and JS files with commented URLs to validate the behavior of the modified storage class\",\n      \"rationale\": \"Ensures the fix works correctly for both CSS block comments and JS line comments without affecting valid substitutions, providing regression protection.\",\n      \"alternatives_considered\": [\n        \"Using existing test files (they don't contain the specific edge cases needed)\",\n        \"Testing only one comment type (incomplete coverage)\",\n        \"Skipping integration tests in favor of unit tests (less realistic validation)\"\n      ],\n      \"files_affected\": [\n        \"tests/staticfiles_tests/project/documents/cached/css/ignored.css\",\n        \"tests/staticfiles_tests/project/documents/cached/module.js\"\n      ]\n    },\n    {\n      \"dimension\": \"test_validation\",\n      \"recommendation\": \"Extend the existing static files storage test suite to validate comment handling behavior\",\n      \"rationale\": \"The existing test suite provides a solid foundation for validating static file processing; extending it ensures the changes integrate smoothly with existing test coverage.\",\n      \"alternatives_considered\": [\n        \"Creating a new test file (would duplicate existing test infrastructure)\",\n        \"Modifying only the functional tests (would miss unit-level validation)\",\n        \"Not adding new test cases (would risk regressions)\"\n      ],\n      \"files_affected\": [\n        \"tests/staticfiles_tests/test_storage.py\"\n      ]\n    },\n    {\n      \"dimension\": \"performance\",\n      \"recommendation\": \"Implement comment parsing as a lightweight pass before URL substitution rather than during substitution\",\n      \"rationale\": \"This avoids additional complexity in the URL substitution logic and allows for early short-circuiting when comments are detected, maintaining acceptable performance for large files.\",\n      \"alternatives_considered\": [\n        \"Integrating comment parsing within URL substitution (would make substitution logic complex and harder to maintain)\",\n        \"Processing files twice (once for comments, once for substitution) (would double processing time)\",\n        \"Skipping comment parsing for small files (would complicate logic with file-size thresholds)\"\n      ],\n      \"files_affected\": [\n        \"django/contrib/staticfiles/storage.py\"\n      ]\n    },\n    {\n      \"dimension\": \"documentation\",\n      \"recommendation\": \"Update the static files documentation to mention that commented URLs are now ignored during collectstatic\",\n      \"rationale\": \"Users need to be aware of this change in behavior, especially if they were relying on commented URLs being processed (even if unintentionally).\",\n      \"alternatives_considered\": [\n        \"Adding a note in release notes only (would be less discoverable)\",\n        \"Not documenting the change (would cause confusion for users)\",\n        \"Documenting in developer mailing list only (would not reach all users)\"\n      ],\n      \"files_affected\": [\n        \"docs/ref/contrib/staticfiles.txt\"\n      ]\n    }\n  ],\n  \"tickets\": [\n    {\n      \"id\": \"T-001\",\n      \"title\": \"Implement comment-aware URL substitution in static storage\",\n      \"description\": \"Modify the static files storage to skip URL substitutions within CSS block comments and JS line comments while maintaining existing behavior for non-commented URLs.\",\n      \"files_to_modify\": [\n        \"django/contrib/staticfiles/storage.py\"\n      ],\n      \"files_to_create\": [],\n      \"estimated_effort\": \"medium\",\n      \"dependencies\": []\n    },\n    {\n      \"id\": \"T-002\",\n      \"title\": \"Create test CSS file with commented URLs\",\n      \"description\": \"Add a CSS file containing various comment types (block comments) with URLs that should be ignored during collectstatic.\",\n      \"files_to_modify\": [],\n      \"files_to_create\": [\n        \"tests/staticfiles_tests/project/documents/cached/css/ignored.css\"\n      ],\n      \"estimated_effort\": \"small\",\n      \"dependencies\": [\"T-001\"]\n    },\n    {\n      \"id\": \"T-003\",\n      \"title\": \"Create test JS file with commented URLs\",\n      \"description\": \"Add a JavaScript file containing line comments with URLs that should be ignored during collectstatic.\",\n      \"files_to_modify\": [],\n      \"files_to_create\": [\n        \"tests/staticfiles_tests/project/documents/cached/module.js\"\n      ],\n      \"estimated_effort\": \"small\",\n      \"dependencies\": [\"T-001\"]\n    },\n    {\n      \"id\": \"T-004\",\n      \"title\": \"Update static files storage tests to validate comment handling\",\n      \"description\": \"Extend the existing tests to verify that URLs inside comments are not substituted while non-commented URLs are processed normally.\",\n      \"files_to_modify\": [\n        \"tests/staticfiles_tests/test_storage.py\"\n      ],\n      \"files_to_create\": [],\n      \"estimated_effort\": \"medium\",\n      \"dependencies\": [\"T-002\", \"T-003\"]\n    },\n    {\n      \"id\": \"T-005\",\n      \"title\": \"Update documentation to reflect comment handling behavior\",\n      \"description\": \"Add a note to the static files documentation explaining that URLs inside CSS/JS comments are now ignored during collectstatic.\",\n      \"files_to_modify\": [\n        \"docs/ref/contrib/staticfiles.txt\"\n      ],\n      \"files_to_create\": [],\n      \"estimated_effort\": \"small\",\n      \"dependencies\": [\"T-001\"]\n    }\n  ],\n  \"implementation_summary\": \"The implementation will modify Django's static files storage to intelligently skip URL substitutions when processing content inside CSS block comments and JavaScript line comments. This approach maintains backward compatibility for all non-commented URLs while preventing unintended substitutions in commented code that could break static asset references. The changes will be implemented in django/contrib/staticfiles/storage.py, where URL substitution logic will be enhanced with comment-aware parsing that operates as a separate pre-processing step. To validate this behavior, new test files will be created in the test suite with commented URLs in both CSS and JS formats, and the existing test_storage.py will be extended to verify the new behavior. Documentation will be updated to inform users of this change in behavior. This implementation prioritizes correctness and maintainability by separating comment detection from URL substitution logic, ensuring the code remains readable and testable while addressing the edge case of commented URLs being incorrectly processed during collectstatic.\"\n}\n<|endoftext|>",
+    "best_rewards": {
+      "format_compliance": 0.5,
+      "format_partial": 0.25,
+      "existing_file_accuracy": 1.1249999999999998,
+      "created_file_accuracy": -0.15,
+      "has_gt_created": false,
+      "semantic_similarity": 2.2816094398498534,
+      "structural_quality": 0.5,
+      "total": 4.5066094398498535
+    },
+    "all_rewards": [
+      {
+        "format_compliance": 0.5,
+        "format_partial": 0.25,
+        "existing_file_accuracy": 1.1249999999999998,
+        "created_file_accuracy": -0.15,
+        "has_gt_created": false,
+        "semantic_similarity": 2.2816094398498534,
+        "structural_quality": 0.5,
+        "total": 4.5066094398498535
+      },
+      {
+        "format_compliance": 0.5,
+        "format_partial": 0.25,
+        "existing_file_accuracy": 1.1249999999999998,
+        "created_file_accuracy": -0.15,
+        "has_gt_created": false,
+        "semantic_similarity": 2.2626340091228485,
+        "structural_quality": 0.4600000000000001,
+        "total": 4.447634009122848
+      },
+      {
+        "format_compliance": 0.5,
+        "format_partial": 0.25,
+        "existing_file_accuracy": 1.1249999999999998,
+        "created_file_accuracy": -0.15,
+        "has_gt_created": false,
+        "semantic_similarity": 2.1089082062244415,
+        "structural_quality": 0.5,
+        "total": 4.333908206224441
+      },
+      {
+        "format_compliance": 0.5,
+        "format_partial": 0.25,
+        "existing_file_accuracy": 1.1249999999999998,
+        "created_file_accuracy": -0.15,
+        "has_gt_created": false,
+        "semantic_similarity": 1.9362892270088197,
+        "structural_quality": 0.5,
+        "total": 4.16128922700882
+      }
+    ],
+    "time_seconds": 176.00175786018372
+  },
+  {
+    "repo_name": "django_pr21046",
+    "spec": {
+      "feature_name": "Avoid propagating invalid arguments from When() to Q()",
+      "description": "When() expressions were incorrectly passing _connector and _negated arguments into Q() objects. This fix adds validation in When and moves PROHIBITED_FILTER_KWARGS for proper reuse.",
+      "functional_requirements": [
+        "Add validation in When() to prevent invalid arguments from reaching Q()",
+        "Move PROHIBITED_FILTER_KWARGS from query.py to query_utils.py for reuse",
+        "Add test coverage for the validation",
+        "Maintain backward compatibility for valid When() usage"
+      ],
+      "project_name": "django",
+      "scale_tier": "enterprise"
+    },
+    "ground_truth": {
+      "modified": [
+        "django/db/models/expressions.py",
+        "django/db/models/query.py",
+        "django/db/models/query_utils.py",
+        "tests/expressions_case/tests.py"
+      ],
+      "created": []
+    },
+    "best_completion": "{\n  \"architecture_decisions\": [\n    {\n      \"dimension\": \"Code Organization\",\n      \"recommendation\": \"Move PROHIBITED_FILTER_KWARGS from query.py to query_utils.py to enable reuse across modules\",\n      \"rationale\": \"Centralizing prohibited filter arguments in query_utils.py makes them accessible to other modules that need to validate filter parameters, such as When() expressions. This avoids code duplication and ensures consistent validation across the codebase.\",\n      \"alternatives_considered\": [\n        \"Leave PROHIBITED_FILTER_KWARGS in query.py and duplicate the constant in other files\",\n        \"Create a new validation module specifically for filter arguments\"\n      ],\n      \"files_affected\": [\n        \"django/db/models/query.py\",\n        \"django/db/models/query_utils.py\"\n      ]\n    },\n    {\n      \"dimension\": \"Validation\",\n      \"recommendation\": \"Add validation in When() to prevent invalid arguments from reaching Q() objects\",\n      \"rationale\": \"The When() class should validate incoming arguments before passing them to Q() to prevent unexpected behavior and ensure data integrity. This validation should check for prohibited arguments like _connector and _negated.\",\n      \"alternatives_considered\": [\n        \"Add validation in Q() instead\",\n        \"Allow When() to pass all arguments through without validation\"\n      ],\n      \"files_affected\": [\n        \"django/db/models/expressions.py\"\n      ]\n    },\n    {\n      \"dimension\": \"Testing\",\n      \"recommendation\": \"Add comprehensive test coverage for the new validation logic in When() and the moved PROHIBITED_FILTER_KWARGS constant\",\n      \"rationale\": \"Proper test coverage ensures that the validation logic works as expected and prevents regressions in future changes. Tests should cover both valid and invalid argument scenarios.\",\n      \"alternatives_considered\": [\n        \"Add minimal test coverage\",\n        \"Rely on existing tests for validation\"\n      ],\n      \"files_affected\": [\n        \"django/db/models/expressions.py\",\n        \"tests/expressions_case/tests.py\"\n      ]\n    },\n    {\n      \"dimension\": \"Backward Compatibility\",\n      \"recommendation\": \"Maintain backward compatibility for valid When() usage by only validating prohibited arguments and not changing existing behavior for valid parameters\",\n      \"rationale\": \"Ensuring backward compatibility prevents breaking existing code that uses When() correctly. The validation should only raise errors for invalid arguments that were previously being improperly handled.\",\n      \"alternatives_considered\": [\n        \"Deprecate old When() usage and require updates\",\n        \"Modify When() to accept different parameter formats\"\n      ],\n      \"files_affected\": [\n        \"django/db/models/expressions.py\"\n      ]\n    }\n  ],\n  \"tickets\": [\n    {\n      \"id\": \"T-001\",\n      \"title\": \"Move PROHIBITED_FILTER_KWARGS to query_utils.py\",\n      \"description\": \"Refactor the code to move the PROHIBITED_FILTER_KWARGS constant from query.py to query_utils.py to enable reuse across modules. Update all references to the constant in the codebase.\",\n      \"files_to_modify\": [\n        \"django/db/models/query.py\",\n        \"django/db/models/query_utils.py\"\n      ],\n      \"files_to_create\": [],\n      \"estimated_effort\": \"small\",\n      \"dependencies\": []\n    },\n    {\n      \"id\": \"T-002\",\n      \"title\": \"Add validation in When() for prohibited arguments\",\n      \"description\": \"Implement validation in the When() class to prevent invalid arguments like _connector and _negated from being passed to Q() objects. Raise appropriate errors when prohibited arguments are detected.\",\n      \"files_to_modify\": [\n        \"django/db/models/expressions.py\"\n      ],\n      \"files_to_create\": [],\n      \"estimated_effort\": \"medium\",\n      \"dependencies\": [\"T-001\"]\n    },\n    {\n      \"id\": \"T-003\",\n      \"title\": \"Add test coverage for When() validation\",\n      \"description\": \"Create comprehensive tests for the new validation logic in When(), including tests for both valid and invalid argument scenarios. Ensure tests cover edge cases and error conditions.\",\n      \"files_to_modify\": [\n        \"tests/expressions_case/tests.py\"\n      ],\n      \"files_to_create\": [],\n      \"estimated_effort\": \"medium\",\n      \"dependencies\": [\"T-002\"]\n    },\n    {\n      \"id\": \"T-004\",\n      \"title\": \"Update documentation for When() validation\",\n      \"description\": \"Document the new validation behavior in When() to inform developers about which arguments are prohibited and the error conditions that may be raised.\",\n      \"files_to_modify\": [\n        \"django/db/models/expressions.py\"\n      ],\n      \"files_to_create\": [],\n      \"estimated_effort\": \"small\",\n      \"dependencies\": [\"T-002\"]\n    },\n    {\n      \"id\": \"T-005\",\n      \"title\": \"Add test coverage for moved PROHIBITED_FILTER_KWARGS\",\n      \"description\": \"Create tests to verify that the PROHIBITED_FILTER_KWARGS constant works correctly after being moved to query_utils.py. Ensure all existing functionality that depended on this constant continues to work as expected.\",\n      \"files_to_modify\": [\n        \"django/db/models/query_utils.py\",\n        \"tests/expressions_case/tests.py\"\n      ],\n      \"files_to_create\": [],\n      \"estimated_effort\": \"small\",\n      \"dependencies\": [\"T-001\"]\n    }\n  ],\n  \"implementation_summary\": \"The implementation plan focuses on enhancing the validation of When() expressions to prevent invalid arguments from propagating to Q() objects. The key architectural decision is to centralize the PROHIBITED_FILTER_KWARGS constant in query_utils.py, making it accessible for reuse across different modules that need to validate filter parameters. This refactoring improves code maintainability and ensures consistent validation logic throughout the codebase. The implementation will add validation in the When() class to specifically check for prohibited arguments like _connector and _negated before they can reach Q() objects, raising appropriate errors when invalid parameters are detected. Comprehensive test coverage will be added to verify both the validation logic and the functionality of the moved constant, ensuring backward compatibility for valid When() usage while preventing the previously problematic behavior of passing invalid arguments through to Q(). The changes will be implemented in a way that maintains compatibility with existing code, only restricting the usage of prohibited arguments that should never have been supported in the first place.\"\n}\n<|endoftext|>",
+    "best_rewards": {
+      "format_compliance": 0.5,
+      "format_partial": 0.25,
+      "existing_file_accuracy": 1.5,
+      "created_file_accuracy": 0.0,
+      "has_gt_created": false,
+      "semantic_similarity": 2.136213541030884,
+      "structural_quality": 0.5,
+      "total": 4.886213541030884
+    },
+    "all_rewards": [
+      {
+        "format_compliance": 0.5,
+        "format_partial": 0.25,
+        "existing_file_accuracy": 1.5,
+        "created_file_accuracy": 0.0,
+        "has_gt_created": false,
+        "semantic_similarity": 1.8665266335010529,
+        "structural_quality": 0.5,
+        "total": 4.616526633501053
+      },
+      {
+        "format_compliance": 0.5,
+        "format_partial": 0.25,
+        "existing_file_accuracy": 1.2857142857142856,
+        "created_file_accuracy": -0.15,
+        "has_gt_created": false,
+        "semantic_similarity": 2.1728083312511446,
+        "structural_quality": 0.5,
+        "total": 4.55852261696543
+      },
+      {
+        "format_compliance": 0.5,
+        "format_partial": 0.25,
+        "existing_file_accuracy": 1.5,
+        "created_file_accuracy": 0.0,
+        "has_gt_created": false,
+        "semantic_similarity": 2.136213541030884,
+        "structural_quality": 0.5,
+        "total": 4.886213541030884
+      },
+      {
+        "format_compliance": 0.5,
+        "format_partial": 0.25,
+        "existing_file_accuracy": 1.2857142857142856,
+        "created_file_accuracy": -0.15,
+        "has_gt_created": false,
+        "semantic_similarity": 2.145871514081955,
+        "structural_quality": 0.5,
+        "total": 4.5315857997962405
+      }
+    ],
+    "time_seconds": 1288.3426671028137
+  },
+  {
+    "repo_name": "flask_pr5917",
+    "spec": {
+      "feature_name": "Fix provide_automatic_options override",
+      "description": "Fix a bug where setting provide_automatic_options=True on a view function or class had no effect when the config-level PROVIDE_AUTOMATIC_OPTIONS was False. Refactor the logic in add_url_rule so the explicit attribute/argument can both enable and disable automatic OPTIONS handling, overriding the global config.",
+      "functional_requirements": [
+        "Allow view-level provide_automatic_options to override the global config setting in both directions (enable and disable)",
+        "Refactor add_url_rule to correctly handle the precedence of view-level vs config-level OPTIONS handling",
+        "Maintain backward compatibility for views that do not set provide_automatic_options",
+        "Add test coverage verifying the override works in both directions"
+      ],
+      "project_name": "flask",
+      "source_pr": "https://github.com/pallets/flask/pull/5917",
+      "scale_tier": "growth"
+    },
+    "ground_truth": {
+      "modified": [
+        "CHANGES.rst",
+        "docs/config.rst",
+        "src/flask/sansio/app.py",
+        "tests/test_basic.py",
+        "tests/test_blueprints.py",
+        "tests/test_cli.py",
+        "tests/test_views.py"
+      ],
+      "created": []
+    },
+    "best_completion": "{\n  \"architecture_decisions\": [\n    {\n      \"dimension\": \"Configuration Precedence\",\n      \"recommendation\": \"Implement view-level `provide_automatic_options` as an override to config-level `PROVIDE_AUTOMATIC_OPTIONS`, with explicit values taking precedence over global defaults.\",\n      \"rationale\": \"This ensures developers can fine-tune OPTIONS handling per route while maintaining global defaults for consistency. It aligns with Flask\u2019s principle of explicit configuration overriding implicit defaults.\",\n      \"alternatives_considered\": [\n        \"Always use config-level setting (ignores view-level)\",\n        \"Merge settings via logical OR (ambiguous behavior)\",\n        \"Deprecate view-level setting (breaks compatibility)\"\n      ],\n      \"files_affected\": [\n        \"src/flask/app.py\",\n        \"src/flask/config.py\"\n      ]\n    },\n    {\n      \"dimension\": \"API Consistency\",\n      \"recommendation\": \"Refactor `add_url_rule` to accept `provide_automatic_options` as a direct parameter with `None` meaning 'use config default', and ensure it\u2019s passed through to the rule creation.\",\n      \"rationale\": \"This maintains backward compatibility for existing code while allowing directional override (explicit True/False) without breaking existing signatures.\",\n      \"alternatives_considered\": [\n        \"Change signature to require explicit boolean (breaks existing code)\",\n        \"Add keyword-only parameter (not compatible with Python 2.7, though Flask dropped it)\",\n        \"Deprecate parameter (not acceptable per requirements)\"\n      ],\n      \"files_affected\": [\n        \"src/flask/app.py\",\n        \"src/flask/sansio/app.py\"\n      ]\n    },\n    {\n      \"dimension\": \"Test Coverage\",\n      \"recommendation\": \"Add integration tests covering all four combinations: config True/False \u00d7 view True/False, plus edge case where view-level is unset.\",\n      \"rationale\": \"Ensures the override logic is deterministic and well-tested across all configuration combinations, preventing regressions.\",\n      \"alternatives_considered\": [\n        \"Only test view-level True (incomplete coverage)\",\n        \"Rely on unit tests only (misses integration behavior)\",\n        \"Test only config override (ignores bidirectional logic)\"\n      ],\n      \"files_affected\": [\n        \"tests/test_views.py\",\n        \"tests/test_config.py\"\n      ]\n    },\n    {\n      \"dimension\": \"Documentation\",\n      \"recommendation\": \"Update `docs/api.rst` and `docs/config.rst` to clarify precedence rule and provide example usage of `provide_automatic_options` at view level.\",\n      \"rationale\": \"Developers need to understand how the override works, especially since this fixes a long-standing misleading behavior.\",\n      \"alternatives_considered\": [\n        \"Add only docstring (insufficient for discoverability)\",\n        \"Update only tutorial (not comprehensive)\",\n        \"No documentation update (risks confusion)\"\n      ],\n      \"files_affected\": [\n        \"docs/api.rst\",\n        \"docs/config.rst\"\n      ]\n    },\n    {\n      \"dimension\": \"Backward Compatibility\",\n      \"recommendation\": \"Preserve default behavior (None = use config) and ensure no breaking changes for routes that omit `provide_automatic_options`.\",\n      \"rationale\": \"Critical for existing Flask applications that rely on implicit behavior. The fix should be transparent unless explicitly overridden.\",\n      \"alternatives_considered\": [\n        \"Force default to True (breaks existing apps with config=False)\",\n        \"Remove config-level setting (not feasible)\",\n        \"Warn on unset values (unnecessary friction)\"\n      ],\n      \"files_affected\": [\n        \"src/flask/app.py\",\n        \"tests/test_views.py\"\n      ]\n    }\n  ],\n  \"tickets\": [\n    {\n      \"id\": \"T-001\",\n      \"title\": \"Refactor add_url_rule to support view-level provide_automatic_options override\",\n      \"description\": \"Modify add_url_rule to accept and properly handle the provide_automatic_options parameter. When set, it should override the global config setting. When None, fall back to config value.\",\n      \"files_to_modify\": [\n        \"src/flask/app.py\"\n      ],\n      \"files_to_create\": [],\n      \"estimated_effort\": \"medium\",\n      \"dependencies\": []\n    },\n    {\n      \"id\": \"T-002\",\n      \"title\": \"Update view rule creation logic to respect precedence of view-level option\",\n      \"description\": \"In the underlying rule creation logic (likely in werkzeug or Flask internals), ensure the view-level flag correctly sets the rule's options handling behavior, overriding the config.\",\n      \"files_to_modify\": [\n        \"src/flask/sansio/app.py\"\n      ],\n      \"files_to_create\": [],\n      \"estimated_effort\": \"medium\",\n      \"dependencies\": [\n        \"T-001\"\n      ]\n    },\n    {\n      \"id\": \"T-003\",\n      \"title\": \"Add integration tests for provide_automatic_options override in all configurations\",\n      \"description\": \"Write tests covering all four combinations: config=True/view=True, config=True/view=False, config=False/view=True, config=False/view=False, plus baseline (view=None).\",\n      \"files_to_modify\": [\n        \"tests/test_views.py\"\n      ],\n      \"files_to_create\": [],\n      \"estimated_effort\": \"medium\",\n      \"dependencies\": [\n        \"T-001\",\n        \"T-002\"\n      ]\n    },\n    {\n      \"id\": \"T-004\",\n      \"title\": \"Document the precedence rule for provide_automatic_options in API and config docs\",\n      \"description\": \"Update the Flask API reference and config documentation to clearly explain that view-level setting overrides global config, and provide examples.\",\n      \"files_to_modify\": [\n        \"docs/api.rst\",\n        \"docs/config.rst\"\n      ],\n      \"files_to_create\": [],\n      \"estimated_effort\": \"small\",\n      \"dependencies\": [\n        \"T-001\"\n      ]\n    },\n    {\n      \"id\": \"T-005\",\n      \"title\": \"Update changelog to note the fix for provide_automatic_options override behavior\",\n      \"description\": \"Add a changelog entry in CHANGES.rst explaining the bug fix and behavior change for provide_automatic_options.\",\n      \"files_to_modify\": [\n        \"CHANGES.rst\"\n      ],\n      \"files_to_create\": [],\n      \"estimated_effort\": \"small\",\n      \"dependencies\": [\n        \"T-001\"\n      ]\n    },\n    {\n      \"id\": \"T-006\",\n      \"title\": \"Verify configuration precedence works with blueprints\",\n      \"description\": \"Add test case to ensure that when using blueprints, view-level provide_automatic_options still correctly overrides app config.\",\n      \"files_to_modify\": [\n        \"tests/test_blueprints.py\"\n      ],\n      \"files_to_create\": [],\n      \"estimated_effort\": \"small\",\n      \"dependencies\": [\n        \"T-003\"\n      ]\n    }\n  ],\n  \"implementation_summary\": \"The implementation will fix the long-standing issue where view-level `provide_automatic_options` had no effect when the global config was set to False. The core change involves updating the `add_url_rule` method in `src/flask/app.py` to properly forward and interpret the view-level flag, and refactoring the underlying rule creation in `src/flask/sansio/app.py` to respect the precedence: view-level overrides config-level, while `None` maintains backward compatibility by deferring to config. This ensures bidirectional control\u2014developers can both enable and disable OPTIONS handling per route, regardless of the global setting. Tests in `tests/test_views.py` and `tests/test_blueprints.py` will validate all four combinations of config/view settings, plus the default behavior. Documentation updates in `docs/api.rst` and `docs/config.rst` will clarify the behavior to prevent future confusion. The changes maintain full backward compatibility and are designed to integrate seamlessly into Flask\u2019s existing architecture without requiring signature changes or deprecations.\"\n}\n<|endoftext|>",
+    "best_rewards": {
+      "format_compliance": 0.5,
+      "format_partial": 0.25,
+      "existing_file_accuracy": 1.0714285714285714,
+      "created_file_accuracy": 0.0,
+      "has_gt_created": false,
+      "semantic_similarity": 2.2222013890743257,
+      "structural_quality": 0.5,
+      "total": 4.543629960502897
+    },
+    "all_rewards": [
+      {
+        "format_compliance": 0.5,
+        "format_partial": 0.25,
+        "existing_file_accuracy": 0.9230769230769229,
+        "created_file_accuracy": 0.0,
+        "has_gt_created": false,
+        "semantic_similarity": 1.9992761492729185,
+        "structural_quality": 0.5,
+        "total": 4.172353072349841
+      },
+      {
+        "format_compliance": 0.5,
+        "format_partial": 0.25,
+        "existing_file_accuracy": 0.8571428571428571,
+        "created_file_accuracy": 0.0,
+        "has_gt_created": false,
+        "semantic_similarity": 2.070928466320038,
+        "structural_quality": 0.5,
+        "total": 4.178071323462895
+      },
+      {
+        "format_compliance": 0.5,
+        "format_partial": 0.25,
+        "existing_file_accuracy": 0.9230769230769229,
+        "created_file_accuracy": 0.0,
+        "has_gt_created": false,
+        "semantic_similarity": 2.274283468723297,
+        "structural_quality": 0.5,
+        "total": 4.4473603918002205
+      },
+      {
+        "format_compliance": 0.5,
+        "format_partial": 0.25,
+        "existing_file_accuracy": 1.0714285714285714,
+        "created_file_accuracy": 0.0,
+        "has_gt_created": false,
+        "semantic_similarity": 2.2222013890743257,
+        "structural_quality": 0.5,
+        "total": 4.543629960502897
+      }
+    ],
+    "time_seconds": 68.07215595245361
+  },
+  {
+    "repo_name": "flask_pr5928",
+    "spec": {
+      "feature_name": "Ensure all teardown callbacks are called despite errors",
+      "description": "Introduce a mechanism so that all request and app-context teardown callbacks run even if earlier ones raise exceptions. On Python 3.11+, collected errors should be raised as a BaseExceptionGroup; on older versions the first error should be re-raised. This prevents resource leaks when teardown handlers fail.",
+      "functional_requirements": [
+        "Create a context manager that collects errors from multiple callbacks without stopping execution",
+        "Ensure all teardown callbacks run even if earlier ones raise exceptions",
+        "On Python 3.11+, raise collected errors as a BaseExceptionGroup",
+        "On older Python versions, re-raise the first collected error",
+        "Update both request context and app context teardown handling",
+        "Add comprehensive test coverage for error collection across multiple teardown callbacks"
+      ],
+      "project_name": "flask",
+      "source_pr": "https://github.com/pallets/flask/pull/5928",
+      "scale_tier": "growth"
+    },
+    "ground_truth": {
+      "modified": [
+        "CHANGES.rst",
+        "docs/appcontext.rst",
+        "src/flask/app.py",
+        "src/flask/ctx.py",
+        "src/flask/helpers.py",
+        "tests/test_appctx.py",
+        "tests/test_basic.py",
+        "tests/test_blueprints.py",
+        "tests/test_helpers.py",
+        "tests/test_testing.py"
+      ],
+      "created": []
+    },
+    "best_completion": "{\n  \"architecture_decisions\": [\n    {\n      \"dimension\": \"Error Handling Strategy\",\n      \"recommendation\": \"Implement a context manager that collects all exceptions from teardown callbacks and aggregates them appropriately based on Python version\",\n      \"rationale\": \"This ensures no resource leaks occur when teardown handlers fail, and provides consistent error reporting across Python versions. The context manager pattern cleanly encapsulates the error collection logic.\",\n      \"alternatives_considered\": [\n        \"Simply ignore errors in teardown callbacks\",\n        \"Stop execution on first error (current behavior)\"\n      ],\n      \"files_affected\": [\n        \"src/flask/ctx.py\"\n      ]\n    },\n    {\n      \"dimension\": \"Python Version Compatibility\",\n      \"recommendation\": \"Use conditional imports and try-except blocks to handle BaseExceptionGroup for Python 3.11+ while falling back to re-raising first error on older versions\",\n      \"rationale\": \"This maintains backward compatibility while leveraging newer Python features where available. The conditional approach minimizes code duplication and ensures clean error handling across versions.\",\n      \"alternatives_considered\": [\n        \"Support only Python 3.11+\",\n        \"Use third-party libraries for exception grouping\"\n      ],\n      \"files_affected\": [\n        \"src/flask/ctx.py\"\n      ]\n    },\n    {\n      \"dimension\": \"Context Management\",\n      \"recommendation\": \"Update both request context and app context teardown handling to use the new error-collecting context manager\",\n      \"rationale\": \"Both contexts need the same error resilience behavior to prevent resource leaks. Centralizing the error collection logic in a context manager avoids code duplication and ensures consistent behavior.\",\n      \"alternatives_considered\": [\n        \"Implement separate error handling for each context type\",\n        \"Modify teardown callbacks directly without context manager\"\n      ],\n      \"files_affected\": [\n        \"src/flask/ctx.py\"\n      ]\n    },\n    {\n      \"dimension\": \"Testing Strategy\",\n      \"recommendation\": \"Add comprehensive tests that verify error collection across multiple teardown callbacks with different error scenarios\",\n      \"rationale\": \"Ensures the implementation works correctly across various failure modes and Python versions. Tests should cover both request and app context teardown scenarios.\",\n      \"alternatives_considered\": [\n        \"Test only basic success cases\",\n        \"Test only Python 3.11+ behavior\"\n      ],\n      \"files_affected\": [\n        \"tests/test_appctx.py\",\n        \"tests/test_basic.py\"\n      ]\n    },\n    {\n      \"dimension\": \"Documentation\",\n      \"recommendation\": \"Update app context documentation to explain the new error handling behavior for teardown callbacks\",\n      \"rationale\": \"Users need to understand the new behavior and how to handle errors in their teardown callbacks. Clear documentation prevents confusion and helps users write robust applications.\",\n      \"alternatives_considered\": [\n        \"No documentation updates\",\n        \"Add only minimal docstring updates\"\n      ],\n      \"files_affected\": [\n        \"docs/appcontext.rst\"\n      ]\n    }\n  ],\n  \"tickets\": [\n    {\n      \"id\": \"T-001\",\n      \"title\": \"Implement ErrorCollectingContextManager for teardown callback error collection\",\n      \"description\": \"Create a context manager that collects errors from multiple callbacks without stopping execution, raising them as BaseExceptionGroup on Python 3.11+ or re-raising the first error on older versions.\",\n      \"files_to_modify\": [\n        \"src/flask/ctx.py\"\n      ],\n      \"files_to_create\": [],\n      \"estimated_effort\": \"medium\",\n      \"dependencies\": []\n    },\n    {\n      \"id\": \"T-002\",\n      \"title\": \"Update app context teardown handling to use error collecting context manager\",\n      \"description\": \"Modify the app context teardown mechanism to use the new ErrorCollectingContextManager to ensure all teardown callbacks run even if earlier ones raise exceptions.\",\n      \"files_to_modify\": [\n        \"src/flask/ctx.py\"\n      ],\n      \"files_to_create\": [],\n      \"estimated_effort\": \"small\",\n      \"dependencies\": [\"T-001\"]\n    },\n    {\n      \"id\": \"T-003\",\n      \"title\": \"Update request context teardown handling to use error collecting context manager\",\n      \"description\": \"Modify the request context teardown mechanism to use the new ErrorCollectingContextManager to ensure all teardown callbacks run even if earlier ones raise exceptions.\",\n      \"files_to_modify\": [\n        \"src/flask/ctx.py\"\n      ],\n      \"files_to_create\": [],\n      \"estimated_effort\": \"small\",\n      \"dependencies\": [\"T-001\"]\n    },\n    {\n      \"id\": \"T-004\",\n      \"title\": \"Add tests for error collection in app context teardown callbacks\",\n      \"description\": \"Create comprehensive tests that verify error collection across multiple app context teardown callbacks with different error scenarios, including Python version-specific behavior.\",\n      \"files_to_modify\": [\n        \"tests/test_appctx.py\"\n      ],\n      \"files_to_create\": [],\n      \"estimated_effort\": \"medium\",\n      \"dependencies\": [\"T-001\", \"T-002\"]\n    },\n    {\n      \"id\": \"T-005\",\n      \"title\": \"Add tests for error collection in request context teardown callbacks\",\n      \"description\": \"Create comprehensive tests that verify error collection across multiple request context teardown callbacks with different error scenarios, including Python version-specific behavior.\",\n      \"files_to_modify\": [\n        \"tests/test_basic.py\"\n      ],\n      \"files_to_create\": [],\n      \"estimated_effort\": \"medium\",\n      \"dependencies\": [\"T-001\", \"T-003\"]\n    },\n    {\n      \"id\": \"T-006\",\n      \"title\": \"Update documentation for app context teardown error handling\",\n      \"description\": \"Update the app context documentation to explain the new behavior where all teardown callbacks run even if earlier ones raise exceptions, and how errors are reported.\",\n      \"files_to_modify\": [\n        \"docs/appcontext.rst\"\n      ],\n      \"files_to_create\": [],\n      \"estimated_effort\": \"small\",\n      \"dependencies\": [\"T-001\", \"T-002\"]\n    },\n    {\n      \"id\": \"T-007\",\n      \"title\": \"Add CHANGES.rst entry for teardown callback error handling improvement\",\n      \"description\": \"Document the new feature in the CHANGES.rst file, explaining the behavior change and its benefits for preventing resource leaks.\",\n      \"files_to_modify\": [\n        \"CHANGES.rst\"\n      ],\n      \"files_to_create\": [],\n      \"estimated_effort\": \"small\",\n      \"dependencies\": [\"T-001\", \"T-002\", \"T-003\"]\n    }\n  ],\n  \"implementation_summary\": \"The implementation will introduce a new ErrorCollectingContextManager in src/flask/ctx.py that collects all exceptions from teardown callbacks without stopping execution. This context manager will handle Python version differences by raising collected errors as a BaseExceptionGroup on Python 3.11+ while falling back to re-raising the first error on older versions. Both request context and app context teardown mechanisms will be updated to use this context manager, ensuring all teardown callbacks run even if earlier ones raise exceptions. This prevents resource leaks by guaranteeing cleanup code execution regardless of errors. Comprehensive tests will be added to verify the behavior across multiple error scenarios and Python versions. The documentation will be updated to explain the new behavior to users. This approach uses a centralized context manager pattern to avoid code duplication and ensure consistent error handling across both context types, while maintaining backward compatibility for older Python versions.\"\n}\n<|endoftext|>",
+    "best_rewards": {
+      "format_compliance": 0.5,
+      "format_partial": 0.25,
+      "existing_file_accuracy": 1.0,
+      "created_file_accuracy": 0.0,
+      "has_gt_created": false,
+      "semantic_similarity": 2.458000087738037,
+      "structural_quality": 0.5,
+      "total": 4.7080000877380375
+    },
+    "all_rewards": [
+      {
+        "format_compliance": 0.5,
+        "format_partial": 0.25,
+        "existing_file_accuracy": 1.0588235294117645,
+        "created_file_accuracy": -0.15,
+        "has_gt_created": false,
+        "semantic_similarity": 2.4215043425559997,
+        "structural_quality": 0.5,
+        "total": 4.580327871967764
+      },
+      {
+        "format_compliance": 0.5,
+        "format_partial": 0.25,
+        "existing_file_accuracy": 0.9375,
+        "created_file_accuracy": 0.0,
+        "has_gt_created": false,
+        "semantic_similarity": 2.3831861078739167,
+        "structural_quality": 0.5,
+        "total": 4.570686107873916
+      },
+      {
+        "format_compliance": 0.5,
+        "format_partial": 0.25,
+        "existing_file_accuracy": 1.0,
+        "created_file_accuracy": 0.0,
+        "has_gt_created": false,
+        "semantic_similarity": 2.458000087738037,
+        "structural_quality": 0.5,
+        "total": 4.7080000877380375
+      },
+      {
+        "format_compliance": 0.5,
+        "format_partial": 0.25,
+        "existing_file_accuracy": 0.9375,
+        "created_file_accuracy": 0.0,
+        "has_gt_created": false,
+        "semantic_similarity": 2.434876924753189,
+        "structural_quality": 0.5,
+        "total": 4.622376924753189
+      }
+    ],
+    "time_seconds": 78.08788919448853
+  },
+  {
+    "repo_name": "httpx_pr3670",
+    "spec": {
+      "feature_name": "Update FileStream API",
+      "description": "Fix the server File response API so httpx.File can be used as response content directly, updating both sync and async content/stream implementations.",
+      "functional_requirements": [
+        "Allow httpx.File to be used directly as response content",
+        "Update sync and async content implementations",
+        "Update sync and async stream implementations",
+        "Add test coverage for File response usage"
+      ],
+      "project_name": "httpx",
+      "scale_tier": "growth"
+    },
+    "ground_truth": {
+      "modified": [
+        "src/ahttpx/_content.py",
+        "src/ahttpx/_streams.py",
+        "src/httpx/_content.py",
+        "src/httpx/_streams.py",
+        "tests/test_streams.py"
+      ],
+      "created": []
+    },
+    "best_completion": "{\n  \"architecture_decisions\": [\n    {\n      \"dimension\": \"API Consistency\",\n      \"recommendation\": \"Expose httpx.File as a first-class content type in both sync and async contexts by making it compatible with the existing content streaming interfaces.\",\n      \"rationale\": \"This ensures users can seamlessly use httpx.File objects as response bodies without wrapping or conversion, improving developer experience and reducing cognitive load.\",\n      \"alternatives_considered\": [\n        \"Introduce a new FileResponse class\",\n        \"Require explicit conversion via .read() or .iter_bytes()\",\n        \"Only support File in async context\"\n      ],\n      \"files_affected\": [\n        \"httpx/_content.py\",\n        \"httpx/_transports/default.py\"\n      ]\n    },\n    {\n      \"dimension\": \"Transport Layer Integration\",\n      \"recommendation\": \"Modify the default transport to intelligently handle File objects by delegating to their inherent stream interface without buffering.\",\n      \"rationale\": \"This leverages existing file stream semantics and avoids unnecessary memory copies, preserving performance and resource efficiency for large files.\",\n      \"alternatives_considered\": [\n        \"Buffer entire file into memory before sending\",\n        \"Add File-specific transport handlers\",\n        \"Require users to wrap files in custom StreamingContent\"\n      ],\n      \"files_affected\": [\n        \"httpx/_transports/default.py\",\n        \"httpx/_content.py\"\n      ]\n    },\n    {\n      \"dimension\": \"Async/Sync Parity\",\n      \"recommendation\": \"Implement identical behavior for File handling in both async and sync modes by unifying the core stream abstraction in _content.py.\",\n      \"rationale\": \"Maintaining parity between async and sync interfaces reduces confusion and allows code to be easily ported between modes without restructuring file handling logic.\",\n      \"alternatives_considered\": [\n        \"Different APIs for sync vs async File handling\",\n        \"Only implement in async first\",\n        \"Delegate to separate async content classes\"\n      ],\n      \"files_affected\": [\n        \"httpx/_content.py\",\n        \"tests/test_content.py\",\n        \"tests/test_streams.py\"\n      ]\n    },\n    {\n      \"dimension\": \"Testing Strategy\",\n      \"recommendation\": \"Add end-to-end integration tests that verify File objects behave identically to other content types when used as response bodies.\",\n      \"rationale\": \"Ensures the feature works across the full request-response lifecycle and doesn't break under edge cases like partial reads, timeouts, or streaming proxies.\",\n      \"alternatives_considered\": [\n        \"Unit test only the content stream abstraction\",\n        \"Test only sync implementation first\",\n        \"Rely on existing content tests with mocks\"\n      ],\n      \"files_affected\": [\n        \"tests/test_content.py\",\n        \"tests/test_streams.py\",\n        \"tests/client/test_client.py\"\n      ]\n    },\n    {\n      \"dimension\": \"Documentation Alignment\",\n      \"recommendation\": \"Update the quickstart and advanced content documentation to demonstrate File as a valid response content type.\",\n      \"rationale\": \"Without documentation, users won't know this capability exists, reducing adoption and potentially leading to unnecessary workarounds.\",\n      \"alternatives_considered\": [\n        \"Add only to API reference\",\n        \"Document in troubleshooting section\",\n        \"Wait for user requests before documenting\"\n      ],\n      \"files_affected\": [\n        \"docs/quickstart.md\",\n        \"docs/advanced/clients.md\"\n      ]\n    }\n  ],\n  \"tickets\": [\n    {\n      \"id\": \"T-001\",\n      \"title\": \"Update _content.py to support httpx.File as direct content source\",\n      \"description\": \"Modify the content handling layer to detect and delegate to httpx.File objects, returning their underlying stream without buffering.\",\n      \"files_to_modify\": [\n        \"httpx/_content.py\"\n      ],\n      \"files_to_create\": [],\n      \"estimated_effort\": \"medium\",\n      \"dependencies\": []\n    },\n    {\n      \"id\": \"T-002\",\n      \"title\": \"Extend default transport to handle File objects in stream mode\",\n      \"description\": \"Update the default transport to recognize File content and stream it directly using file's inherent read methods without intermediate buffering.\",\n      \"files_to_modify\": [\n        \"httpx/_transports/default.py\"\n      ],\n      \"files_to_create\": [],\n      \"estimated_effort\": \"medium\",\n      \"dependencies\": [\"T-001\"]\n    },\n    {\n      \"id\": \"T-003\",\n      \"title\": \"Add comprehensive test coverage for File response usage\",\n      \"description\": \"Create new test cases in test_content.py and test_streams.py that verify both sync and async File response behavior under various conditions.\",\n      \"files_to_modify\": [\n        \"tests/test_content.py\",\n        \"tests/test_streams.py\"\n      ],\n      \"files_to_create\": [],\n      \"estimated_effort\": \"large\",\n      \"dependencies\": [\"T-001\", \"T-002\"]\n    },\n    {\n      \"id\": \"T-004\",\n      \"title\": \"Document File as valid response content in quickstart and clients guide\",\n      \"description\": \"Add examples in docs/quickstart.md and docs/advanced/clients.md showing how to use httpx.File as direct response content for both sync and async clients.\",\n      \"files_to_modify\": [\n        \"docs/quickstart.md\",\n        \"docs/advanced/clients.md\"\n      ],\n      \"files_to_create\": [],\n      \"estimated_effort\": \"small\",\n      \"dependencies\": [\"T-003\"]\n    },\n    {\n      \"id\": \"T-005\",\n      \"title\": \"Update client test suite to include File response scenarios\",\n      \"description\": \"Add tests in tests/client/test_client.py to validate File responses behave correctly with client-side features like headers, timeouts, and redirects.\",\n      \"files_to_modify\": [\n        \"tests/client/test_client.py\"\n      ],\n      \"files_to_create\": [],\n      \"estimated_effort\": \"medium\",\n      \"dependencies\": [\"T-001\", \"T-002\"]\n    },\n    {\n      \"id\": \"T-006\",\n      \"title\": \"Refactor ContentStream interface to unify async/sync File handling\",\n      \"description\": \"Ensure the same interface and behavior is used for File streaming in both async and sync contexts by abstracting common logic in _content.py.\",\n      \"files_to_modify\": [\n        \"httpx/_content.py\"\n      ],\n      \"files_to_create\": [],\n      \"estimated_effort\": \"medium\",\n      \"dependencies\": [\"T-001\"]\n    },\n    {\n      \"id\": \"T-007\",\n      \"title\": \"Add documentation for streaming File responses in advanced topics\",\n      \"description\": \"Include a section in docs/advanced/clients.md explaining performance characteristics and best practices when using File objects as response content.\",\n      \"files_to_modify\": [\n        \"docs/advanced/clients.md\"\n      ],\n      \"files_to_create\": [],\n      \"estimated_effort\": \"small\",\n      \"dependencies\": [\"T-004\"]\n    }\n  ],\n  \"implementation_summary\": \"The implementation will update httpx's content handling subsystem to natively support httpx.File objects as direct response content sources in both synchronous and asynchronous contexts. The core changes will occur in _content.py, where we'll extend the content abstraction to detect and delegate to File objects, and in the default transport, which will stream File content directly without intermediate buffering. This approach maintains API consistency while improving performance for file responses. We'll ensure parity between sync and async implementations by unifying the underlying stream abstraction. Comprehensive test coverage will be added across both unit and integration tests to validate behavior under various conditions including partial reads, timeouts, and proxy scenarios. Documentation will be updated in both the quickstart guide and advanced clients documentation to show practical examples of using File as response content, ensuring users can immediately leverage this new capability. The changes integrate cleanly with the existing codebase, building upon the established content and transport layer abstractions without introducing new classes or breaking changes.\"\n}\n<|endoftext|>",
+    "best_rewards": {
+      "format_compliance": 0.5,
+      "format_partial": 0.25,
+      "existing_file_accuracy": 0.25,
+      "created_file_accuracy": 0.0,
+      "has_gt_created": false,
+      "semantic_similarity": 2.085780555009842,
+      "structural_quality": 0.5,
+      "total": 3.585780555009842
+    },
+    "all_rewards": [
+      {
+        "format_compliance": 0.5,
+        "format_partial": 0.25,
+        "existing_file_accuracy": 0.23076923076923078,
+        "created_file_accuracy": -0.15,
+        "has_gt_created": false,
+        "semantic_similarity": 1.935551369190216,
+        "structural_quality": 0.5,
+        "total": 3.266320599959447
+      },
+      {
+        "format_compliance": 0.5,
+        "format_partial": 0.25,
+        "existing_file_accuracy": 0.25,
+        "created_file_accuracy": 0.0,
+        "has_gt_created": false,
+        "semantic_similarity": 2.085780555009842,
+        "structural_quality": 0.5,
+        "total": 3.585780555009842
+      },
+      {
+        "format_compliance": 0.0,
+        "format_partial": 0.0,
+        "existing_file_accuracy": 0.0,
+        "created_file_accuracy": 0.0,
+        "has_gt_created": false,
+        "semantic_similarity": 0.0,
+        "structural_quality": 0.0,
+        "total": 0.0
+      },
+      {
+        "format_compliance": 0.5,
+        "format_partial": 0.25,
+        "existing_file_accuracy": 0.0,
+        "created_file_accuracy": 0.0,
+        "has_gt_created": false,
+        "semantic_similarity": 2.1257378339767454,
+        "structural_quality": 0.5,
+        "total": 3.3757378339767454
+      }
+    ],
+    "time_seconds": 74.25380492210388
+  },
+  {
+    "repo_name": "httpx_pr3673",
+    "spec": {
+      "feature_name": "Connection resets and keep-alive improvements",
+      "description": "Rename HTTPParser.complete to .reset, add HTTPParser.is_keepalive API for checking keep-alive status, and implement clean exits on KeyboardInterrupt for the server.",
+      "functional_requirements": [
+        "Rename HTTPParser.complete to .reset across sync and async implementations",
+        "Add is_keepalive property to HTTPParser",
+        "Handle KeyboardInterrupt gracefully in server",
+        "Update connection pool to use new parser API",
+        "Add test coverage for parser reset behavior"
+      ],
+      "project_name": "httpx",
+      "scale_tier": "growth"
+    },
+    "ground_truth": {
+      "modified": [
+        "src/ahttpx/_parsers.py",
+        "src/ahttpx/_pool.py",
+        "src/ahttpx/_server.py",
+        "src/httpx/_network.py",
+        "src/httpx/_parsers.py",
+        "src/httpx/_pool.py",
+        "src/httpx/_server.py",
+        "tests/test_parsers.py"
+      ],
+      "created": []
+    },
+    "best_completion": "{\n  \"architecture_decisions\": [\n    {\n      \"dimension\": \"API Design\",\n      \"recommendation\": \"Rename HTTPParser.complete to .reset and add is_keepalive property\",\n      \"rationale\": \"The term 'complete' is ambiguous and doesn't clearly convey the intent of resetting parser state. 'reset' is more intuitive and aligns with common API patterns. Adding is_keepalive provides explicit state visibility for connection management.\",\n      \"alternatives_considered\": [\n        \"Keep 'complete' and add deprecation warning\",\n        \"Add 'reset' as alias and deprecate 'complete'\",\n        \"Rename to 'clear_state' for more explicitness\"\n      ],\n      \"files_affected\": [\n        \"src/httpx/_parsers.py\",\n        \"src/ahttpx/_parsers.py\"\n      ]\n    },\n    {\n      \"dimension\": \"Error Handling\",\n      \"recommendation\": \"Implement graceful shutdown on KeyboardInterrupt in server\",\n      \"rationale\": \"User experience requires clean exits when processes are interrupted. This prevents resource leaks and provides better error reporting during development and production debugging.\",\n      \"alternatives_considered\": [\n        \"Ignore KeyboardInterrupt and let process crash\",\n        \"Log error and continue running\",\n        \"Add timeout for graceful shutdown\"\n      ],\n      \"files_affected\": [\n        \"src/httpx/_server.py\",\n        \"src/ahttpx/_server.py\"\n      ]\n    },\n    {\n      \"dimension\": \"Connection Management\",\n      \"recommendation\": \"Update connection pool to use new parser reset API\",\n      \"rationale\": \"The connection pool must be aware of parser state to properly recycle connections. Using the new reset API ensures consistency and proper state management during keep-alive connections.\",\n      \"alternatives_considered\": [\n        \"Maintain separate parser state in pool\",\n        \"Duplicate parser reset logic in pool\",\n        \"Keep using complete() with adapter layer\"\n      ],\n      \"files_affected\": [\n        \"src/httpx/_pool.py\",\n        \"src/ahttpx/_pool.py\"\n      ]\n    },\n    {\n      \"dimension\": \"Testing Strategy\",\n      \"recommendation\": \"Add dedicated test suite for parser reset behavior\",\n      \"rationale\": \"Critical parser state transitions require comprehensive test coverage to prevent regressions. Dedicated tests ensure the reset and keepalive functionality are properly validated across edge cases.\",\n      \"alternatives_considered\": [\n        \"Add tests to existing parser test file\",\n        \"Rely on integration tests for parser state\",\n        \"Use property-based testing for state transitions\"\n      ],\n      \"files_affected\": [\n        \"tests/test_parsers.py\"\n      ]\n    },\n    {\n      \"dimension\": \"Documentation\",\n      \"recommendation\": \"Update API documentation to reflect parser API changes\",\n      \"rationale\": \"Users need accurate documentation to understand the new parser interface. The changes to reset and is_keepalive are significant enough to warrant explicit documentation.\",\n      \"alternatives_considered\": [\n        \"Add changelog entry only\",\n        \"Update docstrings only\",\n        \"Create migration guide for parser users\"\n      ],\n      \"files_affected\": [\n        \"docs/api.md\",\n        \"httpx/__init__.py\"\n      ]\n    }\n  ],\n  \"tickets\": [\n    {\n      \"id\": \"T-001\",\n      \"title\": \"Rename HTTPParser.complete to .reset\",\n      \"description\": \"Rename the complete method to reset in both sync and async parser implementations. Update all references throughout the codebase.\",\n      \"files_to_modify\": [\n        \"src/httpx/_parsers.py\",\n        \"src/ahttpx/_parsers.py\",\n        \"src/httpx/_pool.py\",\n        \"src/ahttpx/_pool.py\"\n      ],\n      \"files_to_create\": [],\n      \"estimated_effort\": \"medium\",\n      \"dependencies\": []\n    },\n    {\n      \"id\": \"T-002\",\n      \"title\": \"Add is_keepalive property to HTTPParser\",\n      \"description\": \"Implement the is_keepalive property that returns boolean indicating whether connection should be kept alive based on HTTP headers and protocol.\",\n      \"files_to_modify\": [\n        \"src/httpx/_parsers.py\",\n        \"src/ahttpx/_parsers.py\"\n      ],\n      \"files_to_create\": [],\n      \"estimated_effort\": \"medium\",\n      \"dependencies\": [\"T-001\"]\n    },\n    {\n      \"id\": \"T-003\",\n      \"title\": \"Implement graceful shutdown on KeyboardInterrupt\",\n      \"description\": \"Add KeyboardInterrupt handling in server implementations to ensure clean exits without resource leaks.\",\n      \"files_to_modify\": [\n        \"src/httpx/_server.py\",\n        \"src/ahttpx/_server.py\"\n      ],\n      \"files_to_create\": [],\n      \"estimated_effort\": \"small\",\n      \"dependencies\": []\n    },\n    {\n      \"id\": \"T-004\",\n      \"title\": \"Update connection pool to use new parser API\",\n      \"description\": \"Modify connection pool implementations to use the new .reset method and is_keepalive property instead of the deprecated complete method.\",\n      \"files_to_modify\": [\n        \"src/httpx/_pool.py\",\n        \"src/ahttpx/_pool.py\"\n      ],\n      \"files_to_create\": [],\n      \"estimated_effort\": \"medium\",\n      \"dependencies\": [\"T-001\", \"T-002\"]\n    },\n    {\n      \"id\": \"T-005\",\n      \"title\": \"Add test coverage for parser reset behavior\",\n      \"description\": \"Create comprehensive tests for parser reset functionality, including edge cases and keep-alive state transitions.\",\n      \"files_to_modify\": [\n        \"tests/test_parsers.py\"\n      ],\n      \"files_to_create\": [],\n      \"estimated_effort\": \"medium\",\n      \"dependencies\": [\"T-001\", \"T-002\"]\n    },\n    {\n      \"id\": \"T-006\",\n      \"title\": \"Update documentation for parser API changes\",\n      \"description\": \"Update API documentation to reflect the new parser interface with reset method and is_keepalive property.\",\n      \"files_to_modify\": [\n        \"docs/api.md\",\n        \"httpx/__init__.py\"\n      ],\n      \"files_to_create\": [],\n      \"estimated_effort\": \"small\",\n      \"dependencies\": [\"T-001\", \"T-002\"]\n    },\n    {\n      \"id\": \"T-007\",\n      \"title\": \"Add deprecation warning for complete method\",\n      \"description\": \"Add deprecation warnings for the old complete method to help users transition to the new API.\",\n      \"files_to_modify\": [\n        \"src/httpx/_parsers.py\",\n        \"src/ahttpx/_parsers.py\"\n      ],\n      \"files_to_create\": [],\n      \"estimated_effort\": \"small\",\n      \"dependencies\": [\"T-001\"]\n    }\n  ],\n  \"implementation_summary\": \"The implementation plan addresses the connection reset and keep-alive improvements by systematically refactoring the HTTP parser API and integrating it with the connection pool and server components. We'll begin by renaming the HTTPParser.complete method to .reset for better semantic clarity, then add the is_keepalive property to provide explicit connection state visibility. The connection pool will be updated to use these new APIs, ensuring proper state management during connection reuse. We'll implement graceful shutdown handling for KeyboardInterrupt in server components to prevent resource leaks during development and production. Comprehensive test coverage will be added to ensure the parser state transitions work correctly under various conditions. The changes will be documented to guide users through the API transition. This approach maintains backward compatibility through deprecation warnings while providing a cleaner, more intuitive API for connection management. The implementation follows the existing codebase patterns and integrates seamlessly with the existing httpx architecture, ensuring minimal disruption while delivering significant improvements in connection handling and server stability.\"\n}\n<|endoftext|>",
+    "best_rewards": {
+      "format_compliance": 0.5,
+      "format_partial": 0.25,
+      "existing_file_accuracy": 1.2352941176470589,
+      "created_file_accuracy": 0.0,
+      "has_gt_created": false,
+      "semantic_similarity": 1.8519924491643904,
+      "structural_quality": 0.4833333333333334,
+      "total": 4.3206199001447825
+    },
+    "all_rewards": [
+      {
+        "format_compliance": 0.5,
+        "format_partial": 0.25,
+        "existing_file_accuracy": 1.2352941176470589,
+        "created_file_accuracy": 0.0,
+        "has_gt_created": false,
+        "semantic_similarity": 1.804981291294098,
+        "structural_quality": 0.48571428571428577,
+        "total": 4.2759896946554425
+      },
+      {
+        "format_compliance": 0.5,
+        "format_partial": 0.25,
+        "existing_file_accuracy": 1.2352941176470589,
+        "created_file_accuracy": 0.0,
+        "has_gt_created": false,
+        "semantic_similarity": 1.8519924491643904,
+        "structural_quality": 0.4833333333333334,
+        "total": 4.3206199001447825
+      },
+      {
+        "format_compliance": 0.5,
+        "format_partial": 0.25,
+        "existing_file_accuracy": 1.0,
+        "created_file_accuracy": 0.0,
+        "has_gt_created": false,
+        "semantic_similarity": 1.8399259507656098,
+        "structural_quality": 0.5,
+        "total": 4.089925950765609
+      },
+      {
+        "format_compliance": 0.5,
+        "format_partial": 0.25,
+        "existing_file_accuracy": 1.125,
+        "created_file_accuracy": -0.15,
+        "has_gt_created": false,
+        "semantic_similarity": 1.9546878933906555,
+        "structural_quality": 0.48571428571428577,
+        "total": 4.165402179104941
+      }
+    ],
+    "time_seconds": 459.42549300193787
+  },
+  {
+    "repo_name": "pydantic_pr13013",
+    "spec": {
+      "feature_name": "Allow default factories of private attributes to take validated model data",
+      "description": "Extend PrivateAttr default_factory so the factory callable can optionally accept a dict of already-validated model data (public fields and earlier private attrs), matching the existing capability on regular Field defaults. This allows private attributes to be computed from validated public field values during model construction.",
+      "functional_requirements": [
+        "Allow PrivateAttr default_factory callables to optionally accept validated model data as a parameter",
+        "Ensure the factory receives both public fields and previously-set private attributes",
+        "Maintain backward compatibility for existing default_factory callables that take no arguments",
+        "Add a shared utility function for resolving default values across both Field and PrivateAttr",
+        "Add comprehensive test coverage for the new default_factory behavior"
+      ],
+      "project_name": "pydantic",
+      "source_pr": "https://github.com/pydantic/pydantic/pull/13013",
+      "scale_tier": "enterprise"
+    },
+    "ground_truth": {
+      "modified": [
+        "docs/concepts/fields.md",
+        "docs/concepts/models.md",
+        "pydantic/_internal/_fields.py",
+        "pydantic/_internal/_model_construction.py",
+        "pydantic/_internal/_utils.py",
+        "pydantic/fields.py",
+        "tests/test_fields.py",
+        "tests/test_internal.py",
+        "tests/test_private_attributes.py"
+      ],
+      "created": []
+    },
+    "best_completion": "{\n  \"architecture_decisions\": [\n    {\n      \"dimension\": \"API Design\",\n      \"recommendation\": \"Extend PrivateAttr default_factory to optionally accept validated model data as a parameter, mirroring Field behavior\",\n      \"rationale\": \"This maintains consistency between field types and enables powerful use cases where private attributes need to be computed from validated public fields. The optional nature preserves backward compatibility.\",\n      \"alternatives_considered\": [\n        \"Implement as separate method requiring explicit opt-in\",\n        \"Require all default_factories to accept parameters (breaks compatibility)\",\n        \"Create a new PrivateAttrV2 class (increases API surface)\"\n      ],\n      \"files_affected\": [\n        \"pydantic/_internal/_fields.py\",\n        \"pydantic/fields.py\"\n      ]\n    },\n    {\n      \"dimension\": \"Core Logic\",\n      \"recommendation\": \"Create a shared utility function for resolving default values that handles both Field and PrivateAttr cases\",\n      \"rationale\": \"Avoids code duplication and ensures consistent behavior between public fields and private attributes. Centralizes the logic for determining when to pass validated data to factories.\",\n      \"alternatives_considered\": [\n        \"Duplicate the logic in both field and private attribute code paths\",\n        \"Use inheritance to share behavior (increases complexity)\",\n        \"Keep separate implementations (risk of divergence)\"\n      ],\n      \"files_affected\": [\n        \"pydantic/_internal/_fields.py\",\n        \"pydantic/_internal/_utils.py\"\n      ]\n    },\n    {\n      \"dimension\": \"Data Flow\",\n      \"recommendation\": \"Ensure the factory receives validated model data including both public fields and previously-set private attributes\",\n      \"rationale\": \"This enables private attributes to depend on other computed values, creating a more powerful dependency graph. It follows the natural construction order where public fields are validated first, then private attributes are computed in declaration order.\",\n      \"alternatives_considered\": [\n        \"Only pass public fields (limits functionality)\",\n        \"Pass unvalidated data (risk of invalid state)\",\n        \"Allow arbitrary dependencies (complex to implement and debug)\"\n      ],\n      \"files_affected\": [\n        \"pydantic/_internal/_model_construction.py\",\n        \"pydantic/_internal/_fields.py\"\n      ]\n    },\n    {\n      \"dimension\": \"Testing\",\n      \"recommendation\": \"Add comprehensive tests for the new default_factory behavior including edge cases and backward compatibility\",\n      \"rationale\": \"Given the complexity of model construction and the potential for subtle bugs when integrating with existing code, thorough testing is essential. This includes testing both new functionality and ensuring existing code continues to work.\",\n      \"alternatives_considered\": [\n        \"Minimal tests focusing only on happy paths\",\n        \"Rely on existing tests (incomplete coverage)\",\n        \"Test only via integration tests (slower, harder to debug)\"\n      ],\n      \"files_affected\": [\n        \"tests/test_private_attributes.py\",\n        \"tests/test_fields.py\"\n      ]\n    },\n    {\n      \"dimension\": \"Documentation\",\n      \"recommendation\": \"Update conceptual documentation to explain the new capability and provide examples\",\n      \"rationale\": \"Users need clear guidance on how to use this new feature, including when to use it and how it differs from existing patterns. This helps prevent misuse and promotes adoption.\",\n      \"alternatives_considered\": [\n        \"Add only API reference documentation (insufficient context)\",\n        \"Rely on examples in the test suite (not user-facing)\",\n        \"Add no documentation (risks of confusion and underutilization)\"\n      ],\n      \"files_affected\": [\n        \"docs/concepts/fields.md\",\n        \"docs/concepts/models.md\"\n      ]\n    }\n  ],\n  \"tickets\": [\n    {\n      \"id\": \"T-001\",\n      \"title\": \"Implement shared default value resolver utility function\",\n      \"description\": \"Create a utility function that handles resolving default values for both Field and PrivateAttr, including determining whether to pass validated model data to the factory.\",\n      \"files_to_modify\": [\n        \"pydantic/_internal/_utils.py\"\n      ],\n      \"files_to_create\": [],\n      \"estimated_effort\": \"medium\",\n      \"dependencies\": []\n    },\n    {\n      \"id\": \"T-002\",\n      \"title\": \"Extend PrivateAttr default_factory to accept validated model data\",\n      \"description\": \"Modify PrivateAttr implementation to optionally pass validated model data to default_factory callables, maintaining backward compatibility for those that don't accept parameters.\",\n      \"files_to_modify\": [\n        \"pydantic/_internal/_fields.py\"\n      ],\n      \"files_to_create\": [],\n      \"estimated_effort\": \"medium\",\n      \"dependencies\": [\"T-001\"]\n    },\n    {\n      \"id\": \"T-003\",\n      \"title\": \"Update model construction to pass validated data to private attribute factories\",\n      \"description\": \"Modify model construction logic to ensure private attribute factories receive validated model data including public fields and previously-set private attributes in the correct order.\",\n      \"files_to_modify\": [\n        \"pydantic/_internal/_model_construction.py\"\n      ],\n      \"files_to_create\": [],\n      \"estimated_effort\": \"large\",\n      \"dependencies\": [\"T-002\"]\n    },\n    {\n      \"id\": \"T-004\",\n      \"title\": \"Add comprehensive tests for new default_factory behavior\",\n      \"description\": \"Create tests covering the new functionality including backward compatibility, parameter passing, and edge cases where private attributes depend on other private attributes.\",\n      \"files_to_modify\": [\n        \"tests/test_private_attributes.py\"\n      ],\n      \"files_to_create\": [],\n      \"estimated_effort\": \"medium\",\n      \"dependencies\": [\"T-003\"]\n    },\n    {\n      \"id\": \"T-005\",\n      \"title\": \"Update documentation to explain new private attribute factory capability\",\n      \"description\": \"Update conceptual documentation to explain how private attributes can now be computed from validated model data, with examples and best practices.\",\n      \"files_to_modify\": [\n        \"docs/concepts/fields.md\",\n        \"docs/concepts/models.md\"\n      ],\n      \"files_to_create\": [],\n      \"estimated_effort\": \"small\",\n      \"dependencies\": [\"T-004\"]\n    },\n    {\n      \"id\": \"T-006\",\n      \"title\": \"Add type hints for the new default_factory signature\",\n      \"description\": \"Update type hints to reflect that PrivateAttr default_factory can optionally accept validated model data, ensuring better type checking for users.\",\n      \"files_to_modify\": [\n        \"pydantic/fields.py\"\n      ],\n      \"files_to_create\": [],\n      \"estimated_effort\": \"small\",\n      \"dependencies\": [\"T-002\"]\n    },\n    {\n      \"id\": \"T-007\",\n      \"title\": \"Verify backward compatibility with existing codebases\",\n      \"description\": \"Run comprehensive tests to ensure no breaking changes for existing code that uses PrivateAttr with default factories that don't accept parameters.\",\n      \"files_to_modify\": [\n        \"tests/test_fields.py\"\n      ],\n      \"files_to_create\": [],\n      \"estimated_effort\": \"medium\",\n      \"dependencies\": [\"T-004\"]\n    }\n  ],\n  \"implementation_summary\": \"This implementation plan extends Pydantic's PrivateAttr functionality to allow default factories to optionally accept validated model data, mirroring the existing capability for regular Fields. The approach centers on creating a shared utility function for resolving default values across both Field and PrivateAttr types, ensuring consistent behavior and avoiding code duplication. The model construction process will be modified to pass validated model data (including both public fields and previously-set private attributes) to private attribute factories in the correct order, enabling complex dependency graphs where private attributes can be computed from validated values. Special attention will be paid to maintaining backward compatibility for existing default_factory callables that take no parameters. Comprehensive tests will verify the new functionality and ensure no regressions. Documentation will be updated to explain this new capability with examples, helping users adopt the feature effectively. The implementation follows Pydantic's established patterns and architectural principles, integrating cleanly with the existing codebase while extending its capabilities in a consistent, maintainable way.\"\n}\n<|endoftext|>",
+    "best_rewards": {
+      "format_compliance": 0.5,
+      "format_partial": 0.25,
+      "existing_file_accuracy": 1.4117647058823528,
+      "created_file_accuracy": 0.0,
+      "has_gt_created": false,
+      "semantic_similarity": 2.3762754142284397,
+      "structural_quality": 0.5,
+      "total": 5.038040120110793
+    },
+    "all_rewards": [
+      {
+        "format_compliance": 0.5,
+        "format_partial": 0.25,
+        "existing_file_accuracy": 1.4117647058823528,
+        "created_file_accuracy": 0.0,
+        "has_gt_created": false,
+        "semantic_similarity": 2.2810036897659303,
+        "structural_quality": 0.5,
+        "total": 4.942768395648283
+      },
+      {
+        "format_compliance": 0.5,
+        "format_partial": 0.25,
+        "existing_file_accuracy": 1.125,
+        "created_file_accuracy": 0.0,
+        "has_gt_created": false,
+        "semantic_similarity": 2.265276861190796,
+        "structural_quality": 0.5,
+        "total": 4.640276861190796
+      },
+      {
+        "format_compliance": 0.5,
+        "format_partial": 0.25,
+        "existing_file_accuracy": 1.4117647058823528,
+        "created_file_accuracy": 0.0,
+        "has_gt_created": false,
+        "semantic_similarity": 2.3762754142284397,
+        "structural_quality": 0.5,
+        "total": 5.038040120110793
+      },
+      {
+        "format_compliance": 0.0,
+        "format_partial": 0.25,
+        "existing_file_accuracy": 0.0,
+        "created_file_accuracy": 0.0,
+        "has_gt_created": false,
+        "semantic_similarity": 0.0,
+        "structural_quality": 0.0,
+        "total": 0.25
+      }
+    ],
+    "time_seconds": 82.61537408828735
+  },
+  {
+    "repo_name": "pydantic_pr13016",
+    "spec": {
+      "feature_name": "Warn when serializing fixed length tuples with too few items",
+      "description": "Add a PydanticSerializationUnexpectedValue warning in the Rust serializer when a fixed-length tuple has fewer items than the schema expects. Currently only too-many items triggers a warning; this change adds symmetry by also warning on too-few items.",
+      "functional_requirements": [
+        "Emit a PydanticSerializationUnexpectedValue warning when a tuple has fewer items than the fixed-length schema expects",
+        "Maintain the existing warning behavior for tuples with too many items",
+        "Implement the check in the Rust tuple serializer code",
+        "Add test coverage for the new too-few-items warning case"
+      ],
+      "project_name": "pydantic",
+      "source_pr": "https://github.com/pydantic/pydantic/pull/13016",
+      "scale_tier": "enterprise"
+    },
+    "ground_truth": {
+      "modified": [
+        "pydantic-core/src/serializers/type_serializers/tuple.rs",
+        "pydantic-core/tests/serializers/test_list_tuple.py"
+      ],
+      "created": []
+    },
+    "best_completion": "{\n  \"architecture_decisions\": [\n    {\n      \"dimension\": \"Error Handling\",\n      \"recommendation\": \"Use existing PydanticSerializationUnexpectedValue exception for consistency\",\n      \"rationale\": \"The PydanticSerializationUnexpectedValue exception is already used for serialization mismatches (like too many items in a tuple). Reusing this exception maintains API consistency and prevents proliferation of similar error types.\",\n      \"alternatives_considered\": [\"Create a new exception type PydanticSerializationTooFewItems\", \"Use PydanticSerializationError\"],\n      \"files_affected\": [\"pydantic-core/src/errors/value_exception.rs\", \"pydantic-core/src/serializers/type_serializers/tuple.rs\"]\n    },\n    {\n      \"dimension\": \"Performance\",\n      \"recommendation\": \"Implement the check directly in the tuple serializer's Rust code\",\n      \"rationale\": \"The tuple serialization logic already has access to the expected length and actual length. Adding the check there avoids unnecessary function calls and maintains serialization speed while adding the warning.\",\n      \"alternatives_considered\": [\"Add the check in Python layer\", \"Use middleware pattern\"],\n      \"files_affected\": [\"pydantic-core/src/serializers/type_serializers/tuple.rs\"]\n    },\n    {\n      \"dimension\": \"Testing\",\n      \"recommendation\": \"Add minimal test coverage in test_list_tuple.py to validate the new warning behavior\",\n      \"rationale\": \"The existing test file already covers tuple serialization edge cases. Adding tests there ensures we're testing the behavior in context without creating redundant test files.\",\n      \"alternatives_considered\": [\"Create a new test file test_tuple_warnings.py\", \"Add to test_custom_error.py\"],\n      \"files_affected\": [\"pydantic-core/tests/serializers/test_list_tuple.py\"]\n    },\n    {\n      \"dimension\": \"API Consistency\",\n      \"recommendation\": \"Maintain existing warning behavior for too-many items while adding too-few items warning\",\n      \"rationale\": \"This ensures backward compatibility while adding symmetric validation. Users expect warnings for both cases when dealing with fixed-length collections.\",\n      \"alternatives_considered\": [\"Replace existing warning with new one\", \"Remove too-many warning\"],\n      \"files_affected\": [\"pydantic-core/src/serializers/type_serializers/tuple.rs\"]\n    },\n    {\n      \"dimension\": \"Documentation\",\n      \"recommendation\": \"Update experimental.md to mention the new warning behavior\",\n      \"rationale\": \"Since this is an experimental feature, documenting it in experimental.md helps users understand the scope and limitations of the warning system.\",\n      \"alternatives_considered\": [\"Add to serialization.md\", \"Create new warning.md\"],\n      \"files_affected\": [\"docs/api/experimental.md\"]\n    }\n  ],\n  \"tickets\": [\n    {\n      \"id\": \"T-001\",\n      \"title\": \"Add warning for tuples with too few items in Rust serializer\",\n      \"description\": \"Modify the tuple serializer in Rust to emit PydanticSerializationUnexpectedValue when a fixed-length tuple has fewer items than expected, while maintaining existing warning for too-many items.\",\n      \"files_to_modify\": [\"pydantic-core/src/serializers/type_serializers/tuple.rs\"],\n      \"files_to_create\": [],\n      \"estimated_effort\": \"medium\",\n      \"dependencies\": []\n    },\n    {\n      \"id\": \"T-002\",\n      \"title\": \"Add test coverage for too-few-items tuple warning\",\n      \"description\": \"Add test cases to validate that the Rust serializer emits the correct warning when serializing tuples with fewer items than the schema expects.\",\n      \"files_to_modify\": [\"pydantic-core/tests/serializers/test_list_tuple.py\"],\n      \"files_to_create\": [],\n      \"estimated_effort\": \"small\",\n      \"dependencies\": [\"T-001\"]\n    },\n    {\n      \"id\": \"T-003\",\n      \"title\": \"Document the new tuple serialization warning behavior\",\n      \"description\": \"Update the experimental documentation to mention the new warning behavior for tuples with too few items.\",\n      \"files_to_modify\": [\"docs/api/experimental.md\"],\n      \"files_to_create\": [],\n      \"estimated_effort\": \"small\",\n      \"dependencies\": [\"T-001\"]\n    },\n    {\n      \"id\": \"T-004\",\n      \"title\": \"Verify error message consistency with existing PydanticSerializationUnexpectedValue\",\n      \"description\": \"Ensure the error message format for too-few-items warning matches the existing too-many-items warning format for user experience consistency.\",\n      \"files_to_modify\": [\"pydantic-core/src/serializers/type_serializers/tuple.rs\", \"pydantic-core/src/errors/value_exception.rs\"],\n      \"files_to_create\": [],\n      \"estimated_effort\": \"small\",\n      \"dependencies\": [\"T-001\"]\n    },\n    {\n      \"id\": \"T-005\",\n      \"title\": \"Update Python type stub to reflect potential warnings from tuple serialization\",\n      \"description\": \"Update the type stub for tuple serialization to indicate it may raise PydanticSerializationUnexpectedValue warning.\",\n      \"files_to_modify\": [\"pydantic-core/python/pydantic_core/_pydantic_core.pyi\"],\n      \"files_to_create\": [],\n      \"estimated_effort\": \"small\",\n      \"dependencies\": [\"T-001\"]\n    }\n  ],\n  \"implementation_summary\": \"The implementation will add a symmetric warning mechanism for fixed-length tuple serialization in Pydantic. Currently, the Rust serializer only warns when a tuple has too many items, but this change will add warnings for too few items as well. The core implementation will be in the tuple serializer code (tuple.rs) where we'll add a length comparison check before serialization. The existing PydanticSerializationUnexpectedValue exception will be reused for consistency, ensuring we maintain the same error handling patterns throughout the codebase. Test coverage will be added to the existing tuple test file to validate this new behavior. Documentation will be updated in the experimental features section to inform users about this new warning capability. The implementation prioritizes performance by keeping the logic in Rust code and maintains backward compatibility by preserving the existing too-many-items warning behavior. This change enhances data integrity by providing developers with early feedback when their data doesn't match the expected schema structure, particularly important for fixed-length tuples which are often used for structured data representation.\"\n}\n<|endoftext|>",
+    "best_rewards": {
+      "format_compliance": 0.5,
+      "format_partial": 0.25,
+      "existing_file_accuracy": 0.8571428571428572,
+      "created_file_accuracy": 0.0,
+      "has_gt_created": false,
+      "semantic_similarity": 2.59132359623909,
+      "structural_quality": 0.5,
+      "total": 4.698466453381947
+    },
+    "all_rewards": [
+      {
+        "format_compliance": 0.5,
+        "format_partial": 0.25,
+        "existing_file_accuracy": 0.8571428571428572,
+        "created_file_accuracy": 0.0,
+        "has_gt_created": false,
+        "semantic_similarity": 2.59132359623909,
+        "structural_quality": 0.5,
+        "total": 4.698466453381947
+      },
+      {
+        "format_compliance": 0.5,
+        "format_partial": 0.25,
+        "existing_file_accuracy": 0.8571428571428572,
+        "created_file_accuracy": 0.0,
+        "has_gt_created": false,
+        "semantic_similarity": 2.5112115919589995,
+        "structural_quality": 0.5,
+        "total": 4.618354449101856
+      },
+      {
+        "format_compliance": 0.5,
+        "format_partial": 0.25,
+        "existing_file_accuracy": 0.75,
+        "created_file_accuracy": 0.0,
+        "has_gt_created": false,
+        "semantic_similarity": 2.532141315937042,
+        "structural_quality": 0.5,
+        "total": 4.532141315937042
+      },
+      {
+        "format_compliance": 0.5,
+        "format_partial": 0.25,
+        "existing_file_accuracy": 0.8571428571428572,
+        "created_file_accuracy": 0.0,
+        "has_gt_created": false,
+        "semantic_similarity": 2.5185240268707276,
+        "structural_quality": 0.5,
+        "total": 4.625666884013585
+      }
+    ],
+    "time_seconds": 73.64562892913818
+  },
+  {
+    "repo_name": "sqlmodel_pr1701",
+    "spec": {
+      "feature_name": "Drop support for Pydantic v1",
+      "description": "Remove all Pydantic v1 compatibility code, clean up the _compat.py module, simplify main.py, and remove v1-specific test conditionals.",
+      "functional_requirements": [
+        "Remove Pydantic v1 compatibility layer in _compat.py",
+        "Simplify main.py by removing v1 fallback paths",
+        "Remove v1-specific test conditionals and fixtures",
+        "Update CI to remove Pydantic v1 test matrix",
+        "Update pyproject.toml to require Pydantic v2+"
+      ],
+      "project_name": "sqlmodel",
+      "scale_tier": "startup"
+    },
+    "ground_truth": {
+      "modified": [
+        ".github/workflows/test.yml",
+        "pyproject.toml",
+        "sqlmodel/_compat.py",
+        "sqlmodel/main.py",
+        "tests/conftest.py",
+        "tests/test_aliases.py",
+        "tests/test_annotated_uuid.py",
+        "tests/test_enums.py",
+        "tests/test_fields_set.py",
+        "tests/test_validation.py"
+      ],
+      "created": [
+        "uv.lock"
+      ]
+    },
+    "best_completion": "{\n  \"architecture_decisions\": [\n    {\n      \"dimension\": \"Compatibility Layer\",\n      \"recommendation\": \"Remove Pydantic v1 compatibility code from _compat.py and replace with v2-only imports\",\n      \"rationale\": \"Since we are dropping support for Pydantic v1, maintaining a compatibility layer is unnecessary and adds complexity. Removing it simplifies the codebase and reduces maintenance overhead.\",\n      \"alternatives_considered\": [\n        \"Keep compatibility layer for backward compatibility\",\n        \"Deprecate v1 support with warning instead of removal\"\n      ],\n      \"files_affected\": [\n        \"sqlmodel/_compat.py\"\n      ]\n    },\n    {\n      \"dimension\": \"Core Module Simplification\",\n      \"recommendation\": \"Simplify main.py by removing all v1-specific fallback paths and conditionals\",\n      \"rationale\": \"With Pydantic v1 support dropped, the conditional logic in main.py becomes dead code. Removing it improves code readability and reduces potential bugs.\",\n      \"alternatives_considered\": [\n        \"Keep fallback paths with deprecation warnings\",\n        \"Refactor to use feature flags\"\n      ],\n      \"files_affected\": [\n        \"sqlmodel/main.py\"\n      ]\n    },\n    {\n      \"dimension\": \"Testing Infrastructure\",\n      \"recommendation\": \"Remove v1-specific test conditionals and fixtures from test suite\",\n      \"rationale\": \"Maintaining separate test paths for v1 is no longer necessary and adds unnecessary complexity to the test suite.\",\n      \"alternatives_considered\": [\n        \"Keep v1 test conditionals for informational purposes\",\n        \"Convert tests to use parameterized fixtures\"\n      ],\n      \"files_affected\": [\n        \"tests/conftest.py\",\n        \"tests/test_validation.py\"\n      ]\n    },\n    {\n      \"dimension\": \"CI/CD Configuration\",\n      \"recommendation\": \"Update GitHub Actions workflows to remove Pydantic v1 test matrix\",\n      \"rationale\": \"The CI pipeline should reflect the current supported dependencies. Removing the v1 test matrix reduces build times and eliminates unnecessary testing.\",\n      \"alternatives_considered\": [\n        \"Keep v1 test matrix with warnings\",\n        \"Add v1 as an optional test job\"\n      ],\n      \"files_affected\": [\n        \".github/workflows/test.yml\",\n        \".github/workflows/test-redistribute.yml\"\n      ]\n    },\n    {\n      \"dimension\": \"Dependency Management\",\n      \"recommendation\": \"Update pyproject.toml to require Pydantic v2+ and remove v1-specific constraints\",\n      \"rationale\": \"Explicitly requiring Pydantic v2+ ensures users install compatible versions and prevents accidental installation of unsupported versions.\",\n      \"alternatives_considered\": [\n        \"Keep flexible version constraints\",\n        \"Use environment markers for version selection\"\n      ],\n      \"files_affected\": [\n        \"pyproject.toml\"\n      ]\n    }\n  ],\n  \"tickets\": [\n    {\n      \"id\": \"T-001\",\n      \"title\": \"Remove Pydantic v1 compatibility layer from _compat.py\",\n      \"description\": \"Refactor _compat.py to remove all v1-specific code and import statements, leaving only v2-compatible code.\",\n      \"files_to_modify\": [\n        \"sqlmodel/_compat.py\"\n      ],\n      \"files_to_create\": [],\n      \"estimated_effort\": \"medium\",\n      \"dependencies\": []\n    },\n    {\n      \"id\": \"T-002\",\n      \"title\": \"Simplify main.py by removing v1 fallback paths\",\n      \"description\": \"Remove all conditionals and fallback paths related to Pydantic v1 from main.py, leaving only v2-compatible code paths.\",\n      \"files_to_modify\": [\n        \"sqlmodel/main.py\"\n      ],\n      \"files_to_create\": [],\n      \"estimated_effort\": \"medium\",\n      \"dependencies\": [\"T-001\"]\n    },\n    {\n      \"id\": \"T-003\",\n      \"title\": \"Remove v1-specific test conditionals from test suite\",\n      \"description\": \"Identify and remove all test conditionals and fixtures that were created for Pydantic v1 compatibility.\",\n      \"files_to_modify\": [\n        \"tests/conftest.py\",\n        \"tests/test_validation.py\"\n      ],\n      \"files_to_create\": [],\n      \"estimated_effort\": \"medium\",\n      \"dependencies\": [\"T-001\", \"T-002\"]\n    },\n    {\n      \"id\": \"T-004\",\n      \"title\": \"Update CI to remove Pydantic v1 test matrix\",\n      \"description\": \"Modify GitHub Actions workflows to eliminate test jobs that were testing against Pydantic v1.\",\n      \"files_to_modify\": [\n        \".github/workflows/test.yml\",\n        \".github/workflows/test-redistribute.yml\"\n      ],\n      \"files_to_create\": [],\n      \"estimated_effort\": \"small\",\n      \"dependencies\": [\"T-001\", \"T-002\", \"T-003\"]\n    },\n    {\n      \"id\": \"T-005\",\n      \"title\": \"Update pyproject.toml to require Pydantic v2+\",\n      \"description\": \"Modify pyproject.toml to specify that sqlmodel requires Pydantic v2 or later, removing any v1-specific constraints.\",\n      \"files_to_modify\": [\n        \"pyproject.toml\"\n      ],\n      \"files_to_create\": [],\n      \"estimated_effort\": \"small\",\n      \"dependencies\": [\"T-001\", \"T-002\", \"T-003\"]\n    },\n    {\n      \"id\": \"T-006\",\n      \"title\": \"Update documentation to reflect Pydantic v2 requirement\",\n      \"description\": \"Update installation and requirements documentation to specify Pydantic v2+ as the minimum required version.\",\n      \"files_to_modify\": [\n        \"docs/install.md\"\n      ],\n      \"files_to_create\": [],\n      \"estimated_effort\": \"small\",\n      \"dependencies\": [\"T-005\"]\n    },\n    {\n      \"id\": \"T-007\",\n      \"title\": \"Update release notes to document Pydantic v1 deprecation\",\n      \"description\": \"Add an entry to the release notes documenting the removal of Pydantic v1 support in this release.\",\n      \"files_to_modify\": [\n        \"docs/release-notes.md\"\n      ],\n      \"files_to_create\": [],\n      \"estimated_effort\": \"small\",\n      \"dependencies\": [\"T-001\", \"T-002\", \"T-003\", \"T-004\", \"T-005\"]\n    }\n  ],\n  \"implementation_summary\": \"The implementation plan focuses on systematically removing all Pydantic v1 compatibility code from the sqlmodel codebase. We start by eliminating the compatibility layer in _compat.py, then simplify the core functionality in main.py by removing v1-specific fallback paths. The test suite will be cleaned up by removing v1-specific conditionals and fixtures, and the CI pipeline will be updated to remove the Pydantic v1 test matrix. Finally, we'll update the dependency specification in pyproject.toml to require Pydantic v2+ and document these changes in the release notes. This approach ensures a clean, streamlined codebase that only supports the current Pydantic version, reducing maintenance overhead and potential bugs. All changes are designed to integrate smoothly with the existing codebase by following the same architectural patterns and maintaining the current API contract for end users.\"\n}\n<|endoftext|>",
+    "best_rewards": {
+      "format_compliance": 0.5,
+      "format_partial": 0.25,
+      "existing_file_accuracy": 0.9473684210526315,
+      "created_file_accuracy": 0.0,
+      "has_gt_created": true,
+      "semantic_similarity": 2.422705239057541,
+      "structural_quality": 0.5,
+      "total": 4.620073660110172
+    },
+    "all_rewards": [
+      {
+        "format_compliance": 0.5,
+        "format_partial": 0.25,
+        "existing_file_accuracy": 0.7894736842105263,
+        "created_file_accuracy": 0.0,
+        "has_gt_created": true,
+        "semantic_similarity": 2.225389462709427,
+        "structural_quality": 0.5,
+        "total": 4.264863146919954
+      },
+      {
+        "format_compliance": 0.5,
+        "format_partial": 0.25,
+        "existing_file_accuracy": 0.8999999999999999,
+        "created_file_accuracy": 0.0,
+        "has_gt_created": true,
+        "semantic_similarity": 2.0153944194316864,
+        "structural_quality": 0.4800000000000001,
+        "total": 4.145394419431686
+      },
+      {
+        "format_compliance": 0.5,
+        "format_partial": 0.25,
+        "existing_file_accuracy": 0.7142857142857142,
+        "created_file_accuracy": 0.0,
+        "has_gt_created": true,
+        "semantic_similarity": 1.9909867465496063,
+        "structural_quality": 0.4833333333333334,
+        "total": 3.938605794168654
+      },
+      {
+        "format_compliance": 0.5,
+        "format_partial": 0.25,
+        "existing_file_accuracy": 0.9473684210526315,
+        "created_file_accuracy": 0.0,
+        "has_gt_created": true,
+        "semantic_similarity": 2.422705239057541,
+        "structural_quality": 0.5,
+        "total": 4.620073660110172
+      }
+    ],
+    "time_seconds": 75.82982587814331
+  },
+  {
+    "repo_name": "sqlmodel_pr1806",
+    "spec": {
+      "feature_name": "Replace mypy with ty in precommit",
+      "description": "Replace mypy with ty as the type checker in pre-commit hooks, lint.sh, and pyproject.toml. Adjust type codes and remove unnecessary type: ignore statements.",
+      "functional_requirements": [
+        "Replace mypy with ty in pre-commit configuration",
+        "Update lint.sh to use ty instead of mypy",
+        "Update pyproject.toml type checker configuration",
+        "Remove unnecessary type: ignore comments across codebase",
+        "Adjust type error codes to ty-specific codes"
+      ],
+      "project_name": "sqlmodel",
+      "scale_tier": "startup"
+    },
+    "ground_truth": {
+      "modified": [
+        ".pre-commit-config.yaml",
+        "pyproject.toml",
+        "scripts/generate_select.py",
+        "scripts/lint.sh",
+        "sqlmodel/main.py",
+        "sqlmodel/sql/_expression_select_cls.py",
+        "sqlmodel/sql/_expression_select_gen.py",
+        "sqlmodel/sql/_expression_select_gen.py.jinja2",
+        "sqlmodel/sql/expression.py",
+        "sqlmodel/sql/sqltypes.py",
+        "uv.lock"
+      ],
+      "created": []
+    },
+    "best_completion": "{\n  \"architecture_decisions\": [\n    {\n      \"dimension\": \"typechecking\",\n      \"recommendation\": \"Replace mypy with ty as the primary type checker\",\n      \"rationale\": \"ty offers better performance and more accurate type inference for modern Python codebases. It's actively maintained and aligns with the project's goal of modernizing tooling.\",\n      \"alternatives_considered\": [\"mypy\", \"pyright\", \"pyre\"],\n      \"files_affected\": [\n        \".pre-commit-config.yaml\",\n        \"scripts/lint.sh\",\n        \"pyproject.toml\"\n      ]\n    },\n    {\n      \"dimension\": \"code clarity\",\n      \"recommendation\": \"Remove unnecessary type: ignore comments\",\n      \"rationale\": \"ty is more permissive than mypy in many cases, allowing us to remove type: ignore statements that were needed for mypy compatibility but are no longer necessary.\",\n      \"alternatives_considered\": [\"Keep all type: ignore comments\", \"Convert to # noqa comments\"],\n      \"files_affected\": [\n        \"sqlmodel/main.py\",\n        \"sqlmodel/sql/_expression_select_cls.py\",\n        \"sqlmodel/sql/expression.py\"\n      ]\n    },\n    {\n      \"dimension\": \"dependency management\",\n      \"recommendation\": \"Move type checking to uv.lock for consistent dependency resolution\",\n      \"rationale\": \"Using uv.lock ensures that all developers and CI systems use the same version of ty, preventing type checker version drift.\",\n      \"alternatives_considered\": [\"Keep using pyproject.toml\", \"Use separate requirements.txt file\"],\n      \"files_affected\": [\n        \"pyproject.toml\",\n        \"uv.lock\"\n      ]\n    },\n    {\n      \"dimension\": \"testing\",\n      \"recommendation\": \"Ensure type checking is part of the CI pipeline\",\n      \"rationale\": \"Type checking should fail the build if there are type errors, maintaining code quality throughout development.\",\n      \"alternatives_considered\": [\"Run type checking only locally\", \"Run type checking on pull requests only\"],\n      \"files_affected\": [\n        \".github/workflows/pre-commit.yml\",\n        \".github/workflows/test-redistribute.yml\"\n      ]\n    }\n  ],\n  \"tickets\": [\n    {\n      \"id\": \"T-001\",\n      \"title\": \"Replace mypy with ty in pre-commit configuration\",\n      \"description\": \"Update .pre-commit-config.yaml to use ty instead of mypy for type checking. Remove any mypy-specific configuration.\",\n      \"files_to_modify\": [\n        \".pre-commit-config.yaml\"\n      ],\n      \"files_to_create\": [],\n      \"estimated_effort\": \"small\",\n      \"dependencies\": []\n    },\n    {\n      \"id\": \"T-002\",\n      \"title\": \"Update lint.sh to use ty instead of mypy\",\n      \"description\": \"Modify scripts/lint.sh to replace mypy commands with ty commands. Update any type error code references to ty-specific codes.\",\n      \"files_to_modify\": [\n        \"scripts/lint.sh\"\n      ],\n      \"files_to_create\": [],\n      \"estimated_effort\": \"small\",\n      \"dependencies\": [\"T-001\"]\n    },\n    {\n      \"id\": \"T-003\",\n      \"title\": \"Update pyproject.toml type checker configuration\",\n      \"description\": \"Modify pyproject.toml to configure ty as the type checker instead of mypy. Remove mypy configuration sections.\",\n      \"files_to_modify\": [\n        \"pyproject.toml\"\n      ],\n      \"files_to_create\": [],\n      \"estimated_effort\": \"small\",\n      \"dependencies\": [\"T-001\"]\n    },\n    {\n      \"id\": \"T-004\",\n      \"title\": \"Remove unnecessary type: ignore comments\",\n      \"description\": \"Scan the codebase for type: ignore comments that are no longer needed with ty and remove them. Focus on sqlmodel module files.\",\n      \"files_to_modify\": [\n        \"sqlmodel/main.py\",\n        \"sqlmodel/sql/_expression_select_cls.py\",\n        \"sqlmodel/sql/expression.py\"\n      ],\n      \"files_to_create\": [],\n      \"estimated_effort\": \"medium\",\n      \"dependencies\": [\"T-001\", \"T-002\", \"T-003\"]\n    },\n    {\n      \"id\": \"T-005\",\n      \"title\": \"Update CI workflows to use ty\",\n      \"description\": \"Modify GitHub Actions workflows to use ty instead of mypy for type checking in CI. Ensure type checking fails the build on errors.\",\n      \"files_to_modify\": [\n        \".github/workflows/pre-commit.yml\",\n        \".github/workflows/test-redistribute.yml\"\n      ],\n      \"files_to_create\": [],\n      \"estimated_effort\": \"medium\",\n      \"dependencies\": [\"T-001\", \"T-002\", \"T-003\"]\n    },\n    {\n      \"id\": \"T-006\",\n      \"title\": \"Update uv.lock for ty dependencies\",\n      \"description\": \"Update uv.lock file to include ty as a development dependency. Ensure consistent version across all environments.\",\n      \"files_to_modify\": [\n        \"uv.lock\"\n      ],\n      \"files_to_create\": [],\n      \"estimated_effort\": \"small\",\n      \"dependencies\": [\"T-003\"]\n    }\n  ],\n  \"implementation_summary\": \"This implementation plan outlines the migration from mypy to ty as the primary type checker for the sqlmodel project. The approach involves systematically updating all configuration files where mypy is currently specified, including pre-commit hooks, linting scripts, and configuration files. We'll also remove unnecessary type: ignore comments that were required for mypy compatibility but are no longer needed with ty's more permissive type inference. The migration will be done in a phased approach, starting with configuration updates, followed by code cleanup, and finally CI integration. This ensures that the codebase maintains type safety throughout the transition while benefiting from ty's improved performance and modern Python support. The changes will be integrated into the existing codebase without requiring significant architectural changes, making this a relatively low-risk enhancement that improves developer experience and code quality.\"\n}\n<|endoftext|>",
+    "best_rewards": {
+      "format_compliance": 0.5,
+      "format_partial": 0.25,
+      "existing_file_accuracy": 1.05,
+      "created_file_accuracy": 0.0,
+      "has_gt_created": false,
+      "semantic_similarity": 2.1399024188518525,
+      "structural_quality": 0.5,
+      "total": 4.439902418851853
+    },
+    "all_rewards": [
+      {
+        "format_compliance": 0.5,
+        "format_partial": 0.25,
+        "existing_file_accuracy": 0.8400000000000001,
+        "created_file_accuracy": 0.0,
+        "has_gt_created": false,
+        "semantic_similarity": 2.1225433945655823,
+        "structural_quality": 0.5,
+        "total": 4.212543394565582
+      },
+      {
+        "format_compliance": 0.5,
+        "format_partial": 0.25,
+        "existing_file_accuracy": 0.6666666666666666,
+        "created_file_accuracy": 0.0,
+        "has_gt_created": false,
+        "semantic_similarity": 2.1398065209388735,
+        "structural_quality": 0.5,
+        "total": 4.05647318760554
+      },
+      {
+        "format_compliance": 0.5,
+        "format_partial": 0.25,
+        "existing_file_accuracy": 1.05,
+        "created_file_accuracy": 0.0,
+        "has_gt_created": false,
+        "semantic_similarity": 2.1399024188518525,
+        "structural_quality": 0.5,
+        "total": 4.439902418851853
+      },
+      {
+        "format_compliance": 0.5,
+        "format_partial": 0.25,
+        "existing_file_accuracy": 0.8181818181818181,
+        "created_file_accuracy": 0.0,
+        "has_gt_created": false,
+        "semantic_similarity": 2.038555830717087,
+        "structural_quality": 0.5,
+        "total": 4.106737648898905
+      }
+    ],
+    "time_seconds": 73.71907806396484
+  }
+]
